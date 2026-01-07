@@ -20,6 +20,31 @@ Project-specific context for AI assistants working on this codebase.
 - Target devices (Zello handhelds) may have poor connectivity
 - Matrix handles message queuing and delivery
 
+## Target Device
+
+ABBREE Zello handheld (or similar Android PTT devices):
+- **Screen**: 1.77" (tiny), non-touch
+- **Navigation**: D-pad only (Up/Down arrows, Select, Menu, Exit)
+- **Input**: No keyboard, hardware buttons only
+
+### Physical Keys
+| Key | Android KeyEvent | App Function |
+|-----|------------------|--------------|
+| PTT (side) | `KEYCODE_PTT` (79) | Hold to record voice message |
+| Up/Down | `KEYCODE_DPAD_UP/DOWN` | Navigate lists |
+| Select | `KEYCODE_DPAD_CENTER` | Confirm/select item |
+| Menu (green) | `KEYCODE_MENU` | Open menu |
+| Exit (red) | `KEYCODE_BACK` | Go back |
+| P1/P2 | `KEYCODE_PROG_*` | Programmable (TBD) |
+| Side Key 1/2 | Device-specific | TBD |
+
+### UI Constraints
+- Large text and buttons (readable on 1.77" screen)
+- High contrast colors
+- D-pad focusable elements (no touch gestures)
+- Simple, linear navigation (no complex menus)
+- Visual feedback for PTT recording state
+
 ## Technical Notes
 
 ### Matrix SDK
