@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+android/
+ios/
+*.lock
+
+# Config files (keep their own formatting)
+*.config.js
+babel.config.js
+metro.config.js
+jest.config.js
+.eslintrc.js
+.prettierrc.js
+
+# Generated
+coverage/
+*.generated.*

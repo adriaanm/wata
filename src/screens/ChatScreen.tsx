@@ -1,4 +1,4 @@
-import React, {useRef, useEffect} from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,10 @@ import {
   StyleSheet,
   Animated,
 } from 'react-native';
-import {useVoiceMessages} from '../hooks/useMatrix';
-import {useAudioRecorder, useAudioPlayer} from '../hooks/useAudioRecorder';
-import {matrixService, VoiceMessage} from '../services/MatrixService';
+
+import { useAudioRecorder, useAudioPlayer } from '../hooks/useAudioRecorder';
+import { useVoiceMessages } from '../hooks/useMatrix';
+import { matrixService, VoiceMessage } from '../services/MatrixService';
 
 interface Props {
   roomId: string;
@@ -17,7 +18,7 @@ interface Props {
   onBack: () => void;
 }
 
-export function ChatScreen({roomId, roomName, onBack}: Props) {
+export function ChatScreen({ roomId, roomName, onBack }: Props) {
   const messages = useVoiceMessages(roomId);
   const {
     isRecording,
@@ -26,7 +27,7 @@ export function ChatScreen({roomId, roomName, onBack}: Props) {
     stopRecording,
     formatDuration,
   } = useAudioRecorder();
-  const {isPlaying, currentUri, play, stop} = useAudioPlayer();
+  const { isPlaying, currentUri, play, stop } = useAudioPlayer();
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const flatListRef = useRef<FlatList>(null);
@@ -57,7 +58,7 @@ export function ChatScreen({roomId, roomName, onBack}: Props) {
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => {
-        flatListRef.current?.scrollToEnd({animated: true});
+        flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }
   }, [messages.length]);
@@ -95,7 +96,7 @@ export function ChatScreen({roomId, roomName, onBack}: Props) {
     }
   };
 
-  const renderMessage = ({item}: {item: VoiceMessage}) => {
+  const renderMessage = ({ item }: { item: VoiceMessage }) => {
     const isCurrentlyPlaying = isPlaying && currentUri === item.audioUrl;
 
     return (
@@ -104,7 +105,8 @@ export function ChatScreen({roomId, roomName, onBack}: Props) {
           styles.messageItem,
           item.isOwn ? styles.ownMessage : styles.otherMessage,
         ]}
-        onPress={() => handlePlayMessage(item)}>
+        onPress={() => handlePlayMessage(item)}
+      >
         <View style={styles.messageContent}>
           <Text style={styles.senderName}>
             {item.isOwn ? 'You' : item.senderName}
@@ -116,9 +118,7 @@ export function ChatScreen({roomId, roomName, onBack}: Props) {
                 isCurrentlyPlaying && styles.playIconActive,
               ]}
             />
-            <Text style={styles.duration}>
-              {formatDuration(item.duration)}
-            </Text>
+            <Text style={styles.duration}>{formatDuration(item.duration)}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -160,12 +160,13 @@ export function ChatScreen({roomId, roomName, onBack}: Props) {
           </Text>
         )}
 
-        <Animated.View style={{transform: [{scale: pulseAnim}]}}>
+        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
           <TouchableOpacity
             style={[styles.pttButton, isRecording && styles.pttButtonActive]}
             onPressIn={handlePTTPress}
             onPressOut={handlePTTRelease}
-            activeOpacity={0.8}>
+            activeOpacity={0.8}
+          >
             <Text style={styles.pttText}>
               {isRecording ? 'Recording...' : 'Hold to Talk'}
             </Text>
@@ -286,7 +287,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 8,
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 4},
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },

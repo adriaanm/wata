@@ -1,5 +1,6 @@
-import {useState, useEffect, useCallback} from 'react';
-import {audioService, RecordingResult} from '../services/AudioService';
+import { useState, useEffect, useCallback } from 'react';
+
+import { audioService, RecordingResult } from '../services/AudioService';
 
 export function useAudioRecorder() {
   const [isRecording, setIsRecording] = useState(false);

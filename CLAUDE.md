@@ -58,7 +58,17 @@ npm start                    # Metro bundler
 npm run android              # Build and run on device/emulator
 npm run test:integration     # Run against local Matrix server
 ./gradlew assembleDebug      # Build APK (from android/)
+
+# Code quality
+npm run check                # Run all checks (typecheck + lint + format)
+npm run lint                 # ESLint
+npm run lint:fix             # ESLint with auto-fix
+npm run format               # Prettier format
+npm run format:check         # Prettier check (CI)
+npm run typecheck            # TypeScript type checking
 ```
+
+Before committing, run `npm run check` to verify code quality.
 
 ## Build Output
 

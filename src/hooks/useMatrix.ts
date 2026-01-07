@@ -1,5 +1,10 @@
-import {useState, useEffect, useCallback} from 'react';
-import {matrixService, MatrixRoom, VoiceMessage} from '../services/MatrixService';
+import { useState, useEffect, useCallback } from 'react';
+
+import {
+  matrixService,
+  MatrixRoom,
+  VoiceMessage,
+} from '../services/MatrixService';
 
 export function useMatrixSync() {
   const [syncState, setSyncState] = useState<string>('STOPPED');
@@ -14,7 +19,7 @@ export function useMatrixSync() {
     return unsubscribe;
   }, []);
 
-  return {syncState, isReady};
+  return { syncState, isReady };
 }
 
 export function useRooms() {
@@ -43,11 +48,13 @@ export function useVoiceMessages(roomId: string) {
     setMessages(matrixService.getVoiceMessages(roomId));
 
     // Subscribe to new messages
-    const unsubscribe = matrixService.onNewVoiceMessage((msgRoomId, message) => {
-      if (msgRoomId === roomId) {
-        setMessages(prev => [...prev, message]);
-      }
-    });
+    const unsubscribe = matrixService.onNewVoiceMessage(
+      (msgRoomId, message) => {
+        if (msgRoomId === roomId) {
+          setMessages(prev => [...prev, message]);
+        }
+      },
+    );
 
     return unsubscribe;
   }, [roomId]);
@@ -100,5 +107,5 @@ export function useAuth() {
     }
   }, []);
 
-  return {isLoggedIn, isLoading, error, login, logout};
+  return { isLoggedIn, isLoading, error, login, logout };
 }

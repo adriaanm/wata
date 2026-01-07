@@ -7,25 +7,27 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import {useRooms, useMatrixSync} from '../hooks/useMatrix';
-import {MatrixRoom} from '../services/MatrixService';
+
+import { useRooms, useMatrixSync } from '../hooks/useMatrix';
+import { MatrixRoom } from '../services/MatrixService';
 
 interface Props {
   onSelectContact: (roomId: string, roomName: string) => void;
   onLogout: () => void;
 }
 
-export function ContactListScreen({onSelectContact, onLogout}: Props) {
+export function ContactListScreen({ onSelectContact, onLogout }: Props) {
   const rooms = useRooms();
-  const {isReady, syncState} = useMatrixSync();
+  const { isReady, syncState } = useMatrixSync();
 
   // Filter to show only DM rooms (direct messages)
   const directRooms = rooms.filter(room => room.isDirect);
 
-  const renderContact = ({item}: {item: MatrixRoom}) => (
+  const renderContact = ({ item }: { item: MatrixRoom }) => (
     <TouchableOpacity
       style={styles.contactItem}
-      onPress={() => onSelectContact(item.roomId, item.name)}>
+      onPress={() => onSelectContact(item.roomId, item.name)}
+    >
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>
           {item.name.charAt(0).toUpperCase()}

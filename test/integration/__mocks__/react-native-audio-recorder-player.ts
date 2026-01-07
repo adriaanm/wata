@@ -36,6 +36,13 @@ export interface PlayBackType {
   isPlaying: boolean;
 }
 
+// Helper function to format time
+function formatMmss(secs: number): string {
+  const mins = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${mins}:${s.toString().padStart(2, '0')}`;
+}
+
 // Singleton mock instance
 const mockInstance = {
   setSubscriptionDuration: jest.fn(),
@@ -53,15 +60,8 @@ const mockInstance = {
   removeRecordBackListener: jest.fn(),
   addPlayBackListener: jest.fn(),
   removePlayBackListener: jest.fn(),
-  mmss: jest.fn((secs: number) => {
-    const mins = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${mins}:${s.toString().padStart(2, '0')}`;
-  }),
-  mmssss: jest.fn((ms: number) => {
-    const secs = Math.floor(ms / 1000);
-    return mockInstance.mmss(secs);
-  }),
+  mmss: jest.fn((secs: number) => formatMmss(secs)),
+  mmssss: jest.fn((ms: number) => formatMmss(Math.floor(ms / 1000))),
 };
 
 export default mockInstance;

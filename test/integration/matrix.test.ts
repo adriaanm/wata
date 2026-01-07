@@ -9,15 +9,18 @@ import * as matrix from 'matrix-js-sdk';
 
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {
-  alice: {username: 'alice', password: 'testpass123'},
-  bob: {username: 'bob', password: 'testpass123'},
+  alice: { username: 'alice', password: 'testpass123' },
+  bob: { username: 'bob', password: 'testpass123' },
 };
 
 // Helper to login a user
-async function loginUser(username: string, password: string): Promise<matrix.MatrixClient> {
-  const loginClient = matrix.createClient({baseUrl: TEST_HOMESERVER});
+async function loginUser(
+  username: string,
+  password: string,
+): Promise<matrix.MatrixClient> {
+  const loginClient = matrix.createClient({ baseUrl: TEST_HOMESERVER });
   const response = await loginClient.login('m.login.password', {
-    identifier: {type: 'm.id.user', user: username},
+    identifier: { type: 'm.id.user', user: username },
     password: password,
   });
 
@@ -30,16 +33,22 @@ async function loginUser(username: string, password: string): Promise<matrix.Mat
 }
 
 // Helper to wait for sync
-async function waitForSync(client: matrix.MatrixClient, timeoutMs = 5000): Promise<void> {
+async function waitForSync(
+  client: matrix.MatrixClient,
+  timeoutMs = 5000,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Sync timeout')), timeoutMs);
-    client.once(matrix.ClientEvent.Sync, (state) => {
+    const timeout = setTimeout(
+      () => reject(new Error('Sync timeout')),
+      timeoutMs,
+    );
+    client.once(matrix.ClientEvent.Sync, state => {
       clearTimeout(timeout);
       if (state === 'PREPARED' || state === 'SYNCING') {
         resolve();
       }
     });
-    client.startClient({initialSyncLimit: 10});
+    client.startClient({ initialSyncLimit: 10 });
   });
 }
 
@@ -50,7 +59,9 @@ describe('Matrix Integration Tests', () => {
   beforeAll(async () => {
     // Check if server is running
     try {
-      const response = await fetch(`${TEST_HOMESERVER}/_matrix/client/versions`);
+      const response = await fetch(
+        `${TEST_HOMESERVER}/_matrix/client/versions`,
+      );
       if (!response.ok) {
         throw new Error('Matrix server not responding');
       }
@@ -68,10 +79,10 @@ describe('Matrix Integration Tests', () => {
 
   describe('Authentication', () => {
     test('should login with valid credentials', async () => {
-      const client = matrix.createClient({baseUrl: TEST_HOMESERVER});
+      const client = matrix.createClient({ baseUrl: TEST_HOMESERVER });
 
       const response = await client.login('m.login.password', {
-        identifier: {type: 'm.id.user', user: TEST_USERS.alice.username},
+        identifier: { type: 'm.id.user', user: TEST_USERS.alice.username },
         password: TEST_USERS.alice.password,
       });
 
@@ -81,22 +92,22 @@ describe('Matrix Integration Tests', () => {
     });
 
     test('should fail login with invalid password', async () => {
-      const client = matrix.createClient({baseUrl: TEST_HOMESERVER});
+      const client = matrix.createClient({ baseUrl: TEST_HOMESERVER });
 
       await expect(
         client.login('m.login.password', {
-          identifier: {type: 'm.id.user', user: TEST_USERS.alice.username},
+          identifier: { type: 'm.id.user', user: TEST_USERS.alice.username },
           password: 'wrongpassword',
         }),
       ).rejects.toThrow();
     });
 
     test('should fail login with non-existent user', async () => {
-      const client = matrix.createClient({baseUrl: TEST_HOMESERVER});
+      const client = matrix.createClient({ baseUrl: TEST_HOMESERVER });
 
       await expect(
         client.login('m.login.password', {
-          identifier: {type: 'm.id.user', user: 'nonexistent'},
+          identifier: { type: 'm.id.user', user: 'nonexistent' },
           password: 'password',
         }),
       ).rejects.toThrow();
@@ -105,8 +116,14 @@ describe('Matrix Integration Tests', () => {
 
   describe('Room Operations', () => {
     beforeAll(async () => {
-      aliceClient = await loginUser(TEST_USERS.alice.username, TEST_USERS.alice.password);
-      bobClient = await loginUser(TEST_USERS.bob.username, TEST_USERS.bob.password);
+      aliceClient = await loginUser(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      bobClient = await loginUser(
+        TEST_USERS.bob.username,
+        TEST_USERS.bob.password,
+      );
     }, 10000);
 
     test('should create a direct message room', async () => {
@@ -197,8 +214,12 @@ describe('Matrix Integration Tests', () => {
 
       expect(messages.length).toBeGreaterThan(0);
 
-      const hasText = messages.some(m => m.getContent().msgtype === matrix.MsgType.Text);
-      const hasAudio = messages.some(m => m.getContent().msgtype === matrix.MsgType.Audio);
+      const hasText = messages.some(
+        m => m.getContent().msgtype === matrix.MsgType.Text,
+      );
+      const hasAudio = messages.some(
+        m => m.getContent().msgtype === matrix.MsgType.Audio,
+      );
 
       expect(hasText).toBe(true);
       expect(hasAudio).toBe(true);

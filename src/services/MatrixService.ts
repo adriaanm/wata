@@ -1,7 +1,9 @@
+import { Buffer } from 'buffer';
+
 import * as matrix from 'matrix-js-sdk';
-import {MsgType} from 'matrix-js-sdk';
+import { MsgType } from 'matrix-js-sdk';
+import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
-import {Buffer} from 'buffer';
 
 // Configurable for testing - defaults to production
 let HOMESERVER_URL = 'https://matrix.org';
@@ -63,7 +65,7 @@ class MatrixService {
         userId: response.user_id,
         deviceId: response.device_id,
       }),
-      {service: KEYCHAIN_SERVICE},
+      { service: KEYCHAIN_SERVICE },
     );
 
     // Create authenticated client
@@ -75,7 +77,7 @@ class MatrixService {
     });
 
     this.setupEventListeners();
-    await this.client.startClient({initialSyncLimit: 20});
+    await this.client.startClient({ initialSyncLimit: 20 });
   }
 
   async restoreSession(): Promise<boolean> {
@@ -88,7 +90,9 @@ class MatrixService {
         return false;
       }
 
-      const {accessToken, userId, deviceId} = JSON.parse(credentials.password);
+      const { accessToken, userId, deviceId } = JSON.parse(
+        credentials.password,
+      );
 
       this.client = matrix.createClient({
         baseUrl: HOMESERVER_URL,
@@ -98,7 +102,7 @@ class MatrixService {
       });
 
       this.setupEventListeners();
-      await this.client.startClient({initialSyncLimit: 20});
+      await this.client.startClient({ initialSyncLimit: 20 });
       return true;
     } catch {
       return false;
@@ -111,13 +115,13 @@ class MatrixService {
       await this.client.logout();
       this.client = null;
     }
-    await Keychain.resetGenericPassword({service: KEYCHAIN_SERVICE});
+    await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });
   }
 
   private setupEventListeners(): void {
     if (!this.client) return;
 
-    this.client.on(matrix.ClientEvent.Sync, (state) => {
+    this.client.on(matrix.ClientEvent.Sync, state => {
       this.syncCallbacks.forEach(cb => cb(state));
 
       if (state === 'PREPARED' || state === 'SYNCING') {
@@ -222,7 +226,6 @@ class MatrixService {
     if (!this.client) throw new Error('Not logged in');
 
     // Read file and upload to Matrix
-    const RNFS = require('react-native-fs');
     const fileContent = await RNFS.readFile(audioUri, 'base64');
     const buffer = Buffer.from(fileContent, 'base64');
 
@@ -253,7 +256,9 @@ class MatrixService {
     return room.timeline
       .filter(event => {
         const content = event.getContent();
-        return event.getType() === 'm.room.message' && content.msgtype === 'm.audio';
+        return (
+          event.getType() === 'm.room.message' && content.msgtype === 'm.audio'
+        );
       })
       .map(event => this.eventToVoiceMessage(event))
       .filter((msg): msg is VoiceMessage => msg !== null);
@@ -276,7 +281,9 @@ class MatrixService {
   onNewVoiceMessage(callback: MessageCallback): () => void {
     this.messageCallbacks.push(callback);
     return () => {
-      this.messageCallbacks = this.messageCallbacks.filter(cb => cb !== callback);
+      this.messageCallbacks = this.messageCallbacks.filter(
+        cb => cb !== callback,
+      );
     };
   }
 

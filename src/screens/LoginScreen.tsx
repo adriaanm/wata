@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,16 +9,17 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import {useAuth} from '../hooks/useMatrix';
+
+import { useAuth } from '../hooks/useMatrix';
 
 interface Props {
   onLoginSuccess: () => void;
 }
 
-export function LoginScreen({onLoginSuccess}: Props) {
+export function LoginScreen({ onLoginSuccess }: Props) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const {login, isLoading, error} = useAuth();
+  const { login, isLoading, error } = useAuth();
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) return;
@@ -34,7 +35,8 @@ export function LoginScreen({onLoginSuccess}: Props) {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       <View style={styles.content}>
         <Text style={styles.title}>Wata</Text>
         <Text style={styles.subtitle}>Walkie-Talkie</Text>
@@ -66,7 +68,8 @@ export function LoginScreen({onLoginSuccess}: Props) {
           <TouchableOpacity
             style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleLogin}
-            disabled={isLoading || !username.trim() || !password.trim()}>
+            disabled={isLoading || !username.trim() || !password.trim()}
+          >
             {isLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
@@ -75,9 +78,7 @@ export function LoginScreen({onLoginSuccess}: Props) {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.hint}>
-          Use your Matrix account from matrix.org
-        </Text>
+        <Text style={styles.hint}>Use your Matrix account from matrix.org</Text>
       </View>
     </KeyboardAvoidingView>
   );
