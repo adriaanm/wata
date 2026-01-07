@@ -23,6 +23,7 @@ Project-specific context for AI assistants working on this codebase.
 ## Technical Notes
 
 ### Matrix SDK
+- Requires Node.js 22+ (uses `Promise.withResolvers`)
 - `matrix-js-sdk` uses ESM modules - Jest requires `NODE_OPTIONS='--experimental-vm-modules'`
 - Login requires `identifier` format for Conduit: `{type: 'm.id.user', user: 'username'}`
 - The SDK exports a singleton `MatrixClient` - create via `createClient()`
