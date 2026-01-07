@@ -6,10 +6,6 @@
 .bundle/
 .claude/
 
-# Test infrastructure secrets
-test/docker/matrix_key.pem
-test/docker/dendrite.yaml
-
 # Xcode
 #
 build/

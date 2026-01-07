@@ -13,6 +13,36 @@ const TEST_USERS = {
   bob: {username: 'bob', password: 'testpass123'},
 };
 
+// Helper to login a user
+async function loginUser(username: string, password: string): Promise<matrix.MatrixClient> {
+  const loginClient = matrix.createClient({baseUrl: TEST_HOMESERVER});
+  const response = await loginClient.login('m.login.password', {
+    identifier: {type: 'm.id.user', user: username},
+    password: password,
+  });
+
+  return matrix.createClient({
+    baseUrl: TEST_HOMESERVER,
+    accessToken: response.access_token,
+    userId: response.user_id,
+    deviceId: response.device_id,
+  });
+}
+
+// Helper to wait for sync
+async function waitForSync(client: matrix.MatrixClient, timeoutMs = 5000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Sync timeout')), timeoutMs);
+    client.once(matrix.ClientEvent.Sync, (state) => {
+      clearTimeout(timeout);
+      if (state === 'PREPARED' || state === 'SYNCING') {
+        resolve();
+      }
+    });
+    client.startClient({initialSyncLimit: 10});
+  });
+}
+
 describe('Matrix Integration Tests', () => {
   let aliceClient: matrix.MatrixClient;
   let bobClient: matrix.MatrixClient;
@@ -20,9 +50,7 @@ describe('Matrix Integration Tests', () => {
   beforeAll(async () => {
     // Check if server is running
     try {
-      const response = await fetch(
-        `${TEST_HOMESERVER}/_matrix/client/versions`,
-      );
+      const response = await fetch(`${TEST_HOMESERVER}/_matrix/client/versions`);
       if (!response.ok) {
         throw new Error('Matrix server not responding');
       }
@@ -31,22 +59,16 @@ describe('Matrix Integration Tests', () => {
         'Matrix server not running. Start it with: cd test/docker && ./setup.sh',
       );
     }
-  }, 10000);
+  }, 5000);
 
   afterAll(async () => {
-    if (aliceClient) {
-      aliceClient.stopClient();
-    }
-    if (bobClient) {
-      bobClient.stopClient();
-    }
+    if (aliceClient) aliceClient.stopClient();
+    if (bobClient) bobClient.stopClient();
   });
 
   describe('Authentication', () => {
     test('should login with valid credentials', async () => {
-      const client = matrix.createClient({
-        baseUrl: TEST_HOMESERVER,
-      });
+      const client = matrix.createClient({baseUrl: TEST_HOMESERVER});
 
       const response = await client.login('m.login.password', {
         identifier: {type: 'm.id.user', user: TEST_USERS.alice.username},
@@ -59,9 +81,7 @@ describe('Matrix Integration Tests', () => {
     });
 
     test('should fail login with invalid password', async () => {
-      const client = matrix.createClient({
-        baseUrl: TEST_HOMESERVER,
-      });
+      const client = matrix.createClient({baseUrl: TEST_HOMESERVER});
 
       await expect(
         client.login('m.login.password', {
@@ -72,9 +92,7 @@ describe('Matrix Integration Tests', () => {
     });
 
     test('should fail login with non-existent user', async () => {
-      const client = matrix.createClient({
-        baseUrl: TEST_HOMESERVER,
-      });
+      const client = matrix.createClient({baseUrl: TEST_HOMESERVER});
 
       await expect(
         client.login('m.login.password', {
@@ -87,33 +105,9 @@ describe('Matrix Integration Tests', () => {
 
   describe('Room Operations', () => {
     beforeAll(async () => {
-      // Login both users
-      const aliceLoginClient = matrix.createClient({baseUrl: TEST_HOMESERVER});
-      const aliceResponse = await aliceLoginClient.login('m.login.password', {
-        identifier: {type: 'm.id.user', user: TEST_USERS.alice.username},
-        password: TEST_USERS.alice.password,
-      });
-
-      aliceClient = matrix.createClient({
-        baseUrl: TEST_HOMESERVER,
-        accessToken: aliceResponse.access_token,
-        userId: aliceResponse.user_id,
-        deviceId: aliceResponse.device_id,
-      });
-
-      const bobLoginClient = matrix.createClient({baseUrl: TEST_HOMESERVER});
-      const bobResponse = await bobLoginClient.login('m.login.password', {
-        identifier: {type: 'm.id.user', user: TEST_USERS.bob.username},
-        password: TEST_USERS.bob.password,
-      });
-
-      bobClient = matrix.createClient({
-        baseUrl: TEST_HOMESERVER,
-        accessToken: bobResponse.access_token,
-        userId: bobResponse.user_id,
-        deviceId: bobResponse.device_id,
-      });
-    }, 15000);
+      aliceClient = await loginUser(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      bobClient = await loginUser(TEST_USERS.bob.username, TEST_USERS.bob.password);
+    }, 10000);
 
     test('should create a direct message room', async () => {
       const room = await aliceClient.createRoom({
@@ -127,22 +121,10 @@ describe('Matrix Integration Tests', () => {
     });
 
     test('should sync and receive rooms', async () => {
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Sync timeout')), 10000);
-
-        aliceClient.once(matrix.ClientEvent.Sync, (state) => {
-          clearTimeout(timeout);
-          if (state === 'PREPARED' || state === 'SYNCING') {
-            resolve();
-          }
-        });
-
-        aliceClient.startClient({initialSyncLimit: 10});
-      });
-
+      await waitForSync(aliceClient);
       const rooms = aliceClient.getRooms();
       expect(rooms.length).toBeGreaterThan(0);
-    }, 15000);
+    }, 10000);
   });
 
   describe('Messaging', () => {
@@ -157,22 +139,14 @@ describe('Matrix Integration Tests', () => {
       });
       testRoomId = room.room_id;
 
-      // Wait for bob to receive the invite and join
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Start bob's client and accept invite
-      await new Promise<void>((resolve) => {
-        bobClient.once(matrix.ClientEvent.Sync, () => resolve());
-        bobClient.startClient({initialSyncLimit: 10});
-      });
-
-      // Bob joins the room
+      // Start bob's sync and join room
+      await waitForSync(bobClient);
       try {
         await bobClient.joinRoom(testRoomId);
       } catch {
-        // May already be joined or auto-accepted
+        // May already be joined
       }
-    }, 20000);
+    }, 15000);
 
     test('should send a text message', async () => {
       const result = await aliceClient.sendMessage(testRoomId, {
@@ -185,7 +159,6 @@ describe('Matrix Integration Tests', () => {
     });
 
     test('should send an audio message', async () => {
-      // Simulate uploading audio (in real app, this would be actual audio data)
       const fakeAudioData = Buffer.from('fake audio content for testing');
 
       const uploadResponse = await aliceClient.uploadContent(fakeAudioData, {
@@ -196,7 +169,6 @@ describe('Matrix Integration Tests', () => {
       expect(uploadResponse.content_uri).toBeDefined();
       expect(uploadResponse.content_uri).toMatch(/^mxc:\/\//);
 
-      // Send the audio message
       const result = await aliceClient.sendMessage(testRoomId, {
         msgtype: matrix.MsgType.Audio,
         body: 'Voice message',
@@ -212,8 +184,8 @@ describe('Matrix Integration Tests', () => {
     });
 
     test('should receive messages in room timeline', async () => {
-      // Wait for sync to catch up
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Brief wait for sync to process sent messages
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const room = aliceClient.getRoom(testRoomId);
       expect(room).toBeDefined();
@@ -225,13 +197,8 @@ describe('Matrix Integration Tests', () => {
 
       expect(messages.length).toBeGreaterThan(0);
 
-      // Check we have both text and audio messages
-      const hasText = messages.some(
-        m => m.getContent().msgtype === matrix.MsgType.Text,
-      );
-      const hasAudio = messages.some(
-        m => m.getContent().msgtype === matrix.MsgType.Audio,
-      );
+      const hasText = messages.some(m => m.getContent().msgtype === matrix.MsgType.Text);
+      const hasAudio = messages.some(m => m.getContent().msgtype === matrix.MsgType.Audio);
 
       expect(hasText).toBe(true);
       expect(hasAudio).toBe(true);

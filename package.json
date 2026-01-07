@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --config test/integration/jest.config.js",
+    "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --config test/integration/jest.config.js --forceExit",
     "test:integration:setup": "cd test/docker && ./setup.sh"
   },
   "dependencies": {

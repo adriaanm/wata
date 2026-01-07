@@ -3,6 +3,20 @@ set -e
 
 cd "$(dirname "$0")"
 
+# Parse arguments
+CLEAN=false
+if [[ "$1" == "--clean" || "$1" == "-c" ]]; then
+  CLEAN=true
+fi
+
+# Clean up if requested
+if $CLEAN; then
+  echo "Cleaning up existing containers and volumes..."
+  docker compose down -v 2>/dev/null || true
+  echo "Clean complete."
+  echo ""
+fi
+
 # Start Conduit
 echo "Starting Conduit Matrix server..."
 docker compose up -d
@@ -14,15 +28,13 @@ for i in {1..30}; do
     echo "Conduit is ready!"
     break
   fi
+  if [ "$i" -eq 30 ]; then
+    echo "ERROR: Conduit failed to start. Check logs with: docker compose logs"
+    exit 1
+  fi
   echo "  Waiting... ($i/30)"
   sleep 2
 done
-
-# Verify server is up
-if ! curl -sf http://localhost:8008/_matrix/client/versions > /dev/null 2>&1; then
-  echo "ERROR: Conduit failed to start. Check logs with: docker compose logs"
-  exit 1
-fi
 
 # Create test users
 echo "Creating test users..."
@@ -40,7 +52,7 @@ register_user() {
   elif echo "$result" | grep -q "M_USER_IN_USE"; then
     echo "  User already exists: @$username:localhost"
   else
-    echo "  Note: $username registration response: $result"
+    echo "  Warning: $username registration response: $result"
   fi
 }
 
@@ -56,4 +68,7 @@ echo "Test users:"
 echo "  - @alice:localhost / testpass123"
 echo "  - @bob:localhost / testpass123"
 echo ""
-echo "To stop: cd test/docker && docker compose down"
+echo "Commands:"
+echo "  Run tests:  npm run test:integration"
+echo "  Stop:       cd test/docker && docker compose down"
+echo "  Clean:      cd test/docker && docker compose down -v"
