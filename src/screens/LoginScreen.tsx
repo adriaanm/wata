@@ -1,16 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 
+import { FocusablePressable } from '../components/FocusablePressable';
 import { useAuth } from '../hooks/useMatrix';
+import { colors, typography, spacing, components } from '../theme';
 
 interface Props {
   onLoginSuccess: () => void;
@@ -19,7 +18,10 @@ interface Props {
 export function LoginScreen({ onLoginSuccess }: Props) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const { login, isLoading, error } = useAuth();
+
+  const passwordRef = useRef<TextInput>(null);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) return;
@@ -33,114 +35,119 @@ export function LoginScreen({ onLoginSuccess }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.content}>
-        <Text style={styles.title}>Wata</Text>
-        <Text style={styles.subtitle}>Walkie-Talkie</Text>
-
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Matrix username"
-            placeholderTextColor="#666"
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!isLoading}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor="#666"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!isLoading}
-          />
-
-          {error && <Text style={styles.error}>{error}</Text>}
-
-          <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={isLoading || !username.trim() || !password.trim()}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Connect</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.hint}>Use your Matrix account from matrix.org</Text>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>WATA</Text>
       </View>
-    </KeyboardAvoidingView>
+
+      <View style={styles.form}>
+        <TextInput
+          style={[
+            styles.input,
+            focusedField === 'username' && styles.inputFocused,
+          ]}
+          placeholder="Username"
+          placeholderTextColor={colors.textMuted}
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!isLoading}
+          onFocus={() => setFocusedField('username')}
+          onBlur={() => setFocusedField(null)}
+          onSubmitEditing={() => passwordRef.current?.focus()}
+          returnKeyType="next"
+        />
+
+        <TextInput
+          ref={passwordRef}
+          style={[
+            styles.input,
+            focusedField === 'password' && styles.inputFocused,
+          ]}
+          placeholder="Password"
+          placeholderTextColor={colors.textMuted}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          editable={!isLoading}
+          onFocus={() => setFocusedField('password')}
+          onBlur={() => setFocusedField(null)}
+          onSubmitEditing={handleLogin}
+          returnKeyType="go"
+        />
+
+        {error && <Text style={styles.error}>{error}</Text>}
+
+        <FocusablePressable
+          style={[styles.button, isLoading && styles.buttonDisabled]}
+          focusedStyle={styles.buttonFocused}
+          onPress={handleLogin}
+          disabled={isLoading || !username.trim() || !password.trim()}
+        >
+          {isLoading ? (
+            <ActivityIndicator color={colors.text} size="small" />
+          ) : (
+            <Text style={styles.buttonText}>CONNECT</Text>
+          )}
+        </FocusablePressable>
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.hint}>matrix.org</Text>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
+    ...components.screen,
+    paddingHorizontal: spacing.md,
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
+  header: {
+    paddingVertical: spacing.lg,
     alignItems: 'center',
-    padding: 24,
   },
   title: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#888',
-    marginBottom: 48,
+    ...typography.title,
+    letterSpacing: 4,
   },
   form: {
-    width: '100%',
-    maxWidth: 320,
+    flex: 1,
+    justifyContent: 'center',
   },
   input: {
-    backgroundColor: '#2a2a4a',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 18,
-    color: '#fff',
-    marginBottom: 16,
+    ...components.input,
+  },
+  inputFocused: {
+    ...components.inputFocused,
   },
   button: {
-    backgroundColor: '#4a90d9',
-    borderRadius: 12,
-    padding: 18,
-    alignItems: 'center',
-    marginTop: 8,
+    ...components.button,
+    marginTop: spacing.md,
+  },
+  buttonFocused: {
+    ...components.buttonFocused,
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
+    ...components.buttonText,
   },
   error: {
-    color: '#ff6b6b',
-    marginBottom: 16,
+    ...typography.small,
+    color: colors.error,
     textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  footer: {
+    paddingVertical: spacing.md,
+    alignItems: 'center',
   },
   hint: {
-    color: '#666',
-    marginTop: 32,
-    textAlign: 'center',
+    ...typography.small,
+    color: colors.textMuted,
   },
 });

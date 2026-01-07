@@ -28,15 +28,23 @@ ABBREE Zello handheld (or similar Android PTT devices):
 - **Input**: No keyboard, hardware buttons only
 
 ### Physical Keys
+Front keypad (2x3 grid):
+```
+[Menu]  [Up]   [Exit]
+ [P1]  [Down]  [P2]
+```
+
 | Key | Android KeyEvent | App Function |
 |-----|------------------|--------------|
 | PTT (side) | `KEYCODE_PTT` (79) | Hold to record voice message |
 | Up/Down | `KEYCODE_DPAD_UP/DOWN` | Navigate lists |
-| Select | `KEYCODE_DPAD_CENTER` | Confirm/select item |
-| Menu (green) | `KEYCODE_MENU` | Open menu |
+| Menu (green) | `KEYCODE_MENU` | Open context menu |
 | Exit (red) | `KEYCODE_BACK` | Go back |
-| P1/P2 | `KEYCODE_PROG_*` | Programmable (TBD) |
+| P1 | `KEYCODE_DPAD_CENTER` or device-specific | Select/confirm |
+| P2 | Device-specific | TBD |
 | Side Key 1/2 | Device-specific | TBD |
+
+Note: Exact key codes may vary by device - test on actual hardware.
 
 ### UI Constraints
 - Large text and buttons (readable on 1.77" screen)

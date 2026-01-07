@@ -1,16 +1,11 @@
 import React, { useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  Animated,
-} from 'react-native';
+import { View, Text, FlatList, StyleSheet, Animated } from 'react-native';
 
+import { FocusablePressable } from '../components/FocusablePressable';
 import { useAudioRecorder, useAudioPlayer } from '../hooks/useAudioRecorder';
 import { useVoiceMessages } from '../hooks/useMatrix';
 import { matrixService, VoiceMessage } from '../services/MatrixService';
+import { colors, typography, spacing, components } from '../theme';
 
 interface Props {
   roomId: string;
@@ -38,13 +33,13 @@ export function ChatScreen({ roomId, roomName, onBack }: Props) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.2,
-            duration: 500,
+            toValue: 0.3,
+            duration: 400,
             useNativeDriver: true,
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
-            duration: 500,
+            duration: 400,
             useNativeDriver: true,
           }),
         ]),
@@ -63,6 +58,7 @@ export function ChatScreen({ roomId, roomName, onBack }: Props) {
     }
   }, [messages.length]);
 
+  // Hardware PTT button handlers - will be connected to native module
   const handlePTTPress = async () => {
     try {
       await startRecording();
@@ -88,6 +84,17 @@ export function ChatScreen({ roomId, roomName, onBack }: Props) {
     }
   };
 
+  // Expose handlers for hardware PTT button (will be used by native module)
+  // For now, also expose via global for testing
+  useEffect(() => {
+    (global as Record<string, unknown>).pttPress = handlePTTPress;
+    (global as Record<string, unknown>).pttRelease = handlePTTRelease;
+    return () => {
+      delete (global as Record<string, unknown>).pttPress;
+      delete (global as Record<string, unknown>).pttRelease;
+    };
+  });
+
   const handlePlayMessage = async (message: VoiceMessage) => {
     if (isPlaying && currentUri === message.audioUrl) {
       await stop();
@@ -100,43 +107,60 @@ export function ChatScreen({ roomId, roomName, onBack }: Props) {
     const isCurrentlyPlaying = isPlaying && currentUri === item.audioUrl;
 
     return (
-      <TouchableOpacity
+      <FocusablePressable
         style={[
           styles.messageItem,
           item.isOwn ? styles.ownMessage : styles.otherMessage,
         ]}
+        focusedStyle={styles.messageItemFocused}
         onPress={() => handlePlayMessage(item)}
       >
-        <View style={styles.messageContent}>
-          <Text style={styles.senderName}>
+        <View style={styles.messageRow}>
+          <View
+            style={[
+              styles.playIcon,
+              isCurrentlyPlaying && styles.playIconActive,
+            ]}
+          />
+          <Text style={styles.duration}>{formatDuration(item.duration)}</Text>
+          <Text style={styles.sender} numberOfLines={1}>
             {item.isOwn ? 'You' : item.senderName}
           </Text>
-          <View style={styles.audioIndicator}>
-            <View
-              style={[
-                styles.playIcon,
-                isCurrentlyPlaying && styles.playIconActive,
-              ]}
-            />
-            <Text style={styles.duration}>{formatDuration(item.duration)}</Text>
-          </View>
         </View>
-      </TouchableOpacity>
+      </FocusablePressable>
     );
   };
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>Back</Text>
-        </TouchableOpacity>
+        <FocusablePressable
+          style={styles.backButton}
+          focusedStyle={styles.backButtonFocused}
+          onPress={onBack}
+        >
+          <Text style={styles.backText}>{'<'}</Text>
+        </FocusablePressable>
         <Text style={styles.title} numberOfLines={1}>
           {roomName}
         </Text>
-        <View style={styles.placeholder} />
       </View>
 
+      {/* Recording status bar */}
+      {isRecording ? (
+        <Animated.View style={[styles.recordingBar, { opacity: pulseAnim }]}>
+          <Text style={styles.recordingText}>
+            REC {formatDuration(recordingDuration)}
+          </Text>
+        </Animated.View>
+      ) : (
+        <View style={styles.statusBar}>
+          <Text style={styles.statusText}>PTT to record</Text>
+        </View>
+      )}
+
+      {/* Message list */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -145,159 +169,115 @@ export function ChatScreen({ roomId, roomName, onBack }: Props) {
         contentContainerStyle={styles.messageList}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No voice messages yet</Text>
-            <Text style={styles.emptyHint}>
-              Hold the button below to record
-            </Text>
+            <Text style={styles.emptyText}>No messages</Text>
           </View>
         }
       />
-
-      <View style={styles.pttContainer}>
-        {isRecording && (
-          <Text style={styles.recordingDuration}>
-            {formatDuration(recordingDuration)}
-          </Text>
-        )}
-
-        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-          <TouchableOpacity
-            style={[styles.pttButton, isRecording && styles.pttButtonActive]}
-            onPressIn={handlePTTPress}
-            onPressOut={handlePTTRelease}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.pttText}>
-              {isRecording ? 'Recording...' : 'Hold to Talk'}
-            </Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
+    ...components.screen,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    paddingTop: 48,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.bgSecondary,
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a4a',
+    borderBottomColor: colors.bgHighlight,
   },
   backButton: {
-    padding: 8,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  backButtonFocused: {
+    borderColor: colors.focus,
   },
   backText: {
-    color: '#4a90d9',
-    fontSize: 16,
+    ...typography.large,
+    color: colors.primary,
+    fontWeight: 'bold',
   },
   title: {
+    ...typography.header,
     flex: 1,
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginHorizontal: 8,
+    marginLeft: spacing.sm,
   },
-  placeholder: {
-    width: 50,
+  recordingBar: {
+    backgroundColor: colors.recording,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  recordingText: {
+    ...typography.status,
+    color: colors.text,
+  },
+  statusBar: {
+    backgroundColor: colors.bgSecondary,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  statusText: {
+    ...typography.small,
+    color: colors.textMuted,
   },
   messageList: {
-    padding: 16,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
     flexGrow: 1,
   },
   messageItem: {
-    maxWidth: '80%',
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  messageItemFocused: {
+    borderColor: colors.focus,
   },
   ownMessage: {
-    backgroundColor: '#4a90d9',
+    backgroundColor: colors.primary,
     alignSelf: 'flex-end',
+    maxWidth: '85%',
   },
   otherMessage: {
-    backgroundColor: '#2a2a4a',
+    backgroundColor: colors.bgSecondary,
     alignSelf: 'flex-start',
+    maxWidth: '85%',
   },
-  messageContent: {
-    flexDirection: 'column',
-  },
-  senderName: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  audioIndicator: {
+  messageRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   playIcon: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    marginRight: 8,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.textSecondary,
+    marginRight: spacing.sm,
   },
   playIconActive: {
-    backgroundColor: '#4caf50',
+    backgroundColor: colors.playing,
   },
   duration: {
-    color: '#fff',
-    fontSize: 16,
+    ...typography.body,
+    marginRight: spacing.sm,
+  },
+  sender: {
+    ...typography.small,
+    flex: 1,
   },
   emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 48,
+    ...components.emptyState,
   },
   emptyText: {
-    color: '#888',
-    fontSize: 18,
-    marginBottom: 8,
-  },
-  emptyHint: {
-    color: '#666',
-    fontSize: 14,
-  },
-  pttContainer: {
-    padding: 24,
-    paddingBottom: 40,
-    alignItems: 'center',
-  },
-  recordingDuration: {
-    color: '#ff6b6b',
-    fontSize: 18,
-    marginBottom: 16,
-  },
-  pttButton: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: '#4a90d9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  pttButtonActive: {
-    backgroundColor: '#ff6b6b',
-  },
-  pttText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
+    ...components.emptyText,
   },
 });

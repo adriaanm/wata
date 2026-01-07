@@ -3,13 +3,14 @@ import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
 
+import { FocusablePressable } from '../components/FocusablePressable';
 import { useRooms, useMatrixSync } from '../hooks/useMatrix';
 import { MatrixRoom } from '../services/MatrixService';
+import { colors, typography, spacing, components } from '../theme';
 
 interface Props {
   onSelectContact: (roomId: string, roomName: string) => void;
@@ -24,32 +25,26 @@ export function ContactListScreen({ onSelectContact, onLogout }: Props) {
   const directRooms = rooms.filter(room => room.isDirect);
 
   const renderContact = ({ item }: { item: MatrixRoom }) => (
-    <TouchableOpacity
+    <FocusablePressable
       style={styles.contactItem}
+      focusedStyle={styles.contactItemFocused}
       onPress={() => onSelectContact(item.roomId, item.name)}
     >
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>
-          {item.name.charAt(0).toUpperCase()}
+      <Text style={styles.contactName} numberOfLines={1}>
+        {item.name}
+      </Text>
+      {item.lastMessage && (
+        <Text style={styles.lastMessage} numberOfLines={1}>
+          {item.lastMessage}
         </Text>
-      </View>
-      <View style={styles.contactInfo}>
-        <Text style={styles.contactName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        {item.lastMessage && (
-          <Text style={styles.lastMessage} numberOfLines={1}>
-            {item.lastMessage}
-          </Text>
-        )}
-      </View>
-    </TouchableOpacity>
+      )}
+    </FocusablePressable>
   );
 
   if (!isReady) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4a90d9" />
+      <View style={styles.loading}>
+        <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.loadingText}>Syncing...</Text>
         <Text style={styles.syncState}>{syncState}</Text>
       </View>
@@ -60,17 +55,19 @@ export function ContactListScreen({ onSelectContact, onLogout }: Props) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Contacts</Text>
-        <TouchableOpacity onPress={onLogout} style={styles.logoutButton}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+        <FocusablePressable
+          style={styles.logoutButton}
+          focusedStyle={styles.logoutButtonFocused}
+          onPress={onLogout}
+        >
+          <Text style={styles.logoutText}>Exit</Text>
+        </FocusablePressable>
       </View>
 
       {directRooms.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No contacts yet</Text>
-          <Text style={styles.emptyHint}>
-            Start a conversation in Element to see contacts here
-          </Text>
+          <Text style={styles.emptyText}>No contacts</Text>
+          <Text style={styles.emptyHint}>Start chat in Element</Text>
         </View>
       ) : (
         <FlatList
@@ -86,98 +83,65 @@ export function ContactListScreen({ onSelectContact, onLogout }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
+    ...components.screen,
   },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
-    justifyContent: 'center',
-    alignItems: 'center',
+  loading: {
+    ...components.loading,
   },
   loadingText: {
-    color: '#fff',
-    fontSize: 18,
-    marginTop: 16,
+    ...components.loadingText,
   },
   syncState: {
-    color: '#666',
-    fontSize: 14,
-    marginTop: 8,
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 48,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a4a',
+    ...components.header,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
+    ...typography.header,
   },
   logoutButton: {
-    padding: 8,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  logoutButtonFocused: {
+    borderColor: colors.focus,
   },
   logoutText: {
-    color: '#4a90d9',
-    fontSize: 16,
+    ...typography.body,
+    color: colors.primary,
   },
   list: {
-    padding: 16,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
   },
   contactItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2a2a4a',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    ...components.listItem,
   },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#4a90d9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  avatarText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  contactInfo: {
-    flex: 1,
+  contactItemFocused: {
+    ...components.listItemFocused,
   },
   contactName: {
-    color: '#fff',
-    fontSize: 20,
+    ...typography.large,
     fontWeight: '600',
   },
   lastMessage: {
-    color: '#888',
-    fontSize: 14,
-    marginTop: 4,
+    ...typography.small,
+    marginTop: spacing.xs,
   },
   emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+    ...components.emptyState,
   },
   emptyText: {
-    color: '#888',
-    fontSize: 20,
-    marginBottom: 8,
+    ...typography.body,
+    color: colors.textSecondary,
   },
   emptyHint: {
-    color: '#666',
-    fontSize: 14,
-    textAlign: 'center',
+    ...typography.small,
+    marginTop: spacing.xs,
   },
 });
