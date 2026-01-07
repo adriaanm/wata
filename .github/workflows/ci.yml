@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier
+        run: npm run format:check
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      conduit:
+        image: matrixconduit/matrix-conduit:latest
+        ports:
+          - 8008:6167
+        env:
+          CONDUIT_SERVER_NAME: localhost
+          CONDUIT_DATABASE_BACKEND: rocksdb
+          CONDUIT_ALLOW_REGISTRATION: 'true'
+          CONDUIT_ALLOW_GUEST_REGISTRATION: 'true'
+          CONDUIT_TRUSTED_SERVERS: '[]'
+          CONDUIT_ADDRESS: 0.0.0.0
+          CONDUIT_PORT: 6167
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for Conduit
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8008/_matrix/client/versions > /dev/null; then
+              echo "Conduit is ready"
+              exit 0
+            fi
+            echo "Waiting for Conduit... ($i/30)"
+            sleep 1
+          done
+          echo "Conduit failed to start"
+          exit 1
+
+      - name: Register test users
+        run: |
+          curl -X POST http://localhost:8008/_matrix/client/v3/register \
+            -H "Content-Type: application/json" \
+            -d '{"username": "alice", "password": "testpass123", "auth": {"type": "m.login.dummy"}}'
+          curl -X POST http://localhost:8008/_matrix/client/v3/register \
+            -H "Content-Type: application/json" \
+            -d '{"username": "bob", "password": "testpass123", "auth": {"type": "m.login.dummy"}}'
+
+      - name: Run integration tests
+        run: npm run test:integration
