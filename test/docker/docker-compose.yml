@@ -1,0 +1,19 @@
+services:
+  conduit:
+    image: matrixconduit/matrix-conduit:latest
+    container_name: wata-matrix
+    ports:
+      - "8008:6167"
+    volumes:
+      - ./conduit.toml:/etc/conduit.toml:ro
+      - conduit_data:/var/lib/matrix-conduit
+    environment:
+      CONDUIT_CONFIG: /etc/conduit.toml
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6167/_matrix/client/versions"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  conduit_data:
