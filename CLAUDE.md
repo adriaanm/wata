@@ -70,6 +70,10 @@ Note: Exact key codes may vary by device - test on actual hardware.
 - `matrix-js-sdk` uses ESM modules - Jest requires `NODE_OPTIONS='--experimental-vm-modules'`
 - Login requires `identifier` format for Conduit: `{type: 'm.id.user', user: 'username'}`
 - The SDK exports a singleton `MatrixClient` - create via `createClient()`
+- Requires crypto polyfills for React Native:
+  - `react-native-get-random-values` for `crypto.getRandomValues()`
+  - `buffer` for Node.js Buffer API
+  - Both imported in `index.js` before app initialization
 
 ### Audio
 - `react-native-audio-recorder-player` exports a singleton instance, not a class
