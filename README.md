@@ -41,11 +41,12 @@ Wata is a walkie-talkie style app designed for:
 ```
 src/
 ├── App.tsx                    # Navigation setup
+├── config/
+│   └── matrix.ts              # Matrix credentials (configure here)
 ├── services/
 │   ├── MatrixService.ts       # Matrix SDK wrapper
 │   └── AudioService.ts        # Recording/playback
 ├── screens/
-│   ├── LoginScreen.tsx        # Username/password login
 │   ├── ContactListScreen.tsx  # List of DM rooms
 │   └── ChatScreen.tsx         # Voice message thread + PTT
 └── hooks/
@@ -68,39 +69,60 @@ src/
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - Android SDK (API 26+)
 - Java 17+ (tested with Java 23)
+- Docker (for local Matrix server)
 
-### Setup
+### Quick Start
 
 ```bash
 # Install dependencies
 npm install
 
-# Start Metro bundler
+# Start local Matrix server (one-time setup)
+npm run dev:server
+
+# For physical devices: Set up port forwarding (after connecting device)
+npm run dev:forward
+
+# Start Metro bundler (for hot reload)
 npm start
 
-# Build and run on Android
+# In another terminal: Build and run on device
 npm run android
 ```
+
+### Device Testing
+
+The app auto-logs into your local Matrix server using `http://localhost:8008`.
+
+**For Android Emulator:**
+- Works out of the box
+- Just run `npm run dev:server` and `npm run android`
+
+**For Physical Device:**
+- Connect via USB or wireless ADB
+- Run `npm run dev:forward` to set up ADB port forwarding
+- No IP configuration needed!
+
+The app will auto-login as `alice` (password: `testpass123`). Test messaging by:
+- Using `bob` on another device (also using `testpass123`)
+- Using Element web client at http://localhost:8008
 
 ### Running Tests
 
 Integration tests run against a local Matrix server (Conduit):
 
 ```bash
-# Start the local Matrix server (requires Docker)
-cd test/docker && docker compose up -d
-
-# Create test users (first time only)
-./setup.sh
+# Start the server (already done if you ran dev:server)
+npm run test:integration:setup
 
 # Run integration tests
 npm run test:integration
 
 # Stop the server
-docker compose down
+cd test/docker && docker compose down
 ```
 
 ## Status
@@ -110,7 +132,8 @@ docker compose down
 - [x] Project setup (React Native + TypeScript)
 - [x] Matrix integration (login, rooms, messaging)
 - [x] Audio recording and playback
-- [x] Basic UI screens
+- [x] Basic UI screens (optimized for D-pad navigation)
+- [x] Auto-login (no keyboard required)
 - [x] Integration test infrastructure
 - [ ] Hardware PTT button (native Kotlin module)
 - [ ] Push notifications (FCM)

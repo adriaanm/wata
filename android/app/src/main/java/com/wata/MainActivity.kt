@@ -4,6 +4,7 @@ import android.util.Log
 import android.view.KeyEvent
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
@@ -38,23 +39,27 @@ class MainActivity : ReactActivity() {
 
     Log.d("KeyEvent", "Key: $keyName ($keyCode) Action: $action")
 
-    // Send to React Native
-    sendKeyEventToJS(keyCode, action, keyName)
+    // Send to React Native (safely)
+    try {
+      val reactContext = reactDelegate?.reactHost?.currentReactContext
+      if (reactContext != null) {
+        sendKeyEventToJS(reactContext, keyCode, action, keyName)
+      }
+    } catch (e: Exception) {
+      Log.w("KeyEvent", "Could not send key event to JS: ${e.message}")
+    }
 
     return super.dispatchKeyEvent(event)
   }
 
-  private fun sendKeyEventToJS(keyCode: Int, action: String, keyName: String) {
-    val reactContext = reactInstanceManager?.currentReactContext
-    if (reactContext != null && reactContext.hasActiveReactInstance()) {
-      val params = com.facebook.react.bridge.Arguments.createMap().apply {
-        putInt("keyCode", keyCode)
-        putString("action", action)
-        putString("keyName", keyName)
-      }
-      reactContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        .emit("onKeyEvent", params)
+  private fun sendKeyEventToJS(reactContext: ReactContext, keyCode: Int, action: String, keyName: String) {
+    val params = Arguments.createMap().apply {
+      putInt("keyCode", keyCode)
+      putString("action", action)
+      putString("keyName", keyName)
     }
+    reactContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("onKeyEvent", params)
   }
 }

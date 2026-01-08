@@ -55,6 +55,16 @@ Note: Exact key codes may vary by device - test on actual hardware.
 
 ## Technical Notes
 
+### Authentication
+- No login screen (device has no keyboard)
+- Credentials hardcoded in `src/config/matrix.ts` for build-time configuration
+- App auto-logs in on startup using configured credentials
+- Modify `src/config/matrix.ts` before building to change:
+  - Homeserver URL (default: `http://localhost:8008` for local Conduit)
+  - Username (default: `alice`)
+  - Password (default: `testpass123`)
+- Future: Replace with QR code provisioning or companion config app
+
 ### Matrix SDK
 - Requires Node.js 22+ (uses `Promise.withResolvers`)
 - `matrix-js-sdk` uses ESM modules - Jest requires `NODE_OPTIONS='--experimental-vm-modules'`
@@ -85,13 +95,67 @@ Create native Kotlin module:
 - Install `@react-native-firebase/app` and `@react-native-firebase/messaging`
 - Configure Matrix push rules via `client.setPushRuleEnabled()`
 
-## Commands
+## Development Workflow
+
+### Fast Iteration with Metro Bundler
+
+For rapid development with hot reloading:
 
 ```bash
-npm start                    # Metro bundler
+# Terminal 1: Start Conduit server (one-time setup)
+npm run dev:server
+
+# Terminal 2: Set up port forwarding (for physical devices, run after connecting)
+npm run dev:forward
+
+# Terminal 3: Start Metro bundler
+npm start
+
+# Terminal 4: Deploy to device/emulator (one-time per session)
+npm run android
+
+# Now edit code and see changes instantly via hot reload!
+```
+
+### Device Testing with Local Conduit
+
+The app is configured to use `http://localhost:8008` by default, which works for both emulators and physical devices.
+
+**Android Emulator:**
+- Works out of the box (emulator has built-in localhost forwarding)
+- Just run `npm run dev:server` and `npm run android`
+
+**Physical Device:**
+- Requires ADB reverse proxy for localhost forwarding
+- Connect device via USB or wireless ADB
+- Run `npm run dev:forward` to set up port forwarding
+- The forwarding persists until device disconnects
+
+**No IP lookup required!** The ADB reverse proxy makes `localhost:8008` on the device map to `localhost:8008` on your host machine.
+
+**Fallback (if ADB reverse fails):**
+If you can't use ADB reverse proxy, use manual IP configuration:
+```bash
+# 1. Find your host machine's IP
+npm run dev:ip
+
+# 2. Update src/config/matrix.ts with the IP shown
+homeserverUrl: 'http://192.168.x.x:8008'
+```
+
+### Commands Reference
+
+```bash
+# Development
+npm start                    # Metro bundler (for hot reload)
 npm run android              # Build and run on device/emulator
+npm run dev:server           # Start Conduit Matrix server (Docker)
+npm run dev:forward          # Set up ADB port forwarding (physical devices)
+npm run dev:ip               # Show local IP (fallback if adb reverse fails)
+
+# Testing
 npm run test:integration     # Run against local Matrix server
-./gradlew assembleDebug      # Build APK (from android/)
+npm run test:integration:setup  # Alias for dev:server
 
 # Code quality
 npm run check                # Run all checks (typecheck + lint + format)
@@ -100,6 +164,9 @@ npm run lint:fix             # ESLint with auto-fix
 npm run format               # Prettier format
 npm run format:check         # Prettier check (CI)
 npm run typecheck            # TypeScript type checking
+
+# Production build
+cd android && ./gradlew assembleDebug  # Build APK
 ```
 
 Before committing, run `npm run check` to verify code quality.

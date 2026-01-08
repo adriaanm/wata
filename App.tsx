@@ -7,7 +7,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyDebugOverlay } from './src/components/KeyDebugOverlay';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { ContactListScreen } from './src/screens/ContactListScreen';
-import { LoginScreen } from './src/screens/LoginScreen';
 import { matrixService } from './src/services/MatrixService';
 import { colors } from './src/theme';
 
@@ -15,7 +14,6 @@ import { colors } from './src/theme';
 const DEBUG_KEYS = true;
 
 type RootStackParamList = {
-  Login: undefined;
   ContactList: undefined;
   Chat: { roomId: string; roomName: string };
 };
@@ -24,21 +22,26 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function App(): React.JSX.Element {
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
-    const restoreSession = async () => {
+    const initializeAuth = async () => {
       try {
+        // Try to restore existing session first
         const restored = await matrixService.restoreSession();
-        setIsLoggedIn(restored);
-      } catch {
-        setIsLoggedIn(false);
+        if (restored) {
+          return;
+        }
+
+        // If no session, auto-login with config credentials
+        await matrixService.autoLogin();
+      } catch (error) {
+        console.error('Auto-login failed:', error);
       } finally {
         setIsLoading(false);
       }
     };
 
-    restoreSession();
+    initializeAuth();
   }, []);
 
   if (isLoading) {
@@ -56,27 +59,13 @@ function App(): React.JSX.Element {
       <View style={styles.container}>
         <NavigationContainer>
           <Stack.Navigator
-            initialRouteName={isLoggedIn ? 'ContactList' : 'Login'}
+            initialRouteName="ContactList"
             screenOptions={{
               headerShown: false,
               contentStyle: { backgroundColor: colors.bg },
               animation: 'slide_from_right',
             }}
           >
-            <Stack.Screen name="Login">
-              {({ navigation }) => (
-                <LoginScreen
-                  onLoginSuccess={() => {
-                    setIsLoggedIn(true);
-                    navigation.reset({
-                      index: 0,
-                      routes: [{ name: 'ContactList' }],
-                    });
-                  }}
-                />
-              )}
-            </Stack.Screen>
-
             <Stack.Screen name="ContactList">
               {({ navigation }) => (
                 <ContactListScreen
@@ -85,11 +74,7 @@ function App(): React.JSX.Element {
                   }}
                   onLogout={async () => {
                     await matrixService.logout();
-                    setIsLoggedIn(false);
-                    navigation.reset({
-                      index: 0,
-                      routes: [{ name: 'Login' }],
-                    });
+                    // After logout, app will auto-login again on next launch
                   }}
                 />
               )}

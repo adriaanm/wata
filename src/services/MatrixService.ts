@@ -5,8 +5,10 @@ import { MsgType } from 'matrix-js-sdk';
 import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
 
-// Configurable for testing - defaults to production
-let HOMESERVER_URL = 'https://matrix.org';
+import { MATRIX_CONFIG } from '../config/matrix';
+
+// Configurable for testing - defaults to config
+let HOMESERVER_URL = MATRIX_CONFIG.homeserverUrl;
 const KEYCHAIN_SERVICE = 'wata-matrix-credentials';
 
 // Allow overriding homeserver for tests
@@ -78,6 +80,14 @@ class MatrixService {
 
     this.setupEventListeners();
     await this.client.startClient({ initialSyncLimit: 20 });
+  }
+
+  /**
+   * Auto-login using credentials from config.
+   * This is used for devices without keyboard input.
+   */
+  async autoLogin(): Promise<void> {
+    await this.login(MATRIX_CONFIG.username, MATRIX_CONFIG.password);
   }
 
   async restoreSession(): Promise<boolean> {
