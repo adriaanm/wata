@@ -7,29 +7,20 @@
 
 import * as matrix from 'matrix-js-sdk';
 
+import { loginToMatrix } from '../../src/lib/matrix-auth';
+
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {
   alice: { username: 'alice', password: 'testpass123' },
   bob: { username: 'bob', password: 'testpass123' },
 };
 
-// Helper to login a user
+// Helper to login a user (uses shared login logic)
 async function loginUser(
   username: string,
   password: string,
 ): Promise<matrix.MatrixClient> {
-  const loginClient = matrix.createClient({ baseUrl: TEST_HOMESERVER });
-  const response = await loginClient.login('m.login.password', {
-    identifier: { type: 'm.id.user', user: username },
-    password: password,
-  });
-
-  return matrix.createClient({
-    baseUrl: TEST_HOMESERVER,
-    accessToken: response.access_token,
-    userId: response.user_id,
-    deviceId: response.device_id,
-  });
+  return loginToMatrix(TEST_HOMESERVER, username, password, 'test-client');
 }
 
 // Helper to wait for sync

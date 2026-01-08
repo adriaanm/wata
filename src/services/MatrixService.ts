@@ -6,6 +6,12 @@ import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
 
 import { MATRIX_CONFIG } from '../config/matrix';
+import {
+  loginToMatrix,
+  createStoredCredentials,
+  type StoredCredentials,
+} from '../lib/matrix-auth';
+import { createFixedFetch } from '../lib/fixed-fetch-api';
 
 // Configurable for testing - defaults to config
 let HOMESERVER_URL = MATRIX_CONFIG.homeserverUrl;
@@ -50,36 +56,36 @@ class MatrixService {
   private messageCallbacks: MessageCallback[] = [];
 
   async login(username: string, password: string): Promise<void> {
-    const client = matrix.createClient({
-      baseUrl: HOMESERVER_URL,
-    });
+    console.log('[MatrixService] login() called with:', { username, homeserver: HOMESERVER_URL });
 
-    const response = await client.login('m.login.password', {
-      user: username,
-      password: password,
-    });
+    // Use shared login helper to ensure consistency with tests
+    this.client = await loginToMatrix(HOMESERVER_URL, username, password, 'Wata');
 
-    // Store credentials securely
+    console.log('[MatrixService] Login successful, storing credentials');
+
+    // Store credentials securely for session restoration
+    const credentials: StoredCredentials = {
+      accessToken: this.client.getAccessToken() || '',
+      userId: this.client.getUserId() || '',
+      deviceId: this.client.getDeviceId() || '',
+      homeserverUrl: HOMESERVER_URL,
+    };
+
     await Keychain.setGenericPassword(
-      response.user_id,
-      JSON.stringify({
-        accessToken: response.access_token,
-        userId: response.user_id,
-        deviceId: response.device_id,
-      }),
+      credentials.userId,
+      JSON.stringify(credentials),
       { service: KEYCHAIN_SERVICE },
     );
 
-    // Create authenticated client
-    this.client = matrix.createClient({
-      baseUrl: HOMESERVER_URL,
-      accessToken: response.access_token,
-      userId: response.user_id,
-      deviceId: response.device_id,
-    });
-
+    console.log('[MatrixService] Starting client sync');
     this.setupEventListeners();
-    await this.client.startClient({ initialSyncLimit: 20 });
+
+    // Start client with options that don't require unsupported Conduit endpoints
+    await this.client.startClient({
+      initialSyncLimit: 20,
+      // These features require endpoints Conduit doesn't implement
+      disablePresence: true, // Disable presence to reduce errors
+    });
   }
 
   /**
@@ -100,21 +106,27 @@ class MatrixService {
         return false;
       }
 
-      const { accessToken, userId, deviceId } = JSON.parse(
-        credentials.password,
-      );
+      const stored: StoredCredentials = JSON.parse(credentials.password);
 
       this.client = matrix.createClient({
-        baseUrl: HOMESERVER_URL,
-        accessToken,
-        userId,
-        deviceId,
+        baseUrl: stored.homeserverUrl,
+        accessToken: stored.accessToken,
+        userId: stored.userId,
+        deviceId: stored.deviceId,
+        fetchFn: createFixedFetch(),
       });
 
       this.setupEventListeners();
-      await this.client.startClient({ initialSyncLimit: 20 });
+
+      // Start client with options that don't require unsupported Conduit endpoints
+      await this.client.startClient({
+        initialSyncLimit: 20,
+        disablePresence: true,
+      });
+
       return true;
-    } catch {
+    } catch (error) {
+      console.error('[MatrixService] Failed to restore session:', error);
       return false;
     }
   }
@@ -131,7 +143,13 @@ class MatrixService {
   private setupEventListeners(): void {
     if (!this.client) return;
 
-    this.client.on(matrix.ClientEvent.Sync, state => {
+    // Suppress non-critical errors from unsupported Conduit endpoints
+    this.client.on(matrix.ClientEvent.Sync, (state, _prevState, data) => {
+      // Log sync state changes
+      if (state === 'ERROR') {
+        console.warn('[MatrixService] Sync error (non-fatal):', data);
+      }
+
       this.syncCallbacks.forEach(cb => cb(state));
 
       if (state === 'PREPARED' || state === 'SYNCING') {
@@ -154,6 +172,15 @@ class MatrixService {
       }
 
       this.notifyRoomUpdate();
+    });
+
+    // Catch and log HTTP errors without crashing
+    this.client.on(matrix.HttpApiEvent.SessionLoggedOut, () => {
+      console.warn('[MatrixService] Session logged out');
+    });
+
+    this.client.on(matrix.HttpApiEvent.NoConsent, () => {
+      console.warn('[MatrixService] No consent');
     });
   }
 

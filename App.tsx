@@ -26,16 +26,20 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        console.log('[App] Attempting to restore session...');
         // Try to restore existing session first
         const restored = await matrixService.restoreSession();
         if (restored) {
+          console.log('[App] Session restored successfully');
           return;
         }
 
+        console.log('[App] No session found, attempting auto-login...');
         // If no session, auto-login with config credentials
         await matrixService.autoLogin();
+        console.log('[App] Auto-login completed successfully');
       } catch (error) {
-        console.error('Auto-login failed:', error);
+        console.error('[App] Auto-login failed:', error);
       } finally {
         setIsLoading(false);
       }
