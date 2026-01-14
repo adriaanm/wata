@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useVoiceMessages } from '../hooks/useMatrix.js';
 import { useAudioPlayer } from '../hooks/useAudioPlayer.js';
+import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
+import { matrixService } from '../App.js';
 import { MessageItem } from '../components/MessageItem.js';
 import { colors } from '../theme.js';
 
@@ -14,8 +16,14 @@ interface Props {
 export function ChatView({ roomId, roomName, onBack }: Props) {
   const messages = useVoiceMessages(roomId);
   const { isPlaying, currentUri, play, stop } = useAudioPlayer();
+  const {
+    isRecording,
+    recordingDuration,
+    startRecording,
+    stopRecording,
+    formatDuration,
+  } = useAudioRecorder();
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
 
   // Keyboard navigation
   useInput((input, key) => {
@@ -40,9 +48,29 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
       }
     }
 
-    // Space for PTT (toggle for now, will be hold-to-record in Phase 5)
+    // Space for PTT (toggle mode)
     if (input === ' ') {
-      setIsRecording(prev => !prev);
+      if (isRecording) {
+        // Stop recording and send
+        stopRecording()
+          .then(async (result) => {
+            await matrixService.sendVoiceMessage(
+              roomId,
+              result.buffer,
+              result.mimeType,
+              result.duration,
+              result.size
+            );
+          })
+          .catch((err) => {
+            console.error('Failed to send voice message:', err);
+          });
+      } else {
+        // Start recording
+        startRecording().catch((err) => {
+          console.error('Failed to start recording:', err);
+        });
+      }
     }
   });
 
@@ -61,7 +89,9 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
         <Box marginBottom={1} borderStyle="single" borderColor={colors.recording} paddingX={1}>
           <Text color={colors.recording}>● REC</Text>
           <Text> </Text>
-          <Text>0:00</Text>
+          <Text>{formatDuration(recordingDuration)}</Text>
+          <Text> </Text>
+          <Text dimColor>(Press Space to stop and send)</Text>
         </Box>
       )}
 
