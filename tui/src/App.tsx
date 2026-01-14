@@ -4,6 +4,7 @@ import { MatrixService } from '@shared/services/MatrixService';
 import { KeytarCredentialStorage } from './services/KeytarCredentialStorage.js';
 import { LoadingView } from './views/LoadingView.js';
 import { ContactListView } from './views/ContactListView.js';
+import { ChatView } from './views/ChatView.js';
 
 // Create TUI-specific MatrixService instance with keytar storage
 const credentialStorage = new KeytarCredentialStorage();
@@ -67,13 +68,12 @@ export function App() {
   }
 
   if (navigation.screen === 'chat' && navigation.roomId && navigation.roomName) {
-    // TODO: Implement ChatView
     return (
-      <Box flexDirection="column">
-        <Box>Chat with: {navigation.roomName}</Box>
-        <Box>Room ID: {navigation.roomId}</Box>
-        <Box>Press Esc to go back</Box>
-      </Box>
+      <ChatView
+        roomId={navigation.roomId}
+        roomName={navigation.roomName}
+        onBack={handleBack}
+      />
     );
   }
 
