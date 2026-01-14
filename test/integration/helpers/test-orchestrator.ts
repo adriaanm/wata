@@ -7,7 +7,7 @@
 
 import type { MessageFilter } from './test-client';
 import { TestClient } from './test-client';
-import type { VoiceMessage } from '../../../src/services/MatrixService';
+import type { VoiceMessage } from '../../../src/shared/services/MatrixService';
 
 export class TestOrchestrator {
   private clients = new Map<string, TestClient>();

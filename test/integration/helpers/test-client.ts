@@ -7,8 +7,8 @@
 
 import * as matrix from 'matrix-js-sdk';
 
-import { loginToMatrix } from '../../../src/lib/matrix-auth';
-import type { VoiceMessage } from '../../../src/services/MatrixService';
+import { loginToMatrix } from '../../../src/shared/lib/matrix-auth';
+import type { VoiceMessage } from '../../../src/shared/services/MatrixService';
 
 export interface MessageFilter {
   sender?: string;

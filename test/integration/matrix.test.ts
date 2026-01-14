@@ -7,7 +7,7 @@
 
 import * as matrix from 'matrix-js-sdk';
 
-import { loginToMatrix } from '../../src/lib/matrix-auth';
+import { loginToMatrix } from '../../src/shared/lib/matrix-auth';
 
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {

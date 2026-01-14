@@ -7,7 +7,7 @@
  */
 
 import { TestOrchestrator } from './helpers';
-import { MATRIX_CONFIG } from '../../src/config/matrix';
+import { MATRIX_CONFIG } from '../../src/shared/config/matrix';
 
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {
