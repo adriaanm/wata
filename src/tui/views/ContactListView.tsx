@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Box, Text, useInput, useApp } from 'ink';
+import React, { useState, useMemo } from 'react';
+import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import { useRooms, useMatrixSync } from '../hooks/useMatrix.js';
 import { FocusableItem } from '../components/FocusableItem.js';
 import { colors } from '../theme.js';
@@ -13,6 +13,48 @@ export function ContactListView({ onSelectContact }: Props) {
   const { isReady } = useMatrixSync();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const { exit } = useApp();
+  const { stdout } = useStdout();
+
+  // Calculate viewport dimensions
+  const terminalHeight = stdout?.rows || 24;
+  const { visibleRooms, hasMore, startIndex } = useMemo(() => {
+    // Reserve space for: header (2), help (2), scroll indicators (2), margins (2)
+    // Each room item takes ~3 lines (border + content + margin)
+    const HEADER_HEIGHT = 2;
+    const HELP_HEIGHT = 2;
+    const INDICATOR_HEIGHT = 2;
+    const MARGIN_HEIGHT = 2;
+    const ITEM_HEIGHT = 3;
+
+    const availableHeight = terminalHeight - HEADER_HEIGHT - HELP_HEIGHT - INDICATOR_HEIGHT - MARGIN_HEIGHT;
+    const maxItems = Math.max(1, Math.floor(availableHeight / ITEM_HEIGHT));
+
+    // On larger terminals, leave some breathing room (don't fill entire screen)
+    const preferredMaxItems = terminalHeight > 30
+      ? Math.floor(maxItems * 0.7)  // Use 70% of available space
+      : maxItems;
+
+    // Calculate window around selected item
+    const halfWindow = Math.floor(preferredMaxItems / 2);
+    let startIndex = Math.max(0, selectedIndex - halfWindow);
+    let endIndex = Math.min(rooms.length, startIndex + preferredMaxItems);
+
+    // Adjust if we're near the end
+    if (endIndex - startIndex < preferredMaxItems) {
+      startIndex = Math.max(0, endIndex - preferredMaxItems);
+    }
+
+    return {
+      visibleRooms: rooms.slice(startIndex, endIndex),
+      hasMore: {
+        above: startIndex > 0,
+        below: endIndex < rooms.length,
+        aboveCount: startIndex,
+        belowCount: rooms.length - endIndex,
+      },
+      startIndex,
+    };
+  }, [rooms, selectedIndex, terminalHeight]);
 
   // Keyboard navigation
   useInput((input, key) => {
@@ -74,17 +116,34 @@ export function ContactListView({ onSelectContact }: Props) {
         </Box>
       )}
 
+      {/* Scroll indicator - more above */}
+      {hasMore.above && (
+        <Box justifyContent="center" marginBottom={0}>
+          <Text dimColor>⬆ {hasMore.aboveCount} more above ⬆</Text>
+        </Box>
+      )}
+
       {/* Rooms list */}
-      {rooms.map((room, index) => (
-        <FocusableItem
-          key={room.roomId}
-          label={room.name}
-          sublabel={room.lastMessage || undefined}
-          timestamp={formatTimestamp(room.lastMessageTime)}
-          isFocused={index === selectedIndex}
-          onSelect={() => onSelectContact(room.roomId, room.name)}
-        />
-      ))}
+      {visibleRooms.map((room, visibleIndex) => {
+        const actualIndex = startIndex + visibleIndex;
+        return (
+          <FocusableItem
+            key={room.roomId}
+            label={room.name}
+            sublabel={room.lastMessage || undefined}
+            timestamp={formatTimestamp(room.lastMessageTime)}
+            isFocused={actualIndex === selectedIndex}
+            onSelect={() => onSelectContact(room.roomId, room.name)}
+          />
+        );
+      })}
+
+      {/* Scroll indicator - more below */}
+      {hasMore.below && (
+        <Box justifyContent="center" marginTop={0}>
+          <Text dimColor>⬇ {hasMore.belowCount} more below ⬇</Text>
+        </Box>
+      )}
 
       {/* Help text */}
       <Box marginTop={1}>
