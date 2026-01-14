@@ -9,6 +9,72 @@ if [[ "$1" == "--clean" || "$1" == "-c" ]]; then
   CLEAN=true
 fi
 
+# Function to check if Docker is available
+check_docker() {
+  docker info > /dev/null 2>&1
+  return $?
+}
+
+# Function to check if Colima is installed
+check_colima_installed() {
+  command -v colima > /dev/null 2>&1
+  return $?
+}
+
+# Function to check if Colima is running
+check_colima_running() {
+  colima status 2>/dev/null | grep -q "colima is running"
+  return $?
+}
+
+# Ensure Docker is available
+echo "Checking Docker availability..."
+if ! check_docker; then
+  echo "Docker is not available."
+
+  # Check if Colima is installed
+  if check_colima_installed; then
+    echo "Colima is installed. Checking status..."
+
+    if check_colima_running; then
+      echo "Colima is running but Docker is not available. Waiting for Docker..."
+      # Give it a moment to become available
+      sleep 2
+      if ! check_docker; then
+        echo "ERROR: Colima is running but Docker is still not available."
+        echo "Try running: colima restart"
+        exit 1
+      fi
+    else
+      echo "Starting Colima..."
+      colima start
+
+      # Wait for Docker to become available
+      echo "Waiting for Docker to be ready..."
+      for i in {1..30}; do
+        if check_docker; then
+          echo "Docker is ready!"
+          break
+        fi
+        if [ "$i" -eq 30 ]; then
+          echo "ERROR: Docker failed to become available after starting Colima."
+          exit 1
+        fi
+        echo "  Waiting... ($i/30)"
+        sleep 2
+      done
+    fi
+  else
+    echo "ERROR: Docker is not available and Colima is not installed."
+    echo "Please install Docker Desktop or Colima:"
+    echo "  - Docker Desktop: https://www.docker.com/products/docker-desktop"
+    echo "  - Colima: brew install colima"
+    exit 1
+  fi
+else
+  echo "Docker is available!"
+fi
+
 # Clean up if requested
 if $CLEAN; then
   echo "Cleaning up existing containers and volumes..."

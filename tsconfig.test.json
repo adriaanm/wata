@@ -1,0 +1,9 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    // Tests can use Node.js APIs
+    "types": ["jest", "node"]
+  },
+  "include": ["test/**/*.ts", "test/**/*.tsx"],
+  "exclude": ["**/node_modules"]
+}

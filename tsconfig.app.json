@@ -1,9 +1,8 @@
 {
   "extends": "@react-native/typescript-config",
   "compilerOptions": {
-    // This ensures we don't accidentally use Node.js APIs in app code
-    // Tests use a separate tsconfig.test.json with Node types
-    "types": []
+    // Only include types needed for React Native, not Node.js
+    "types": ["react-native"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "App.tsx", "index.js"],
   "exclude": ["**/node_modules", "**/Pods", "test/**/*"]

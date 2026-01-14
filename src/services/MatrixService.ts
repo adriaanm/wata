@@ -331,6 +331,106 @@ class MatrixService {
   isLoggedIn(): boolean {
     return this.client !== null;
   }
+
+  // Test interface methods
+  // These methods are primarily for testing and provide observability
+  // into async operations
+
+  /**
+   * Get the underlying Matrix client (for advanced test scenarios)
+   */
+  getClient(): MatrixClient | null {
+    return this.client;
+  }
+
+  /**
+   * Get current sync state
+   */
+  getSyncState(): string | null {
+    if (!this.client) return null;
+    // The sync state is tracked internally by the client
+    // We'll need to listen to sync events to track it
+    return 'UNKNOWN'; // TODO: Track sync state in a property
+  }
+
+  /**
+   * Wait for sync to complete (useful for tests)
+   */
+  async waitForSync(timeoutMs = 10000): Promise<void> {
+    if (!this.client) throw new Error('Not logged in');
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`Sync timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const onSync = (state: string) => {
+        if (state === 'PREPARED' || state === 'SYNCING') {
+          clearTimeout(timeout);
+          const unsubscribe = this.onSyncStateChange(onSync);
+          unsubscribe();
+          resolve();
+        }
+      };
+
+      this.onSyncStateChange(onSync);
+    });
+  }
+
+  /**
+   * Wait for a specific voice message (useful for tests)
+   */
+  async waitForMessage(
+    roomId: string,
+    predicate: (msg: VoiceMessage) => boolean,
+    timeoutMs = 10000,
+  ): Promise<VoiceMessage> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(
+          new Error(
+            `Message not received in room ${roomId} after ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+
+      // Check existing messages first
+      const existing = this.getVoiceMessages(roomId).find(predicate);
+      if (existing) {
+        clearTimeout(timeout);
+        resolve(existing);
+        return;
+      }
+
+      // Listen for new messages
+      const onMessage = (msgRoomId: string, message: VoiceMessage) => {
+        if (msgRoomId === roomId && predicate(message)) {
+          clearTimeout(timeout);
+          const unsubscribe = this.onNewVoiceMessage(onMessage);
+          unsubscribe();
+          resolve(message);
+        }
+      };
+
+      this.onNewVoiceMessage(onMessage);
+    });
+  }
+
+  /**
+   * Get message count for a room (useful for tests)
+   */
+  getMessageCount(roomId: string): number {
+    return this.getVoiceMessages(roomId).length;
+  }
+
+  /**
+   * Cleanup all callbacks (useful for test isolation)
+   */
+  cleanup(): void {
+    this.syncCallbacks = [];
+    this.roomCallbacks = [];
+    this.messageCallbacks = [];
+  }
 }
 
 // Export singleton instance

@@ -11,14 +11,8 @@ module.exports = {
       'ts-jest',
       {
         useESM: true,
-        tsconfig: {
-          module: 'ESNext',
-          esModuleInterop: true,
-          allowSyntheticDefaultImports: true,
-          target: 'ES2020',
-          moduleResolution: 'node',
-          strict: false,
-        },
+        // Use separate tsconfig for tests that includes Node types
+        tsconfig: '<rootDir>/tsconfig.test.json',
       },
     ],
   },
@@ -26,6 +20,8 @@ module.exports = {
   testTimeout: 30000,
   // Don't transform node_modules (they're already ESM)
   transformIgnorePatterns: [],
+  // Setup file to configure logging and other test globals
+  setupFilesAfterEnv: ['<rootDir>/test/integration/setup.ts'],
   // Mock React Native specific modules
   moduleNameMapper: {
     '^react-native-keychain$': '<rootDir>/test/integration/__mocks__/react-native-keychain.ts',

@@ -8,7 +8,7 @@ Project-specific context for AI assistants working on this codebase.
 - Signal requires running their server infrastructure or reverse-engineering their protocol
 - Matrix is an open standard with free hosted servers (matrix.org)
 - Voice messages sent as standard `m.audio` events are interoperable with Element
-- E2E encryption available via Olm/Megolm (deferred to v2)
+- E2E encryption available via Olm/Megolm (deferred to v2, see `FUTURE.md`)
 
 ### Why React Native (bare) over Expo?
 - Need native Kotlin module for hardware PTT button capture (`KeyEvent.KEYCODE_PTT`)
@@ -75,6 +75,14 @@ Note: Exact key codes may vary by device - test on actual hardware.
   - `buffer` for Node.js Buffer API
   - Both imported in `index.js` before app initialization
 
+**Conduit Push Rules Workaround:**
+- Conduit doesn't implement `/_matrix/client/v3/pushrules/` (returns 404)
+- The SDK treats this as fatal and enters ERROR state during sync
+- We intercept push rules requests in `src/lib/fixed-fetch-api.ts` and return empty rules
+- **Trade-off: Push notifications will NOT work** (rules always empty)
+- This is acceptable since target PTT devices don't support push notifications
+- See `TEST_STRATEGY.md` for full details and removal instructions
+
 ### Audio
 - `react-native-audio-recorder-player` exports a singleton instance, not a class
 - Use AAC encoding (`.m4a`) for broad compatibility and small file sizes
@@ -94,10 +102,15 @@ Create native Kotlin module:
 - Bridge to JS via `NativeEventEmitter`
 - Hook: `usePttButton.ts`
 
-### Push Notifications (Phase 6)
-- Set up Firebase project and add `google-services.json`
-- Install `@react-native-firebase/app` and `@react-native-firebase/messaging`
-- Configure Matrix push rules via `client.setPushRuleEnabled()`
+### Push Notifications (v2)
+**Deferred to v2** - not needed for active PTT use.
+
+Why it's not urgent:
+- Messages arrive via real-time sync while app is open
+- Target PTT devices run the app continuously in foreground
+- Push is only needed for background/sleep scenarios
+
+See `FUTURE.md` for implementation notes when ready.
 
 ## Development Workflow
 
