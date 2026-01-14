@@ -77,13 +77,10 @@ Note: Exact key codes may vary by device - test on actual hardware.
   - `buffer` for Node.js Buffer API
   - Both imported in `index.js` before app initialization
 
-**Conduit Push Rules Workaround:**
-- Conduit doesn't implement `/_matrix/client/v3/pushrules/` (returns 404)
-- The SDK treats this as fatal and enters ERROR state during sync
-- We intercept push rules requests in `src/lib/fixed-fetch-api.ts` and return empty rules
-- **Trade-off: Push notifications will NOT work** (rules always empty)
-- This is acceptable for a prototype, but v1 will need push notifications to wake up device as needed.
-- See `TEST_STRATEGY.md` for full details and removal instructions
+**Conduit URL Normalization:**
+- Conduit requires trailing slash on `/_matrix/client/v3/pushrules/` but the SDK omits it
+- We normalize URLs in `src/shared/lib/fixed-fetch-api.ts` to add the trailing slash
+- Push rules work correctly - Conduit returns proper rules and the SDK syncs successfully
 
 ### Audio
 - `react-native-audio-recorder-player` exports a singleton instance, not a class

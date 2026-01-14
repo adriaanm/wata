@@ -10,15 +10,13 @@ import { logger } from 'matrix-js-sdk/lib/logger.js';
 
 // Silence Matrix SDK logs during tests
 // Available levels: 'trace', 'debug', 'info', 'warn', 'error', 'silent'
-// We use 'silent' because:
-// 1. Our empty pushrules workaround triggers "Missing default push rule" warnings
-// 2. The SDK's RTC features log errors about unknown rooms during tests
-// Both are expected/benign and clutter test output.
+// We use 'silent' because the SDK's RTC features log warnings about unknown rooms during tests.
 logger.setLevel('silent');
 
 // Also reduce our own logging in tests
 // Override console methods to filter out noisy logs
 const originalConsoleLog = console.log;
+const originalConsoleDebug = console.debug;
 const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 const originalConsoleInfo = console.info;
@@ -33,9 +31,11 @@ const noisyPatterns = process.env.VERBOSE_TESTS
       '[TestClient:',
       '[TestOrchestrator]',
       'MatrixRTCSessionManager',
+      'MatrixRTCSession',
       'Missing default',
       'Adding default',
       'ignoring leave call',
+      'sync ', // SDK sync debug logs
     ];
 
 function shouldFilter(args: unknown[]): boolean {
@@ -46,6 +46,10 @@ function shouldFilter(args: unknown[]): boolean {
 
 console.log = (...args: unknown[]) => {
   if (!shouldFilter(args)) originalConsoleLog(...args);
+};
+
+console.debug = (...args: unknown[]) => {
+  if (!shouldFilter(args)) originalConsoleDebug(...args);
 };
 
 console.error = (...args: unknown[]) => {

@@ -21,66 +21,27 @@
 **Example Test Suite:**
 - `test/integration/voice-message-flow.test.ts` - 6 comprehensive test scenarios
 
-### ✅ Resolved: Conduit Sync Issues (Push Rules Workaround)
+### ✅ Resolved: Conduit URL Trailing Slash Issue
 
 **Original Problem:**
-The Matrix SDK repeatedly got ERROR sync states when using Conduit because:
-1. SDK fetches `/_matrix/client/v3/pushrules/` during initial sync
-2. Conduit returns 404 (documented limitation - push rules not implemented)
-3. SDK treats this as fatal error and enters ERROR state
-4. SDK never reaches PREPARED/SYNCING state consistently
+The Matrix SDK got 404 errors when fetching push rules from Conduit because:
+1. SDK sends requests to `/_matrix/client/v3/pushrules` (no trailing slash)
+2. Conduit only accepts `/_matrix/client/v3/pushrules/` (with trailing slash)
+3. SDK treats 404 as fatal error and enters ERROR state
+
+Note: Conduit **does** implement push rules - this was purely a URL routing issue.
 
 **Solution Implemented:**
-We intercept push rules requests in the custom fetch wrapper (`src/lib/fixed-fetch-api.ts`)
-and return an empty but valid push rules response, allowing the SDK to complete sync.
+We normalize the pushrules URL in `src/shared/lib/fixed-fetch-api.ts` to add the trailing slash:
 
 ```typescript
-// In createFixedFetch():
-if (shouldInterceptPushRules(urlString)) {
-  return Promise.resolve(mockPushRulesResponse());
+// In normalizeUrl():
+if (normalized.includes('/_matrix/client/v3/pushrules') && !normalized.includes('pushrules/')) {
+  normalized = normalized.replace('/pushrules', '/pushrules/');
 }
 ```
 
-**Why This Approach:**
-- No infrastructure changes (no nginx proxy, no Docker changes)
-- Works for both app and tests (same code path via `createFixedFetch`)
-- Minimal code change in one file
-- Easy to remove when Conduit adds push rules support
-
-**⚠️ IMPORTANT TRADE-OFF:**
-This workaround means **push notifications will NOT work**:
-- Push rules are always empty (no notification triggers)
-- Client-side notification settings have no effect
-- Users will not receive push notifications for messages
-
-**Why This Is Acceptable:**
-- Target devices (PTT handhelds) don't support push notifications anyway
-- The app is designed for active voice chat, not background notifications
-- Conduit's 404 meant push notifications never worked in the first place
-
-**To Remove This Workaround:**
-See `FUTURE.md` for push notification implementation when ready. In short:
-1. Switch to Synapse (or wait for Conduit to implement push rules)
-2. Remove interception from `fixed-fetch-api.ts`
-
-**Alternative Solutions (Not Chosen):**
-
-**Option 1: Switch to Synapse**
-- Synapse supports all Matrix endpoints including pushrules
-- Trade-off: Heavier resource usage (8GB RAM vs 500MB for Conduit)
-- Rejected: Prefer lightweight Conduit for dev/test environments
-
-**Option 2: Patch Matrix SDK**
-- Fork matrix-js-sdk to make pushrules fetch optional
-- Rejected: High maintenance burden
-
-**Option 3: nginx Proxy**
-- Add nginx proxy in front of Conduit to return empty pushrules on 404
-- Rejected: Adds infrastructure complexity
-
-**Option 4: Manual Sync**
-- Don't use SDK's startClient() - manually implement sync
-- Rejected: Requires deep SDK knowledge, loses features
+**Push rules now work correctly** - Conduit returns proper push rules and the SDK syncs successfully.
 
 ### 📝 Current Test Infrastructure Capabilities
 
@@ -617,4 +578,4 @@ npm run test:integration
 - Matrix SDK logger must be silenced - see `test/integration/setup.ts`
 - SDK emits noisy RTC/push rule warnings that are filtered in setup.ts
 - Use `VERBOSE_TESTS=1 npm run test:integration` to see all logs when debugging
-- Tests use `loginToMatrix()` from `src/lib/matrix-auth.ts` which includes the push rules workaround via `createFixedFetch()`
+- Tests use `loginToMatrix()` from `src/shared/lib/matrix-auth.ts` which includes URL normalization via `createFixedFetch()`

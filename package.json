@@ -35,7 +35,7 @@
     "ink": "^6.6.0",
     "ink-spinner": "^5.0.0",
     "keytar": "^7.9.0",
-    "matrix-js-sdk": "^34.11.0",
+    "matrix-js-sdk": "^40.0.0",
     "react": "19.2.3",
     "react-native": "0.83.1",
     "react-native-audio-recorder-player": "^4.5.0",
@@ -69,9 +69,9 @@
     "ink-testing-library": "^4.0.0",
     "jest": "^30.2.0",
     "prettier": "3.7.4",
-    "tsx": "^4.21.0",
     "react-test-renderer": "19.2.3",
     "ts-jest": "^29.4.6",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
   "engines": {

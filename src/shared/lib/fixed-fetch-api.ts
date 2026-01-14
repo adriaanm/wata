@@ -1,6 +1,6 @@
 /**
  * Custom fetch implementation for matrix-js-sdk that fixes URL construction bugs
- * in React Native environments and works around Conduit server limitations.
+ * in React Native environments.
  *
  * ## URL Normalization
  *
@@ -13,64 +13,7 @@
  * where path already ends with "/" for some endpoints.
  *
  * This wrapper fixes these malformed URLs before passing them to React Native's fetch.
- *
- * ## Conduit Push Rules Workaround
- *
- * IMPORTANT LIMITATION: This fetch wrapper intercepts requests to /_matrix/client/v3/pushrules/
- * and returns an empty push rules response instead of letting Conduit return 404.
- *
- * Why this is needed:
- * - Conduit (lightweight Matrix server) does not implement the push rules endpoint
- * - The Matrix SDK fetches push rules during initial sync and treats 404 as a fatal error
- * - This causes the SDK to enter ERROR state and never reach PREPARED/SYNCING
- * - By returning empty push rules, the SDK can complete sync successfully
- *
- * Trade-offs:
- * - Push notifications will NOT work (rules are always empty)
- * - Client-side notification settings have no effect
- * - This is acceptable for the wata app which targets PTT devices without push support
- *
- * To remove this workaround:
- * - Switch to a Matrix server that supports push rules (Synapse, Dendrite)
- * - Or wait for Conduit to implement the push rules endpoint
- * - Then remove the shouldInterceptPushRules() check and mockPushRulesResponse()
- *
- * See: TEST_STRATEGY.md for more context on this decision
  */
-
-/**
- * Check if a URL is a push rules request that should be intercepted.
- * Conduit returns 404 for this endpoint, causing SDK sync failures.
- */
-function shouldInterceptPushRules(url: string): boolean {
-  return url.includes('/_matrix/client/v3/pushrules');
-}
-
-/**
- * Create a mock Response for push rules requests.
- * Returns empty push rules in the format expected by matrix-js-sdk.
- *
- * Format per Matrix spec: https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3pushrules
- */
-function mockPushRulesResponse(): Response {
-  const emptyPushRules = {
-    global: {
-      override: [],
-      content: [],
-      room: [],
-      sender: [],
-      underride: [],
-    },
-  };
-
-  return new Response(JSON.stringify(emptyPushRules), {
-    status: 200,
-    statusText: 'OK',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-}
 
 /**
  * Normalizes URLs that have malformed query strings from matrix-js-sdk
@@ -92,12 +35,18 @@ function normalizeUrl(url: string): string {
   // Only remove if it's not the root path (/)
   normalized = normalized.replace(/\/(\?|#|$)/, '$1');
 
+  // Conduit requires trailing slash on pushrules endpoint
+  // SDK sends: /_matrix/client/v3/pushrules
+  // Conduit expects: /_matrix/client/v3/pushrules/
+  if (normalized.includes('/_matrix/client/v3/pushrules') && !normalized.includes('pushrules/')) {
+    normalized = normalized.replace('/pushrules', '/pushrules/');
+  }
+
   return normalized;
 }
 
 /**
- * Wrapper around React Native's fetch that fixes buggy URLs from matrix-js-sdk
- * and intercepts problematic endpoints for Conduit compatibility.
+ * Wrapper around React Native's fetch that fixes buggy URLs from matrix-js-sdk.
  */
 export function createFixedFetch() {
   return function fixedFetch(
@@ -117,24 +66,8 @@ export function createFixedFetch() {
       urlString = (input as any)._url || (input as any).url;
     }
 
-    // CONDUIT WORKAROUND: Intercept push rules requests
-    // See file header for full explanation of why this is needed
-    if (shouldInterceptPushRules(urlString)) {
-      console.log(
-        '[FixedFetch] Intercepting pushrules request (Conduit workaround):',
-        urlString,
-      );
-      return Promise.resolve(mockPushRulesResponse());
-    }
-
     // Normalize URL to fix matrix-js-sdk's malformed URL construction
     const normalized = normalizeUrl(urlString);
-    if (normalized !== urlString) {
-      console.log('[FixedFetch] Fixed URL:', {
-        original: urlString,
-        fixed: normalized,
-      });
-    }
 
     // For Request objects, we need to reconstruct with the fixed URL
     if (typeof input !== 'string' && !(input instanceof URL)) {

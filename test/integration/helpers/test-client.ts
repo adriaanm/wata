@@ -46,11 +46,8 @@ export class TestClient {
   /**
    * Wait for initial sync to complete
    *
-   * Note: Push rules requests are intercepted by createFixedFetch() in
-   * src/lib/fixed-fetch-api.ts to work around Conduit's missing pushrules
-   * endpoint. See that file and TEST_STRATEGY.md for details.
-   *
-   * If sync still fails with ERROR states, the workaround may need adjustment.
+   * Note: createFixedFetch() in src/shared/lib/fixed-fetch-api.ts normalizes
+   * URLs for Conduit compatibility (e.g., adding trailing slash to pushrules).
    */
   async waitForSync(timeoutMs = 30000): Promise<void> {
     if (!this.client) throw new Error('Not logged in');
@@ -116,7 +113,6 @@ export class TestClient {
       this.client!.on(matrix.ClientEvent.Sync, onSync);
 
       // Start the client with Conduit-compatible options
-      // Note: Push rules requests are intercepted by createFixedFetch()
       this.client!.startClient({
         initialSyncLimit: 20,
         disablePresence: true, // Conduit doesn't fully support presence
