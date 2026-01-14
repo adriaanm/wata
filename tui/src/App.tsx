@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Box } from 'ink';
 import { MatrixService } from '@shared/services/MatrixService';
-import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
-import { LoadingView } from './views/LoadingView';
+import { KeytarCredentialStorage } from './services/KeytarCredentialStorage.js';
+import { LoadingView } from './views/LoadingView.js';
+import { ContactListView } from './views/ContactListView.js';
 
 // Create TUI-specific MatrixService instance with keytar storage
 const credentialStorage = new KeytarCredentialStorage();
@@ -49,15 +50,32 @@ export function App() {
     initAuth();
   }, []);
 
+  const handleSelectContact = (roomId: string, roomName: string) => {
+    setNavigation({ screen: 'chat', roomId, roomName });
+  };
+
+  const handleBack = () => {
+    setNavigation({ screen: 'contacts' });
+  };
+
   if (navigation.screen === 'loading') {
     return <LoadingView syncState={syncState} />;
   }
 
-  // TODO: Implement ContactListView and ChatView
-  return (
-    <Box flexDirection="column">
-      <Box>Screen: {navigation.screen}</Box>
-      <Box>Sync State: {syncState}</Box>
-    </Box>
-  );
+  if (navigation.screen === 'contacts') {
+    return <ContactListView onSelectContact={handleSelectContact} />;
+  }
+
+  if (navigation.screen === 'chat' && navigation.roomId && navigation.roomName) {
+    // TODO: Implement ChatView
+    return (
+      <Box flexDirection="column">
+        <Box>Chat with: {navigation.roomName}</Box>
+        <Box>Room ID: {navigation.roomId}</Box>
+        <Box>Press Esc to go back</Box>
+      </Box>
+    );
+  }
+
+  return <Box>Unknown screen</Box>;
 }
