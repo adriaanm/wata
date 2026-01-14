@@ -2,8 +2,6 @@ import { Buffer } from 'buffer';
 
 import * as matrix from 'matrix-js-sdk';
 import { MsgType } from 'matrix-js-sdk';
-import RNFS from 'react-native-fs';
-import * as Keychain from 'react-native-keychain';
 
 import { MATRIX_CONFIG } from '../config/matrix';
 import {
@@ -12,10 +10,10 @@ import {
   type StoredCredentials,
 } from '../lib/matrix-auth';
 import { createFixedFetch } from '../lib/fixed-fetch-api';
+import type { RNCredentialStorage } from './RNCredentialStorage';
 
 // Configurable for testing - defaults to config
 let HOMESERVER_URL = MATRIX_CONFIG.homeserverUrl;
-const KEYCHAIN_SERVICE = 'wata-matrix-credentials';
 
 // Allow overriding homeserver for tests
 export function setHomeserverUrl(url: string): void {
@@ -54,6 +52,11 @@ class MatrixService {
   private syncCallbacks: SyncCallback[] = [];
   private roomCallbacks: RoomCallback[] = [];
   private messageCallbacks: MessageCallback[] = [];
+  private credentialStorage: RNCredentialStorage;
+
+  constructor(credentialStorage: RNCredentialStorage) {
+    this.credentialStorage = credentialStorage;
+  }
 
   async login(username: string, password: string): Promise<void> {
     console.log('[MatrixService] login() called with:', { username, homeserver: HOMESERVER_URL });
@@ -71,11 +74,7 @@ class MatrixService {
       homeserverUrl: HOMESERVER_URL,
     };
 
-    await Keychain.setGenericPassword(
-      credentials.userId,
-      JSON.stringify(credentials),
-      { service: KEYCHAIN_SERVICE },
-    );
+    await this.credentialStorage.storeSession(credentials);
 
     console.log('[MatrixService] Starting client sync');
     this.setupEventListeners();
@@ -98,15 +97,11 @@ class MatrixService {
 
   async restoreSession(): Promise<boolean> {
     try {
-      const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE,
-      });
+      const stored = await this.credentialStorage.retrieveSession();
 
-      if (!credentials) {
+      if (!stored) {
         return false;
       }
-
-      const stored: StoredCredentials = JSON.parse(credentials.password);
 
       this.client = matrix.createClient({
         baseUrl: stored.homeserverUrl,
@@ -137,7 +132,7 @@ class MatrixService {
       await this.client.logout();
       this.client = null;
     }
-    await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });
+    await this.credentialStorage.clear();
   }
 
   private setupEventListeners(): void {
@@ -255,18 +250,15 @@ class MatrixService {
 
   async sendVoiceMessage(
     roomId: string,
-    audioUri: string,
+    audioBuffer: Buffer,
     mimeType: string,
     duration: number,
     size: number,
   ): Promise<void> {
     if (!this.client) throw new Error('Not logged in');
 
-    // Read file and upload to Matrix
-    const fileContent = await RNFS.readFile(audioUri, 'base64');
-    const buffer = Buffer.from(fileContent, 'base64');
-
-    const uploadResponse = await this.client.uploadContent(buffer, {
+    // Upload audio buffer to Matrix
+    const uploadResponse = await this.client.uploadContent(audioBuffer, {
       type: mimeType,
       name: 'voice-message.m4a',
     });
@@ -433,5 +425,12 @@ class MatrixService {
   }
 }
 
-// Export singleton instance
-export const matrixService = new MatrixService();
+// Export MatrixService class for instantiation with platform-specific adapters
+export { MatrixService };
+
+// Export singleton instance for React Native app (uses RNCredentialStorage)
+// TUI and other platforms should create their own instances with appropriate adapters
+import { RNCredentialStorage } from './RNCredentialStorage';
+
+const rnCredentialStorage = new RNCredentialStorage();
+export const matrixService = new MatrixService(rnCredentialStorage);

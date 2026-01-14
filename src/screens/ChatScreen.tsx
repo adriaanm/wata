@@ -1,5 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, Animated } from 'react-native';
+import { Buffer } from 'buffer';
+import RNFS from 'react-native-fs';
 
 import { FocusablePressable } from '../components/FocusablePressable';
 import { useAudioRecorder, useAudioPlayer } from '../hooks/useAudioRecorder';
@@ -71,10 +73,14 @@ export function ChatScreen({ roomId, roomName, onBack }: Props) {
     try {
       const result = await stopRecording();
 
+      // Read the audio file as a buffer
+      const fileContent = await RNFS.readFile(result.uri, 'base64');
+      const buffer = Buffer.from(fileContent, 'base64');
+
       // Send the voice message
       await matrixService.sendVoiceMessage(
         roomId,
-        result.uri,
+        buffer,
         result.mimeType,
         result.duration,
         result.size,
