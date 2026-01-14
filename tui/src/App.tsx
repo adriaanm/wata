@@ -21,6 +21,7 @@ interface Navigation {
 export function App() {
   const [navigation, setNavigation] = useState<Navigation>({ screen: 'loading' });
   const [syncState, setSyncState] = useState<string>('STOPPED');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -38,13 +39,18 @@ export function App() {
           if (state === 'PREPARED' || state === 'SYNCING') {
             setNavigation({ screen: 'contacts' });
           }
+          if (state === 'ERROR') {
+            setError('Sync error - retrying...');
+          }
         });
 
         return () => {
           unsubscribe();
         };
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error('Failed to initialize auth:', error);
+        setError(`Failed to connect: ${errorMessage}`);
       }
     };
 
@@ -60,7 +66,7 @@ export function App() {
   };
 
   if (navigation.screen === 'loading') {
-    return <LoadingView syncState={syncState} />;
+    return <LoadingView syncState={syncState} error={error} />;
   }
 
   if (navigation.screen === 'contacts') {
