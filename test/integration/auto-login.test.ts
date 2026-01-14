@@ -79,9 +79,10 @@ describe('Auto-Login Flow', () => {
       orchestrator.createClient(TEST_USERS.alice.username, 'wrongpassword'),
     ).rejects.toThrow();
 
-    // Client should not be created
-    const client = orchestrator.getClient('alice');
-    expect(client).toBeUndefined();
+    // Client should not be created (getClient throws when not found)
+    expect(() =>
+      orchestrator.getClient('alice'),
+    ).toThrow('Client not found');
   }, 20000);
 
   test('should fail login with non-existent user', async () => {
@@ -89,8 +90,10 @@ describe('Auto-Login Flow', () => {
       orchestrator.createClient('nonexistent', 'password'),
     ).rejects.toThrow();
 
-    const client = orchestrator.getClient('nonexistent');
-    expect(client).toBeUndefined();
+    // Client should not be created (getClient throws when not found)
+    expect(() =>
+      orchestrator.getClient('nonexistent'),
+    ).toThrow('Client not found');
   }, 20000);
 
   test('should login multiple users concurrently', async () => {

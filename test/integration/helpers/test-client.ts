@@ -57,13 +57,27 @@ export class TestClient {
 
     console.log(`[TestClient:${this.username}] Waiting for sync...`);
 
+    // Check if already synced
+    const currentState = this.client.getSyncState();
+    if (currentState === 'PREPARED' || currentState === 'SYNCING') {
+      const rooms = this.client.getRooms() || [];
+      console.log(
+        `[TestClient:${this.username}] Already synced (${rooms.length} rooms)`,
+      );
+      return Promise.resolve();
+    }
+
     return new Promise((resolve, reject) => {
       let resolved = false;
 
       const timeout = setTimeout(() => {
         if (!resolved) {
           cleanup();
-          reject(new Error(`Sync timeout after ${timeoutMs}ms - never reached PREPARED state`));
+          reject(
+            new Error(
+              `Sync timeout after ${timeoutMs}ms - never reached PREPARED state`,
+            ),
+          );
         }
       }, timeoutMs);
 
@@ -83,14 +97,18 @@ export class TestClient {
             cleanup();
 
             const rooms = this.client?.getRooms() || [];
-            console.log(`[TestClient:${this.username}] Sync complete (${rooms.length} rooms)`);
+            console.log(
+              `[TestClient:${this.username}] Sync complete (${rooms.length} rooms)`,
+            );
             resolve();
           }
         }
         // With the push rules workaround in fixed-fetch-api.ts, we shouldn't see
         // ERROR states from pushrules 404s anymore. If we do, log it for debugging.
         else if (state === 'ERROR') {
-          console.log(`[TestClient:${this.username}] ERROR state - check if pushrules workaround is active`);
+          console.log(
+            `[TestClient:${this.username}] ERROR state - check if pushrules workaround is active`,
+          );
           // Don't fail immediately - keep waiting for PREPARED
         }
       };
