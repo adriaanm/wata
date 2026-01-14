@@ -377,6 +377,61 @@ export class TestClient {
   }
 
   /**
+   * Check if client is logged in
+   */
+  isLoggedIn(): boolean {
+    return this.client !== null;
+  }
+
+  /**
+   * Get direct message rooms with metadata (similar to MatrixService.getDirectRooms)
+   */
+  getDirectRooms(): Array<{
+    roomId: string;
+    name: string;
+    avatarUrl: string | null;
+    lastMessage: string | null;
+    lastMessageTime: number | null;
+    isDirect: boolean;
+  }> {
+    if (!this.client) return [];
+
+    const rooms = this.client.getRooms();
+    const directRooms = [];
+
+    for (const room of rooms) {
+      const isDirect = this.isDirectRoom(room);
+
+      const lastEvent = room.timeline
+        .filter(e => e.getType() === 'm.room.message')
+        .pop();
+
+      directRooms.push({
+        roomId: room.roomId,
+        name: room.name || 'Unknown',
+        avatarUrl: room.getAvatarUrl(this.homeserverUrl, 48, 48, 'crop'),
+        lastMessage: lastEvent?.getContent()?.body || null,
+        lastMessageTime: lastEvent?.getTs() || null,
+        isDirect,
+      });
+    }
+
+    // Sort by last message time, most recent first
+    return directRooms.sort((a, b) => {
+      if (!a.lastMessageTime) return 1;
+      if (!b.lastMessageTime) return -1;
+      return b.lastMessageTime - a.lastMessageTime;
+    });
+  }
+
+  /**
+   * Get message count for a room
+   */
+  getMessageCount(roomId: string): number {
+    return this.getVoiceMessages(roomId).length;
+  }
+
+  /**
    * Logout and cleanup
    */
   async logout(): Promise<void> {
@@ -427,5 +482,19 @@ export class TestClient {
     if (filter.maxDuration && message.duration > filter.maxDuration)
       return false;
     return true;
+  }
+
+  private isDirectRoom(room: matrix.Room): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dmData = this.client?.getAccountData('m.direct' as any);
+    if (!dmData) return false;
+
+    const directRooms = dmData.getContent() as Record<string, string[]>;
+    for (const userId of Object.keys(directRooms)) {
+      if (directRooms[userId]?.includes(room.roomId)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
