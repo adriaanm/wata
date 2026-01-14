@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useVoiceMessages } from '../hooks/useMatrix.js';
+import { useAudioPlayer } from '../hooks/useAudioPlayer.js';
 import { MessageItem } from '../components/MessageItem.js';
 import { colors } from '../theme.js';
 
@@ -12,9 +13,9 @@ interface Props {
 
 export function ChatView({ roomId, roomName, onBack }: Props) {
   const messages = useVoiceMessages(roomId);
+  const { isPlaying, currentUri, play, stop } = useAudioPlayer();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
-  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
 
   // Keyboard navigation
   useInput((input, key) => {
@@ -31,12 +32,11 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
     }
 
     if (key.return && messages[selectedIndex]) {
-      // TODO: Implement playback in Phase 4
       const message = messages[selectedIndex];
-      if (playingMessageId === message.eventId) {
-        setPlayingMessageId(null);
+      if (isPlaying && currentUri === message.audioUrl) {
+        stop();
       } else {
-        setPlayingMessageId(message.eventId);
+        play(message.audioUrl);
       }
     }
 
@@ -84,7 +84,7 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
           key={message.eventId}
           message={message}
           isFocused={index === selectedIndex}
-          isPlaying={playingMessageId === message.eventId}
+          isPlaying={isPlaying && currentUri === message.audioUrl}
         />
       ))}
 
