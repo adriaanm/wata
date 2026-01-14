@@ -242,25 +242,31 @@ describe('Contact List', () => {
 
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Send 3 messages
+    // Send 3 messages and collect event IDs
+    const eventIds: string[] = [];
     for (let i = 0; i < 3; i++) {
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);
-      await orchestrator.sendVoiceMessage(
+      const eventId = await orchestrator.sendVoiceMessage(
         'alice',
         roomId,
         audio,
         'audio/mp4',
         AudioDurations.SHORT,
       );
+      eventIds.push(eventId);
     }
 
-    // Wait for messages to sync
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Verify last message is received to ensure sync is complete
+    await orchestrator.verifyMessageReceived(
+      'bob',
+      roomId,
+      { eventId: eventIds[eventIds.length - 1] },
+      15000,
+    );
 
-    // Check bob sees all 3 messages
-    const bobClient = orchestrator.getClient('bob');
-    const messageCount = bobClient?.getMessageCount(roomId);
+    // Check bob sees all 3 messages (use pagination to ensure all are fetched)
+    const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 20);
 
-    expect(messageCount).toBeGreaterThanOrEqual(3);
-  }, 40000);
+    expect(messages.length).toBeGreaterThanOrEqual(3);
+  }, 60000);
 });

@@ -179,6 +179,30 @@ export class TestOrchestrator {
   }
 
   /**
+   * Paginate timeline to fetch more events from server
+   */
+  async paginateTimeline(
+    username: string,
+    roomId: string,
+    limit = 50,
+  ): Promise<void> {
+    const client = this.getClient(username);
+    await client.paginateTimeline(roomId, limit);
+  }
+
+  /**
+   * Get all voice messages with pagination to ensure all are fetched
+   */
+  async getAllVoiceMessages(
+    username: string,
+    roomId: string,
+    limit = 100,
+  ): Promise<VoiceMessage[]> {
+    const client = this.getClient(username);
+    return await client.getAllVoiceMessages(roomId, limit);
+  }
+
+  /**
    * Complete scenario: create room, send message, verify receipt
    */
   async sendAndVerifyVoiceMessage(

@@ -376,6 +376,53 @@ export class TestClient {
   }
 
   /**
+   * Paginate room timeline to fetch more events from server
+   * Useful for stress tests where many messages were sent rapidly
+   */
+  async paginateTimeline(roomId: string, limit = 50): Promise<void> {
+    if (!this.client) throw new Error('Not logged in');
+
+    const room = this.client.getRoom(roomId);
+    if (!room) {
+      console.log(
+        `[TestClient:${this.username}] Room ${roomId} not found for pagination`,
+      );
+      return;
+    }
+
+    console.log(
+      `[TestClient:${this.username}] Paginating timeline for room ${roomId} (limit: ${limit})...`,
+    );
+
+    try {
+      await this.client.scrollback(room, limit);
+      console.log(
+        `[TestClient:${this.username}] Pagination complete, timeline now has ${room.timeline.length} events`,
+      );
+    } catch (error) {
+      console.log(
+        `[TestClient:${this.username}] Pagination failed:`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Get all voice messages with pagination to ensure we fetch all from server
+   */
+  async getAllVoiceMessages(roomId: string, limit = 100): Promise<VoiceMessage[]> {
+    if (!this.client) return [];
+
+    const room = this.client.getRoom(roomId);
+    if (!room) return [];
+
+    // Paginate to ensure we have all events
+    await this.paginateTimeline(roomId, limit);
+
+    return this.getVoiceMessages(roomId);
+  }
+
+  /**
    * Get rooms for this client
    */
   getRooms(): matrix.Room[] {
