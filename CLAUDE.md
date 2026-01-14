@@ -1,6 +1,7 @@
 # Claude Context
 
-Project-specific context for AI assistants working on this codebase.
+## Project Status
+We are currently developing a prototype. A simple android app (primarily) and a TUI for Mac. v1 will target hobbyist usage (may require custom builds, but no compromises on security and core walkie-talkie functionality). v2 should be ready for deployment to app stores.
 
 ## Project Decisions
 
@@ -8,7 +9,7 @@ Project-specific context for AI assistants working on this codebase.
 - Signal requires running their server infrastructure or reverse-engineering their protocol
 - Matrix is an open standard with free hosted servers (matrix.org)
 - Voice messages sent as standard `m.audio` events are interoperable with Element
-- E2E encryption available via Olm/Megolm (deferred to v2, see `FUTURE.md`)
+- E2E encryption available via Olm/Megolm (deferred to v1, see `FUTURE.md`)
 
 ### Why React Native (bare) over Expo?
 - Need native Kotlin module for hardware PTT button capture (`KeyEvent.KEYCODE_PTT`)
@@ -52,6 +53,7 @@ Note: Exact key codes may vary by device - test on actual hardware.
 - D-pad focusable elements (no touch gestures)
 - Simple, linear navigation (no complex menus)
 - Visual feedback for PTT recording state
+- It should be kid-friendly, it should feel like a walkie-talkie (and nothing more).
 
 ## Technical Notes
 
@@ -80,7 +82,7 @@ Note: Exact key codes may vary by device - test on actual hardware.
 - The SDK treats this as fatal and enters ERROR state during sync
 - We intercept push rules requests in `src/lib/fixed-fetch-api.ts` and return empty rules
 - **Trade-off: Push notifications will NOT work** (rules always empty)
-- This is acceptable since target PTT devices don't support push notifications
+- This is acceptable for a prototype, but v1 will need push notifications to wake up device as needed.
 - See `TEST_STRATEGY.md` for full details and removal instructions
 
 ### Audio
@@ -102,8 +104,8 @@ Create native Kotlin module:
 - Bridge to JS via `NativeEventEmitter`
 - Hook: `usePttButton.ts`
 
-### Push Notifications (v2)
-**Deferred to v2** - not needed for active PTT use.
+### Push Notifications (v1)
+**Deferred to v1** - not needed for active PTT use.
 
 Why it's not urgent:
 - Messages arrive via real-time sync while app is open
