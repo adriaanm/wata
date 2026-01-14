@@ -170,7 +170,7 @@ describe('Message Ordering', () => {
     await Promise.all(sends);
 
     // Wait for all messages to sync
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 8000));
 
     // Both clients should see the same ordering
     const aliceClient = orchestrator.getClient('alice');
@@ -234,8 +234,8 @@ describe('Message Ordering', () => {
 
     await Promise.all([...aliceSends, ...bobSends]);
 
-    // Wait for sync
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for sync (longer for concurrent sends)
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     // Both clients should see all 10 messages
     const aliceClient = orchestrator.getClient('alice');

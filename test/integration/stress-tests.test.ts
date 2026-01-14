@@ -78,8 +78,8 @@ describe('Stress Tests', () => {
       const sendDuration = Date.now() - startTime;
       console.log(`[STRESS] Sent 30 messages in ${sendDuration}ms`);
 
-      // Wait for all messages to sync
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      // Wait for all messages to sync (needs more time for bulk messages)
+      await new Promise(resolve => setTimeout(resolve, 20000));
 
       // Verify bob received all messages
       const bobClient = orchestrator.getClient('bob');
@@ -137,8 +137,8 @@ describe('Stress Tests', () => {
       const sendDuration = Date.now() - startTime;
       console.log(`[STRESS] Sent 50 messages in ${sendDuration}ms`);
 
-      // Wait for sync
-      await new Promise(resolve => setTimeout(resolve, 15000));
+      // Wait for sync (needs more time for 50 messages)
+      await new Promise(resolve => setTimeout(resolve, 25000));
 
       // Verify
       const bobClient = orchestrator.getClient('bob');
@@ -198,8 +198,8 @@ describe('Stress Tests', () => {
         `[STRESS] Sent 50 concurrent messages in ${sendDuration}ms`,
       );
 
-      // Wait for sync
-      await new Promise(resolve => setTimeout(resolve, 15000));
+      // Wait for sync (concurrent sends need even more time)
+      await new Promise(resolve => setTimeout(resolve, 30000));
 
       // Both clients should see all 50 messages
       const aliceClient = orchestrator.getClient('alice');

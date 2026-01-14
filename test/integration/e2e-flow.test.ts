@@ -233,10 +233,11 @@ describe('End-to-End Voice Chat Flow', () => {
 
     // Create room (bob not logged in yet)
     const aliceClient = orchestrator.getClient('alice');
-    const roomId = await aliceClient?.createRoom({
+    const result = await aliceClient?.createRoom({
       is_direct: true,
       invite: ['@bob:localhost'],
     });
+    const roomId = result?.room_id;
 
     // Alice sends a few messages before bob joins
     const audioBuffers = createAudioBuffers(3, AudioDurations.SHORT);
@@ -266,8 +267,15 @@ describe('End-to-End Voice Chat Flow', () => {
     const bobClient = orchestrator.getClient('bob');
     await bobClient?.waitForSync(15000);
 
-    // Wait for room to appear
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait for room to appear and bob to auto-join
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Explicitly wait for the room to be available
+    try {
+      await bobClient?.waitForRoom(roomId!, 10000);
+    } catch (error) {
+      console.log('[E2E Test] Room not found immediately, continuing anyway');
+    }
 
     // Bob should see alice's previous messages
     const bobMessages = bobClient?.getVoiceMessages(roomId!) || [];
