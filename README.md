@@ -1,6 +1,11 @@
 # Wata
 
-A minimalist push-to-talk voice messaging app for Android, built on the Matrix protocol.
+A minimalist push-to-talk voice messaging app for Android (and macOS Terminal), built on the Matrix protocol.
+
+## Frontends
+
+- **Android** (`src/`) - React Native app for PTT handhelds
+- **TUI** (`tui/`) - Terminal UI for macOS (see `tui/README.md`)
 
 ## Goals
 
@@ -14,27 +19,34 @@ Wata is a walkie-talkie style app designed for:
 ## Architecture
 
 ```
-┌──────────────────────────────────────────┐
-│              Wata App                    │
-├──────────────────────────────────────────┤
-│  UI Layer (React Native + TypeScript)   │
-│  - ContactListScreen                    │
-│  - ChatScreen (voice messages only)     │
-│  - PTTButton component                  │
-├──────────────────────────────────────────┤
-│  Services                               │
-│  - MatrixService (auth, sync, messages) │
-│  - AudioService (record/playback)       │
-├──────────────────────────────────────────┤
-│  Native Module (Kotlin) [planned]       │
-│  - Hardware PTT button capture          │
-└──────────────────────────────────────────┘
-           │
-           ▼
-┌──────────────────────────────────────────┐
-│       matrix.org homeserver             │
-└──────────────────────────────────────────┘
+┌────────────────────────┐  ┌────────────────────────┐
+│   Android Frontend     │  │    TUI Frontend        │
+│   (React Native)       │  │    (Ink/Terminal)      │
+│                        │  │                        │
+│ - ContactListScreen    │  │ - ContactListView      │
+│ - ChatScreen           │  │ - ChatView             │
+│ - RN Audio/Keychain    │  │ - macOS Audio/Keychain │
+└───────────┬────────────┘  └───────────┬────────────┘
+            │                           │
+            └───────────┬───────────────┘
+                        ▼
+            ┌───────────────────────┐
+            │   SHARED BACKEND      │
+            │   (src/)              │
+            │                       │
+            │ - MatrixService       │
+            │ - Matrix hooks        │
+            │ - Types/Interfaces    │
+            └───────────┬───────────┘
+                        │
+                        ▼
+            ┌───────────────────────┐
+            │  Matrix Homeserver    │
+            │  (matrix.org)         │
+            └───────────────────────┘
 ```
+
+**Both frontends share the same Matrix backend code** (`src/services/MatrixService.ts`, hooks, types), ensuring identical protocol behavior. Only UI and platform-specific services (audio, credentials) differ.
 
 ### Key Files
 
