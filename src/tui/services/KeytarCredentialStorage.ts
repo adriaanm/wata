@@ -1,5 +1,5 @@
-import * as keytar from 'keytar';
-import type { StoredCredentials } from '@shared/services/CredentialStorage';
+import keytar from 'keytar';
+import type { StoredCredentials } from '../../shared/services/CredentialStorage.js';
 
 const SERVICE_NAME = 'wata-matrix-credentials';
 

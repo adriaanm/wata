@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
-import {
-  matrixService,
-  MatrixRoom,
-  VoiceMessage,
-} from '../services/MatrixService';
+import type { MatrixRoom, VoiceMessage } from '@shared/services/MatrixService';
+import { matrixService } from '@shared/services/MatrixService.rn';
 
 export function useMatrixSync() {
   const [syncState, setSyncState] = useState<string>('STOPPED');

@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 
 import { FocusablePressable } from '../components/FocusablePressable';
-import { useAuth } from '../hooks/useMatrix';
+import { useAuth } from '@shared/hooks/useMatrix';
 import { colors, typography, spacing, components } from '../theme';
 
 interface Props {

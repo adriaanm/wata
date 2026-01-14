@@ -8,8 +8,8 @@ import {
 } from 'react-native';
 
 import { FocusablePressable } from '../components/FocusablePressable';
-import { useRooms, useMatrixSync } from '../hooks/useMatrix';
-import { MatrixRoom } from '../services/MatrixService';
+import { useRooms, useMatrixSync } from '@shared/hooks/useMatrix';
+import type { MatrixRoom } from '@shared/services/MatrixService';
 import { colors, typography, spacing, components } from '../theme';
 
 interface Props {

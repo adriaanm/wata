@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Box } from 'ink';
-import { MatrixService } from '@shared/services/MatrixService';
-import { KeytarCredentialStorage } from './services/KeytarCredentialStorage.js';
-import { LoadingView } from './views/LoadingView.js';
-import { ContactListView } from './views/ContactListView.js';
-import { ChatView } from './views/ChatView.js';
+import { MatrixService } from '../shared/services/MatrixService.js';
+import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
+import { LoadingView } from './views/LoadingView';
+import { ContactListView } from './views/ContactListView';
+import { ChatView } from './views/ChatView';
 
 // Create TUI-specific MatrixService instance with keytar storage
 const credentialStorage = new KeytarCredentialStorage();

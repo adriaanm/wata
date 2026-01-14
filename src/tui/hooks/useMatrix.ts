@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { MatrixRoom, VoiceMessage } from '@shared/services/MatrixService';
+import type { MatrixRoom, VoiceMessage } from '../../shared/services/MatrixService.js';
 import { matrixService } from '../App.js';
 
 /**

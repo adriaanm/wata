@@ -4,11 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { StatusBar, ActivityIndicator, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { KeyDebugOverlay } from './src/components/KeyDebugOverlay';
-import { ChatScreen } from './src/screens/ChatScreen';
-import { ContactListScreen } from './src/screens/ContactListScreen';
-import { matrixService } from './src/services/MatrixService';
-import { colors } from './src/theme';
+import { KeyDebugOverlay } from './components/KeyDebugOverlay';
+import { ChatScreen } from './screens/ChatScreen';
+import { ContactListScreen } from './screens/ContactListScreen';
+import { matrixService } from '@shared/services/MatrixService.rn';
+import { colors } from './theme';
 
 // Set to false to hide key debug overlay
 const DEBUG_KEYS = true;

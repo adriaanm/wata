@@ -3,8 +3,14 @@
   "compilerOptions": {
     // This ensures we don't accidentally use Node.js APIs in app code
     // Tests use a separate tsconfig.test.json with Node types
-    "types": []
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"],
+      "@rn/*": ["src/rn/*"],
+      "@tui/*": ["src/tui/*"]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "App.tsx", "index.js"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "index.js"],
   "exclude": ["**/node_modules", "**/Pods", "test/**/*"]
 }

@@ -3,14 +3,14 @@ import { Buffer } from 'buffer';
 import * as matrix from 'matrix-js-sdk';
 import { MsgType } from 'matrix-js-sdk';
 
-import { MATRIX_CONFIG } from '../config/matrix';
+import { MATRIX_CONFIG } from '@shared/config/matrix';
 import {
   loginToMatrix,
   createStoredCredentials,
   type StoredCredentials,
-} from '../lib/matrix-auth';
-import { createFixedFetch } from '../lib/fixed-fetch-api';
-import type { RNCredentialStorage } from './RNCredentialStorage';
+} from '@shared/lib/matrix-auth';
+import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
+import type { CredentialStorage } from '@shared/services/CredentialStorage';
 
 // Configurable for testing - defaults to config
 let HOMESERVER_URL = MATRIX_CONFIG.homeserverUrl;
@@ -52,9 +52,9 @@ class MatrixService {
   private syncCallbacks: SyncCallback[] = [];
   private roomCallbacks: RoomCallback[] = [];
   private messageCallbacks: MessageCallback[] = [];
-  private credentialStorage: RNCredentialStorage;
+  private credentialStorage: CredentialStorage;
 
-  constructor(credentialStorage: RNCredentialStorage) {
+  constructor(credentialStorage: CredentialStorage) {
     this.credentialStorage = credentialStorage;
   }
 
@@ -427,10 +427,3 @@ class MatrixService {
 
 // Export MatrixService class for instantiation with platform-specific adapters
 export { MatrixService };
-
-// Export singleton instance for React Native app (uses RNCredentialStorage)
-// TUI and other platforms should create their own instances with appropriate adapters
-import { RNCredentialStorage } from './RNCredentialStorage';
-
-const rnCredentialStorage = new RNCredentialStorage();
-export const matrixService = new MatrixService(rnCredentialStorage);
