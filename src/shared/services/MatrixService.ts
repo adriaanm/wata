@@ -11,6 +11,32 @@ import {
 } from '@shared/lib/matrix-auth';
 import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';
+import { LogService } from '@tui/services/LogService';
+
+// Helper to log to LogService (works in both TUI and RN environments)
+const log = (message: string): void => {
+  try {
+    LogService.getInstance()?.addEntry('log', message);
+  } catch {
+    // LogService not available (e.g., in React Native), silently ignore
+  }
+};
+
+const logWarn = (message: string): void => {
+  try {
+    LogService.getInstance()?.addEntry('warn', message);
+  } catch {
+    // LogService not available (e.g., in React Native), silently ignore
+  }
+};
+
+const logError = (message: string): void => {
+  try {
+    LogService.getInstance()?.addEntry('error', message);
+  } catch {
+    // LogService not available (e.g., in React Native), silently ignore
+  }
+};
 
 // Configurable for testing - defaults to config
 let HOMESERVER_URL = MATRIX_CONFIG.homeserverUrl;
@@ -47,24 +73,40 @@ type SyncCallback = (state: string) => void;
 type RoomCallback = (rooms: MatrixRoom[]) => void;
 type MessageCallback = (roomId: string, message: VoiceMessage) => void;
 
+// Logger interface matching matrix-js-sdk's Logger type
+interface MatrixLogger {
+  trace(...msg: unknown[]): void;
+  debug(...msg: unknown[]): void;
+  info(...msg: unknown[]): void;
+  warn(...msg: unknown[]): void;
+  error(...msg: unknown[]): void;
+  getChild(namespace: string): MatrixLogger;
+}
+
 class MatrixService {
   private client: matrix.MatrixClient | null = null;
   private syncCallbacks: SyncCallback[] = [];
   private roomCallbacks: RoomCallback[] = [];
   private messageCallbacks: MessageCallback[] = [];
   private credentialStorage: CredentialStorage;
+  private logger?: MatrixLogger;
 
-  constructor(credentialStorage: CredentialStorage) {
+  constructor(credentialStorage: CredentialStorage, logger?: MatrixLogger) {
     this.credentialStorage = credentialStorage;
+    this.logger = logger;
   }
 
   async login(username: string, password: string): Promise<void> {
-    console.log('[MatrixService] login() called with:', { username, homeserver: HOMESERVER_URL });
+    log('[MatrixService] login() called with:');
+    log(`  username: ${username}, homeserver: ${HOMESERVER_URL}`);
 
     // Use shared login helper to ensure consistency with tests
-    this.client = await loginToMatrix(HOMESERVER_URL, username, password, 'Wata');
+    this.client = await loginToMatrix(HOMESERVER_URL, username, password, {
+      deviceName: 'Wata',
+      logger: this.logger,
+    });
 
-    console.log('[MatrixService] Login successful, storing credentials');
+    log('[MatrixService] Login successful, storing credentials');
 
     // Store credentials securely for session restoration
     const credentials: StoredCredentials = {
@@ -74,9 +116,9 @@ class MatrixService {
       homeserverUrl: HOMESERVER_URL,
     };
 
-    await this.credentialStorage.storeSession(credentials);
+    await this.credentialStorage.storeSession(username, credentials);
 
-    console.log('[MatrixService] Starting client sync');
+    log('[MatrixService] Starting client sync');
     this.setupEventListeners();
 
     // Start client with options that don't require unsupported Conduit endpoints
@@ -90,26 +132,38 @@ class MatrixService {
   /**
    * Auto-login using credentials from config.
    * This is used for devices without keyboard input.
+   * @param username - Optional username to login as (defaults to config username)
    */
-  async autoLogin(): Promise<void> {
-    await this.login(MATRIX_CONFIG.username, MATRIX_CONFIG.password);
+  async autoLogin(username?: string): Promise<void> {
+    const user = username || MATRIX_CONFIG.username;
+    const password = MATRIX_CONFIG.password; // Same password for all test users
+    await this.login(user, password);
   }
 
-  async restoreSession(): Promise<boolean> {
+  async restoreSession(username?: string): Promise<boolean> {
     try {
-      const stored = await this.credentialStorage.retrieveSession();
+      const user = username || MATRIX_CONFIG.username;
+      const stored = await this.credentialStorage.retrieveSession(user);
 
       if (!stored) {
         return false;
       }
 
-      this.client = matrix.createClient({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const clientOpts: any = {
         baseUrl: stored.homeserverUrl,
         accessToken: stored.accessToken,
         userId: stored.userId,
         deviceId: stored.deviceId,
         fetchFn: createFixedFetch(),
-      });
+      };
+
+      // Add custom logger if provided (for TUI to suppress console output)
+      if (this.logger) {
+        clientOpts.logger = this.logger;
+      }
+
+      this.client = matrix.createClient(clientOpts);
 
       this.setupEventListeners();
 
@@ -121,7 +175,7 @@ class MatrixService {
 
       return true;
     } catch (error) {
-      console.error('[MatrixService] Failed to restore session:', error);
+      logError(`[MatrixService] Failed to restore session: ${error}`);
       return false;
     }
   }
@@ -135,6 +189,18 @@ class MatrixService {
     await this.credentialStorage.clear();
   }
 
+  /**
+   * Get the currently logged-in username (without homeserver domain)
+   * @returns Username (e.g., 'alice') or null if not logged in
+   */
+  getCurrentUsername(): string | null {
+    if (!this.client) return null;
+    const userId = this.client.getUserId();
+    if (!userId) return null;
+    // Extract username from Matrix ID (@username:homeserver)
+    return userId.split(':')[0].substring(1);
+  }
+
   private setupEventListeners(): void {
     if (!this.client) return;
 
@@ -142,7 +208,8 @@ class MatrixService {
     this.client.on(matrix.ClientEvent.Sync, (state, _prevState, data) => {
       // Log sync state changes
       if (state === 'ERROR') {
-        console.warn('[MatrixService] Sync error (non-fatal):', data);
+        const dataStr = JSON.stringify(data, null, 2);
+        logWarn(`[MatrixService] Sync error (non-fatal): ${dataStr}`);
       }
 
       this.syncCallbacks.forEach(cb => cb(state));
@@ -171,11 +238,11 @@ class MatrixService {
 
     // Catch and log HTTP errors without crashing
     this.client.on(matrix.HttpApiEvent.SessionLoggedOut, () => {
-      console.warn('[MatrixService] Session logged out');
+      logWarn('[MatrixService] Session logged out');
     });
 
     this.client.on(matrix.HttpApiEvent.NoConsent, () => {
-      console.warn('[MatrixService] No consent');
+      logWarn('[MatrixService] No consent');
     });
   }
 
@@ -274,6 +341,37 @@ class MatrixService {
         size: size,
       },
     });
+  }
+
+  /**
+   * Redact (delete) a single message
+   * @param roomId - Room ID containing the message
+   * @param eventId - Event ID of the message to redact
+   * @param reason - Optional reason for redaction
+   */
+  async redactMessage(roomId: string, eventId: string, reason?: string): Promise<void> {
+    if (!this.client) throw new Error('Not logged in');
+    await this.client.redactEvent(roomId, eventId, undefined, reason ? { reason } : undefined);
+  }
+
+  /**
+   * Redact (delete) multiple messages sequentially
+   * @param roomId - Room ID containing the messages
+   * @param eventIds - Array of event IDs to redact
+   * @param reason - Optional reason for redaction
+   */
+  async redactMessages(roomId: string, eventIds: string[], reason?: string): Promise<void> {
+    if (!this.client) throw new Error('Not logged in');
+
+    // Sequential redaction to avoid rate limits
+    for (const eventId of eventIds) {
+      try {
+        await this.client.redactEvent(roomId, eventId, undefined, reason ? { reason } : undefined);
+      } catch (error) {
+        logError(`Failed to redact message ${eventId}: ${error}`);
+        // Continue with remaining messages even if one fails
+      }
+    }
   }
 
   getVoiceMessages(roomId: string): VoiceMessage[] {

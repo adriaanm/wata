@@ -8,6 +8,24 @@
 import * as matrix from 'matrix-js-sdk';
 
 import { createFixedFetch } from './fixed-fetch-api';
+import { LogService } from '@tui/services/LogService';
+
+// Helper to log to LogService (works in both TUI and RN environments)
+const log = (message: string): void => {
+  try {
+    LogService.getInstance()?.addEntry('log', message);
+  } catch {
+    // LogService not available (e.g., in React Native), silently ignore
+  }
+};
+
+const logError = (message: string): void => {
+  try {
+    LogService.getInstance()?.addEntry('error', message);
+  } catch {
+    // LogService not available (e.g., in React Native), silently ignore
+  }
+};
 
 /**
  * Login request format required by Conduit
@@ -35,26 +53,43 @@ export interface MatrixLoginResponse {
   };
 }
 
+// Logger interface matching matrix-js-sdk's Logger type
+interface MatrixLogger {
+  trace(...msg: unknown[]): void;
+  debug(...msg: unknown[]): void;
+  info(...msg: unknown[]): void;
+  warn(...msg: unknown[]): void;
+  error(...msg: unknown[]): void;
+  getChild(namespace: string): MatrixLogger;
+}
+
+export interface LoginOptions {
+  deviceName?: string;
+  logger?: MatrixLogger;
+}
+
 /**
  * Login to a Matrix homeserver using username and password
  *
  * @param baseUrl - The homeserver URL (e.g., 'http://localhost:8008')
  * @param username - The username (not the full Matrix ID)
  * @param password - The user's password
- * @param deviceName - Optional display name for this device/session
+ * @param options - Optional login options (deviceName, logger)
  * @returns MatrixClient configured with the authenticated session
  */
 export async function loginToMatrix(
   baseUrl: string,
   username: string,
   password: string,
-  deviceName?: string,
+  options?: LoginOptions | string, // string for backwards compatibility (deviceName)
 ): Promise<matrix.MatrixClient> {
-  console.log('[matrix-auth] loginToMatrix called:', {
-    baseUrl,
-    username,
-    deviceName,
-  });
+  // Handle backwards compatibility - old signature passed deviceName as string
+  const opts: LoginOptions =
+    typeof options === 'string' ? { deviceName: options } : options || {};
+  log('[matrix-auth] loginToMatrix called:');
+  log(`  baseUrl: ${baseUrl}`);
+  log(`  username: ${username}`);
+  log(`  deviceName: ${opts.deviceName || '(none)'}`);
 
   // Construct login request in Conduit-compatible format
   const loginRequest: MatrixLoginRequest = {
@@ -65,21 +100,20 @@ export async function loginToMatrix(
     password,
   };
 
-  if (deviceName) {
-    loginRequest.initial_device_display_name = deviceName;
+  if (opts.deviceName) {
+    loginRequest.initial_device_display_name = opts.deviceName;
   }
 
-  console.log('[matrix-auth] Calling SDK login with request:', {
-    type: 'm.login.password',
-    identifier: loginRequest.identifier,
-    hasPassword: !!password,
-    deviceName: loginRequest.initial_device_display_name,
-  });
+  log('[matrix-auth] Calling SDK login with request:');
+  log(`  type: m.login.password`);
+  log(`  identifier: ${JSON.stringify(loginRequest.identifier)}`);
+  log(`  hasPassword: ${!!password}`);
+  log(`  deviceName: ${loginRequest.initial_device_display_name || '(none)'}`);
 
   try {
     // Use direct fetch to avoid SDK's buggy URL construction in React Native
     const loginUrl = `${baseUrl}/_matrix/client/v3/login`;
-    console.log('[matrix-auth] POST to:', loginUrl);
+    log(`[matrix-auth] POST to: ${loginUrl}`);
 
     const response = await fetch(loginUrl, {
       method: 'POST',
@@ -101,14 +135,14 @@ export async function loginToMatrix(
 
     const loginResponse = (await response.json()) as MatrixLoginResponse;
 
-    console.log('[matrix-auth] Login successful:', {
-      userId: loginResponse.user_id,
-      deviceId: loginResponse.device_id,
-    });
+    log('[matrix-auth] Login successful:');
+    log(`  userId: ${loginResponse.user_id}`);
+    log(`  deviceId: ${loginResponse.device_id}`);
 
     // Create authenticated client with custom fetch that fixes URLs
     // and configuration suitable for Conduit server
-    return matrix.createClient({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const clientOpts: any = {
       baseUrl,
       accessToken: loginResponse.access_token,
       userId: loginResponse.user_id,
@@ -117,9 +151,16 @@ export async function loginToMatrix(
       // Reduce load on Conduit by disabling optional features
       useAuthorizationHeader: true,
       timelineSupport: true,
-    });
+    };
+
+    // Add custom logger if provided (for TUI to suppress console output)
+    if (opts.logger) {
+      clientOpts.logger = opts.logger;
+    }
+
+    return matrix.createClient(clientOpts);
   } catch (error) {
-    console.error('[matrix-auth] Login failed:', error);
+    logError(`[matrix-auth] Login failed: ${error}`);
     throw error;
   }
 }

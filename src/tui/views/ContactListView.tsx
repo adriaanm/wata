@@ -2,13 +2,16 @@ import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import { useRooms, useMatrixSync } from '../hooks/useMatrix.js';
 import { FocusableItem } from '../components/FocusableItem.js';
+import { PROFILES, type ProfileKey } from '../types/profile';
 import { colors } from '../theme.js';
 
 interface Props {
   onSelectContact: (roomId: string, roomName: string) => void;
+  currentProfile: ProfileKey;
 }
 
-export function ContactListView({ onSelectContact }: Props) {
+export function ContactListView({ onSelectContact, currentProfile }: Props) {
+  const profile = PROFILES[currentProfile];
   const rooms = useRooms();
   const { isReady } = useMatrixSync();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -96,10 +99,10 @@ export function ContactListView({ onSelectContact }: Props) {
     <Box flexDirection="column" padding={1}>
       {/* Header */}
       <Box marginBottom={1} justifyContent="space-between">
-        <Text bold color={colors.accent}>
-          WATA - Contacts
+        <Text bold color={profile.color}>
+          WATA - Contacts ({profile.displayName})
         </Text>
-        <Text dimColor>[q] quit</Text>
+        <Text dimColor>[p] switch [l] logs [q] quit</Text>
       </Box>
 
       {/* Loading state */}
@@ -148,7 +151,7 @@ export function ContactListView({ onSelectContact }: Props) {
       {/* Help text */}
       <Box marginTop={1}>
         <Text dimColor>
-          ↑↓/jk Navigate  Enter Select  q Quit
+          ↑↓/jk Navigate  Enter Select  l Logs  q Quit
         </Text>
       </Box>
     </Box>

@@ -18,6 +18,26 @@ export interface CredentialStorage {
    * Clear stored credentials
    */
   clear(): Promise<void>;
+
+  /**
+   * Store Matrix session credentials for a specific user
+   * @param username - Username to store session for
+   * @param credentials - Session credentials
+   */
+  storeSession(username: string, credentials: StoredCredentials): Promise<void>;
+
+  /**
+   * Retrieve Matrix session credentials for a specific user
+   * @param username - Username to retrieve session for
+   * @returns Session credentials or null if not found
+   */
+  retrieveSession(username: string): Promise<StoredCredentials | null>;
+
+  /**
+   * Clear credentials for a specific user
+   * @param username - Username to clear credentials for
+   */
+  clearUser(username: string): Promise<void>;
 }
 
 /**

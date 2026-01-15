@@ -7,12 +7,20 @@ interface Props {
   message: VoiceMessage;
   isFocused: boolean;
   isPlaying: boolean;
+  isSelected?: boolean;
+  selectionMode?: boolean;
 }
 
 /**
  * Display a voice message in the chat view
  */
-export function MessageItem({ message, isFocused, isPlaying }: Props) {
+export function MessageItem({
+  message,
+  isFocused,
+  isPlaying,
+  isSelected = false,
+  selectionMode = false,
+}: Props) {
   const formatDuration = (ms: number): string => {
     const totalSeconds = Math.floor(ms / 1000);
     const minutes = Math.floor(totalSeconds / 60);
@@ -30,17 +38,27 @@ export function MessageItem({ message, isFocused, isPlaying }: Props) {
   };
 
   const icon = isPlaying ? '[▌▌]' : '[▶]';
-  const borderColor = isFocused ? colors.focus : colors.backgroundLight;
+
+  // Determine border styling based on selection state
+  const borderColor = isSelected ? 'yellow' : isFocused ? colors.focus : colors.backgroundLight;
+  const borderStyle = isSelected ? 'double' : 'single';
 
   return (
     <Box
       flexDirection="row"
-      borderStyle="single"
+      borderStyle={borderStyle}
       borderColor={borderColor}
       paddingX={1}
       marginY={0}
       justifyContent={message.isOwn ? 'flex-end' : 'flex-start'}
     >
+      {/* Checkbox in visual mode */}
+      {selectionMode && (
+        <Box marginRight={1}>
+          <Text>{isSelected ? '[✓] ' : '[ ] '}</Text>
+        </Box>
+      )}
+
       <Box flexDirection="column">
         <Box>
           <Text color={message.isOwn ? colors.accent : colors.text}>

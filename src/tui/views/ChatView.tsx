@@ -5,15 +5,23 @@ import { useAudioPlayer } from '../hooks/useAudioPlayer.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
 import { matrixService } from '../App.js';
 import { MessageItem } from '../components/MessageItem.js';
+import { PROFILES, type ProfileKey } from '../types/profile';
 import { colors } from '../theme.js';
 
 interface Props {
   roomId: string;
   roomName: string;
   onBack: () => void;
+  currentProfile: ProfileKey;
 }
 
-export function ChatView({ roomId, roomName, onBack }: Props) {
+interface SelectionState {
+  mode: 'normal' | 'visual';
+  selectedEventIds: Set<string>;
+}
+
+export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
+  const profile = PROFILES[currentProfile];
   const messages = useVoiceMessages(roomId);
   const { isPlaying, currentUri, play, stop } = useAudioPlayer();
   const {
@@ -24,6 +32,11 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
     formatDuration,
   } = useAudioRecorder();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selection, setSelection] = useState<SelectionState>({
+    mode: 'normal',
+    selectedEventIds: new Set(),
+  });
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const { stdout } = useStdout();
 
   // Calculate viewport dimensions
@@ -70,51 +83,136 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
 
   // Keyboard navigation
   useInput((input, key) => {
-    if (key.escape || key.backspace) {
-      onBack();
+    // Confirmation dialog handling
+    if (showConfirmDelete) {
+      if (input === 'y') {
+        matrixService
+          .redactMessages(roomId, Array.from(selection.selectedEventIds), 'Bulk deletion')
+          .then(() => {
+            setSelection({ mode: 'normal', selectedEventIds: new Set() });
+            setShowConfirmDelete(false);
+          })
+          .catch((err) => {
+            console.error('Failed to delete messages:', err);
+            setShowConfirmDelete(false);
+          });
+      }
+      if (input === 'n' || key.escape) {
+        setShowConfirmDelete(false);
+      }
+      return; // Don't process other keys when in confirmation dialog
     }
 
+    // Back navigation
+    if (key.escape || key.backspace) {
+      if (selection.mode === 'visual') {
+        // Exit visual mode first
+        setSelection({ mode: 'normal', selectedEventIds: new Set() });
+      } else {
+        onBack();
+      }
+      return;
+    }
+
+    // Navigation (works in both modes)
     if (key.upArrow || input === 'k') {
-      setSelectedIndex(prev => Math.max(0, prev - 1));
+      setSelectedIndex((prev) => Math.max(0, prev - 1));
     }
 
     if (key.downArrow || input === 'j') {
-      setSelectedIndex(prev => Math.min(messages.length - 1, prev + 1));
+      setSelectedIndex((prev) => Math.min(messages.length - 1, prev + 1));
     }
 
-    if (key.return) {
-      const message = messages[selectedIndex];
-      if (message) {
-        if (isPlaying && currentUri === message.audioUrl) {
-          stop();
-        } else {
-          play(message.audioUrl);
+    // Toggle visual mode
+    if (input === 'v' && !isRecording) {
+      setSelection((prev) => ({
+        mode: prev.mode === 'normal' ? 'visual' : 'normal',
+        selectedEventIds: prev.mode === 'visual' ? new Set() : prev.selectedEventIds,
+      }));
+      return;
+    }
+
+    // Visual mode actions
+    if (selection.mode === 'visual') {
+      // Space toggles selection in visual mode
+      if (input === ' ') {
+        const message = messages[selectedIndex];
+        if (message) {
+          setSelection((prev) => {
+            const newSet = new Set(prev.selectedEventIds);
+            if (newSet.has(message.eventId)) {
+              newSet.delete(message.eventId);
+            } else {
+              newSet.add(message.eventId);
+            }
+            return { ...prev, selectedEventIds: newSet };
+          });
         }
+        return;
+      }
+
+      // Select all
+      if (input === 'a') {
+        setSelection((prev) => ({
+          ...prev,
+          selectedEventIds: new Set(messages.map((m) => m.eventId)),
+        }));
+        return;
+      }
+
+      // Deselect all
+      if (input === 'A') {
+        setSelection((prev) => ({
+          ...prev,
+          selectedEventIds: new Set(),
+        }));
+        return;
+      }
+
+      // Delete selected
+      if ((input === 'd' || key.delete) && selection.selectedEventIds.size > 0) {
+        setShowConfirmDelete(true);
+        return;
       }
     }
 
-    // Space for PTT (toggle mode)
-    if (input === ' ') {
-      if (isRecording) {
-        // Stop recording and send
-        stopRecording()
-          .then(async (result) => {
-            await matrixService.sendVoiceMessage(
-              roomId,
-              result.buffer,
-              result.mimeType,
-              result.duration,
-              result.size
-            );
-          })
-          .catch((err) => {
-            console.error('Failed to send voice message:', err);
+    // Normal mode actions
+    if (selection.mode === 'normal') {
+      // Enter to play/pause
+      if (key.return) {
+        const message = messages[selectedIndex];
+        if (message) {
+          if (isPlaying && currentUri === message.audioUrl) {
+            stop();
+          } else {
+            play(message.audioUrl);
+          }
+        }
+      }
+
+      // Space for PTT (toggle mode)
+      if (input === ' ') {
+        if (isRecording) {
+          // Stop recording and send
+          stopRecording()
+            .then(async (result) => {
+              await matrixService.sendVoiceMessage(
+                roomId,
+                result.buffer,
+                result.mimeType,
+                result.duration,
+                result.size
+              );
+            })
+            .catch((err) => {
+              console.error('Failed to send voice message:', err);
+            });
+        } else {
+          // Start recording
+          startRecording().catch((err) => {
+            console.error('Failed to start recording:', err);
           });
-      } else {
-        // Start recording
-        startRecording().catch((err) => {
-          console.error('Failed to start recording:', err);
-        });
+        }
       }
     }
   });
@@ -123,7 +221,7 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
     <Box flexDirection="column" padding={1}>
       {/* Header */}
       <Box marginBottom={1} justifyContent="space-between">
-        <Text bold color={colors.accent}>
+        <Text bold color={profile.color}>
           ← {roomName}
         </Text>
         <Text dimColor>[Esc] back</Text>
@@ -141,9 +239,25 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
       )}
 
       {/* Ready Status */}
-      {!isRecording && (
+      {!isRecording && selection.mode === 'normal' && (
         <Box marginBottom={1} borderStyle="single" borderColor={colors.textMuted} paddingX={1}>
           <Text dimColor>Space to record</Text>
+        </Box>
+      )}
+
+      {/* Visual mode indicator */}
+      {selection.mode === 'visual' && !showConfirmDelete && (
+        <Box marginBottom={1} borderStyle="single" borderColor="yellow" paddingX={1}>
+          <Text color="yellow">VISUAL MODE - {selection.selectedEventIds.size} selected</Text>
+        </Box>
+      )}
+
+      {/* Confirmation dialog */}
+      {showConfirmDelete && (
+        <Box marginBottom={1} borderStyle="double" borderColor={colors.error} paddingX={1}>
+          <Text color={colors.error}>
+            Delete {selection.selectedEventIds.size} message(s)? [y/n]
+          </Text>
         </Box>
       )}
 
@@ -169,6 +283,8 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
             message={message}
             isFocused={actualIndex === selectedIndex}
             isPlaying={isPlaying && currentUri === message.audioUrl}
+            isSelected={selection.selectedEventIds.has(message.eventId)}
+            selectionMode={selection.mode === 'visual'}
           />
         );
       })}
@@ -183,7 +299,9 @@ export function ChatView({ roomId, roomName, onBack }: Props) {
       {/* Help text */}
       <Box marginTop={1}>
         <Text dimColor>
-          ↑↓/jk Navigate  Enter Play  Space PTT  Esc Back
+          {selection.mode === 'normal'
+            ? '↑↓/jk Navigate  Enter Play  Space PTT  v Visual  l Logs  Esc Back'
+            : '↑↓/jk Navigate  Space Toggle  a All  A None  d Delete  v/Esc Exit'}
         </Text>
       </Box>
     </Box>
