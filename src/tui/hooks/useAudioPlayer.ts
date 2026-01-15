@@ -8,8 +8,10 @@ import { LogService } from '../services/LogService.js';
 export function useAudioPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentUri, setCurrentUri] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const play = async (uri: string) => {
+    setPlaybackError(null); // Clear previous error
     try {
       await tuiAudioService.startPlayback(uri);
       setIsPlaying(true);
@@ -27,6 +29,7 @@ export function useAudioPlayer() {
       // Log error message without stack trace
       const errorMsg = error instanceof Error ? error.message : String(error);
       LogService.getInstance().addEntry('error', `Failed to play audio: ${errorMsg}`);
+      setPlaybackError(errorMsg);
       setIsPlaying(false);
       setCurrentUri(null);
     }
@@ -36,12 +39,19 @@ export function useAudioPlayer() {
     await tuiAudioService.stopPlayback();
     setIsPlaying(false);
     setCurrentUri(null);
+    setPlaybackError(null);
+  };
+
+  const clearError = () => {
+    setPlaybackError(null);
   };
 
   return {
     isPlaying,
     currentUri,
+    playbackError,
     play,
     stop,
+    clearError,
   };
 }

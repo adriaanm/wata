@@ -24,7 +24,7 @@ interface SelectionState {
 export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
   const profile = PROFILES[currentProfile];
   const messages = useVoiceMessages(roomId);
-  const { isPlaying, currentUri, play, stop } = useAudioPlayer();
+  const { isPlaying, currentUri, playbackError, play, stop, clearError } = useAudioPlayer();
   const {
     isRecording,
     recordingDuration,
@@ -119,10 +119,12 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
     // Navigation (works in both modes)
     if (key.upArrow || input === 'k') {
       setSelectedIndex((prev) => Math.max(0, prev - 1));
+      clearError();
     }
 
     if (key.downArrow || input === 'j') {
       setSelectedIndex((prev) => Math.min(messages.length - 1, prev + 1));
+      clearError();
     }
 
     // Toggle visual mode
@@ -242,8 +244,17 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
         </Box>
       )}
 
+      {/* Playback Error Status */}
+      {playbackError && !isRecording && (
+        <Box marginBottom={1} borderStyle="double" borderColor={colors.error} paddingX={1}>
+          <Text color={colors.error}>
+            ⚠ Playback Error: {playbackError}
+          </Text>
+        </Box>
+      )}
+
       {/* Ready Status */}
-      {!isRecording && selection.mode === 'normal' && (
+      {!isRecording && selection.mode === 'normal' && !playbackError && (
         <Box marginBottom={1} borderStyle="single" borderColor={colors.textMuted} paddingX={1}>
           <Text dimColor>Space to record</Text>
         </Box>
