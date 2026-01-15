@@ -9,6 +9,16 @@ import { ContactListView } from './views/ContactListView';
 import { ChatView } from './views/ChatView';
 import { LogView } from './views/LogView';
 import { ProfileSelectorView } from './views/ProfileSelectorView';
+import { LogService } from './services/LogService.js';
+
+// Logging helpers
+const log = (message: string): void => {
+  LogService.getInstance().addEntry('log', message);
+};
+
+const logError = (message: string): void => {
+  LogService.getInstance().addEntry('error', message);
+};
 
 // Create TUI-specific MatrixService instance with keytar storage and silent logger
 const credentialStorage = new KeytarCredentialStorage();
@@ -61,7 +71,7 @@ export function App({ initialProfile }: AppProps) {
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error('Failed to initialize auth:', error);
+        logError(`Failed to initialize auth: ${errorMessage}`);
         setError(`Failed to connect: ${errorMessage}`);
       }
     };
@@ -85,7 +95,7 @@ export function App({ initialProfile }: AppProps) {
   // Profile switching handler
   const switchProfile = async (newProfile: ProfileKey) => {
     try {
-      console.log(`[App] Switching profile to ${PROFILES[newProfile].displayName}`);
+      log(`[App] Switching profile to ${PROFILES[newProfile].displayName}`);
 
       // Stop current session
       await matrixService.logout();
@@ -105,7 +115,7 @@ export function App({ initialProfile }: AppProps) {
       // Sync state listener will transition to 'contacts' screen
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[App] Failed to switch profile:', error);
+      logError(`[App] Failed to switch profile: ${errorMessage}`);
       setError(`Failed to switch to ${PROFILES[newProfile].displayName}: ${errorMessage}`);
     }
   };

@@ -103,6 +103,20 @@ Note: Exact key codes may vary by device - test on actual hardware.
 - Test users: `alice` and `bob` with password `testpass123`
 - Mocks for RN modules in `test/integration/__mocks__/`
 
+### Logging (TUI)
+**CRITICAL**: Never use `console.log/warn/error` in TUI code — it corrupts the Ink UI.
+
+```typescript
+// ❌ DON'T
+console.log('Something happened');
+
+// ✅ DO - See docs/coding-rules.md for full guide
+import { LogService } from './services/LogService.js';
+LogService.getInstance().addEntry('log', 'Something happened');
+```
+
+See [docs/coding-rules.md](docs/coding-rules.md) for complete logging guidelines.
+
 ## Remaining Work
 
 ### Hardware PTT Button (Phase 4)
