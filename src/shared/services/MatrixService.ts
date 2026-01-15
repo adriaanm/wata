@@ -271,6 +271,21 @@ class MatrixService {
     // Log URL conversion for debugging audio playback issues
     log(`[MatrixService] Audio URL conversion: MXC=${mxcUrl} -> HTTP=${audioUrl}`);
 
+    // Verify the MXC URL format and log the server name
+    const mxcMatch = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+    if (mxcMatch) {
+      const [, serverName, mediaId] = mxcMatch;
+      log(`[MatrixService] MXC parsed: server=${serverName}, id=${mediaId}`);
+
+      // Log what we'd expect the URL to be
+      const expectedUrl = `${HOMESERVER_URL}/_matrix/media/v3/download/${serverName}/${mediaId}`;
+      log(`[MatrixService] Expected HTTP URL: ${expectedUrl}`);
+      log(`[MatrixService] Actual HTTP URL: ${audioUrl}`);
+      log(`[MatrixService] URLs match: ${audioUrl === expectedUrl}`);
+    } else {
+      logWarn(`[MatrixService] Invalid MXC URL format: ${mxcUrl}`);
+    }
+
     return {
       eventId: event.getId() || '',
       sender: sender,
@@ -352,6 +367,15 @@ class MatrixService {
 
     // Log upload response for debugging
     log(`[MatrixService] Upload response: MXC=${uploadResponse.content_uri}`);
+
+    // Verify the MXC URL format and log the server name
+    const mxcMatch = uploadResponse.content_uri.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+    if (mxcMatch) {
+      const [, serverName, mediaId] = mxcMatch;
+      log(`[MatrixService] MXC parsed: server=${serverName}, id=${mediaId}`);
+    } else {
+      logWarn(`[MatrixService] Invalid MXC URL format: ${uploadResponse.content_uri}`);
+    }
 
     // Send the message
     await this.client.sendMessage(roomId, {
