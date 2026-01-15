@@ -10,3 +10,7 @@ trusted_servers = ["matrix.org"]
 
 # Use localhost address
 address = "0.0.0.0"
+
+# Media storage configuration - required for voice messages
+[global.media]
+backend = "filesystem"

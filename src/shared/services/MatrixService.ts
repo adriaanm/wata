@@ -363,13 +363,14 @@ class MatrixService {
 
     log(`[MatrixService] Uploading audio: ${size} bytes, type=${mimeType}`);
 
+    // Log the full upload response for debugging
     const uploadResponse = await this.client.uploadContent(audioBuffer, {
       type: mimeType,
       name: `voice-message.${extension}`,
     });
 
-    // Log upload response for debugging
-    log(`[MatrixService] Upload response: MXC=${uploadResponse.content_uri}`);
+    // Log the complete upload response object
+    log(`[MatrixService] Upload complete. Response: ${JSON.stringify(uploadResponse)}`);
 
     // Verify the MXC URL format and log the server name
     const mxcMatch = uploadResponse.content_uri.match(/^mxc:\/\/([^/]+)\/(.+)$/);
