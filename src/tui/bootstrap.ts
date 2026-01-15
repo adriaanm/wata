@@ -33,7 +33,13 @@ async function bootstrap() {
     console.log(`[bootstrap] Initial profile from CLI: ${initialProfile}`);
   }
 
-  // Step 2: Now import the rest of the app
+  // Step 2: Configure global matrix-js-sdk logger to redirect to LogService
+  // This must happen BEFORE any Matrix SDK code is imported
+  const { ensureGlobalMatrixLogger } = await import('./services/MatrixLogger.js');
+  await ensureGlobalMatrixLogger();
+  console.log('[bootstrap] Global matrix-js-sdk logger configured');
+
+  // Step 3: Now import the rest of the app
   const React = await import('react');
   const { render } = await import('ink');
   const { App } = await import('./App.js');
