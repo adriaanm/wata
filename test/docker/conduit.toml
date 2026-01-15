@@ -11,6 +11,9 @@ trusted_servers = ["matrix.org"]
 # Use localhost address
 address = "0.0.0.0"
 
+# Enable verbose logging for debugging media issues
+log = "debug"
+
 # Media storage configuration - required for voice messages
 [global.media]
 backend = "filesystem"
