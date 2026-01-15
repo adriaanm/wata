@@ -266,19 +266,23 @@ class MatrixService {
     if (!sender) return null;
 
     const mxcUrl = content.url;
-    const audioUrl = this.client?.mxcUrlToHttp(mxcUrl) || '';
+    // Use authenticated media endpoint (requires Authorization header)
+    // The v3 endpoint is always unauthenticated in Conduit, so we use v1
+    const mxcMatch = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+    const audioUrl = mxcMatch
+      ? `${HOMESERVER_URL}/_matrix/client/v1/media/download/${mxcMatch[1]}/${mxcMatch[2]}`
+      : '';
 
     // Log URL conversion for debugging audio playback issues
     log(`[MatrixService] Audio URL conversion: MXC=${mxcUrl} -> HTTP=${audioUrl}`);
 
     // Verify the MXC URL format and log the server name
-    const mxcMatch = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
     if (mxcMatch) {
       const [, serverName, mediaId] = mxcMatch;
       log(`[MatrixService] MXC parsed: server=${serverName}, id=${mediaId}`);
 
-      // Log what we'd expect the URL to be
-      const expectedUrl = `${HOMESERVER_URL}/_matrix/media/v3/download/${serverName}/${mediaId}`;
+      // Log what we'd expect the URL to be (authenticated v1 endpoint)
+      const expectedUrl = `${HOMESERVER_URL}/_matrix/client/v1/media/download/${serverName}/${mediaId}`;
       log(`[MatrixService] Expected HTTP URL: ${expectedUrl}`);
       log(`[MatrixService] Actual HTTP URL: ${audioUrl}`);
       log(`[MatrixService] URLs match: ${audioUrl === expectedUrl}`);
@@ -584,6 +588,13 @@ class MatrixService {
    */
   getMessageCount(roomId: string): number {
     return this.getVoiceMessages(roomId).length;
+  }
+
+  /**
+   * Get the current access token for authenticated requests
+   */
+  getAccessToken(): string | null {
+    return this.client?.getAccessToken() || null;
   }
 
   /**

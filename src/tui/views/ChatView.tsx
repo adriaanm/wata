@@ -33,8 +33,10 @@ interface SelectionState {
 export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
   const profile = PROFILES[currentProfile];
   const messages = useVoiceMessages(roomId);
+  // Get access token for authenticated media downloads
+  const accessToken = matrixService.getAccessToken();
   const { isPlaying, currentUri, playbackError, play, stop, clearError } =
-    useAudioPlayer();
+    useAudioPlayer(accessToken || undefined);
   const {
     isRecording,
     recordingDuration,

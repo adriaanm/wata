@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { tuiAudioService } from '../services/TuiAudioService.js';
+import { pvRecorderAudioService } from '../services/PvRecorderAudioService.js';
 import { LogService } from '../services/LogService.js';
 
 /**
- * Hook for audio playback in TUI
+ * Hook for audio playback in TUI using PvRecorderAudioService
+ * @param accessToken - Optional access token for authenticated media downloads
  */
-export function useAudioPlayer() {
+export function useAudioPlayer(accessToken?: string) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentUri, setCurrentUri] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
@@ -13,13 +14,13 @@ export function useAudioPlayer() {
   const play = async (uri: string) => {
     setPlaybackError(null); // Clear previous error
     try {
-      await tuiAudioService.startPlayback(uri);
+      await pvRecorderAudioService.startPlayback(uri, accessToken);
       setIsPlaying(true);
       setCurrentUri(uri);
 
       // Poll for playback completion (afplay doesn't provide real-time status)
       const checkInterval = setInterval(() => {
-        if (!tuiAudioService.getIsPlaying()) {
+        if (!pvRecorderAudioService.getIsPlaying()) {
           setIsPlaying(false);
           setCurrentUri(null);
           clearInterval(checkInterval);
@@ -28,7 +29,10 @@ export function useAudioPlayer() {
     } catch (error) {
       // Log error message without stack trace
       const errorMsg = error instanceof Error ? error.message : String(error);
-      LogService.getInstance().addEntry('error', `Failed to play audio: ${errorMsg}`);
+      LogService.getInstance().addEntry(
+        'error',
+        `Failed to play audio: ${errorMsg}`,
+      );
       setPlaybackError(errorMsg);
       setIsPlaying(false);
       setCurrentUri(null);
@@ -36,7 +40,7 @@ export function useAudioPlayer() {
   };
 
   const stop = async () => {
-    await tuiAudioService.stopPlayback();
+    await pvRecorderAudioService.stopPlayback();
     setIsPlaying(false);
     setCurrentUri(null);
     setPlaybackError(null);

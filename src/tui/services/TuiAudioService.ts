@@ -30,8 +30,10 @@ export class TuiAudioService {
 
   /**
    * Download audio from URL and play using afplay (macOS)
+   * @param audioUrl - URL of the audio file
+   * @param accessToken - Optional access token for authenticated downloads
    */
-  async startPlayback(audioUrl: string): Promise<void> {
+  async startPlayback(audioUrl: string, accessToken?: string): Promise<void> {
     if (this.isPlaying) {
       await this.stopPlayback();
     }
@@ -40,8 +42,14 @@ export class TuiAudioService {
     this.isPlaying = true;
 
     try {
+      // Build fetch headers with authentication if token is provided
+      const headers: Record<string, string> = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+
       // Download the audio file
-      const response = await fetch(audioUrl);
+      const response = await fetch(audioUrl, { headers });
       if (!response.ok) {
         throw new Error(`Failed to download audio: ${response.statusText}`);
       }
