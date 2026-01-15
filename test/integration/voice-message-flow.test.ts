@@ -266,4 +266,89 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
       );
     }, 30000);
   });
+
+  describe('Audio Download', () => {
+    test('bob can download audio uploaded by alice', async () => {
+      await orchestrator.createClient(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await orchestrator.createClient(
+        TEST_USERS.bob.username,
+        TEST_USERS.bob.password,
+      );
+
+      const roomId = await orchestrator.createRoom('alice', 'bob');
+
+      // Create and send test audio
+      const audioBuffer = createFakeAudioBuffer(3000);
+      const eventId = await orchestrator.sendVoiceMessage(
+        'alice',
+        roomId,
+        audioBuffer,
+        'audio/mp4',
+        3000,
+      );
+
+      // Verify bob receives the message
+      const receivedMessage = await orchestrator.verifyMessageReceived(
+        'bob',
+        roomId,
+        { eventId },
+        15000,
+      );
+
+      // Verify the audio URL is valid
+      expect(receivedMessage.audioUrl).toMatch(/^http/);
+
+      // Actually download the audio to verify it works
+      const response = await fetch(receivedMessage.audioUrl);
+      expect(response.ok).toBe(true);
+      expect(response.headers.get('content-type')).toMatch(/audio/);
+
+      // Verify we got the audio data
+      const downloadedBuffer = Buffer.from(await response.arrayBuffer());
+      expect(downloadedBuffer.length).toBeGreaterThan(0);
+      // The downloaded data should match what we uploaded
+      expect(downloadedBuffer.equals(audioBuffer)).toBe(true);
+    }, 30000);
+
+    test('alice can download audio uploaded by bob', async () => {
+      await orchestrator.createClient(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await orchestrator.createClient(
+        TEST_USERS.bob.username,
+        TEST_USERS.bob.password,
+      );
+
+      const roomId = await orchestrator.createRoom('alice', 'bob');
+
+      // Bob sends audio
+      const audioBuffer = createFakeAudioBuffer(5000);
+      const eventId = await orchestrator.sendVoiceMessage(
+        'bob',
+        roomId,
+        audioBuffer,
+        'audio/mp4',
+        5000,
+      );
+
+      // Alice receives it
+      const receivedMessage = await orchestrator.verifyMessageReceived(
+        'alice',
+        roomId,
+        { eventId },
+        15000,
+      );
+
+      // Verify Alice can download Bob's audio
+      const response = await fetch(receivedMessage.audioUrl);
+      expect(response.ok).toBe(true);
+
+      const downloadedBuffer = Buffer.from(await response.arrayBuffer());
+      expect(downloadedBuffer.equals(audioBuffer)).toBe(true);
+    }, 30000);
+  });
 });
