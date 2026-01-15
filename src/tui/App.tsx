@@ -8,12 +8,13 @@ import { LoadingView } from './views/LoadingView';
 import { ContactListView } from './views/ContactListView';
 import { ChatView } from './views/ChatView';
 import { LogView } from './views/LogView';
+import { ProfileSelectorView } from './views/ProfileSelectorView';
 
 // Create TUI-specific MatrixService instance with keytar storage and silent logger
 const credentialStorage = new KeytarCredentialStorage();
 export const matrixService = new MatrixService(credentialStorage, silentLogger);
 
-type Screen = 'loading' | 'contacts' | 'chat' | 'log';
+type Screen = 'loading' | 'contacts' | 'chat' | 'log' | 'profile-select';
 
 interface Navigation {
   screen: Screen;
@@ -22,11 +23,17 @@ interface Navigation {
   previousScreen?: Screen;
 }
 
-export function App() {
+interface AppProps {
+  initialProfile?: ProfileKey | null;
+}
+
+export function App({ initialProfile }: AppProps) {
   const [navigation, setNavigation] = useState<Navigation>({ screen: 'loading' });
   const [syncState, setSyncState] = useState<string>('STOPPED');
   const [error, setError] = useState<string | null>(null);
-  const [currentProfile, setCurrentProfile] = useState<ProfileKey>('alice');
+  const [currentProfile, setCurrentProfile] = useState<ProfileKey>(
+    (initialProfile && PROFILES[initialProfile]) ? initialProfile : 'alice'
+  );
 
   useEffect(() => {
     const initAuth = async () => {
@@ -70,6 +77,11 @@ export function App() {
     setNavigation({ screen: 'contacts' });
   };
 
+  const handleSelectProfile = (profileKey: ProfileKey) => {
+    setNavigation({ screen: 'loading' });
+    switchProfile(profileKey);
+  };
+
   // Profile switching handler
   const switchProfile = async (newProfile: ProfileKey) => {
     try {
@@ -99,9 +111,9 @@ export function App() {
   };
 
   // Global key handlers
-  useInput((input) => {
-    // Log viewer
-    if (input === 'l' && navigation.screen !== 'loading') {
+  useInput((input, key) => {
+    // Log viewer (always available except in profile-select)
+    if (input === 'l' && navigation.screen !== 'profile-select') {
       setNavigation({
         ...navigation,
         screen: 'log',
@@ -109,10 +121,22 @@ export function App() {
       });
     }
 
-    // Profile switching
-    if (input === 'p' && navigation.screen !== 'loading') {
-      const nextProfile: ProfileKey = currentProfile === 'alice' ? 'bob' : 'alice';
-      switchProfile(nextProfile);
+    // Profile switching (always available, even in error state)
+    if (input === 'p' && navigation.screen !== 'profile-select') {
+      setNavigation({
+        ...navigation,
+        screen: 'profile-select',
+        previousScreen: navigation.screen,
+      });
+    }
+
+    // Escape key closes profile selector
+    if (key.escape && navigation.screen === 'profile-select') {
+      setNavigation({
+        screen: navigation.previousScreen || 'contacts',
+        roomId: navigation.roomId,
+        roomName: navigation.roomName,
+      });
     }
   });
 
@@ -138,6 +162,22 @@ export function App() {
   if (navigation.screen === 'log') {
     return (
       <LogView
+        onBack={() => {
+          setNavigation({
+            screen: navigation.previousScreen || 'contacts',
+            roomId: navigation.roomId,
+            roomName: navigation.roomName,
+          });
+        }}
+      />
+    );
+  }
+
+  if (navigation.screen === 'profile-select') {
+    return (
+      <ProfileSelectorView
+        currentProfile={currentProfile}
+        onSelectProfile={handleSelectProfile}
         onBack={() => {
           setNavigation({
             screen: navigation.previousScreen || 'contacts',
