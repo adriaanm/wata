@@ -427,11 +427,17 @@ export class PvRecorderAudioService {
     this.currentAudioPath = audioUrl;
     this.isPlaying = true;
 
+    // Log the URL being fetched for debugging
+    LogService.getInstance().addEntry(
+      'log',
+      `Playback: Fetching audio from ${audioUrl}`,
+    );
+
     try {
       // Download the audio file
       const response = await fetch(audioUrl);
       if (!response.ok) {
-        throw new Error(`Failed to download audio: ${response.statusText}`);
+        throw new Error(`Failed to download audio: ${response.statusText} (${response.status})`);
       }
 
       const arrayBuffer = await response.arrayBuffer();

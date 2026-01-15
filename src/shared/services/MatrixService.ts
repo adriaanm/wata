@@ -188,10 +188,10 @@ class MatrixService {
         await this.client.logout();
       } catch (error) {
         // If we get a 401, we're already logged out - continue with cleanup
-        const isUnknownToken = error instanceof Error && (
-          error.message.includes('M_UNKNOWN_TOKEN') ||
-          error.message.includes('401')
-        );
+        const isUnknownToken =
+          error instanceof Error &&
+          (error.message.includes('M_UNKNOWN_TOKEN') ||
+            error.message.includes('401'));
         if (!isUnknownToken) {
           throw error;
         }
@@ -265,14 +265,18 @@ class MatrixService {
     const sender = event.getSender();
     if (!sender) return null;
 
+    const mxcUrl = content.url;
+    const audioUrl = this.client?.mxcUrlToHttp(mxcUrl) || '';
+
+    // Log URL conversion for debugging audio playback issues
+    log(`[MatrixService] Audio URL conversion: MXC=${mxcUrl} -> HTTP=${audioUrl}`);
+
     return {
       eventId: event.getId() || '',
       sender: sender,
       senderName: this.client?.getUser(sender)?.displayName || sender,
       timestamp: event.getTs(),
-      // Use standard download URL (Conduit doesn't support MSC3916 authenticated media)
-      // For DM rooms, unauthenticated downloads work since both users have room access
-      audioUrl: this.client?.mxcUrlToHttp(content.url) || '',
+      audioUrl,
       duration: content.info?.duration || 0,
       isOwn: sender === this.client?.getUserId(),
     };
@@ -339,10 +343,15 @@ class MatrixService {
     if (!this.client) throw new Error('Not logged in');
 
     // Upload audio buffer to Matrix
+    const extension =
+      mimeType.includes('ogg') || mimeType.includes('opus') ? 'ogg' : 'm4a';
     const uploadResponse = await this.client.uploadContent(audioBuffer, {
       type: mimeType,
-      name: 'voice-message.m4a',
+      name: `voice-message.${extension}`,
     });
+
+    // Log upload response for debugging
+    log(`[MatrixService] Upload response: MXC=${uploadResponse.content_uri}`);
 
     // Send the message
     await this.client.sendMessage(roomId, {
@@ -363,9 +372,18 @@ class MatrixService {
    * @param eventId - Event ID of the message to redact
    * @param reason - Optional reason for redaction
    */
-  async redactMessage(roomId: string, eventId: string, reason?: string): Promise<void> {
+  async redactMessage(
+    roomId: string,
+    eventId: string,
+    reason?: string,
+  ): Promise<void> {
     if (!this.client) throw new Error('Not logged in');
-    await this.client.redactEvent(roomId, eventId, undefined, reason ? { reason } : undefined);
+    await this.client.redactEvent(
+      roomId,
+      eventId,
+      undefined,
+      reason ? { reason } : undefined,
+    );
   }
 
   /**
@@ -374,13 +392,22 @@ class MatrixService {
    * @param eventIds - Array of event IDs to redact
    * @param reason - Optional reason for redaction
    */
-  async redactMessages(roomId: string, eventIds: string[], reason?: string): Promise<void> {
+  async redactMessages(
+    roomId: string,
+    eventIds: string[],
+    reason?: string,
+  ): Promise<void> {
     if (!this.client) throw new Error('Not logged in');
 
     // Sequential redaction to avoid rate limits
     for (const eventId of eventIds) {
       try {
-        await this.client.redactEvent(roomId, eventId, undefined, reason ? { reason } : undefined);
+        await this.client.redactEvent(
+          roomId,
+          eventId,
+          undefined,
+          reason ? { reason } : undefined,
+        );
       } catch (error) {
         logError(`Failed to redact message ${eventId}: ${error}`);
         // Continue with remaining messages even if one fails
