@@ -10,7 +10,7 @@ services:
     environment:
       CONDUIT_CONFIG: /etc/conduit.toml
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6167/_matrix/client/versions"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6167/_matrix/client/v3/versions"]
       interval: 5s
       timeout: 5s
       retries: 10

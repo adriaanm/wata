@@ -183,7 +183,18 @@ class MatrixService {
   async logout(): Promise<void> {
     if (this.client) {
       this.client.stopClient();
-      await this.client.logout();
+      try {
+        await this.client.logout();
+      } catch (error) {
+        // If we get a 401, we're already logged out - continue with cleanup
+        const isUnknownToken = error instanceof Error && (
+          error.message.includes('M_UNKNOWN_TOKEN') ||
+          error.message.includes('401')
+        );
+        if (!isUnknownToken) {
+          throw error;
+        }
+      }
       this.client = null;
     }
     await this.credentialStorage.clear();
