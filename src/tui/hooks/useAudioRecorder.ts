@@ -1,15 +1,41 @@
-import { useState, useEffect } from 'react';
-import { tuiAudioService } from '../services/TuiAudioService.js';
-import type { RecordingResult } from '../services/TuiAudioService.js';
+import { useState, useEffect, useRef } from 'react';
+import { pvRecorderAudioService } from '../services/PvRecorderAudioService.js';
+import type { RecordingResult } from '../services/PvRecorderAudioService.js';
 import { LogService } from '../services/LogService.js';
 
 /**
- * Hook for audio recording in TUI
+ * Hook for audio recording in TUI using PvRecorder + Opus
  */
 export function useAudioRecorder() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+  const recordingLoopRef = useRef<boolean>(false);
+
+  // Recording loop - continuously captures audio frames while recording
+  useEffect(() => {
+    if (!isRecording) {
+      recordingLoopRef.current = false;
+      return;
+    }
+
+    recordingLoopRef.current = true;
+
+    const runRecordingLoop = async () => {
+      while (
+        recordingLoopRef.current &&
+        pvRecorderAudioService.getIsRecording()
+      ) {
+        await pvRecorderAudioService.recordFrame();
+      }
+    };
+
+    runRecordingLoop();
+
+    return () => {
+      recordingLoopRef.current = false;
+    };
+  }, [isRecording]);
 
   // Update recording duration every 100ms
   useEffect(() => {
@@ -19,7 +45,7 @@ export function useAudioRecorder() {
     }
 
     const interval = setInterval(() => {
-      setRecordingDuration(tuiAudioService.getRecordingDuration());
+      setRecordingDuration(pvRecorderAudioService.getRecordingDuration());
     }, 100);
 
     return () => clearInterval(interval);
@@ -28,19 +54,23 @@ export function useAudioRecorder() {
   const startRecording = async () => {
     setRecordingError(null); // Clear previous error
     try {
-      await tuiAudioService.startRecording();
+      await pvRecorderAudioService.startRecording();
       setIsRecording(true);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      LogService.getInstance().addEntry('error', `Failed to start recording: ${errorMsg}`);
+      LogService.getInstance().addEntry(
+        'error',
+        `Failed to start recording: ${errorMsg}`,
+      );
       setRecordingError(errorMsg);
       setIsRecording(false);
     }
   };
 
   const stopRecording = async (): Promise<RecordingResult> => {
+    recordingLoopRef.current = false; // Stop the recording loop
     try {
-      const result = await tuiAudioService.stopRecording();
+      const result = await pvRecorderAudioService.stopRecording();
       setIsRecording(false);
       setRecordingDuration(0);
       setRecordingError(null);
@@ -55,7 +85,8 @@ export function useAudioRecorder() {
   };
 
   const cancelRecording = async () => {
-    await tuiAudioService.cancelRecording();
+    recordingLoopRef.current = false; // Stop the recording loop
+    await pvRecorderAudioService.cancelRecording();
     setIsRecording(false);
     setRecordingDuration(0);
     setRecordingError(null);
