@@ -44,13 +44,27 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
     clearError: clearRecordingError,
     formatDuration,
   } = useAudioRecorder();
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(() => 0); // Default to 0, will be updated by useEffect
   const [selection, setSelection] = useState<SelectionState>({
     mode: 'normal',
     selectedEventIds: new Set(),
   });
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const { stdout } = useStdout();
+
+  // Initialize selectedIndex to the most recent message when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Select the most recent message (last in array)
+      setSelectedIndex(messages.length - 1);
+      LogService.getInstance().addEntry(
+        'log',
+        `ChatView: Selected message [${messages.length - 1}] (most recent)`,
+      );
+    } else {
+      setSelectedIndex(0);
+    }
+  }, [messages.length]); // Only re-run when message count changes (new message added)
 
   // Log messages when they change (for debugging audio playback issues)
   useEffect(() => {
