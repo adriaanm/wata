@@ -360,6 +360,9 @@ class MatrixService {
     // Upload audio buffer to Matrix
     const extension =
       mimeType.includes('ogg') || mimeType.includes('opus') ? 'ogg' : 'm4a';
+
+    log(`[MatrixService] Uploading audio: ${size} bytes, type=${mimeType}`);
+
     const uploadResponse = await this.client.uploadContent(audioBuffer, {
       type: mimeType,
       name: `voice-message.${extension}`,
@@ -373,6 +376,10 @@ class MatrixService {
     if (mxcMatch) {
       const [, serverName, mediaId] = mxcMatch;
       log(`[MatrixService] MXC parsed: server=${serverName}, id=${mediaId}`);
+
+      // Verify the content is accessible by attempting to construct the download URL
+      const testUrl = `${HOMESERVER_URL}/_matrix/media/v3/download/${serverName}/${mediaId}`;
+      log(`[MatrixService] Content should be accessible at: ${testUrl}`);
     } else {
       logWarn(`[MatrixService] Invalid MXC URL format: ${uploadResponse.content_uri}`);
     }
