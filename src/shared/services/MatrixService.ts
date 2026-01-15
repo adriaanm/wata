@@ -2,6 +2,7 @@ import { Buffer } from 'buffer';
 
 import * as matrix from 'matrix-js-sdk';
 import { MsgType } from 'matrix-js-sdk';
+import type { MatrixClient } from 'matrix-js-sdk';
 
 import { MATRIX_CONFIG } from '@shared/config/matrix';
 import {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/// <reference types="node" />
 
 /**
  * Bootstrap file for TUI that ensures LogService is installed

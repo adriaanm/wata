@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { spawn, ChildProcess } from 'child_process';
 import { writeFile, unlink, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';

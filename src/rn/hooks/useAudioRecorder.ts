@@ -7,7 +7,7 @@ export function useAudioRecorder() {
   const [recordingDuration, setRecordingDuration] = useState(0);
 
   useEffect(() => {
-    const unsubscribe = audioService.onRecordingProgress(position => {
+    const unsubscribe = audioService.onRecordingProgress((position: number) => {
       setRecordingDuration(position);
     });
 
@@ -49,7 +49,7 @@ export function useAudioPlayer() {
   const [currentUri, setCurrentUri] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubProgress = audioService.onPlaybackProgress((pos, dur) => {
+    const unsubProgress = audioService.onPlaybackProgress((pos: number, dur: number) => {
       setCurrentPosition(pos);
       setDuration(dur);
     });

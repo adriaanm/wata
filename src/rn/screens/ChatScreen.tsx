@@ -4,7 +4,7 @@ import { Buffer } from 'buffer';
 import RNFS from 'react-native-fs';
 
 import { FocusablePressable } from '../components/FocusablePressable';
-import { useAudioRecorder, useAudioPlayer } from '@shared/hooks/useAudioRecorder';
+import { useAudioRecorder, useAudioPlayer } from '../hooks/useAudioRecorder';
 import { useVoiceMessages } from '@shared/hooks/useMatrix';
 import type { VoiceMessage } from '@shared/services/MatrixService';
 import { matrixService } from '@shared/services/MatrixService.rn';
