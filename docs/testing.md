@@ -78,7 +78,7 @@ await orchestrator.sendAndVerifyVoiceMessage('alice', 'bob', audio)
    - Run integration tests to confirm sync completes successfully
    - Check for flakiness over multiple runs
 
-2. **Expand Test Coverage** (per TEST_STRATEGY.md phases)
+2. **Expand Test Coverage** (per phases below)
    - Phase 2: Auto-login, contacts, sending
    - Phase 3: Reception, multi-client scenarios
    - Phase 4: E2E flows, edge cases

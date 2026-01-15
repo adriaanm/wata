@@ -3,13 +3,24 @@
 ## Project Status
 We are currently developing a prototype. A simple android app (primarily) and a TUI for Mac. v1 will target hobbyist usage (may require custom builds, but no compromises on security and core walkie-talkie functionality). v2 should be ready for deployment to app stores.
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [docs/quickstart.md](docs/quickstart.md) | Getting started guide |
+| [docs/device-automation.md](docs/device-automation.md) | Physical device testing workflow |
+| [docs/tui-architecture.md](docs/tui-architecture.md) | TUI frontend design |
+| [docs/matrix-servers.md](docs/matrix-servers.md) | Matrix server comparison |
+| [docs/testing.md](docs/testing.md) | Test strategy and infrastructure |
+| [docs/roadmap.md](docs/roadmap.md) | Future work and TODOs |
+
 ## Project Decisions
 
 ### Why Matrix over Signal/custom backend?
 - Signal requires running their server infrastructure or reverse-engineering their protocol
 - Matrix is an open standard with free hosted servers (matrix.org)
 - Voice messages sent as standard `m.audio` events are interoperable with Element
-- E2E encryption available via Olm/Megolm (deferred to v1, see `FUTURE.md`)
+- E2E encryption available via Olm/Megolm (deferred to v1, see `docs/roadmap.md`)
 
 ### Why React Native (bare) over Expo?
 - Need native Kotlin module for hardware PTT button capture (`KeyEvent.KEYCODE_PTT`)
@@ -109,7 +120,7 @@ Why it's not urgent:
 - Target PTT devices run the app continuously in foreground
 - Push is only needed for background/sleep scenarios
 
-See `FUTURE.md` for implementation notes when ready.
+See `docs/roadmap.md` for implementation notes when ready.
 
 ## Development Workflow
 
