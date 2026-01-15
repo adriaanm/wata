@@ -1,4 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+  useCallback,
+} from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import { useVoiceMessages } from '../hooks/useMatrix.js';
 import { useAudioPlayer } from '../hooks/useAudioPlayer.js';
@@ -8,6 +14,9 @@ import { MessageItem } from '../components/MessageItem.js';
 import { PROFILES, type ProfileKey } from '../types/profile';
 import { colors } from '../theme.js';
 import { LogService } from '../services/LogService.js';
+
+// PTT hold-to-record: detect key release by gap in key repeat events
+const PTT_RELEASE_TIMEOUT_MS = 200; // If no Space for this long, assume key released
 
 interface Props {
   roomId: string;
@@ -24,7 +33,8 @@ interface SelectionState {
 export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
   const profile = PROFILES[currentProfile];
   const messages = useVoiceMessages(roomId);
-  const { isPlaying, currentUri, playbackError, play, stop, clearError } = useAudioPlayer();
+  const { isPlaying, currentUri, playbackError, play, stop, clearError } =
+    useAudioPlayer();
   const {
     isRecording,
     recordingDuration,
@@ -42,6 +52,67 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const { stdout } = useStdout();
 
+  // Log messages when they change (for debugging audio playback issues)
+  useEffect(() => {
+    LogService.getInstance().addEntry(
+      'log',
+      `ChatView: Room ${roomId} has ${messages.length} message(s)`,
+    );
+    // Log each message's details
+    messages.forEach((msg, idx) => {
+      LogService.getInstance().addEntry(
+        'log',
+        `ChatView: [${idx}] ${msg.eventId} from ${msg.sender} - ${msg.audioUrl.substring(0, 80)}...`,
+      );
+    });
+  }, [roomId, messages]);
+
+  // PTT hold-to-record state
+  const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isStoppingRef = useRef(false); // Prevent double-stop
+  const [isHoldingSpace, setIsHoldingSpace] = useState(false); // True if key repeat detected
+
+  // Stop recording and send message
+  const doStopAndSend = useCallback(async () => {
+    if (isStoppingRef.current || !isRecording) return;
+    isStoppingRef.current = true;
+
+    try {
+      const result = await stopRecording();
+      await matrixService.sendVoiceMessage(
+        roomId,
+        result.buffer,
+        result.mimeType,
+        result.duration,
+        result.size,
+      );
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      LogService.getInstance().addEntry(
+        'error',
+        `Failed to send voice message: ${errorMsg}`,
+      );
+    } finally {
+      isStoppingRef.current = false;
+    }
+  }, [isRecording, stopRecording, roomId]);
+
+  // Clear PTT timeout on unmount or when recording stops
+  useEffect(() => {
+    if (!isRecording) {
+      if (pttTimeoutRef.current) {
+        clearTimeout(pttTimeoutRef.current);
+        pttTimeoutRef.current = null;
+      }
+      setIsHoldingSpace(false);
+    }
+    return () => {
+      if (pttTimeoutRef.current) {
+        clearTimeout(pttTimeoutRef.current);
+      }
+    };
+  }, [isRecording]);
+
   // Calculate viewport dimensions
   const terminalHeight = stdout?.rows || 24;
   const { visibleMessages, hasMore, startIndex } = useMemo(() => {
@@ -54,13 +125,20 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
     const MARGIN_HEIGHT = 2;
     const ITEM_HEIGHT = 4;
 
-    const availableHeight = terminalHeight - HEADER_HEIGHT - STATUS_HEIGHT - HELP_HEIGHT - INDICATOR_HEIGHT - MARGIN_HEIGHT;
+    const availableHeight =
+      terminalHeight -
+      HEADER_HEIGHT -
+      STATUS_HEIGHT -
+      HELP_HEIGHT -
+      INDICATOR_HEIGHT -
+      MARGIN_HEIGHT;
     const maxItems = Math.max(1, Math.floor(availableHeight / ITEM_HEIGHT));
 
     // On larger terminals, leave some breathing room (don't fill entire screen)
-    const preferredMaxItems = terminalHeight > 30
-      ? Math.floor(maxItems * 0.7)  // Use 70% of available space
-      : maxItems;
+    const preferredMaxItems =
+      terminalHeight > 30
+        ? Math.floor(maxItems * 0.7) // Use 70% of available space
+        : maxItems;
 
     // Calculate window around selected item
     const halfWindow = Math.floor(preferredMaxItems / 2);
@@ -90,14 +168,21 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
     if (showConfirmDelete) {
       if (input === 'y') {
         matrixService
-          .redactMessages(roomId, Array.from(selection.selectedEventIds), 'Bulk deletion')
+          .redactMessages(
+            roomId,
+            Array.from(selection.selectedEventIds),
+            'Bulk deletion',
+          )
           .then(() => {
             setSelection({ mode: 'normal', selectedEventIds: new Set() });
             setShowConfirmDelete(false);
           })
-          .catch((err) => {
+          .catch(err => {
             const errorMsg = err instanceof Error ? err.message : String(err);
-            LogService.getInstance().addEntry('error', `Failed to delete messages: ${errorMsg}`);
+            LogService.getInstance().addEntry(
+              'error',
+              `Failed to delete messages: ${errorMsg}`,
+            );
             setShowConfirmDelete(false);
           });
       }
@@ -120,22 +205,23 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
 
     // Navigation (works in both modes)
     if (key.upArrow || input === 'k') {
-      setSelectedIndex((prev) => Math.max(0, prev - 1));
+      setSelectedIndex(prev => Math.max(0, prev - 1));
       clearError();
       clearRecordingError();
     }
 
     if (key.downArrow || input === 'j') {
-      setSelectedIndex((prev) => Math.min(messages.length - 1, prev + 1));
+      setSelectedIndex(prev => Math.min(messages.length - 1, prev + 1));
       clearError();
       clearRecordingError();
     }
 
     // Toggle visual mode
     if (input === 'v' && !isRecording) {
-      setSelection((prev) => ({
+      setSelection(prev => ({
         mode: prev.mode === 'normal' ? 'visual' : 'normal',
-        selectedEventIds: prev.mode === 'visual' ? new Set() : prev.selectedEventIds,
+        selectedEventIds:
+          prev.mode === 'visual' ? new Set() : prev.selectedEventIds,
       }));
       return;
     }
@@ -146,7 +232,7 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
       if (input === ' ') {
         const message = messages[selectedIndex];
         if (message) {
-          setSelection((prev) => {
+          setSelection(prev => {
             const newSet = new Set(prev.selectedEventIds);
             if (newSet.has(message.eventId)) {
               newSet.delete(message.eventId);
@@ -161,16 +247,16 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
 
       // Select all
       if (input === 'a') {
-        setSelection((prev) => ({
+        setSelection(prev => ({
           ...prev,
-          selectedEventIds: new Set(messages.map((m) => m.eventId)),
+          selectedEventIds: new Set(messages.map(m => m.eventId)),
         }));
         return;
       }
 
       // Deselect all
       if (input === 'A') {
-        setSelection((prev) => ({
+        setSelection(prev => ({
           ...prev,
           selectedEventIds: new Set(),
         }));
@@ -178,7 +264,10 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
       }
 
       // Delete selected
-      if ((input === 'd' || key.delete) && selection.selectedEventIds.size > 0) {
+      if (
+        (input === 'd' || key.delete) &&
+        selection.selectedEventIds.size > 0
+      ) {
         setShowConfirmDelete(true);
         return;
       }
@@ -190,38 +279,56 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
       if (key.return) {
         const message = messages[selectedIndex];
         if (message) {
+          // Log which message is being played
+          LogService.getInstance().addEntry(
+            'log',
+            `ChatView: Playing message [${selectedIndex}] ${message.eventId} from ${message.sender}`,
+          );
+          LogService.getInstance().addEntry(
+            'log',
+            `ChatView: Audio URL = ${message.audioUrl}`,
+          );
+
           if (isPlaying && currentUri === message.audioUrl) {
             stop();
           } else {
             play(message.audioUrl);
           }
+        } else {
+          LogService.getInstance().addEntry(
+            'warn',
+            `ChatView: No message at index ${selectedIndex} (total: ${messages.length})`,
+          );
         }
       }
 
-      // Space for PTT (toggle mode)
+      // Space for PTT (hold-to-record)
+      // When holding Space, terminal sends repeated key events.
+      // We detect key release by noticing when events stop coming.
       if (input === ' ') {
         if (isRecording) {
-          // Stop recording and send
-          stopRecording()
-            .then(async (result) => {
-              await matrixService.sendVoiceMessage(
-                roomId,
-                result.buffer,
-                result.mimeType,
-                result.duration,
-                result.size
-              );
-            })
-            .catch((err) => {
-              const errorMsg = err instanceof Error ? err.message : String(err);
-              LogService.getInstance().addEntry('error', `Failed to send voice message: ${errorMsg}`);
-            });
+          // Already recording - this is a repeated key event (holding) or explicit tap to stop
+          setIsHoldingSpace(true); // We've detected key repeat, so user is holding
+          if (pttTimeoutRef.current) {
+            clearTimeout(pttTimeoutRef.current);
+          }
+          // Set timeout to auto-stop when key appears released
+          pttTimeoutRef.current = setTimeout(() => {
+            doStopAndSend();
+          }, PTT_RELEASE_TIMEOUT_MS);
         } else {
           // Start recording
-          startRecording().catch((err) => {
+          startRecording().catch(err => {
             const errorMsg = err instanceof Error ? err.message : String(err);
-            LogService.getInstance().addEntry('error', `Failed to start recording: ${errorMsg}`);
+            LogService.getInstance().addEntry(
+              'error',
+              `Failed to start recording: ${errorMsg}`,
+            );
           });
+          // Set initial timeout in case user just taps Space briefly
+          pttTimeoutRef.current = setTimeout(() => {
+            doStopAndSend();
+          }, PTT_RELEASE_TIMEOUT_MS);
         }
       }
     }
@@ -239,50 +346,85 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
 
       {/* Recording Status */}
       {isRecording && (
-        <Box marginBottom={1} borderStyle="single" borderColor={colors.recording} paddingX={1}>
+        <Box
+          marginBottom={1}
+          borderStyle="single"
+          borderColor={colors.recording}
+          paddingX={1}
+        >
           <Text color={colors.recording}>● REC</Text>
           <Text> </Text>
           <Text>{formatDuration(recordingDuration)}</Text>
           <Text> </Text>
-          <Text dimColor>(Press Space to stop and send)</Text>
+          <Text dimColor>
+            {isHoldingSpace
+              ? '(Release Space to send)'
+              : '(Press Space again to send)'}
+          </Text>
         </Box>
       )}
 
       {/* Playback Error Status */}
       {playbackError && !isRecording && (
-        <Box marginBottom={1} borderStyle="double" borderColor={colors.error} paddingX={1}>
-          <Text color={colors.error}>
-            ⚠ Playback Error: {playbackError}
-          </Text>
+        <Box
+          marginBottom={1}
+          borderStyle="double"
+          borderColor={colors.error}
+          paddingX={1}
+        >
+          <Text color={colors.error}>⚠ Playback Error: {playbackError}</Text>
         </Box>
       )}
 
       {/* Recording Error Status */}
       {recordingError && !isRecording && (
-        <Box marginBottom={1} borderStyle="double" borderColor={colors.error} paddingX={1}>
-          <Text color={colors.error}>
-            ⚠ Recording Error: {recordingError}
-          </Text>
+        <Box
+          marginBottom={1}
+          borderStyle="double"
+          borderColor={colors.error}
+          paddingX={1}
+        >
+          <Text color={colors.error}>⚠ Recording Error: {recordingError}</Text>
         </Box>
       )}
 
       {/* Ready Status */}
-      {!isRecording && selection.mode === 'normal' && !playbackError && !recordingError && (
-        <Box marginBottom={1} borderStyle="single" borderColor={colors.textMuted} paddingX={1}>
-          <Text dimColor>Space to record</Text>
-        </Box>
-      )}
+      {!isRecording &&
+        selection.mode === 'normal' &&
+        !playbackError &&
+        !recordingError && (
+          <Box
+            marginBottom={1}
+            borderStyle="single"
+            borderColor={colors.textMuted}
+            paddingX={1}
+          >
+            <Text dimColor>Hold Space to record</Text>
+          </Box>
+        )}
 
       {/* Visual mode indicator */}
       {selection.mode === 'visual' && !showConfirmDelete && (
-        <Box marginBottom={1} borderStyle="single" borderColor="yellow" paddingX={1}>
-          <Text color="yellow">VISUAL MODE - {selection.selectedEventIds.size} selected</Text>
+        <Box
+          marginBottom={1}
+          borderStyle="single"
+          borderColor="yellow"
+          paddingX={1}
+        >
+          <Text color="yellow">
+            VISUAL MODE - {selection.selectedEventIds.size} selected
+          </Text>
         </Box>
       )}
 
       {/* Confirmation dialog */}
       {showConfirmDelete && (
-        <Box marginBottom={1} borderStyle="double" borderColor={colors.error} paddingX={1}>
+        <Box
+          marginBottom={1}
+          borderStyle="double"
+          borderColor={colors.error}
+          paddingX={1}
+        >
           <Text color={colors.error}>
             Delete {selection.selectedEventIds.size} message(s)? [y/n]
           </Text>
