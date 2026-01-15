@@ -1,5 +1,9 @@
 # Claude Context
 
+## Working with Claude
+
+**Commit Policy:** Commit coherent changes as soon as they are complete. Don't batch unrelated changes or wait to commit until the end of a session.
+
 ## Project Status
 We are currently developing a prototype. A simple android app (primarily) and a TUI for Mac. v1 will target hobbyist usage (may require custom builds, but no compromises on security and core walkie-talkie functionality). v2 should be ready for deployment to app stores.
 
@@ -12,6 +16,7 @@ We are currently developing a prototype. A simple android app (primarily) and a 
 | [docs/tui-architecture.md](docs/tui-architecture.md) | TUI frontend design |
 | [docs/matrix-servers.md](docs/matrix-servers.md) | Matrix server comparison |
 | [docs/testing.md](docs/testing.md) | Test strategy and infrastructure |
+| [docs/voice.md](docs/voice.md) | Audio recording/encoding/playback architecture |
 | [docs/roadmap.md](docs/roadmap.md) | Future work and TODOs |
 
 ## Project Decisions
