@@ -5,6 +5,7 @@ import { writeFile, unlink, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Buffer } from 'buffer';
+import { LogService } from './LogService.js';
 
 export interface RecordingResult {
   buffer: Buffer;
@@ -65,7 +66,8 @@ export class TuiAudioService {
       });
 
       this.playProcess.on('error', (err) => {
-        console.error('Playback error:', err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        LogService.getInstance().addEntry('error', `Playback error: ${errorMsg}`);
         this.isPlaying = false;
         this.currentAudioUrl = null;
       });
@@ -146,12 +148,14 @@ export class TuiAudioService {
       }
 
       this.recProcess.on('error', (err) => {
-        console.error('Recording error (rec):', err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        LogService.getInstance().addEntry('error', `Recording error (rec): ${errorMsg}`);
         this.isRecording = false;
       });
 
       this.ffmpegProcess.on('error', (err) => {
-        console.error('Recording error (ffmpeg):', err);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        LogService.getInstance().addEntry('error', `Recording error (ffmpeg): ${errorMsg}`);
         this.isRecording = false;
       });
     } catch (error) {

@@ -7,6 +7,7 @@ import { matrixService } from '../App.js';
 import { MessageItem } from '../components/MessageItem.js';
 import { PROFILES, type ProfileKey } from '../types/profile';
 import { colors } from '../theme.js';
+import { LogService } from '../services/LogService.js';
 
 interface Props {
   roomId: string;
@@ -93,7 +94,8 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
             setShowConfirmDelete(false);
           })
           .catch((err) => {
-            console.error('Failed to delete messages:', err);
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            LogService.getInstance().addEntry('error', `Failed to delete messages: ${errorMsg}`);
             setShowConfirmDelete(false);
           });
       }
@@ -205,12 +207,14 @@ export function ChatView({ roomId, roomName, onBack, currentProfile }: Props) {
               );
             })
             .catch((err) => {
-              console.error('Failed to send voice message:', err);
+              const errorMsg = err instanceof Error ? err.message : String(err);
+              LogService.getInstance().addEntry('error', `Failed to send voice message: ${errorMsg}`);
             });
         } else {
           // Start recording
           startRecording().catch((err) => {
-            console.error('Failed to start recording:', err);
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            LogService.getInstance().addEntry('error', `Failed to start recording: ${errorMsg}`);
           });
         }
       }

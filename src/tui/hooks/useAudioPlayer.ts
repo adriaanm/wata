@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { tuiAudioService } from '../services/TuiAudioService.js';
+import { LogService } from '../services/LogService.js';
 
 /**
  * Hook for audio playback in TUI
@@ -23,7 +24,9 @@ export function useAudioPlayer() {
         }
       }, 100);
     } catch (error) {
-      console.error('Failed to play audio:', error);
+      // Log error message without stack trace
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      LogService.getInstance().addEntry('error', `Failed to play audio: ${errorMsg}`);
       setIsPlaying(false);
       setCurrentUri(null);
     }

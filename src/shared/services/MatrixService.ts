@@ -270,7 +270,14 @@ class MatrixService {
       sender: sender,
       senderName: this.client?.getUser(sender)?.displayName || sender,
       timestamp: event.getTs(),
-      audioUrl: this.client?.mxcUrlToHttp(content.url) || '',
+      // Use authenticated download URL (requires access token)
+      audioUrl: this.client?.mxcUrlToHttp(
+        content.url,
+        undefined, undefined, undefined, // width, height, resizeMethod
+        false, // allowDirectLinks
+        false, // allowRedirects
+        true   // useAuthentication - requires access token
+      ) || '',
       duration: content.info?.duration || 0,
       isOwn: sender === this.client?.getUserId(),
     };

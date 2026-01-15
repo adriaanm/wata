@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { tuiAudioService } from '../services/TuiAudioService.js';
 import type { RecordingResult } from '../services/TuiAudioService.js';
+import { LogService } from '../services/LogService.js';
 
 /**
  * Hook for audio recording in TUI
@@ -28,7 +29,8 @@ export function useAudioRecorder() {
       await tuiAudioService.startRecording();
       setIsRecording(true);
     } catch (error) {
-      console.error('Failed to start recording:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      LogService.getInstance().addEntry('error', `Failed to start recording: ${errorMsg}`);
       setIsRecording(false);
     }
   };
