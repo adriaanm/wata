@@ -1,7 +1,38 @@
 # Current status
 Prototype
 
-# Future Work 
+# Future Work
+
+## TUI Audio ✓
+
+Complete. See [docs/voice.md](voice.md) for architecture details.
+
+**Implemented:**
+- Recording via PvRecorder (16kHz PCM) with FFmpeg encoding to Ogg Opus
+- Playback with format detection (Ogg Opus or M4A) and FFmpeg decoding
+- PTT hold-to-record behavior (detects key release via gap in key repeat events)
+- Error handling with status bar display and graceful cleanup on exit
+
+## Android Audio Review
+
+The Android app uses react-native-audio-recorder-player with AAC encoding. Consider migrating to Opus for consistency with TUI.
+
+**Review items:**
+
+1. **Evaluate Opus on Android**
+   - Research react-native-opus or native Kotlin bindings
+   - Compare file sizes and quality vs current AAC
+   - Benchmark CPU usage on target PTT devices
+
+2. **Audio Quality Settings**
+   - Current: 44.1kHz AAC (music-optimized)
+   - Target: 16kHz Opus (voice-optimized)
+   - Potential 4-5x reduction in file size
+
+3. **Format Consistency**
+   - Both platforms should produce same format for interop
+   - Target: `audio/ogg; codecs=opus` on both TUI and Android
+   - Fallback: keep AAC if Opus proves problematic on Android
 
 ## Requirements for v1
 
