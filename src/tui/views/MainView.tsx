@@ -296,8 +296,27 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
       const contact = contacts[selectedIndex];
       // For now, always allow viewing history
       // TODO: Only show if hasUnread
-      if (contact.type === 'dm' && contact.roomId) {
-        onSelectContact(contact);
+      if (contact.type === 'dm') {
+        // For DMs, we need a roomId. If it doesn't exist, create it on-demand
+        if (contact.roomId) {
+          onSelectContact(contact);
+        } else if (contact.userId) {
+          // Create DM room on-demand for viewing history
+          matrixService
+            .getOrCreateDmRoom(contact.userId)
+            .then(roomId => {
+              // Update the contact with the new roomId and select it
+              const updatedContact = { ...contact, roomId };
+              onSelectContact(updatedContact);
+            })
+            .catch(err => {
+              const errorMsg = err instanceof Error ? err.message : String(err);
+              LogService.getInstance().addEntry(
+                'error',
+                `Failed to create DM room: ${errorMsg}`,
+              );
+            });
+        }
       } else if (contact.type === 'family') {
         // TODO: Show family room history
         onSelectContact(contact);

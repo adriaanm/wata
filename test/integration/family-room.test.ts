@@ -406,6 +406,141 @@ describe('Family Room', () => {
       expect(lastMessage.duration).toBeCloseTo(5000, -2);
     }, 60000);
   });
+
+  describe('sendVoiceMessage to DM room', () => {
+    test('should send voice message to DM room and have recipient receive it', async () => {
+      // Given: alice and bob are logged in
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await aliceService.waitForSync();
+
+      await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
+      // Only wait for sync if not already synced
+      if (
+        bobService.getSyncState() !== 'PREPARED' &&
+        bobService.getSyncState() !== 'SYNCING'
+      ) {
+        await bobService.waitForSync();
+      }
+
+      // When: alice creates a DM room with bob
+      console.log('[Test] Creating DM room between alice and bob...');
+      const dmRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+      console.log('[Test] DM room created:', dmRoomId);
+      expect(dmRoomId).toBeTruthy();
+      expect(dmRoomId).toMatch(/^!/);
+
+      // Bob needs to join the room (in a real app, Bob would accept the invite)
+      console.log('[Test] Bob joining DM room...');
+      await bobService.joinRoom(dmRoomId);
+      console.log('[Test] Bob joined DM room');
+
+      // Wait for bob to fully join
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Now alice sends a voice message
+      const audioBuffer = createFakeAudioBuffer(4000, { prefix: 'DM_MSG' });
+      console.log('[Test] Sending voice message to DM room...');
+
+      await aliceService.sendVoiceMessage(
+        dmRoomId,
+        audioBuffer,
+        'audio/mp4',
+        4000,
+        audioBuffer.length,
+      );
+      console.log('[Test] Voice message sent successfully');
+
+      // Wait for the message to sync to bob
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Then: bob should receive the message in the DM room
+      const bobMessages = bobService.getVoiceMessages(dmRoomId);
+      console.log('[Test] Bob received messages in DM:', bobMessages.length);
+
+      // Verify bob received the message
+      expect(bobMessages.length).toBeGreaterThan(0);
+      const lastMessage = bobMessages[bobMessages.length - 1];
+      expect(lastMessage.sender).toBe('@alice:localhost');
+      expect(lastMessage.duration).toBeCloseTo(4000, -2);
+      console.log('[Test] DM message received successfully');
+    }, 60000);
+
+    test('should show messages in history after sending', async () => {
+      // Given: alice and bob have exchanged messages in a DM room
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await aliceService.waitForSync();
+
+      await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
+      if (
+        bobService.getSyncState() !== 'PREPARED' &&
+        bobService.getSyncState() !== 'SYNCING'
+      ) {
+        await bobService.waitForSync();
+      }
+
+      // Create DM room and have bob join
+      const dmRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+      await bobService.joinRoom(dmRoomId);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Alice sends a message
+      const audio1 = createFakeAudioBuffer(3000, { prefix: 'ALICE_DM' });
+      await aliceService.sendVoiceMessage(
+        dmRoomId,
+        audio1,
+        'audio/mp4',
+        3000,
+        audio1.length,
+      );
+
+      // Wait for sync
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Bob sends a reply
+      const audio2 = createFakeAudioBuffer(4000, { prefix: 'BOB_DM' });
+      await bobService.sendVoiceMessage(
+        dmRoomId,
+        audio2,
+        'audio/mp4',
+        4000,
+        audio2.length,
+      );
+
+      // Wait for sync
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // When: alice gets messages from the DM room (simulating viewing history)
+      const aliceMessages = aliceService.getVoiceMessages(dmRoomId);
+      const bobMessages = bobService.getVoiceMessages(dmRoomId);
+
+      console.log(
+        '[Test] Alice sees',
+        aliceMessages.length,
+        'messages in DM history',
+      );
+      console.log(
+        '[Test] Bob sees',
+        bobMessages.length,
+        'messages in DM history',
+      );
+
+      // Then: both should see both messages
+      expect(aliceMessages.length).toBeGreaterThanOrEqual(2);
+      expect(bobMessages.length).toBeGreaterThanOrEqual(2);
+
+      // Verify the senders
+      const aliceMsg = aliceMessages.find(m => m.sender === '@alice:localhost');
+      const bobMsg = aliceMessages.find(m => m.sender === '@bob:localhost');
+      expect(aliceMsg).toBeTruthy();
+      expect(bobMsg).toBeTruthy();
+    }, 60000);
+  });
 });
 
 describe('Family Onboarding Flow (E2E)', () => {
