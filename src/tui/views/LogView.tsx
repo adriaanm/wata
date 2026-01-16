@@ -97,6 +97,8 @@ export function LogView({ onBack }: Props) {
         return colors.error;
       case 'warn':
         return 'yellow';
+      case 'success':
+        return 'green';
       default:
         return colors.textMuted;
     }

@@ -155,16 +155,32 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
 
       if (contact.type === 'family') {
         // Send to family room
+        LogService.getInstance().addEntry(
+          'log',
+          `Sending to family room: ${contact.name}`,
+        );
         targetRoomId = await matrixService.getFamilyRoomId();
         if (!targetRoomId) {
           // Fallback: if no family room, we can't broadcast
           throw new Error('Family room not available');
         }
+        LogService.getInstance().addEntry(
+          'log',
+          `Family room ID: ${targetRoomId}`,
+        );
       } else {
         // Send to DM room
+        LogService.getInstance().addEntry(
+          'log',
+          `Sending to DM: ${contact.name} (${contact.userId})`,
+        );
         targetRoomId = contact.roomId;
         if (!targetRoomId && contact.userId) {
           // Create DM room on-demand
+          LogService.getInstance().addEntry(
+            'log',
+            `Creating DM room with ${contact.userId}`,
+          );
           targetRoomId = await matrixService.getOrCreateDmRoom(contact.userId);
         }
       }
@@ -173,6 +189,10 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
         throw new Error('No room to send to');
       }
 
+      LogService.getInstance().addEntry(
+        'log',
+        `Sending voice message to ${targetRoomId}`,
+      );
       await matrixService.sendVoiceMessage(
         targetRoomId,
         result.buffer,
@@ -181,6 +201,10 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
         result.size,
       );
 
+      LogService.getInstance().addEntry(
+        'success',
+        `Voice message sent to ${contact.name}`,
+      );
       setSendError(null);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -256,16 +280,15 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     }
 
     // Navigation
+    // Don't clear send error on navigation - keep it visible until user records again
     if (key.upArrow || input === 'k') {
       setSelectedIndex(prev => Math.max(0, prev - 1));
       clearRecordingError();
-      setSendError(null);
     }
 
     if (key.downArrow || input === 'j') {
       setSelectedIndex(prev => Math.min(contacts.length - 1, prev + 1));
       clearRecordingError();
-      setSendError(null);
     }
 
     // Enter to view history (if contact has unread messages)
@@ -292,6 +315,8 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
           doStopAndSend();
         }, PTT_RELEASE_TIMEOUT_MS);
       } else {
+        // Clear any previous send error when starting a new recording
+        setSendError(null);
         startRecording().catch(err => {
           const errorMsg = err instanceof Error ? err.message : String(err);
           LogService.getInstance().addEntry(

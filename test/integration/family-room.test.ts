@@ -12,6 +12,7 @@ import {
   MatrixService,
   setHomeserverUrl,
 } from '../../src/shared/services/MatrixService';
+import { createFakeAudioBuffer } from './helpers/audio-helpers';
 
 // Simple in-memory credential storage for testing
 class TestCredentialStorage {
@@ -329,6 +330,81 @@ describe('Family Room', () => {
       // Then: returns existing room ID
       expect(secondRoomId).toBe(firstRoomId);
     }, 35000);
+  });
+
+  describe('sendVoiceMessage to family room', () => {
+    test('should send voice message to family room and have other members receive it', async () => {
+      // Given: alice and bob are both members of the family room
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await aliceService.waitForSync();
+
+      const familyRoomId = await ensureFamilyRoomMembership(aliceService);
+      console.log('[Test] Family room ID:', familyRoomId);
+
+      // Invite bob and have him join
+      try {
+        await aliceService.inviteToFamily('@bob:localhost');
+      } catch {
+        // May already be invited
+      }
+
+      await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
+      // Only wait for sync if not already synced
+      if (
+        bobService.getSyncState() !== 'PREPARED' &&
+        bobService.getSyncState() !== 'SYNCING'
+      ) {
+        await bobService.waitForSync();
+      }
+
+      try {
+        await bobService.joinRoom(familyRoomId);
+      } catch {
+        // May already be a member
+      }
+
+      // Wait for sync to propagate - don't call waitForSync again as it may timeout
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // When: alice sends a voice message to the family room
+      const audioBuffer = createFakeAudioBuffer(5000, { prefix: 'FAMILY_MSG' });
+      console.log('[Test] Sending voice message to family room...');
+
+      // Get the family room ID and send the message
+      const targetRoomId = await aliceService.getFamilyRoomId();
+      console.log('[Test] Target room ID:', targetRoomId);
+      expect(targetRoomId).toBe(familyRoomId);
+
+      await aliceService.sendVoiceMessage(
+        targetRoomId!,
+        audioBuffer,
+        'audio/mp4',
+        5000,
+        audioBuffer.length,
+      );
+      console.log('[Test] Voice message sent successfully');
+
+      // Wait for the message to sync to bob
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Then: bob should receive the message in the family room
+      const bobFamilyRoom = await bobService.getFamilyRoom();
+      expect(bobFamilyRoom).toBeTruthy();
+      expect(bobFamilyRoom?.roomId).toBe(familyRoomId);
+
+      // Get bob's voice messages from the family room
+      const bobMessages = bobService.getVoiceMessages(familyRoomId);
+      console.log('[Test] Bob received messages:', bobMessages.length);
+
+      // Verify bob received the message
+      expect(bobMessages.length).toBeGreaterThan(0);
+      const lastMessage = bobMessages[bobMessages.length - 1];
+      expect(lastMessage.sender).toBe('@alice:localhost');
+      expect(lastMessage.duration).toBeCloseTo(5000, -2);
+    }, 60000);
   });
 });
 

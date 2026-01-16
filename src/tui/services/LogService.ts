@@ -1,6 +1,6 @@
 export interface LogEntry {
   timestamp: number;
-  level: 'log' | 'warn' | 'error';
+  level: 'log' | 'warn' | 'error' | 'success';
   message: string;
 }
 
