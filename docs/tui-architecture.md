@@ -72,12 +72,19 @@ MatrixService accepts these adapters via dependency injection, keeping the core 
 │                        TUI Application                          │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │              Ink Components (tui/src/)                   │   │
-│  │  ┌─────────────────┐    ┌─────────────────────────────┐ │   │
-│  │  │ ContactListView │───▶│       ChatView              │ │   │
-│  │  │ - Room list     │    │ - Message list              │ │   │
-│  │  │ - Focus state   │    │ - Recording status          │ │   │
-│  │  │ - Selection     │    │ - PTT indicator             │ │   │
-│  │  └─────────────────┘    └─────────────────────────────┘ │   │
+│  │  ┌─────────────────────────────────────────────────────┐ │   │
+│  │  │                    MainView                          │ │   │
+│  │  │  - Family member list (from family room membership) │ │   │
+│  │  │  - PTT recording (Space to talk)                    │ │   │
+│  │  │  - Status indicators (●/⚠/none)                     │ │   │
+│  │  └───────────────────────┬─────────────────────────────┘ │   │
+│  │                          │ Enter (if unread)             │   │
+│  │                          ▼                               │   │
+│  │  ┌─────────────────────────────────────────────────────┐ │   │
+│  │  │                   HistoryView                        │ │   │
+│  │  │  - Messages from contact (most recent first)        │ │   │
+│  │  │  - Playback (Enter to play)                         │ │   │
+│  │  └─────────────────────────────────────────────────────┘ │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                              │                                  │
 │  ┌─────────────────────────────────────────────────────────┐   │
@@ -159,8 +166,8 @@ wata/
 │       ├── App.tsx               # Root component, navigation state
 │       │
 │       ├── views/
-│       │   ├── ContactListView.tsx   # Room list screen
-│       │   ├── ChatView.tsx          # Voice message screen
+│       │   ├── MainView.tsx          # Family list + PTT (primary)
+│       │   ├── HistoryView.tsx       # Message playback
 │       │   └── LoadingView.tsx       # Startup/sync screen
 │       │
 │       ├── components/
@@ -205,65 +212,122 @@ import { useRooms } from '@shared/hooks/useRooms';
 import type { MatrixRoom } from '@shared/types/MatrixRoom';
 ```
 
-## Screen Mapping
+## Screen Design
 
-### Mobile → TUI Equivalence
+The UI is optimized for the core use case: **sending ephemeral voice messages to family members**.
 
-| Mobile Screen | TUI View | Key Bindings |
-|---------------|----------|--------------|
-| ContactListScreen | ContactListView | `↑/↓` navigate, `Enter` select, `q` quit |
-| ChatScreen | ChatView | `Space` PTT (hold), `↑/↓` navigate, `Enter` play, `Esc` back |
+### Design Principles
 
-### ContactListView Layout
+1. **Minimal friction**: Talk to someone in one action (select + space)
+2. **Main screen is everything**: No navigation to send a message
+3. **Status at a glance**: Unread, error, or all-good per contact
+4. **History is secondary**: Only accessed when there's something unread
 
-```
-┌─────────────────────────────────────────┐
-│  WATA - Contacts                   [q]  │
-├─────────────────────────────────────────┤
-│  ▶ Alice                                │
-│    "Voice message"          2 min ago   │
-│  ─────────────────────────────────────  │
-│    Bob                                  │
-│    "Voice message"          1 hour ago  │
-│  ─────────────────────────────────────  │
-│    Charlie                              │
-│    "Voice message"          Yesterday   │
-├─────────────────────────────────────────┤
-│  ↑↓ Navigate  Enter Select  q Quit      │
-└─────────────────────────────────────────┘
-```
+### Views
 
-### ChatView Layout
+| View | Purpose | Entry |
+|------|---------|-------|
+| **MainView** | Family list + PTT | Default screen |
+| **HistoryView** | Message playback | Enter on contact with unread |
+
+### MainView (Primary Interface)
+
+The main screen shows all family members. PTT happens directly here.
 
 ```
 ┌─────────────────────────────────────────┐
-│  ← Alice                                │
+│  WATA                                   │
 ├─────────────────────────────────────────┤
-│  ● REC 0:05                             │  ← Recording indicator
+│                                         │
+│  ▶ Mom                            ●     │  ← ● = unread message
+│                                         │
+│    Dad                                  │  ← no indicator = all good
+│                                         │
+│    Sister                         ⚠     │  ← ⚠ = delivery error
+│                                         │
+│  ─────────────────────────────────────  │
+│    Family                         ●     │  ← broadcast channel
+│                                         │
 ├─────────────────────────────────────────┤
-│  Alice        [▶]  0:12      10:30 AM   │
-│  You               0:08      10:31 AM   │
-│  Alice        [▶]  0:15      10:32 AM   │
-│▶ You               0:10      10:33 AM   │  ← Selected message
-├─────────────────────────────────────────┤
-│  Space PTT  Enter Play  Esc Back        │
+│  ↑↓ Navigate  Space Talk  Enter History │
 └─────────────────────────────────────────┘
 ```
 
-## Key Bindings
+**Recording state** (when holding space):
+
+```
+┌─────────────────────────────────────────┐
+│  WATA                                   │
+├─────────────────────────────────────────┤
+│                                         │
+│  ▶ Mom                            ●     │
+│    ┌─────────────────────────────┐      │
+│    │ ● REC 0:05  Release to send │      │  ← inline recording indicator
+│    └─────────────────────────────┘      │
+│    Dad                                  │
+│                                         │
+│    Sister                         ⚠     │
+│                                         │
+│  ─────────────────────────────────────  │
+│    Family                         ●     │
+│                                         │
+├─────────────────────────────────────────┤
+│  Recording...                           │
+└─────────────────────────────────────────┘
+```
+
+### HistoryView (Message Playback)
+
+Accessed by pressing Enter on a contact with unread messages. Shows messages from that contact, most recent on top.
+
+```
+┌─────────────────────────────────────────┐
+│  ← Mom                                  │
+├─────────────────────────────────────────┤
+│                                         │
+│  ▶ 0:12                      10:33 AM   │  ← selected, Enter to play
+│                                         │
+│    0:08                      10:31 AM   │
+│                                         │
+│    0:15                      10:28 AM   │
+│                                         │
+│    0:10                      Yesterday  │
+│                                         │
+├─────────────────────────────────────────┤
+│  ↑↓ Navigate  Enter Play  Esc Back      │
+└─────────────────────────────────────────┘
+```
+
+**Notes:**
+- Messages from this contact only (not your replies)
+- Most recent on top (reverse chronological)
+- Duration + timestamp, no sender name needed (it's all from them)
+- Playing a message marks it as read
+- After playing the last unread, the ● indicator clears on MainView
+
+### Key Bindings
 
 | Context | Key | Action |
 |---------|-----|--------|
 | Global | `q` / `Ctrl+C` | Quit application |
-| Global | `Ctrl+L` | Refresh/redraw |
-| ContactList | `↑` / `k` | Move selection up |
-| ContactList | `↓` / `j` | Move selection down |
-| ContactList | `Enter` | Open selected contact |
-| Chat | `↑` / `k` | Select previous message |
-| Chat | `↓` / `j` | Select next message |
-| Chat | `Enter` | Play/pause selected message |
-| Chat | `Space` (hold) | Push-to-talk record |
-| Chat | `Esc` / `Backspace` | Return to contacts |
+| MainView | `↑` / `k` | Move selection up |
+| MainView | `↓` / `j` | Move selection down |
+| MainView | `Space` (hold) | Record and send to selected contact |
+| MainView | `Enter` | Open history (if unread messages) |
+| HistoryView | `↑` / `k` | Select previous message |
+| HistoryView | `↓` / `j` | Select next message |
+| HistoryView | `Enter` | Play selected message |
+| HistoryView | `Esc` | Return to main |
+
+### Status Indicators
+
+| Indicator | Meaning | Display |
+|-----------|---------|---------|
+| `●` | Unread message(s) | Right-aligned, accent color |
+| `⚠` | Delivery error | Right-aligned, error color |
+| (none) | All good | No indicator |
+
+**Priority**: Error takes precedence over unread (show `⚠` not `●`)
 
 ## Implementation Strategy
 
@@ -279,46 +343,47 @@ import type { MatrixRoom } from '@shared/types/MatrixRoom';
 
 **Deliverable:** TUI app that logs in using shared MatrixService
 
-### Phase 2: Contact List Screen
+### Phase 2: Main View (Family List + PTT)
 
-1. Import shared `useMatrixSync` and `useRooms` hooks (no porting needed)
-2. Build ContactListView with FocusableItem components
-3. Implement keyboard navigation (useInput)
-4. Style with terminal colors matching mobile theme
+1. Query family room membership for contact list (see `docs/family-model.md`)
+2. Build MainView with family member list
+3. Implement status indicators (unread ●, error ⚠)
+4. Wire up Space key for PTT recording directly from main view
+5. Implement inline recording indicator
 
-**Deliverable:** Functional contact list using shared hooks
+**Deliverable:** Main view with family list and PTT
 
-### Phase 3: Chat View (Display Only)
-
-1. Import shared `useVoiceMessages` hook (no porting needed)
-2. Build ChatView with MessageItem components
-3. Implement message list navigation
-4. Add Header and StatusBar components
-
-**Deliverable:** Chat screen showing voice messages via shared backend
-
-### Phase 4: Audio Playback
-
-1. Implement TuiAudioService playback methods
-2. Use `afplay` (macOS) for audio output
-3. Wire up Enter key to play selected message
-4. Show playback state in UI
-
-**Deliverable:** Can play voice messages
-
-### Phase 5: Audio Recording & PTT
+### Phase 3: Audio Recording & Sending
 
 1. Implement TuiAudioService recording methods
-2. Use `node-record-lpcm16` → FFmpeg pipeline
-3. Wire up Space key for PTT (keydown/keyup detection)
-4. Implement RecordingStatus component with timer
-5. Upload and send via MatrixService
+2. Use PvRecorder + FFmpeg → Opus pipeline
+3. Upload and send to selected contact's DM (create on-demand)
+4. Track delivery status for error indicator
 
-**Deliverable:** Full PTT voice messaging
+**Deliverable:** Can record and send voice messages from main view
+
+### Phase 4: History View (Playback)
+
+1. Build HistoryView showing messages from selected contact
+2. Filter to show only their messages (not your replies)
+3. Most recent on top (reverse chronological)
+4. Implement playback with `afplay`
+5. Mark messages as read on playback
+
+**Deliverable:** Can view and play message history
+
+### Phase 5: Unread Tracking
+
+1. Track read receipts or local read state
+2. Update unread indicator when messages arrive
+3. Clear indicator when messages are played
+4. Persist read state across restarts
+
+**Deliverable:** Accurate unread indicators
 
 ### Phase 6: Polish & Testing
 
-1. Error handling and edge cases
+1. Error handling (delivery failures, network issues)
 2. Graceful shutdown
 3. Integration tests against Conduit
 4. Documentation
@@ -558,10 +623,13 @@ Integration tests can share `test/integration/` setup from mobile app.
 ## Success Criteria
 
 - [ ] Login and sync with Matrix homeserver
-- [ ] Display contact list with keyboard navigation
-- [ ] Display voice messages in chat view
+- [ ] Display family members from family room membership
+- [ ] PTT recording from main view (Space to talk)
+- [ ] Send voice messages to DM rooms (created on-demand)
+- [ ] Status indicators (unread ●, error ⚠)
+- [ ] History view for message playback
 - [ ] Play voice messages via macOS audio
-- [ ] Record and send voice messages via PTT
-- [ ] Visual parity with mobile app (within terminal constraints)
+- [ ] Unread tracking (clear after playback)
+- [ ] Family broadcast (send to family room)
 - [ ] Integration tests passing against Conduit
 - [ ] **Shared backend**: TUI imports `MatrixService`, hooks, and types from `src/` with zero duplication
