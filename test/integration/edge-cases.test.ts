@@ -142,11 +142,9 @@ describe('Edge Cases and Error Handling', () => {
         1000,
       );
 
-      const received = await orchestrator.verifyMessageReceived(
-        'bob',
-        roomId,
-        { eventId },
-      );
+      const received = await orchestrator.verifyMessageReceived('bob', roomId, {
+        eventId,
+      });
 
       expect(received.audioUrl).toBeDefined();
       expect(received.audioUrl).toMatch(/^http/);
@@ -174,11 +172,9 @@ describe('Edge Cases and Error Handling', () => {
         10000,
       );
 
-      const received = await orchestrator.verifyMessageReceived(
-        'bob',
-        roomId,
-        { eventId },
-      );
+      const received = await orchestrator.verifyMessageReceived('bob', roomId, {
+        eventId,
+      });
 
       expect(received.audioUrl).toBeDefined();
     }, 40000);
@@ -261,8 +257,16 @@ describe('Edge Cases and Error Handling', () => {
 
       // Both should see most messages (use pagination to fetch all)
       // Concurrent alternating sends can have sync race conditions
-      const aliceMessages = await orchestrator.getAllVoiceMessages('alice', roomId, 20);
-      const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 20);
+      const aliceMessages = await orchestrator.getAllVoiceMessages(
+        'alice',
+        roomId,
+        20,
+      );
+      const bobMessages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        20,
+      );
 
       // Accept at least 3/6 = 50% for each client in concurrent scenario
       expect(aliceMessages.length).toBeGreaterThanOrEqual(3);
@@ -365,14 +369,22 @@ describe('Edge Cases and Error Handling', () => {
       await new Promise(resolve => setTimeout(resolve, 4000));
 
       // Alice should see isOwn = true (use pagination to ensure message is fetched)
-      const aliceMessages = await orchestrator.getAllVoiceMessages('alice', roomId, 20);
+      const aliceMessages = await orchestrator.getAllVoiceMessages(
+        'alice',
+        roomId,
+        20,
+      );
       const aliceMsg = aliceMessages.find(m => m.eventId === eventId);
 
       expect(aliceMsg).toBeDefined();
       expect(aliceMsg?.isOwn).toBe(true);
 
       // Bob should see isOwn = false (use pagination to ensure message is fetched)
-      const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 20);
+      const bobMessages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        20,
+      );
       const bobMsg = bobMessages.find(m => m.eventId === eventId);
 
       expect(bobMsg).toBeDefined();

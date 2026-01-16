@@ -82,7 +82,11 @@ describe('Stress Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 20000));
 
       // Verify bob received all messages (use pagination to fetch all)
-      const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
+      const messages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        50,
+      );
 
       console.log(`[STRESS] Bob received ${messages.length} messages`);
       // Rapid sends may not all sync in time - accept at least 60% (18/30)
@@ -136,7 +140,11 @@ describe('Stress Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 25000));
 
       // Verify (use pagination to fetch all)
-      const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 100);
+      const messages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        100,
+      );
 
       console.log(`[STRESS] Bob received ${messages.length} messages`);
       // Rapid sends may not all sync - accept at least 50% (25/50)
@@ -189,16 +197,22 @@ describe('Stress Tests', () => {
       const allEventIds = await Promise.all([...aliceSends, ...bobSends]);
       const sendDuration = Date.now() - startTime;
 
-      console.log(
-        `[STRESS] Sent 50 concurrent messages in ${sendDuration}ms`,
-      );
+      console.log(`[STRESS] Sent 50 concurrent messages in ${sendDuration}ms`);
 
       // Wait for sync (concurrent sends need even more time)
       await new Promise(resolve => setTimeout(resolve, 30000));
 
       // Both clients should see all 50 messages (use pagination to fetch all)
-      const aliceMessages = await orchestrator.getAllVoiceMessages('alice', roomId, 100);
-      const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 100);
+      const aliceMessages = await orchestrator.getAllVoiceMessages(
+        'alice',
+        roomId,
+        100,
+      );
+      const bobMessages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        100,
+      );
 
       console.log(
         `[STRESS] Alice sees ${aliceMessages.length}, Bob sees ${bobMessages.length}`,
@@ -276,7 +290,11 @@ describe('Stress Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 5000));
 
       // Verify bob received all 20 messages (use pagination to fetch all)
-      const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
+      const messages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        50,
+      );
 
       expect(messages.length).toBeGreaterThanOrEqual(20);
 
@@ -328,7 +346,11 @@ describe('Stress Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       // Verify (use pagination to fetch all)
-      const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
+      const messages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        50,
+      );
 
       expect(messages.length).toBeGreaterThanOrEqual(20);
 
@@ -416,7 +438,12 @@ describe('Stress Tests', () => {
       );
 
       // Use longer timeout for message verification
-      await orchestrator.verifyMessageReceived('bob', roomId, { eventId }, 20000);
+      await orchestrator.verifyMessageReceived(
+        'bob',
+        roomId,
+        { eventId },
+        20000,
+      );
 
       const deliveryTime = Date.now() - startTime;
 

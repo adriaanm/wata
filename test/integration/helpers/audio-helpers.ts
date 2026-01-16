@@ -43,10 +43,7 @@ export function createFakeAudioBuffer(
 /**
  * Create multiple unique audio buffers
  */
-export function createAudioBuffers(
-  count: number,
-  durationMs = 5000,
-): Buffer[] {
+export function createAudioBuffers(count: number, durationMs = 5000): Buffer[] {
   return Array.from({ length: count }, (_, i) =>
     createFakeAudioBuffer(durationMs, {
       prefix: `AUDIO_${i + 1}`,

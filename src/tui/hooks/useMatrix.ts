@@ -1,15 +1,29 @@
 import { useState, useEffect } from 'react';
-import type { MatrixRoom, VoiceMessage } from '../../shared/services/MatrixService.js';
+import type {
+  MatrixRoom,
+  VoiceMessage,
+} from '../../shared/services/MatrixService.js';
 import { matrixService } from '../App.js';
 
 /**
  * Hook to monitor Matrix sync state
  */
 export function useMatrixSync() {
-  const [syncState, setSyncState] = useState<string>('STOPPED');
-  const [isReady, setIsReady] = useState(false);
+  // Initialize with current sync state (important for late-mounting components)
+  const initialState = matrixService.getSyncState();
+  const [syncState, setSyncState] = useState<string>(initialState);
+  const [isReady, setIsReady] = useState(
+    initialState === 'PREPARED' || initialState === 'SYNCING',
+  );
 
   useEffect(() => {
+    // Check current state immediately in case it changed before subscription
+    const currentState = matrixService.getSyncState();
+    if (currentState !== syncState) {
+      setSyncState(currentState);
+      setIsReady(currentState === 'PREPARED' || currentState === 'SYNCING');
+    }
+
     const unsubscribe = matrixService.onSyncStateChange(state => {
       setSyncState(state);
       setIsReady(state === 'PREPARED' || state === 'SYNCING');

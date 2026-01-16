@@ -13,7 +13,12 @@ interface Props {
 /**
  * Focusable list item for keyboard navigation
  */
-export function FocusableItem({ label, sublabel, timestamp, isFocused }: Props) {
+export function FocusableItem({
+  label,
+  sublabel,
+  timestamp,
+  isFocused,
+}: Props) {
   return (
     <Box
       flexDirection="column"
@@ -27,9 +32,7 @@ export function FocusableItem({ label, sublabel, timestamp, isFocused }: Props) 
           {isFocused ? '▶ ' : '  '}
           {label}
         </Text>
-        {timestamp && (
-          <Text dimColor>{timestamp}</Text>
-        )}
+        {timestamp && <Text dimColor>{timestamp}</Text>}
       </Box>
       {sublabel && (
         <Box paddingLeft={2}>

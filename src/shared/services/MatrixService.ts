@@ -97,6 +97,7 @@ class MatrixService {
   private messageCallbacks: MessageCallback[] = [];
   private credentialStorage: CredentialStorage;
   private logger?: MatrixLogger;
+  private currentSyncState: string = 'STOPPED';
 
   constructor(credentialStorage: CredentialStorage, logger?: MatrixLogger) {
     this.credentialStorage = credentialStorage;
@@ -219,11 +220,39 @@ class MatrixService {
     return userId.split(':')[0].substring(1);
   }
 
+  /**
+   * Get the current user's display name from their profile
+   */
+  async getDisplayName(): Promise<string | null> {
+    if (!this.client) return null;
+    const userId = this.client.getUserId();
+    if (!userId) return null;
+
+    try {
+      const profile = await this.client.getProfileInfo(userId);
+      return profile.displayname || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Set the current user's display name (friendly name shown to others)
+   */
+  async setDisplayName(displayName: string): Promise<void> {
+    if (!this.client) throw new Error('Not logged in');
+    await this.client.setDisplayName(displayName);
+    log(`[MatrixService] Display name set to: ${displayName}`);
+  }
+
   private setupEventListeners(): void {
     if (!this.client) return;
 
     // Suppress non-critical errors from unsupported Conduit endpoints
     this.client.on(matrix.ClientEvent.Sync, (state, _prevState, data) => {
+      // Track current sync state
+      this.currentSyncState = state;
+
       // Log sync state changes
       if (state === 'ERROR') {
         const dataStr = JSON.stringify(data, null, 2);
@@ -374,8 +403,9 @@ class MatrixService {
   /**
    * Get family members from the family room
    * Returns empty array if family room doesn't exist
+   * @param includeSelf - If true, includes the current user in the list (default: false)
    */
-  async getFamilyMembers(): Promise<FamilyMember[]> {
+  async getFamilyMembers(includeSelf = false): Promise<FamilyMember[]> {
     const familyRoom = await this.getFamilyRoom();
     if (!familyRoom) return [];
 
@@ -383,7 +413,7 @@ class MatrixService {
     const members = familyRoom.getJoinedMembers();
 
     return members
-      .filter(member => member.userId !== myUserId) // Exclude self
+      .filter(member => includeSelf || member.userId !== myUserId)
       .map(member => ({
         userId: member.userId,
         displayName: member.name || member.userId.split(':')[0].substring(1),
@@ -720,11 +750,8 @@ class MatrixService {
   /**
    * Get current sync state
    */
-  getSyncState(): string | null {
-    if (!this.client) return null;
-    // The sync state is tracked internally by the client
-    // We'll need to listen to sync events to track it
-    return 'UNKNOWN'; // TODO: Track sync state in a property
+  getSyncState(): string {
+    return this.currentSyncState;
   }
 
   /**

@@ -73,9 +73,12 @@ export class TuiAudioService {
         });
       });
 
-      this.playProcess.on('error', (err) => {
+      this.playProcess.on('error', err => {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        LogService.getInstance().addEntry('error', `Playback error: ${errorMsg}`);
+        LogService.getInstance().addEntry(
+          'error',
+          `Playback error: ${errorMsg}`,
+        );
         this.isPlaying = false;
         this.currentAudioUrl = null;
       });
@@ -131,23 +134,32 @@ export class TuiAudioService {
     try {
       // Start rec (sox) to capture audio
       this.recProcess = spawn('rec', [
-        '-q',          // quiet
-        '-r', '44100', // sample rate
-        '-c', '1',     // mono
-        '-t', 'raw',   // raw PCM output
-        '-',           // output to stdout
+        '-q', // quiet
+        '-r',
+        '44100', // sample rate
+        '-c',
+        '1', // mono
+        '-t',
+        'raw', // raw PCM output
+        '-', // output to stdout
       ]);
 
       // Start FFmpeg to encode as AAC
       this.ffmpegProcess = spawn('ffmpeg', [
-        '-f', 's16le',      // input format (signed 16-bit little-endian)
-        '-ar', '44100',     // sample rate
-        '-ac', '1',         // mono
-        '-i', 'pipe:0',     // read from stdin
-        '-c:a', 'aac',      // AAC codec
-        '-b:a', '64k',      // bitrate
-        '-y',               // overwrite output file
-        outputPath
+        '-f',
+        's16le', // input format (signed 16-bit little-endian)
+        '-ar',
+        '44100', // sample rate
+        '-ac',
+        '1', // mono
+        '-i',
+        'pipe:0', // read from stdin
+        '-c:a',
+        'aac', // AAC codec
+        '-b:a',
+        '64k', // bitrate
+        '-y', // overwrite output file
+        outputPath,
       ]);
 
       // Pipe rec output to ffmpeg input
@@ -155,15 +167,21 @@ export class TuiAudioService {
         this.recProcess.stdout.pipe(this.ffmpegProcess.stdin);
       }
 
-      this.recProcess.on('error', (err) => {
+      this.recProcess.on('error', err => {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        LogService.getInstance().addEntry('error', `Recording error (rec): ${errorMsg}`);
+        LogService.getInstance().addEntry(
+          'error',
+          `Recording error (rec): ${errorMsg}`,
+        );
         this.isRecording = false;
       });
 
-      this.ffmpegProcess.on('error', (err) => {
+      this.ffmpegProcess.on('error', err => {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        LogService.getInstance().addEntry('error', `Recording error (ffmpeg): ${errorMsg}`);
+        LogService.getInstance().addEntry(
+          'error',
+          `Recording error (ffmpeg): ${errorMsg}`,
+        );
         this.isRecording = false;
       });
     } catch (error) {

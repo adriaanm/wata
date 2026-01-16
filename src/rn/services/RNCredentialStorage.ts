@@ -1,6 +1,9 @@
 import * as Keychain from 'react-native-keychain';
 
-import type { CredentialStorage, StoredCredentials} from '@shared/services/CredentialStorage';
+import type {
+  CredentialStorage,
+  StoredCredentials,
+} from '@shared/services/CredentialStorage';
 
 const KEYCHAIN_SERVICE = 'wata-matrix-credentials';
 
@@ -37,12 +40,13 @@ export class RNCredentialStorage implements CredentialStorage {
   /**
    * Store Matrix session credentials (used by MatrixService)
    */
-  async storeSession(username: string, credentials: StoredCredentials): Promise<void> {
-    await Keychain.setGenericPassword(
-      username,
-      JSON.stringify(credentials),
-      { service: KEYCHAIN_SERVICE },
-    );
+  async storeSession(
+    username: string,
+    credentials: StoredCredentials,
+  ): Promise<void> {
+    await Keychain.setGenericPassword(username, JSON.stringify(credentials), {
+      service: KEYCHAIN_SERVICE,
+    });
   }
 
   /**

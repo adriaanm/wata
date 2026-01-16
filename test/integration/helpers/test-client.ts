@@ -230,10 +230,7 @@ export class TestClient {
         }
       };
 
-      const onTimeline = (
-        event: matrix.MatrixEvent,
-        room?: matrix.Room,
-      ) => {
+      const onTimeline = (event: matrix.MatrixEvent, room?: matrix.Room) => {
         if (resolved || !room || room.roomId !== roomId) return;
 
         if (event.getType() === 'm.room.message') {
@@ -296,7 +293,9 @@ export class TestClient {
 
     console.log(`[TestClient:${this.username}] Creating room...`);
     const result = await this.client.createRoom(options);
-    console.log(`[TestClient:${this.username}] Room created: ${result.room_id}`);
+    console.log(
+      `[TestClient:${this.username}] Room created: ${result.room_id}`,
+    );
 
     // Wait for room to appear in client
     await this.waitForRoom(result.room_id, 5000);
@@ -400,17 +399,17 @@ export class TestClient {
         `[TestClient:${this.username}] Pagination complete, timeline now has ${room.timeline.length} events`,
       );
     } catch (error) {
-      console.log(
-        `[TestClient:${this.username}] Pagination failed:`,
-        error,
-      );
+      console.log(`[TestClient:${this.username}] Pagination failed:`, error);
     }
   }
 
   /**
    * Get all voice messages with pagination to ensure we fetch all from server
    */
-  async getAllVoiceMessages(roomId: string, limit = 100): Promise<VoiceMessage[]> {
+  async getAllVoiceMessages(
+    roomId: string,
+    limit = 100,
+  ): Promise<VoiceMessage[]> {
     if (!this.client) return [];
 
     const room = this.client.getRoom(roomId);

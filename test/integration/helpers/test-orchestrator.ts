@@ -21,10 +21,7 @@ export class TestOrchestrator {
   /**
    * Create and login a test client
    */
-  async createClient(
-    username: string,
-    password: string,
-  ): Promise<TestClient> {
+  async createClient(username: string, password: string): Promise<TestClient> {
     console.log(`[TestOrchestrator] Creating client for ${username}`);
 
     const client = new TestClient(username, password, this.homeserverUrl);
@@ -53,10 +50,7 @@ export class TestOrchestrator {
    *
    * Includes retry logic for Conduit's eventual consistency.
    */
-  async createRoom(
-    owner: string,
-    ...participants: string[]
-  ): Promise<string> {
+  async createRoom(owner: string, ...participants: string[]): Promise<string> {
     console.log(
       `[TestOrchestrator] Creating room: ${owner} with ${participants.join(', ')}`,
     );
@@ -97,9 +91,7 @@ export class TestOrchestrator {
           // Check if already in the room
           const room = client.getRooms().find(r => r.roomId === roomId);
           if (room) {
-            console.log(
-              `[TestOrchestrator] ${participant} already in room`,
-            );
+            console.log(`[TestOrchestrator] ${participant} already in room`);
             joined = true;
           } else if (attempts < maxAttempts) {
             console.log(
@@ -150,7 +142,12 @@ export class TestOrchestrator {
     );
 
     const client = this.getClient(sender);
-    return await client.sendVoiceMessage(roomId, audioBuffer, mimeType, duration);
+    return await client.sendVoiceMessage(
+      roomId,
+      audioBuffer,
+      mimeType,
+      duration,
+    );
   }
 
   /**
@@ -253,10 +250,7 @@ export class TestOrchestrator {
         client.stop();
         console.log(`[TestOrchestrator] Stopped client: ${username}`);
       } catch (error) {
-        console.error(
-          `[TestOrchestrator] Error stopping ${username}:`,
-          error,
-        );
+        console.error(`[TestOrchestrator] Error stopping ${username}:`, error);
       }
     }
 

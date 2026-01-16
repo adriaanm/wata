@@ -16,7 +16,7 @@ export class SilentLogger {
 
   private formatMessage(...args: unknown[]): string {
     const msg = args
-      .map((arg) => {
+      .map(arg => {
         if (typeof arg === 'object' && arg !== null) {
           try {
             return JSON.stringify(arg);
@@ -30,7 +30,10 @@ export class SilentLogger {
     return this.prefix ? `[${this.prefix}] ${msg}` : msg;
   }
 
-  private addToLogService(level: 'log' | 'warn' | 'error', ...args: unknown[]): void {
+  private addToLogService(
+    level: 'log' | 'warn' | 'error',
+    ...args: unknown[]
+  ): void {
     LogService.getInstance().addEntry(level, this.formatMessage(...args));
   }
 

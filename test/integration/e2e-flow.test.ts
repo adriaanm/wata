@@ -147,11 +147,9 @@ describe('End-to-End Voice Chat Flow', () => {
     );
 
     // Alice receives bob's reply
-    const bobReply = await orchestrator.verifyMessageReceived(
-      'alice',
-      roomId,
-      { eventId: bobEventId },
-    );
+    const bobReply = await orchestrator.verifyMessageReceived('alice', roomId, {
+      eventId: bobEventId,
+    });
 
     expect(bobReply.sender).toBe('@bob:localhost');
 
@@ -264,7 +262,11 @@ describe('End-to-End Voice Chat Flow', () => {
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Bob should see alice's messages (use pagination to fetch all)
-    const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 20);
+    const bobMessages = await orchestrator.getAllVoiceMessages(
+      'bob',
+      roomId,
+      20,
+    );
 
     expect(bobMessages.length).toBeGreaterThanOrEqual(3);
 
@@ -327,8 +329,7 @@ describe('End-to-End Voice Chat Flow', () => {
     const aliceClient = orchestrator.getClient('alice');
 
     // Get initial message count
-    const initialCount =
-      aliceClient?.getVoiceMessages(roomId).length || 0;
+    const initialCount = aliceClient?.getVoiceMessages(roomId).length || 0;
 
     // Send message
     const audio = createFakeAudioBuffer(AudioDurations.SHORT);

@@ -16,7 +16,7 @@ interface Props {
   currentProfile: ProfileKey;
 }
 
-type AdminMode = 'menu' | 'invite';
+type AdminMode = 'menu' | 'invite' | 'set-name';
 
 export function AdminView({ onBack, currentProfile }: Props) {
   const profile = PROFILES[currentProfile];
@@ -27,16 +27,23 @@ export function AdminView({ onBack, currentProfile }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [inviteUsername, setInviteUsername] = useState('');
+  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
+  const [newDisplayName, setNewDisplayName] = useState('');
 
   // Load family room state
   const loadFamilyState = async () => {
     setLoading(true);
     setError(null);
     try {
+      // Load current display name
+      const displayName = await matrixService.getDisplayName();
+      setMyDisplayName(displayName);
+
       const roomId = await matrixService.getFamilyRoomId();
       setFamilyRoomId(roomId);
       if (roomId) {
-        const members = await matrixService.getFamilyMembers();
+        // Include self in the member list for admin view
+        const members = await matrixService.getFamilyMembers(true);
         setFamilyMembers(members);
       }
     } catch (err) {
@@ -44,6 +51,34 @@ export function AdminView({ onBack, currentProfile }: Props) {
       LogService.getInstance().addEntry('error', `Admin: ${msg}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Set display name
+  const handleSetDisplayName = async () => {
+    if (!newDisplayName.trim()) return;
+
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await matrixService.setDisplayName(newDisplayName.trim());
+      setMyDisplayName(newDisplayName.trim());
+      setSuccess(`Display name set to "${newDisplayName.trim()}"`);
+      setNewDisplayName('');
+      setMode('menu');
+      // Reload members to show updated name
+      if (familyRoomId) {
+        const members = await matrixService.getFamilyMembers(true);
+        setFamilyMembers(members);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      LogService.getInstance().addEntry(
+        'error',
+        `Set display name failed: ${msg}`,
+      );
     }
   };
 
@@ -59,11 +94,17 @@ export function AdminView({ onBack, currentProfile }: Props) {
       const roomId = await matrixService.createFamilyRoom();
       setFamilyRoomId(roomId);
       setSuccess('Family room created!');
-      LogService.getInstance().addEntry('log', `Created family room: ${roomId}`);
+      LogService.getInstance().addEntry(
+        'log',
+        `Created family room: ${roomId}`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
-      LogService.getInstance().addEntry('error', `Failed to create family: ${msg}`);
+      LogService.getInstance().addEntry(
+        'error',
+        `Failed to create family: ${msg}`,
+      );
     }
   };
 
@@ -90,8 +131,8 @@ export function AdminView({ onBack, currentProfile }: Props) {
       setSuccess(`Invited ${userId}`);
       setInviteUsername('');
       setMode('menu');
-      // Reload members
-      const members = await matrixService.getFamilyMembers();
+      // Reload members (include self for admin view)
+      const members = await matrixService.getFamilyMembers(true);
       setFamilyMembers(members);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -106,6 +147,14 @@ export function AdminView({ onBack, currentProfile }: Props) {
       if (key.escape) {
         setMode('menu');
         setInviteUsername('');
+      }
+      return; // Let TextInput handle other keys
+    }
+
+    if (mode === 'set-name') {
+      if (key.escape) {
+        setMode('menu');
+        setNewDisplayName('');
       }
       return; // Let TextInput handle other keys
     }
@@ -126,6 +175,13 @@ export function AdminView({ onBack, currentProfile }: Props) {
       setSuccess(null);
     }
 
+    if (input === 'n') {
+      setMode('set-name');
+      setNewDisplayName(myDisplayName || '');
+      setError(null);
+      setSuccess(null);
+    }
+
     if (input === 'r') {
       loadFamilyState();
     }
@@ -142,26 +198,60 @@ export function AdminView({ onBack, currentProfile }: Props) {
       </Box>
 
       {/* Loading */}
-      {loading && (
-        <Text color={colors.textMuted}>Loading...</Text>
-      )}
+      {loading && <Text color={colors.textMuted}>Loading...</Text>}
 
       {/* Error */}
       {error && (
-        <Box marginBottom={1} borderStyle="single" borderColor={colors.error} paddingX={1}>
+        <Box
+          marginBottom={1}
+          borderStyle="single"
+          borderColor={colors.error}
+          paddingX={1}
+        >
           <Text color={colors.error}>{error}</Text>
         </Box>
       )}
 
       {/* Success */}
       {success && (
-        <Box marginBottom={1} borderStyle="single" borderColor={colors.playing} paddingX={1}>
+        <Box
+          marginBottom={1}
+          borderStyle="single"
+          borderColor={colors.playing}
+          paddingX={1}
+        >
           <Text color={colors.playing}>{success}</Text>
         </Box>
       )}
 
+      {/* Your display name */}
+      {!loading && (
+        <Box marginBottom={1} flexDirection="column">
+          <Text bold>Your name: </Text>
+          <Text color={myDisplayName ? colors.text : colors.textMuted}>
+            {myDisplayName || '(not set)'}
+          </Text>
+        </Box>
+      )}
+
+      {/* Set name mode */}
+      {mode === 'set-name' && (
+        <Box marginTop={1} marginBottom={1} flexDirection="column">
+          <Text>Enter your friendly name:</Text>
+          <Box>
+            <TextInput
+              value={newDisplayName}
+              onChange={setNewDisplayName}
+              onSubmit={handleSetDisplayName}
+              placeholder="e.g., Mom, Dad, Alice"
+            />
+          </Box>
+          <Text dimColor>Press Enter to save, Esc to cancel</Text>
+        </Box>
+      )}
+
       {/* No family room - offer to create */}
-      {!loading && !familyRoomId && (
+      {!loading && !familyRoomId && mode === 'menu' && (
         <Box flexDirection="column" marginBottom={1}>
           <Text>No family room found.</Text>
           <Text color={colors.accent}>[c] Create family room</Text>
@@ -171,16 +261,24 @@ export function AdminView({ onBack, currentProfile }: Props) {
       {/* Family room exists */}
       {!loading && familyRoomId && (
         <Box flexDirection="column">
-          <Text color={colors.playing}>Family room: {familyRoomId.substring(0, 20)}...</Text>
+          <Text color={colors.playing}>
+            Family room: {familyRoomId.substring(0, 20)}...
+          </Text>
 
           <Box marginTop={1} flexDirection="column">
             <Text bold>Members ({familyMembers.length}):</Text>
             {familyMembers.length === 0 && (
-              <Text color={colors.textMuted}>  No other members yet</Text>
+              <Text color={colors.textMuted}> No members yet</Text>
             )}
-            {familyMembers.map(member => (
-              <Text key={member.userId}>  - {member.displayName}</Text>
-            ))}
+            {familyMembers.map(member => {
+              const isMe = member.userId === matrixService.getUserId();
+              return (
+                <Text key={member.userId}>
+                  {'  '}- {member.displayName}
+                  {isMe && <Text color={colors.textMuted}> (you)</Text>}
+                </Text>
+              );
+            })}
           </Box>
 
           {/* Invite mode */}
@@ -206,10 +304,12 @@ export function AdminView({ onBack, currentProfile }: Props) {
       <Box marginTop={1}>
         <Text dimColor>
           {mode === 'menu'
-            ? (familyRoomId
-                ? '[i] Invite member  [r] Refresh  [Esc] Back'
-                : '[c] Create family  [Esc] Back')
-            : '[Enter] Invite  [Esc] Cancel'}
+            ? familyRoomId
+              ? '[n] Set name  [i] Invite  [r] Refresh  [Esc] Back'
+              : '[n] Set name  [c] Create family  [Esc] Back'
+            : mode === 'invite'
+              ? '[Enter] Invite  [Esc] Cancel'
+              : '[Enter] Save  [Esc] Cancel'}
         </Text>
       </Box>
     </Box>

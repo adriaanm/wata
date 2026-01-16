@@ -199,11 +199,9 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
       );
 
       // Alice receives bob's reply
-      const reply = await orchestrator.verifyMessageReceived(
-        'alice',
-        roomId,
-        { eventId: event2 },
-      );
+      const reply = await orchestrator.verifyMessageReceived('alice', roomId, {
+        eventId: event2,
+      });
 
       expect(reply.sender).toBe('@bob:localhost');
       expect(reply.duration).toBeCloseTo(4000, -2);

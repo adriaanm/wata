@@ -21,7 +21,11 @@ export function LogView({ onBack }: Props) {
     const INDICATOR_HEIGHT = 2;
 
     const availableHeight =
-      terminalHeight - HEADER_HEIGHT - HELP_HEIGHT - MARGIN_HEIGHT - INDICATOR_HEIGHT;
+      terminalHeight -
+      HEADER_HEIGHT -
+      HELP_HEIGHT -
+      MARGIN_HEIGHT -
+      INDICATOR_HEIGHT;
     const maxItems = Math.max(1, availableHeight);
 
     // Center viewport around selected item
@@ -53,11 +57,11 @@ export function LogView({ onBack }: Props) {
     }
 
     if (key.upArrow || input === 'k') {
-      setSelectedIndex((prev) => Math.max(0, prev - 1));
+      setSelectedIndex(prev => Math.max(0, prev - 1));
     }
 
     if (key.downArrow || input === 'j') {
-      setSelectedIndex((prev) => Math.min(logs.length - 1, prev + 1));
+      setSelectedIndex(prev => Math.min(logs.length - 1, prev + 1));
     }
 
     // Jump to top
@@ -132,7 +136,9 @@ export function LogView({ onBack }: Props) {
             backgroundColor={isFocused ? 'gray' : undefined}
             paddingX={isFocused ? 1 : 0}
           >
-            <Text color={getLevelColor(log.level)}>{formatTime(log.timestamp)}</Text>
+            <Text color={getLevelColor(log.level)}>
+              {formatTime(log.timestamp)}
+            </Text>
             <Text> </Text>
             <Text color={getLevelColor(log.level)} bold>
               [{log.level.toUpperCase()}]
@@ -151,7 +157,7 @@ export function LogView({ onBack }: Props) {
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text dimColor>↑↓/jk Navigate  g/G Top/Bottom  c Clear  l/Esc Back</Text>
+        <Text dimColor>↑↓/jk Navigate g/G Top/Bottom c Clear l/Esc Back</Text>
       </Box>
     </Box>
   );

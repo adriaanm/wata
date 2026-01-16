@@ -49,10 +49,12 @@ export function useAudioPlayer() {
   const [currentUri, setCurrentUri] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubProgress = audioService.onPlaybackProgress((pos: number, dur: number) => {
-      setCurrentPosition(pos);
-      setDuration(dur);
-    });
+    const unsubProgress = audioService.onPlaybackProgress(
+      (pos: number, dur: number) => {
+        setCurrentPosition(pos);
+        setDuration(dur);
+      },
+    );
 
     const unsubComplete = audioService.onPlaybackComplete(() => {
       setIsPlaying(false);

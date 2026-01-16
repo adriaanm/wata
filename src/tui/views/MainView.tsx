@@ -1,4 +1,10 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+  useCallback,
+} from 'react';
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import { useRooms, useMatrixSync } from '../hooks/useMatrix.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
@@ -52,10 +58,12 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
   const [sendError, setSendError] = useState<string | null>(null);
 
   // Family members state (loaded async from family room)
-  const [familyMembers, setFamilyMembers] = useState<Array<{
-    userId: string;
-    displayName: string;
-  }>>([]);
+  const [familyMembers, setFamilyMembers] = useState<
+    Array<{
+      userId: string;
+      displayName: string;
+    }>
+  >([]);
   const [familyRoomId, setFamilyRoomId] = useState<string | null>(null);
   const [familyError, setFamilyError] = useState<string | null>(null);
 
@@ -97,8 +105,8 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     // Add family members as contacts
     for (const member of familyMembers) {
       // Find existing DM room with this user
-      const existingDmRoom = rooms.find(r =>
-        r.isDirect && r.name === member.displayName
+      const existingDmRoom = rooms.find(
+        r => r.isDirect && r.name === member.displayName,
       );
 
       result.push({
@@ -210,12 +218,16 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     const ITEM_HEIGHT = 2; // Simpler items without sublabel
 
     const availableHeight =
-      terminalHeight - HEADER_HEIGHT - STATUS_HEIGHT - HELP_HEIGHT - INDICATOR_HEIGHT - MARGIN_HEIGHT;
+      terminalHeight -
+      HEADER_HEIGHT -
+      STATUS_HEIGHT -
+      HELP_HEIGHT -
+      INDICATOR_HEIGHT -
+      MARGIN_HEIGHT;
     const maxItems = Math.max(1, Math.floor(availableHeight / ITEM_HEIGHT));
 
-    const preferredMaxItems = terminalHeight > 30
-      ? Math.floor(maxItems * 0.7)
-      : maxItems;
+    const preferredMaxItems =
+      terminalHeight > 30 ? Math.floor(maxItems * 0.7) : maxItems;
 
     const halfWindow = Math.floor(preferredMaxItems / 2);
     let start = Math.max(0, selectedIndex - halfWindow);
@@ -282,7 +294,10 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
       } else {
         startRecording().catch(err => {
           const errorMsg = err instanceof Error ? err.message : String(err);
-          LogService.getInstance().addEntry('error', `Failed to start recording: ${errorMsg}`);
+          LogService.getInstance().addEntry(
+            'error',
+            `Failed to start recording: ${errorMsg}`,
+          );
         });
         pttTimeoutRef.current = setTimeout(() => {
           doStopAndSend();
@@ -292,7 +307,9 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
   });
 
   // Status indicator for a contact
-  const getStatusIndicator = (contact: Contact): { symbol: string; color: string } | null => {
+  const getStatusIndicator = (
+    contact: Contact,
+  ): { symbol: string; color: string } | null => {
     if (contact.hasError) {
       return { symbol: '⚠', color: colors.error };
     }
@@ -415,7 +432,7 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
       {/* Help text */}
       <Box marginTop={1}>
         <Text dimColor>
-          ↑↓ Navigate  Space Talk  Enter History  a Admin  l Logs  q Quit
+          ↑↓ Navigate Space Talk Enter History a Admin l Logs q Quit
         </Text>
       </Box>
     </Box>

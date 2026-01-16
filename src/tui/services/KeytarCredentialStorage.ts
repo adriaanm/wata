@@ -64,11 +64,14 @@ export class KeytarCredentialStorage {
   /**
    * Store Matrix session credentials for a specific user
    */
-  async storeSession(username: string, credentials: StoredCredentials): Promise<void> {
+  async storeSession(
+    username: string,
+    credentials: StoredCredentials,
+  ): Promise<void> {
     await keytar.setPassword(
       this.getServiceName(username),
       credentials.userId,
-      JSON.stringify(credentials)
+      JSON.stringify(credentials),
     );
   }
 
@@ -76,7 +79,9 @@ export class KeytarCredentialStorage {
    * Retrieve Matrix session credentials for a specific user
    */
   async retrieveSession(username: string): Promise<StoredCredentials | null> {
-    const accounts = await keytar.findCredentials(this.getServiceName(username));
+    const accounts = await keytar.findCredentials(
+      this.getServiceName(username),
+    );
     if (accounts.length === 0) {
       return null;
     }

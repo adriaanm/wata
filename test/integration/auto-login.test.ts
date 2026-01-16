@@ -80,9 +80,7 @@ describe('Auto-Login Flow', () => {
     ).rejects.toThrow();
 
     // Client should not be created (getClient throws when not found)
-    expect(() =>
-      orchestrator.getClient('alice'),
-    ).toThrow('Client not found');
+    expect(() => orchestrator.getClient('alice')).toThrow('Client not found');
   }, 20000);
 
   test('should fail login with non-existent user', async () => {
@@ -91,9 +89,9 @@ describe('Auto-Login Flow', () => {
     ).rejects.toThrow();
 
     // Client should not be created (getClient throws when not found)
-    expect(() =>
-      orchestrator.getClient('nonexistent'),
-    ).toThrow('Client not found');
+    expect(() => orchestrator.getClient('nonexistent')).toThrow(
+      'Client not found',
+    );
   }, 20000);
 
   test('should login multiple users concurrently', async () => {

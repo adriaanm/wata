@@ -29,13 +29,19 @@ export function ContactListView({ onSelectContact, currentProfile }: Props) {
     const MARGIN_HEIGHT = 2;
     const ITEM_HEIGHT = 3;
 
-    const availableHeight = terminalHeight - HEADER_HEIGHT - HELP_HEIGHT - INDICATOR_HEIGHT - MARGIN_HEIGHT;
+    const availableHeight =
+      terminalHeight -
+      HEADER_HEIGHT -
+      HELP_HEIGHT -
+      INDICATOR_HEIGHT -
+      MARGIN_HEIGHT;
     const maxItems = Math.max(1, Math.floor(availableHeight / ITEM_HEIGHT));
 
     // On larger terminals, leave some breathing room (don't fill entire screen)
-    const preferredMaxItems = terminalHeight > 30
-      ? Math.floor(maxItems * 0.7)  // Use 70% of available space
-      : maxItems;
+    const preferredMaxItems =
+      terminalHeight > 30
+        ? Math.floor(maxItems * 0.7) // Use 70% of available space
+        : maxItems;
 
     // Calculate window around selected item
     const halfWindow = Math.floor(preferredMaxItems / 2);
@@ -150,9 +156,7 @@ export function ContactListView({ onSelectContact, currentProfile }: Props) {
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text dimColor>
-          ↑↓/jk Navigate  Enter Select  l Logs  q Quit
-        </Text>
+        <Text dimColor>↑↓/jk Navigate Enter Select l Logs q Quit</Text>
       </Box>
     </Box>
   );

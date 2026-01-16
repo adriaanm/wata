@@ -171,8 +171,16 @@ describe('Message Ordering', () => {
     await new Promise(resolve => setTimeout(resolve, 8000));
 
     // Both clients should see the same ordering (use pagination to fetch all)
-    const aliceMessages = await orchestrator.getAllVoiceMessages('alice', roomId, 50);
-    const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
+    const aliceMessages = await orchestrator.getAllVoiceMessages(
+      'alice',
+      roomId,
+      50,
+    );
+    const bobMessages = await orchestrator.getAllVoiceMessages(
+      'bob',
+      roomId,
+      50,
+    );
 
     // Alternating senders with small delays - accept at least 80%
     expect(aliceMessages.length).toBeGreaterThanOrEqual(8);
@@ -234,8 +242,16 @@ describe('Message Ordering', () => {
 
     // Both clients should see most messages (use pagination to fetch all)
     // Note: Concurrent sends from multiple clients can have sync race conditions
-    const aliceMessages = await orchestrator.getAllVoiceMessages('alice', roomId, 50);
-    const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
+    const aliceMessages = await orchestrator.getAllVoiceMessages(
+      'alice',
+      roomId,
+      50,
+    );
+    const bobMessages = await orchestrator.getAllVoiceMessages(
+      'bob',
+      roomId,
+      50,
+    );
 
     // Concurrent sends from multiple clients have sync race conditions
     // Accept at least 5/10 = 50% for each client
@@ -315,8 +331,16 @@ describe('Message Ordering', () => {
     await orchestrator.verifyMessageReceived('bob', roomId, { eventId }, 15000);
 
     // Both clients should see the same timestamp for this message
-    const aliceMessages = await orchestrator.getAllVoiceMessages('alice', roomId, 50);
-    const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
+    const aliceMessages = await orchestrator.getAllVoiceMessages(
+      'alice',
+      roomId,
+      50,
+    );
+    const bobMessages = await orchestrator.getAllVoiceMessages(
+      'bob',
+      roomId,
+      50,
+    );
 
     const aliceMsg = aliceMessages.find(m => m.eventId === eventId);
     const bobMsg = bobMessages.find(m => m.eventId === eventId);

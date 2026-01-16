@@ -11,9 +11,13 @@ interface Props {
   onBack: () => void;
 }
 
-export function ProfileSelectorView({ currentProfile, onSelectProfile, onBack }: Props) {
+export function ProfileSelectorView({
+  currentProfile,
+  onSelectProfile,
+  onBack,
+}: Props) {
   const [selectedIndex, setSelectedIndex] = React.useState(
-    PROFILE_KEYS.indexOf(currentProfile)
+    PROFILE_KEYS.indexOf(currentProfile),
   );
   const { stdout } = useStdout();
 
@@ -34,11 +38,11 @@ export function ProfileSelectorView({ currentProfile, onSelectProfile, onBack }:
     }
 
     if (key.upArrow || input === 'k') {
-      setSelectedIndex((prev) => Math.max(0, prev - 1));
+      setSelectedIndex(prev => Math.max(0, prev - 1));
     }
 
     if (key.downArrow || input === 'j') {
-      setSelectedIndex((prev) => Math.min(PROFILE_KEYS.length - 1, prev + 1));
+      setSelectedIndex(prev => Math.min(PROFILE_KEYS.length - 1, prev + 1));
     }
 
     // Number shortcuts
@@ -88,9 +92,7 @@ export function ProfileSelectorView({ currentProfile, onSelectProfile, onBack }:
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text dimColor>
-          ↑↓/jk Navigate  Enter/1-2 Select  p/Esc Back
-        </Text>
+        <Text dimColor>↑↓/jk Navigate Enter/1-2 Select p/Esc Back</Text>
       </Box>
     </Box>
   );

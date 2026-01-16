@@ -449,7 +449,9 @@ export class PvRecorderAudioService {
       // Download the audio file
       const response = await fetch(audioUrl, { headers });
       if (!response.ok) {
-        throw new Error(`Failed to download audio: ${response.statusText} (${response.status})`);
+        throw new Error(
+          `Failed to download audio: ${response.statusText} (${response.status})`,
+        );
       }
 
       const arrayBuffer = await response.arrayBuffer();

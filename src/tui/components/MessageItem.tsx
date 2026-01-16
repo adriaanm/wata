@@ -40,7 +40,11 @@ export function MessageItem({
   const icon = isPlaying ? '[▌▌]' : '[▶]';
 
   // Determine border styling based on selection state
-  const borderColor = isSelected ? 'yellow' : isFocused ? colors.focus : colors.backgroundLight;
+  const borderColor = isSelected
+    ? 'yellow'
+    : isFocused
+      ? colors.focus
+      : colors.backgroundLight;
   const borderStyle = isSelected ? 'double' : 'single';
 
   return (
@@ -65,9 +69,7 @@ export function MessageItem({
             {message.senderName}
           </Text>
           <Text> </Text>
-          <Text color={isPlaying ? colors.playing : colors.text}>
-            {icon}
-          </Text>
+          <Text color={isPlaying ? colors.playing : colors.text}>{icon}</Text>
           <Text> </Text>
           <Text dimColor>{formatDuration(message.duration)}</Text>
           <Text> </Text>

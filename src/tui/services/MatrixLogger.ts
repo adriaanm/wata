@@ -21,14 +21,19 @@ export async function configureGlobalMatrixLogger(): Promise<void> {
   const originalFactory = loglevel.methodFactory;
 
   // Custom method factory that redirects to LogService
-  loglevel.methodFactory = function (methodName: string, logLevel: number, loggerName: string | symbol) {
+  loglevel.methodFactory = function (
+    methodName: string,
+    logLevel: number,
+    loggerName: string | symbol,
+  ) {
     // Return a new function that redirects to LogService instead of console
     return function (...args: unknown[]) {
       // Format the message
-      const nameStr = typeof loggerName === 'symbol' ? String(loggerName) : loggerName;
+      const nameStr =
+        typeof loggerName === 'symbol' ? String(loggerName) : loggerName;
       const prefix = nameStr !== 'matrix' ? `[${nameStr}] ` : '';
       const message = args
-        .map((arg) => {
+        .map(arg => {
           if (typeof arg === 'object' && arg !== null) {
             try {
               return JSON.stringify(arg);
@@ -58,7 +63,13 @@ export async function configureGlobalMatrixLogger(): Promise<void> {
 
   // Rebuild all existing loggers to apply the new methodFactory
   // This includes the default 'matrix' logger and any child loggers
-  const loggers = ['matrix', 'matrix-sdk', 'MatrixRTCSession', 'sync', 'client'];
+  const loggers = [
+    'matrix',
+    'matrix-sdk',
+    'MatrixRTCSession',
+    'sync',
+    'client',
+  ];
   for (const name of loggers) {
     const logger = loglevel.getLogger(name);
     logger.rebuild();

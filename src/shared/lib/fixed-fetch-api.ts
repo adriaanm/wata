@@ -38,7 +38,10 @@ function normalizeUrl(url: string): string {
   // Conduit requires trailing slash on pushrules endpoint
   // SDK sends: /_matrix/client/v3/pushrules
   // Conduit expects: /_matrix/client/v3/pushrules/
-  if (normalized.includes('/_matrix/client/v3/pushrules') && !normalized.includes('pushrules/')) {
+  if (
+    normalized.includes('/_matrix/client/v3/pushrules') &&
+    !normalized.includes('pushrules/')
+  ) {
     normalized = normalized.replace('/pushrules', '/pushrules/');
   }
 

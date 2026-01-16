@@ -51,7 +51,7 @@ export class LogService {
   private capture(level: LogEntry['level'], args: unknown[]): void {
     try {
       const message = args
-        .map((arg) => {
+        .map(arg => {
           if (typeof arg === 'object' && arg !== null) {
             try {
               return JSON.stringify(arg);

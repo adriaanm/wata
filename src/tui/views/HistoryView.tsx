@@ -57,12 +57,16 @@ export function HistoryView({
     const ITEM_HEIGHT = 2;
 
     const availableHeight =
-      terminalHeight - HEADER_HEIGHT - ERROR_HEIGHT - HELP_HEIGHT - INDICATOR_HEIGHT - MARGIN_HEIGHT;
+      terminalHeight -
+      HEADER_HEIGHT -
+      ERROR_HEIGHT -
+      HELP_HEIGHT -
+      INDICATOR_HEIGHT -
+      MARGIN_HEIGHT;
     const maxItems = Math.max(1, Math.floor(availableHeight / ITEM_HEIGHT));
 
-    const preferredMaxItems = terminalHeight > 30
-      ? Math.floor(maxItems * 0.7)
-      : maxItems;
+    const preferredMaxItems =
+      terminalHeight > 30 ? Math.floor(maxItems * 0.7) : maxItems;
 
     const halfWindow = Math.floor(preferredMaxItems / 2);
     let start = Math.max(0, selectedIndex - halfWindow);
@@ -102,7 +106,10 @@ export function HistoryView({
     const isYesterday = date.toDateString() === yesterday.toDateString();
 
     if (isToday) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
     } else if (isYesterday) {
       return 'Yesterday';
     } else {
@@ -194,11 +201,7 @@ export function HistoryView({
         const isCurrentlyPlaying = isPlaying && currentUri === message.audioUrl;
 
         return (
-          <Box
-            key={message.eventId}
-            paddingX={1}
-            marginY={0}
-          >
+          <Box key={message.eventId} paddingX={1} marginY={0}>
             {/* Focus indicator */}
             <Text color={isFocused ? colors.focus : undefined}>
               {isFocused ? '▶ ' : '  '}
@@ -215,7 +218,8 @@ export function HistoryView({
             {/* Sender name (for family room) */}
             {contactType === 'family' && (
               <Text color={colors.textMuted} dimColor>
-                {message.senderName}{'  '}
+                {message.senderName}
+                {'  '}
               </Text>
             )}
 
@@ -223,9 +227,7 @@ export function HistoryView({
             <Text dimColor>{formatTimestamp(message.timestamp)}</Text>
 
             {/* Playing indicator */}
-            {isCurrentlyPlaying && (
-              <Text color={colors.playing}> ▌▌</Text>
-            )}
+            {isCurrentlyPlaying && <Text color={colors.playing}> ▌▌</Text>}
           </Box>
         );
       })}
@@ -239,9 +241,7 @@ export function HistoryView({
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text dimColor>
-          ↑↓ Navigate  Enter Play  l Logs  Esc Back
-        </Text>
+        <Text dimColor>↑↓ Navigate Enter Play l Logs Esc Back</Text>
       </Box>
     </Box>
   );

@@ -25,7 +25,13 @@ const logError = (message: string): void => {
 const credentialStorage = new KeytarCredentialStorage();
 export const matrixService = new MatrixService(credentialStorage, silentLogger);
 
-type Screen = 'loading' | 'main' | 'history' | 'admin' | 'log' | 'profile-select';
+type Screen =
+  | 'loading'
+  | 'main'
+  | 'history'
+  | 'admin'
+  | 'log'
+  | 'profile-select';
 
 interface Contact {
   id: string;
@@ -48,11 +54,13 @@ interface AppProps {
 }
 
 export function App({ initialProfile }: AppProps) {
-  const [navigation, setNavigation] = useState<Navigation>({ screen: 'loading' });
+  const [navigation, setNavigation] = useState<Navigation>({
+    screen: 'loading',
+  });
   const [syncState, setSyncState] = useState<string>('STOPPED');
   const [error, setError] = useState<string | null>(null);
   const [currentProfile, setCurrentProfile] = useState<ProfileKey>(
-    (initialProfile && PROFILES[initialProfile]) ? initialProfile : 'alice'
+    initialProfile && PROFILES[initialProfile] ? initialProfile : 'alice',
   );
 
   useEffect(() => {
@@ -66,7 +74,7 @@ export function App({ initialProfile }: AppProps) {
         }
 
         // Listen for sync state changes
-        const unsubscribe = matrixService.onSyncStateChange((state) => {
+        const unsubscribe = matrixService.onSyncStateChange(state => {
           setSyncState(state);
           if (state === 'PREPARED' || state === 'SYNCING') {
             setNavigation({ screen: 'main' });
@@ -80,7 +88,8 @@ export function App({ initialProfile }: AppProps) {
           unsubscribe();
         };
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
         logError(`Failed to initialize auth: ${errorMessage}`);
         setError(`Failed to connect: ${errorMessage}`);
       }
@@ -124,16 +133,23 @@ export function App({ initialProfile }: AppProps) {
 
       // Sync state listener will transition to 'contacts' screen
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       logError(`[App] Failed to switch profile: ${errorMessage}`);
-      setError(`Failed to switch to ${PROFILES[newProfile].displayName}: ${errorMessage}`);
+      setError(
+        `Failed to switch to ${PROFILES[newProfile].displayName}: ${errorMessage}`,
+      );
     }
   };
 
   // Global key handlers
   useInput((input, key) => {
     // Log viewer (always available except in profile-select and admin)
-    if (input === 'l' && navigation.screen !== 'profile-select' && navigation.screen !== 'admin') {
+    if (
+      input === 'l' &&
+      navigation.screen !== 'profile-select' &&
+      navigation.screen !== 'admin'
+    ) {
       setNavigation({
         ...navigation,
         screen: 'log',
@@ -142,7 +158,11 @@ export function App({ initialProfile }: AppProps) {
     }
 
     // Profile switching (always available, even in error state)
-    if (input === 'p' && navigation.screen !== 'profile-select' && navigation.screen !== 'admin') {
+    if (
+      input === 'p' &&
+      navigation.screen !== 'profile-select' &&
+      navigation.screen !== 'admin'
+    ) {
       setNavigation({
         ...navigation,
         screen: 'profile-select',
@@ -169,11 +189,22 @@ export function App({ initialProfile }: AppProps) {
   });
 
   if (navigation.screen === 'loading') {
-    return <LoadingView syncState={syncState} error={error} currentProfile={currentProfile} />;
+    return (
+      <LoadingView
+        syncState={syncState}
+        error={error}
+        currentProfile={currentProfile}
+      />
+    );
   }
 
   if (navigation.screen === 'main') {
-    return <MainView onSelectContact={handleSelectContact} currentProfile={currentProfile} />;
+    return (
+      <MainView
+        onSelectContact={handleSelectContact}
+        currentProfile={currentProfile}
+      />
+    );
   }
 
   if (navigation.screen === 'history' && navigation.contact?.roomId) {
@@ -189,12 +220,7 @@ export function App({ initialProfile }: AppProps) {
   }
 
   if (navigation.screen === 'admin') {
-    return (
-      <AdminView
-        onBack={handleBack}
-        currentProfile={currentProfile}
-      />
-    );
+    return <AdminView onBack={handleBack} currentProfile={currentProfile} />;
   }
 
   if (navigation.screen === 'log') {
