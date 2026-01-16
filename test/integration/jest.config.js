@@ -22,10 +22,14 @@ module.exports = {
   transformIgnorePatterns: [],
   // Setup file to configure logging and other test globals
   setupFilesAfterEnv: ['<rootDir>/test/integration/setup.ts'],
-  // Mock React Native specific modules
+  // Mock React Native specific modules and resolve path aliases
   moduleNameMapper: {
     '^react-native-keychain$': '<rootDir>/test/integration/__mocks__/react-native-keychain.ts',
     '^react-native-fs$': '<rootDir>/test/integration/__mocks__/react-native-fs.ts',
     '^react-native-audio-recorder-player$': '<rootDir>/test/integration/__mocks__/react-native-audio-recorder-player.ts',
+    // Path aliases from tsconfig.json
+    '^@shared/(.*)$': '<rootDir>/src/shared/$1',
+    '^@rn/(.*)$': '<rootDir>/src/rn/$1',
+    '^@tui/(.*)$': '<rootDir>/src/tui/$1',
   },
 };

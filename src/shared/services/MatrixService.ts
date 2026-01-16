@@ -280,7 +280,9 @@ class MatrixService {
       : '';
 
     // Log URL conversion for debugging audio playback issues
-    log(`[MatrixService] Audio URL conversion: MXC=${mxcUrl} -> HTTP=${audioUrl}`);
+    log(
+      `[MatrixService] Audio URL conversion: MXC=${mxcUrl} -> HTTP=${audioUrl}`,
+    );
 
     // Verify the MXC URL format and log the server name
     if (mxcMatch) {
@@ -385,7 +387,9 @@ class MatrixService {
       .map(member => ({
         userId: member.userId,
         displayName: member.name || member.userId.split(':')[0].substring(1),
-        avatarUrl: member.getAvatarUrl(HOMESERVER_URL, 48, 48, 'crop', false, false) || null,
+        avatarUrl:
+          member.getAvatarUrl(HOMESERVER_URL, 48, 48, 'crop', false, false) ||
+          null,
       }));
   }
 
@@ -425,7 +429,10 @@ class MatrixService {
   /**
    * Update m.direct account data to mark a room as a DM
    */
-  private async updateDirectRoomData(userId: string, roomId: string): Promise<void> {
+  private async updateDirectRoomData(
+    userId: string,
+    roomId: string,
+  ): Promise<void> {
     if (!this.client) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -446,6 +453,7 @@ class MatrixService {
   /**
    * Create the family room (admin operation)
    * Creates a private room with alias #family:server
+   * Uses TrustedPrivateChat preset so all members can invite new family members
    */
   async createFamilyRoom(): Promise<string> {
     if (!this.client) throw new Error('Not logged in');
@@ -453,13 +461,17 @@ class MatrixService {
     const serverName = new URL(HOMESERVER_URL).hostname;
     const alias = `family`; // Will become #family:server
 
-    log(`[MatrixService] Creating family room with alias #${alias}:${serverName}`);
+    log(
+      `[MatrixService] Creating family room with alias #${alias}:${serverName}`,
+    );
 
     const result = await this.client.createRoom({
       name: 'Family',
       room_alias_name: alias,
       visibility: matrix.Visibility.Private,
-      preset: matrix.Preset.PrivateChat,
+      // TrustedPrivateChat allows all members to invite, which is appropriate
+      // for a family room where any parent should be able to add members
+      preset: matrix.Preset.TrustedPrivateChat,
     });
 
     log(`[MatrixService] Family room created: ${result.room_id}`);
@@ -479,6 +491,44 @@ class MatrixService {
 
     log(`[MatrixService] Inviting ${userId} to family room`);
     await this.client.invite(familyRoom.roomId, userId);
+  }
+
+  /**
+   * Join a room by room ID or alias
+   */
+  async joinRoom(roomIdOrAlias: string): Promise<void> {
+    if (!this.client) throw new Error('Not logged in');
+    log(`[MatrixService] Joining room ${roomIdOrAlias}`);
+    await this.client.joinRoom(roomIdOrAlias);
+  }
+
+  /**
+   * Check if user is a member of a room
+   */
+  isRoomMember(roomId: string): boolean {
+    if (!this.client) return false;
+    const room = this.client.getRoom(roomId);
+    if (!room) return false;
+    const myMembership = room.getMyMembership();
+    return myMembership === 'join';
+  }
+
+  /**
+   * Get family room ID by resolving alias (even if not joined)
+   * This is useful for joining the family room if it exists
+   */
+  async getFamilyRoomIdFromAlias(): Promise<string | null> {
+    if (!this.client) return null;
+
+    try {
+      const serverName = new URL(HOMESERVER_URL).hostname;
+      const alias = `#family:${serverName}`;
+
+      const result = await this.client.getRoomIdForAlias(alias);
+      return result?.room_id || null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -525,10 +575,14 @@ class MatrixService {
     });
 
     // Log the complete upload response object
-    log(`[MatrixService] Upload complete. Response: ${JSON.stringify(uploadResponse)}`);
+    log(
+      `[MatrixService] Upload complete. Response: ${JSON.stringify(uploadResponse)}`,
+    );
 
     // Verify the MXC URL format and log the server name
-    const mxcMatch = uploadResponse.content_uri.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+    const mxcMatch = uploadResponse.content_uri.match(
+      /^mxc:\/\/([^/]+)\/(.+)$/,
+    );
     if (mxcMatch) {
       const [, serverName, mediaId] = mxcMatch;
       log(`[MatrixService] MXC parsed: server=${serverName}, id=${mediaId}`);
@@ -537,7 +591,9 @@ class MatrixService {
       const testUrl = `${HOMESERVER_URL}/_matrix/media/v3/download/${serverName}/${mediaId}`;
       log(`[MatrixService] Content should be accessible at: ${testUrl}`);
     } else {
-      logWarn(`[MatrixService] Invalid MXC URL format: ${uploadResponse.content_uri}`);
+      logWarn(
+        `[MatrixService] Invalid MXC URL format: ${uploadResponse.content_uri}`,
+      );
     }
 
     // Send the message
