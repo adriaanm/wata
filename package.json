@@ -38,6 +38,7 @@
     "buffer": "^6.0.3",
     "ink": "^6.6.0",
     "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "keytar": "^7.9.0",
     "libopus-node": "^0.0.4",
     "matrix-js-sdk": "^40.0.0",

@@ -5,8 +5,9 @@ import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
 import { silentLogger } from './services/SilentLogger';
 import { PROFILES, type ProfileKey } from './types/profile';
 import { LoadingView } from './views/LoadingView';
-import { ContactListView } from './views/ContactListView';
-import { ChatView } from './views/ChatView';
+import { MainView } from './views/MainView';
+import { HistoryView } from './views/HistoryView';
+import { AdminView } from './views/AdminView';
 import { LogView } from './views/LogView';
 import { ProfileSelectorView } from './views/ProfileSelectorView';
 import { LogService } from './services/LogService.js';
@@ -24,12 +25,21 @@ const logError = (message: string): void => {
 const credentialStorage = new KeytarCredentialStorage();
 export const matrixService = new MatrixService(credentialStorage, silentLogger);
 
-type Screen = 'loading' | 'contacts' | 'chat' | 'log' | 'profile-select';
+type Screen = 'loading' | 'main' | 'history' | 'admin' | 'log' | 'profile-select';
+
+interface Contact {
+  id: string;
+  name: string;
+  type: 'dm' | 'family';
+  roomId: string | null;
+  userId: string | null;
+  hasUnread: boolean;
+  hasError: boolean;
+}
 
 interface Navigation {
   screen: Screen;
-  roomId?: string;
-  roomName?: string;
+  contact?: Contact;
   previousScreen?: Screen;
 }
 
@@ -59,7 +69,7 @@ export function App({ initialProfile }: AppProps) {
         const unsubscribe = matrixService.onSyncStateChange((state) => {
           setSyncState(state);
           if (state === 'PREPARED' || state === 'SYNCING') {
-            setNavigation({ screen: 'contacts' });
+            setNavigation({ screen: 'main' });
           }
           if (state === 'ERROR') {
             setError('Sync error - retrying...');
@@ -79,12 +89,12 @@ export function App({ initialProfile }: AppProps) {
     initAuth();
   }, []);
 
-  const handleSelectContact = (roomId: string, roomName: string) => {
-    setNavigation({ screen: 'chat', roomId, roomName });
+  const handleSelectContact = (contact: Contact) => {
+    setNavigation({ screen: 'history', contact });
   };
 
   const handleBack = () => {
-    setNavigation({ screen: 'contacts' });
+    setNavigation({ screen: 'main' });
   };
 
   const handleSelectProfile = (profileKey: ProfileKey) => {
@@ -122,8 +132,8 @@ export function App({ initialProfile }: AppProps) {
 
   // Global key handlers
   useInput((input, key) => {
-    // Log viewer (always available except in profile-select)
-    if (input === 'l' && navigation.screen !== 'profile-select') {
+    // Log viewer (always available except in profile-select and admin)
+    if (input === 'l' && navigation.screen !== 'profile-select' && navigation.screen !== 'admin') {
       setNavigation({
         ...navigation,
         screen: 'log',
@@ -132,7 +142,7 @@ export function App({ initialProfile }: AppProps) {
     }
 
     // Profile switching (always available, even in error state)
-    if (input === 'p' && navigation.screen !== 'profile-select') {
+    if (input === 'p' && navigation.screen !== 'profile-select' && navigation.screen !== 'admin') {
       setNavigation({
         ...navigation,
         screen: 'profile-select',
@@ -140,12 +150,20 @@ export function App({ initialProfile }: AppProps) {
       });
     }
 
+    // Admin view (from main screen)
+    if (input === 'a' && navigation.screen === 'main') {
+      setNavigation({
+        ...navigation,
+        screen: 'admin',
+        previousScreen: navigation.screen,
+      });
+    }
+
     // Escape key closes profile selector
     if (key.escape && navigation.screen === 'profile-select') {
       setNavigation({
-        screen: navigation.previousScreen || 'contacts',
-        roomId: navigation.roomId,
-        roomName: navigation.roomName,
+        screen: navigation.previousScreen || 'main',
+        contact: navigation.contact,
       });
     }
   });
@@ -154,15 +172,25 @@ export function App({ initialProfile }: AppProps) {
     return <LoadingView syncState={syncState} error={error} currentProfile={currentProfile} />;
   }
 
-  if (navigation.screen === 'contacts') {
-    return <ContactListView onSelectContact={handleSelectContact} currentProfile={currentProfile} />;
+  if (navigation.screen === 'main') {
+    return <MainView onSelectContact={handleSelectContact} currentProfile={currentProfile} />;
   }
 
-  if (navigation.screen === 'chat' && navigation.roomId && navigation.roomName) {
+  if (navigation.screen === 'history' && navigation.contact?.roomId) {
     return (
-      <ChatView
-        roomId={navigation.roomId}
-        roomName={navigation.roomName}
+      <HistoryView
+        roomId={navigation.contact.roomId}
+        contactName={navigation.contact.name}
+        contactType={navigation.contact.type}
+        onBack={handleBack}
+        currentProfile={currentProfile}
+      />
+    );
+  }
+
+  if (navigation.screen === 'admin') {
+    return (
+      <AdminView
         onBack={handleBack}
         currentProfile={currentProfile}
       />
@@ -174,9 +202,8 @@ export function App({ initialProfile }: AppProps) {
       <LogView
         onBack={() => {
           setNavigation({
-            screen: navigation.previousScreen || 'contacts',
-            roomId: navigation.roomId,
-            roomName: navigation.roomName,
+            screen: navigation.previousScreen || 'main',
+            contact: navigation.contact,
           });
         }}
       />
@@ -190,9 +217,8 @@ export function App({ initialProfile }: AppProps) {
         onSelectProfile={handleSelectProfile}
         onBack={() => {
           setNavigation({
-            screen: navigation.previousScreen || 'contacts',
-            roomId: navigation.roomId,
-            roomName: navigation.roomName,
+            screen: navigation.previousScreen || 'main',
+            contact: navigation.contact,
           });
         }}
       />

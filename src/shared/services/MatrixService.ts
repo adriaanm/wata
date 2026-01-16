@@ -60,6 +60,12 @@ export interface MatrixRoom {
   isDirect: boolean;
 }
 
+export interface FamilyMember {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
 export interface VoiceMessage {
   eventId: string;
   sender: string;
@@ -336,6 +342,151 @@ class MatrixService {
       if (!b.lastMessageTime) return -1;
       return b.lastMessageTime - a.lastMessageTime;
     });
+  }
+
+  /**
+   * Get the family room by alias (#family:server)
+   * Returns null if not found or not joined
+   */
+  async getFamilyRoom(): Promise<matrix.Room | null> {
+    if (!this.client) return null;
+
+    try {
+      // Extract server name from homeserver URL
+      const serverName = new URL(HOMESERVER_URL).hostname;
+      const alias = `#family:${serverName}`;
+
+      // Try to resolve the alias
+      const result = await this.client.getRoomIdForAlias(alias);
+      if (result?.room_id) {
+        return this.client.getRoom(result.room_id);
+      }
+    } catch (error) {
+      // Room alias doesn't exist or we don't have access
+      log(`[MatrixService] Family room not found: ${error}`);
+    }
+
+    return null;
+  }
+
+  /**
+   * Get family members from the family room
+   * Returns empty array if family room doesn't exist
+   */
+  async getFamilyMembers(): Promise<FamilyMember[]> {
+    const familyRoom = await this.getFamilyRoom();
+    if (!familyRoom) return [];
+
+    const myUserId = this.client?.getUserId();
+    const members = familyRoom.getJoinedMembers();
+
+    return members
+      .filter(member => member.userId !== myUserId) // Exclude self
+      .map(member => ({
+        userId: member.userId,
+        displayName: member.name || member.userId.split(':')[0].substring(1),
+        avatarUrl: member.getAvatarUrl(HOMESERVER_URL, 48, 48, 'crop', false, false) || null,
+      }));
+  }
+
+  /**
+   * Get or create a DM room with another user
+   * If a DM room already exists, return it. Otherwise, create a new one.
+   */
+  async getOrCreateDmRoom(userId: string): Promise<string> {
+    if (!this.client) throw new Error('Not logged in');
+
+    // Check existing DM rooms
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dmData = this.client.getAccountData('m.direct' as any);
+    if (dmData) {
+      const directRooms = dmData.getContent() as Record<string, string[]>;
+      const existingRoomIds = directRooms[userId];
+      if (existingRoomIds && existingRoomIds.length > 0) {
+        // Return first existing DM room
+        return existingRoomIds[0];
+      }
+    }
+
+    // Create new DM room
+    log(`[MatrixService] Creating DM room with ${userId}`);
+    const result = await this.client.createRoom({
+      is_direct: true,
+      invite: [userId],
+      preset: matrix.Preset.TrustedPrivateChat,
+    });
+
+    // Update m.direct account data
+    await this.updateDirectRoomData(userId, result.room_id);
+
+    return result.room_id;
+  }
+
+  /**
+   * Update m.direct account data to mark a room as a DM
+   */
+  private async updateDirectRoomData(userId: string, roomId: string): Promise<void> {
+    if (!this.client) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dmData = this.client.getAccountData('m.direct' as any);
+    const content = dmData ? { ...dmData.getContent() } : {};
+
+    if (!content[userId]) {
+      content[userId] = [];
+    }
+    if (!content[userId].includes(roomId)) {
+      content[userId].push(roomId);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await this.client.setAccountData('m.direct' as any, content as any);
+  }
+
+  /**
+   * Create the family room (admin operation)
+   * Creates a private room with alias #family:server
+   */
+  async createFamilyRoom(): Promise<string> {
+    if (!this.client) throw new Error('Not logged in');
+
+    const serverName = new URL(HOMESERVER_URL).hostname;
+    const alias = `family`; // Will become #family:server
+
+    log(`[MatrixService] Creating family room with alias #${alias}:${serverName}`);
+
+    const result = await this.client.createRoom({
+      name: 'Family',
+      room_alias_name: alias,
+      visibility: matrix.Visibility.Private,
+      preset: matrix.Preset.PrivateChat,
+    });
+
+    log(`[MatrixService] Family room created: ${result.room_id}`);
+    return result.room_id;
+  }
+
+  /**
+   * Invite a user to the family room (admin operation)
+   */
+  async inviteToFamily(userId: string): Promise<void> {
+    const familyRoom = await this.getFamilyRoom();
+    if (!familyRoom) {
+      throw new Error('Family room does not exist');
+    }
+
+    if (!this.client) throw new Error('Not logged in');
+
+    log(`[MatrixService] Inviting ${userId} to family room`);
+    await this.client.invite(familyRoom.roomId, userId);
+  }
+
+  /**
+   * Get the family room ID (for sending broadcast messages)
+   */
+  async getFamilyRoomId(): Promise<string | null> {
+    const familyRoom = await this.getFamilyRoom();
+    return familyRoom?.roomId || null;
   }
 
   private isDirectRoom(room: matrix.Room): boolean {
