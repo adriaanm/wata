@@ -14,6 +14,7 @@ We are currently developing a prototype. A simple android app (primarily) and a 
 | [docs/quickstart.md](docs/quickstart.md) | Getting started guide |
 | [docs/device-automation.md](docs/device-automation.md) | Physical device testing workflow |
 | [docs/tui-architecture.md](docs/tui-architecture.md) | TUI frontend design |
+| [docs/family-model.md](docs/family-model.md) | Family room architecture and Matrix mapping |
 | [docs/matrix-servers.md](docs/matrix-servers.md) | Matrix server comparison |
 | [docs/testing.md](docs/testing.md) | Test strategy and infrastructure |
 | [docs/voice.md](docs/voice.md) | Audio recording/encoding/playback architecture |
