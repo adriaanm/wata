@@ -93,5 +93,8 @@ Full offline support for incoming and outgoing messages. Retention is configurab
 - Handle key backup and device verification
 - Consider UX for verification on keypad-only devices
 
-# Never
-This app is not intended as a replacement for Signal, Whatsapp,... It should be thought of as a long-range walkie talkie with a few other improvements (mostly about handling temporary lack of connectivity, and ability to form groups). No text, no images,... Minimalist, kid-friendly interface.
+# Non-goals
+
+**Element client interop:** We use Matrix for the protocol and server infrastructure, not for interoperability with Element or other Matrix clients. If Element can receive Wata messages, that's a nice side effect, but not a design goal. Wata-to-Wata communication is what matters.
+
+**General messaging app:** This app is not intended as a replacement for Signal, Whatsapp, etc. It should be thought of as a long-range walkie talkie with a few improvements (handling temporary lack of connectivity, ability to form groups). No text, no images. Minimalist, kid-friendly interface.
