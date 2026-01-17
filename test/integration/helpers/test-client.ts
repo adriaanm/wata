@@ -8,13 +8,18 @@
 import * as matrix from 'matrix-js-sdk';
 
 import { loginToMatrix } from '../../../src/shared/lib/matrix-auth';
-import type { VoiceMessage } from '../../../src/shared/services/MatrixService';
+import type { VoiceMessage as BaseVoiceMessage } from '../../../src/shared/services/MatrixService';
 
 export interface MessageFilter {
   sender?: string;
   eventId?: string;
   minDuration?: number;
   maxDuration?: number;
+}
+
+// Extended VoiceMessage interface for tests that includes MXC URL
+export interface VoiceMessage extends BaseVoiceMessage {
+  mxcUrl?: string;
 }
 
 export class TestClient {
@@ -492,6 +497,39 @@ export class TestClient {
   }
 
   /**
+   * Get the access token for authenticated requests
+   */
+  getAccessToken(): string | undefined {
+    return this.client?.getAccessToken();
+  }
+
+  /**
+   * Download media with authentication
+   */
+  async downloadMedia(mxcUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
+    const mxcMatch = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+    if (!mxcMatch) {
+      throw new Error(`Invalid MXC URL: ${mxcUrl}`);
+    }
+
+    const url = `${this.homeserverUrl}/_matrix/client/v1/media/download/${mxcMatch[1]}/${mxcMatch[2]}`;
+    const token = this.getAccessToken();
+
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to download media: ${response.status} ${response.statusText}`);
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+    return { buffer, contentType };
+  }
+
+  /**
    * Logout and cleanup
    */
   async logout(): Promise<void> {
@@ -523,12 +561,21 @@ export class TestClient {
     const sender = event.getSender();
     if (!sender) return null;
 
+    // Convert MXC URL to HTTP URL manually for Conduit compatibility
+    // Matrix SDK's mxcUrlToHttp() doesn't work reliably with Conduit
+    const mxcUrl = content.url;
+    const mxcMatch = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+    const audioUrl = mxcMatch
+      ? `${this.homeserverUrl}/_matrix/client/v1/media/download/${mxcMatch[1]}/${mxcMatch[2]}`
+      : '';
+
     return {
       eventId: event.getId() || '',
       sender: sender,
       senderName: this.client?.getUser(sender)?.displayName || sender,
       timestamp: event.getTs(),
-      audioUrl: this.client?.mxcUrlToHttp(content.url) || '',
+      audioUrl,
+      mxcUrl,
       duration: content.info?.duration || 0,
       isOwn: sender === this.client?.getUserId(),
     };

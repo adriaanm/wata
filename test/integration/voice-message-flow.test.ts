@@ -298,14 +298,13 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
 
       // Verify the audio URL is valid
       expect(receivedMessage.audioUrl).toMatch(/^http/);
+      expect(receivedMessage.mxcUrl).toMatch(/^mxc:/);
 
-      // Actually download the audio to verify it works
-      const response = await fetch(receivedMessage.audioUrl);
-      expect(response.ok).toBe(true);
-      expect(response.headers.get('content-type')).toMatch(/audio/);
+      // Download the audio using authenticated request
+      const bobClient = orchestrator.getClient('bob');
+      const { buffer: downloadedBuffer, contentType } = await bobClient.downloadMedia(receivedMessage.mxcUrl!);
 
-      // Verify we got the audio data
-      const downloadedBuffer = Buffer.from(await response.arrayBuffer());
+      expect(contentType).toMatch(/audio/);
       expect(downloadedBuffer.length).toBeGreaterThan(0);
       // The downloaded data should match what we uploaded
       expect(downloadedBuffer.equals(audioBuffer)).toBe(true);
@@ -341,11 +340,10 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
         15000,
       );
 
-      // Verify Alice can download Bob's audio
-      const response = await fetch(receivedMessage.audioUrl);
-      expect(response.ok).toBe(true);
+      // Verify Alice can download Bob's audio using authenticated request
+      const aliceClient = orchestrator.getClient('alice');
+      const { buffer: downloadedBuffer } = await aliceClient.downloadMedia(receivedMessage.mxcUrl!);
 
-      const downloadedBuffer = Buffer.from(await response.arrayBuffer());
       expect(downloadedBuffer.equals(audioBuffer)).toBe(true);
     }, 30000);
   });

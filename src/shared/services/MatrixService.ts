@@ -679,7 +679,7 @@ class MatrixService {
       }
     }
 
-    // Second, check for rooms where this user invited us (may not be in m.direct yet)
+    // Second, check for rooms where this user invited us or we created (may not be in m.direct yet)
     const myUserId = this.client.getUserId();
     const rooms = this.client.getRooms();
     for (const room of rooms) {
@@ -692,10 +692,27 @@ class MatrixService {
       const hasTargetUser = members.some(m => m.userId === userId);
       if (!hasTargetUser) continue;
 
-      // Check if this is a DM room (via getDMInviter)
+      // Check if this is a DM room (via getDMInviter or creation event)
       const myMember = room.getMember(myUserId!);
       const dmInviter = myMember?.getDMInviter();
-      if (dmInviter === userId) {
+
+      // Room is a DM if:
+      // 1. The target user invited us (dmInviter === userId), OR
+      // 2. We invited the target user (dmInviter === myUserId), OR
+      // 3. Check the creation event for is_direct flag
+      let isDirectRoom = dmInviter === userId || dmInviter === myUserId;
+
+      // If still unsure, check the room creation event for is_direct flag
+      if (!isDirectRoom) {
+        const createEvent = room.currentState.getStateEvents('m.room.create', '');
+        if (createEvent) {
+          const content = createEvent.getContent();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          isDirectRoom = (content as any).is_direct === true;
+        }
+      }
+
+      if (isDirectRoom) {
         // Found a DM room with this user that wasn't in m.direct
         // Update m.direct and return this room
         log(
