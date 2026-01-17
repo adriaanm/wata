@@ -67,7 +67,7 @@ export function useVoiceMessages(roomId: string) {
     setMessages(matrixService.getVoiceMessages(roomId));
 
     // Subscribe to new messages
-    const unsubscribe = matrixService.onNewVoiceMessage(
+    const unsubscribeMessages = matrixService.onNewVoiceMessage(
       (msgRoomId, message) => {
         if (msgRoomId === roomId) {
           setMessages(prev => [...prev, message]);
@@ -75,7 +75,20 @@ export function useVoiceMessages(roomId: string) {
       },
     );
 
-    return unsubscribe;
+    // Subscribe to receipt updates to refresh readBy status
+    const unsubscribeReceipts = matrixService.onReceiptUpdate(
+      (receiptRoomId) => {
+        if (receiptRoomId === roomId) {
+          // Re-fetch all messages to get updated readBy
+          setMessages(matrixService.getVoiceMessages(roomId));
+        }
+      },
+    );
+
+    return () => {
+      unsubscribeMessages();
+      unsubscribeReceipts();
+    };
   }, [roomId]);
 
   return messages;

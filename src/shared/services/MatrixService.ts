@@ -98,6 +98,7 @@ export interface VoiceMessage {
 type SyncCallback = (state: string) => void;
 type RoomCallback = (rooms: MatrixRoom[]) => void;
 type MessageCallback = (roomId: string, message: VoiceMessage) => void;
+type ReceiptCallback = (roomId: string) => void;
 
 // Logger interface matching matrix-js-sdk's Logger type
 interface MatrixLogger {
@@ -114,6 +115,7 @@ class MatrixService {
   private syncCallbacks: SyncCallback[] = [];
   private roomCallbacks: RoomCallback[] = [];
   private messageCallbacks: MessageCallback[] = [];
+  private receiptCallbacks: ReceiptCallback[] = [];
   private credentialStorage: CredentialStorage;
   private logger?: MatrixLogger;
   private currentSyncState: string = 'STOPPED';
@@ -416,6 +418,12 @@ class MatrixService {
       }
 
       this.notifyRoomUpdate();
+    });
+
+    // Handle read receipts to update message playback status
+    this.client.on(matrix.RoomEvent.Receipt, (_event, room) => {
+      if (!room) return;
+      this.receiptCallbacks.forEach(cb => cb(room.roomId));
     });
 
     // Handle room membership changes to sync m.direct for DM rooms
@@ -1111,6 +1119,15 @@ class MatrixService {
     this.messageCallbacks.push(callback);
     return () => {
       this.messageCallbacks = this.messageCallbacks.filter(
+        cb => cb !== callback,
+      );
+    };
+  }
+
+  onReceiptUpdate(callback: ReceiptCallback): () => void {
+    this.receiptCallbacks.push(callback);
+    return () => {
+      this.receiptCallbacks = this.receiptCallbacks.filter(
         cb => cb !== callback,
       );
     };
