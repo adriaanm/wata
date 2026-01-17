@@ -12,7 +12,7 @@ export function LogView({ onBack }: Props) {
   const { stdout } = useStdout();
   const logs = LogService.getInstance().getLogs();
 
-  // Calculate viewport dimensions (similar to ChatView/ContactListView)
+  // Calculate viewport dimensions (similar to other views)
   const terminalHeight = stdout?.rows || 24;
   const { visibleLogs, hasMore, startIndex } = useMemo(() => {
     const HEADER_HEIGHT = 2;
