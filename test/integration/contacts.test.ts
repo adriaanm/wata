@@ -240,8 +240,8 @@ describe('Contact List', () => {
   // DISABLED on CI: Message delivery timeout - verifyMessageReceived times out
   // after 15s waiting for the last of 3 messages. Conduit on CI has
   // significantly slower message delivery than local testing.
-  const testFn = isCI ? test.skip : test;
-  testFn(
+  const testSkippedOnCI = isCI ? test.skip : test;
+  testSkippedOnCI(
     'should show correct message count in room',
     async () => {
       await orchestrator.createClient(

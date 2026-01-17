@@ -321,8 +321,8 @@ describe('Family Room', () => {
     // Test for idempotency: calling getOrCreateDmRoom twice should return the same room
     // Uses longer wait on CI due to slower m.direct account data propagation
     // DISABLED on CI: m.direct account data doesn't sync reliably even with long waits
-    const testFn = isCI ? test.skip : test;
-    testFn(
+    const testSkippedOnCI = isCI ? test.skip : test;
+    testSkippedOnCI(
       'should return existing DM room on second call',
       async () => {
         // Given: alice and bob have existing DM (from previous call in same session)

@@ -312,8 +312,8 @@ describe('Message Ordering', () => {
   // DISABLED on CI: Message delivery timeout - even with 15s timeout, messages
   // sometimes don't arrive. Conduit on CI appears to have significantly slower
   // message delivery than local testing.
-  const testFn = isCI ? test.skip : test;
-  testFn(
+  const testSkippedOnCI = isCI ? test.skip : test;
+  testSkippedOnCI(
     'timestamp consistency across clients',
     async () => {
       await orchestrator.createClient(
