@@ -359,7 +359,7 @@ class MatrixService {
     if (!this.client) return;
 
     // Suppress non-critical errors from unsupported Conduit endpoints
-    this.client.on(matrix.ClientEvent.Sync, (state, _prevState, data) => {
+    this.client.on(matrix.ClientEvent.Sync, async (state, _prevState, data) => {
       // Track current sync state
       this.currentSyncState = state;
 
@@ -373,6 +373,12 @@ class MatrixService {
 
       if (state === 'PREPARED' || state === 'SYNCING') {
         this.notifyRoomUpdate();
+      }
+
+      // On initial sync, check for DM rooms that need m.direct update
+      // This handles legacy rooms or rooms where the membership listener was missed
+      if (state === 'PREPARED') {
+        await this.syncDirectRoomsFromMembership();
       }
     });
 
@@ -392,6 +398,57 @@ class MatrixService {
 
       this.notifyRoomUpdate();
     });
+
+    // Handle room membership changes to sync m.direct for DM rooms
+    // When we join a room that was created as a DM by another user,
+    // we need to update our own m.direct account data
+    this.client.on(
+      matrix.RoomMemberEvent.Membership,
+      async (event, member, oldMembership) => {
+        if (!this.client) return;
+
+        // Only care about our own membership changes
+        if (member.userId !== this.client.getUserId()) return;
+
+        // Only care when we join a room (from any previous state)
+        if (member.membership !== 'join') return;
+
+        // Skip if we were already joined (no change)
+        if (oldMembership === 'join') return;
+
+        // Check if this room was created as a DM using getDMInviter()
+        // This is the recommended way per matrix-js-sdk docs
+        const dmInviter = member.getDMInviter();
+        if (!dmInviter) return;
+
+        const roomId = event.getRoomId();
+        if (!roomId) return;
+
+        // Check if already in m.direct
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const dmData = this.client.getAccountData('m.direct' as any);
+        const existingDirect = dmData
+          ? (dmData.getContent() as Record<string, string[]>)
+          : {};
+        if (existingDirect[dmInviter]?.includes(roomId)) {
+          // Already tracked, no need to update
+          return;
+        }
+
+        log(
+          `[MatrixService] Joined DM room ${roomId} from ${dmInviter}, updating m.direct`,
+        );
+
+        // Update our m.direct to recognize this as a DM room
+        try {
+          await this.updateDirectRoomData(dmInviter, roomId);
+          // Notify about room updates so UI refreshes
+          this.notifyRoomUpdate();
+        } catch (err) {
+          logError(`[MatrixService] Failed to update m.direct: ${err}`);
+        }
+      },
+    );
 
     // Catch and log HTTP errors without crashing
     this.client.on(matrix.HttpApiEvent.SessionLoggedOut, () => {
@@ -540,15 +597,51 @@ class MatrixService {
   async getOrCreateDmRoom(userId: string): Promise<string> {
     if (!this.client) throw new Error('Not logged in');
 
-    // Check existing DM rooms
+    // First, check existing DM rooms from m.direct
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dmData = this.client.getAccountData('m.direct' as any);
     if (dmData) {
       const directRooms = dmData.getContent() as Record<string, string[]>;
       const existingRoomIds = directRooms[userId];
       if (existingRoomIds && existingRoomIds.length > 0) {
-        // Return first existing DM room
-        return existingRoomIds[0];
+        // Find the first room we're actually a member of AND the target user is also in
+        for (const roomId of existingRoomIds) {
+          const room = this.client.getRoom(roomId);
+          if (room && room.getMyMembership() === 'join') {
+            // Check if the target user is also in the room
+            const targetMember = room.getMember(userId);
+            if (targetMember && targetMember.membership === 'join') {
+              return roomId;
+            }
+          }
+        }
+      }
+    }
+
+    // Second, check for rooms where this user invited us (may not be in m.direct yet)
+    const myUserId = this.client.getUserId();
+    const rooms = this.client.getRooms();
+    for (const room of rooms) {
+      if (room.getMyMembership() !== 'join') continue;
+
+      const members = room.getJoinedMembers();
+      if (members.length !== 2) continue;
+
+      // Check if this is a DM with the target user
+      const hasTargetUser = members.some(m => m.userId === userId);
+      if (!hasTargetUser) continue;
+
+      // Check if this is a DM room (via getDMInviter)
+      const myMember = room.getMember(myUserId!);
+      const dmInviter = myMember?.getDMInviter();
+      if (dmInviter === userId) {
+        // Found a DM room with this user that wasn't in m.direct
+        // Update m.direct and return this room
+        log(
+          `[MatrixService] Found existing DM room ${room.roomId} with ${userId}, updating m.direct`,
+        );
+        await this.updateDirectRoomData(userId, room.roomId);
+        return room.roomId;
       }
     }
 
@@ -588,6 +681,82 @@ class MatrixService {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await this.client.setAccountData('m.direct' as any, content as any);
+  }
+
+  /**
+   * Sync m.direct account data from room membership events
+   * This handles legacy rooms or rooms where the membership event listener was missed.
+   * Called on initial sync to ensure m.direct is up to date.
+   */
+  private async syncDirectRoomsFromMembership(): Promise<void> {
+    if (!this.client) return;
+
+    const myUserId = this.client.getUserId();
+    if (!myUserId) return;
+
+    // Get current m.direct data
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dmData = this.client.getAccountData('m.direct' as any);
+    const existingDirect = dmData
+      ? (dmData.getContent() as Record<string, string[]>)
+      : {};
+
+    // Build a set of all room IDs already in m.direct
+    const knownDmRoomIds = new Set<string>();
+    for (const roomIds of Object.values(existingDirect)) {
+      for (const roomId of roomIds) {
+        knownDmRoomIds.add(roomId);
+      }
+    }
+
+    // Check all joined rooms for DM markers
+    const rooms = this.client.getRooms();
+    let updated = false;
+
+    for (const room of rooms) {
+      // Skip if already known as DM
+      if (knownDmRoomIds.has(room.roomId)) continue;
+
+      // Skip if not joined
+      if (room.getMyMembership() !== 'join') continue;
+
+      // Check if this is a 2-person room (likely DM)
+      const members = room.getJoinedMembers();
+      if (members.length !== 2) continue;
+
+      // Get the other member
+      const otherMember = members.find(m => m.userId !== myUserId);
+      if (!otherMember) continue;
+
+      // Check if this room was created as a DM using getDMInviter()
+      // This is the recommended way per matrix-js-sdk docs
+      const myMember = room.getMember(myUserId);
+      if (!myMember) continue;
+
+      const dmInviter = myMember.getDMInviter();
+      if (dmInviter) {
+        log(
+          `[MatrixService] Found untracked DM room ${room.roomId} with ${dmInviter}, adding to m.direct`,
+        );
+
+        // Add to existing direct data using the inviter
+        if (!existingDirect[dmInviter]) {
+          existingDirect[dmInviter] = [];
+        }
+        if (!existingDirect[dmInviter].includes(room.roomId)) {
+          existingDirect[dmInviter].push(room.roomId);
+          updated = true;
+        }
+      }
+    }
+
+    // Save updated m.direct if we found new DM rooms
+    if (updated) {
+      log('[MatrixService] Updating m.direct with newly discovered DM rooms');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await this.client.setAccountData('m.direct' as any, existingDirect as any);
+      this.notifyRoomUpdate();
+    }
   }
 
   /**

@@ -195,6 +195,39 @@ async function getDmRoom(userId: string): Promise<Room | null> {
 }
 ```
 
+### DM Room Recipient-Side Handling
+
+**Important:** `m.direct` is per-user account data. When Alice creates a DM room with Bob:
+
+1. Alice creates room with `is_direct: true`, invites Bob
+2. Alice updates **her** `m.direct` → `{'@bob:localhost': ['!roomid']}`
+3. Bob receives invite and joins
+4. **Bob's `m.direct` is NOT automatically updated**
+
+If the recipient doesn't update their `m.direct`, they won't recognize the room as a DM. This causes problems:
+- `isDirectRoom()` returns `false` for Bob
+- Bob's contact list doesn't show the existing DM room
+- If Bob tries to message Alice, he creates a **new** room (duplicate!)
+
+**Solution:** When joining a room, check if the invite event had `is_direct: true`. If so, update the local user's `m.direct`:
+
+```typescript
+// When user joins a room, check if it's a DM
+client.on(RoomMemberEvent.Membership, async (event, member) => {
+  if (member.userId !== client.getUserId()) return;
+  if (member.membership !== 'join') return;
+
+  // Check if the invite had is_direct flag
+  const dominated = event.getPrevContent()?.is_direct;
+  if (isDirect) {
+    const inviterId = event.getSender();
+    await updateDirectRoomData(inviterId, event.getRoomId());
+  }
+});
+```
+
+This ensures both parties recognize the room as a DM and prevents duplicate room creation.
+
 ## Future Considerations
 
 ### Public Matrix Server Hosting

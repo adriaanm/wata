@@ -540,6 +540,63 @@ describe('Family Room', () => {
       expect(aliceMsg).toBeTruthy();
       expect(bobMsg).toBeTruthy();
     }, 60000);
+
+    test('bob should recognize DM room after joining (m.direct sync)', async () => {
+      // This test verifies that when Alice creates a DM room with Bob,
+      // and Bob joins, Bob's m.direct account data is updated automatically
+      // so that Bob recognizes the room as a DM (isDirect: true)
+
+      // Given: alice and bob are logged in
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await aliceService.waitForSync();
+
+      await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
+      if (
+        bobService.getSyncState() !== 'PREPARED' &&
+        bobService.getSyncState() !== 'SYNCING'
+      ) {
+        await bobService.waitForSync();
+      }
+
+      // When: Alice creates a DM room with Bob
+      console.log('[Test] Alice creating DM room with Bob...');
+      const dmRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+      console.log('[Test] DM room created:', dmRoomId);
+
+      // And: Bob joins the room
+      console.log('[Test] Bob joining DM room...');
+      await bobService.joinRoom(dmRoomId);
+
+      // Wait for sync and m.direct update
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Then: Bob should recognize the room as a DM
+      const bobRooms = bobService.getDirectRooms();
+      const bobsDmRoom = bobRooms.find(r => r.roomId === dmRoomId);
+      expect(bobsDmRoom).toBeTruthy();
+      expect(bobsDmRoom?.isDirect).toBe(true);
+
+      // And: Bob should be able to find a valid DM room when messaging Alice
+      // Note: Due to test data accumulation, Bob may have older DM rooms with Alice.
+      // The important thing is that getOrCreateDmRoom returns a valid, joined room.
+      const bobsDmRoomId = await bobService.getOrCreateDmRoom('@alice:localhost');
+
+      // Verify it's a valid room Bob is joined to
+      const bobClient = (bobService as any).client;
+      const foundRoom = bobClient?.getRoom(bobsDmRoomId);
+      expect(foundRoom).toBeTruthy();
+      expect(foundRoom?.getMyMembership()).toBe('join');
+
+      // Verify it's a 2-person room with Alice
+      const members = foundRoom?.getJoinedMembers();
+      expect(members?.length).toBe(2);
+      expect(members?.some((m: any) => m.userId === '@alice:localhost')).toBe(true);
+
+      console.log('[Test] Bob found valid DM room with Alice:', bobsDmRoomId);
+    }, 60000);
   });
 });
 
