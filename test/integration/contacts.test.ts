@@ -237,46 +237,55 @@ describe('Contact List', () => {
     expect(ourRoom?.lastMessageTime).toBeNull();
   }, 30000);
 
-  // DISABLED: Message delivery timeout on CI - verifyMessageReceived times out
+  // DISABLED on CI: Message delivery timeout - verifyMessageReceived times out
   // after 15s waiting for the last of 3 messages. Conduit on CI has
   // significantly slower message delivery than local testing.
-  test.skip('should show correct message count in room', async () => {
-    await orchestrator.createClient(
-      TEST_USERS.alice.username,
-      TEST_USERS.alice.password,
-    );
-    await orchestrator.createClient(
-      TEST_USERS.bob.username,
-      TEST_USERS.bob.password,
-    );
-
-    const roomId = await orchestrator.createRoom('alice', 'bob');
-
-    // Send 3 messages and collect event IDs
-    const eventIds: string[] = [];
-    for (let i = 0; i < 3; i++) {
-      const audio = createFakeAudioBuffer(AudioDurations.SHORT);
-      const eventId = await orchestrator.sendVoiceMessage(
-        'alice',
-        roomId,
-        audio,
-        'audio/mp4',
-        AudioDurations.SHORT,
+  const testFn = isCI ? test.skip : test;
+  testFn(
+    'should show correct message count in room',
+    async () => {
+      await orchestrator.createClient(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
       );
-      eventIds.push(eventId);
-    }
+      await orchestrator.createClient(
+        TEST_USERS.bob.username,
+        TEST_USERS.bob.password,
+      );
 
-    // Verify last message is received to ensure sync is complete
-    await orchestrator.verifyMessageReceived(
-      'bob',
-      roomId,
-      { eventId: eventIds[eventIds.length - 1] },
-      15000,
-    );
+      const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Check bob sees all 3 messages (use pagination to ensure all are fetched)
-    const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 20);
+      // Send 3 messages and collect event IDs
+      const eventIds: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const audio = createFakeAudioBuffer(AudioDurations.SHORT);
+        const eventId = await orchestrator.sendVoiceMessage(
+          'alice',
+          roomId,
+          audio,
+          'audio/mp4',
+          AudioDurations.SHORT,
+        );
+        eventIds.push(eventId);
+      }
 
-    expect(messages.length).toBeGreaterThanOrEqual(3);
-  }, 60000);
+      // Verify last message is received to ensure sync is complete
+      await orchestrator.verifyMessageReceived(
+        'bob',
+        roomId,
+        { eventId: eventIds[eventIds.length - 1] },
+        15000,
+      );
+
+      // Check bob sees all 3 messages (use pagination to ensure all are fetched)
+      const messages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        20,
+      );
+
+      expect(messages.length).toBeGreaterThanOrEqual(3);
+    },
+    60000,
+  );
 });

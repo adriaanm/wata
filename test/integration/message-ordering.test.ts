@@ -309,56 +309,66 @@ describe('Message Ordering', () => {
   }, 70000);
 
   // Timestamp consistency across clients with tolerance for CI timing variations
-  // DISABLED: Message delivery timeout on CI - even with 15s timeout, messages
+  // DISABLED on CI: Message delivery timeout - even with 15s timeout, messages
   // sometimes don't arrive. Conduit on CI appears to have significantly slower
   // message delivery than local testing.
-  test.skip('timestamp consistency across clients', async () => {
-    await orchestrator.createClient(
-      TEST_USERS.alice.username,
-      TEST_USERS.alice.password,
-    );
-    await orchestrator.createClient(
-      TEST_USERS.bob.username,
-      TEST_USERS.bob.password,
-    );
+  const testFn = isCI ? test.skip : test;
+  testFn(
+    'timestamp consistency across clients',
+    async () => {
+      await orchestrator.createClient(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await orchestrator.createClient(
+        TEST_USERS.bob.username,
+        TEST_USERS.bob.password,
+      );
 
-    const roomId = await orchestrator.createRoom('alice', 'bob');
+      const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Send a message
-    const audio = createFakeAudioBuffer(AudioDurations.SHORT);
-    const eventId = await orchestrator.sendVoiceMessage(
-      'alice',
-      roomId,
-      audio,
-      'audio/mp4',
-      AudioDurations.SHORT,
-    );
+      // Send a message
+      const audio = createFakeAudioBuffer(AudioDurations.SHORT);
+      const eventId = await orchestrator.sendVoiceMessage(
+        'alice',
+        roomId,
+        audio,
+        'audio/mp4',
+        AudioDurations.SHORT,
+      );
 
-    // Verify message is received by bob
-    await orchestrator.verifyMessageReceived('bob', roomId, { eventId }, 15000);
+      // Verify message is received by bob
+      await orchestrator.verifyMessageReceived(
+        'bob',
+        roomId,
+        { eventId },
+        15000,
+      );
 
-    // Both clients should see the same timestamp for this message
-    const aliceMessages = await orchestrator.getAllVoiceMessages(
-      'alice',
-      roomId,
-      50,
-    );
-    const bobMessages = await orchestrator.getAllVoiceMessages(
-      'bob',
-      roomId,
-      50,
-    );
+      // Both clients should see the same timestamp for this message
+      const aliceMessages = await orchestrator.getAllVoiceMessages(
+        'alice',
+        roomId,
+        50,
+      );
+      const bobMessages = await orchestrator.getAllVoiceMessages(
+        'bob',
+        roomId,
+        50,
+      );
 
-    const aliceMsg = aliceMessages.find(m => m.eventId === eventId);
-    const bobMsg = bobMessages.find(m => m.eventId === eventId);
+      const aliceMsg = aliceMessages.find(m => m.eventId === eventId);
+      const bobMsg = bobMessages.find(m => m.eventId === eventId);
 
-    expect(aliceMsg).toBeDefined();
-    expect(bobMsg).toBeDefined();
+      expect(aliceMsg).toBeDefined();
+      expect(bobMsg).toBeDefined();
 
-    // Timestamps should be (nearly) identical (server-side timestamp)
-    // Allow tolerance for CI timing variations: 2s on CI, 100ms locally
-    const timestampToleranceMs = isCI ? 2000 : 100;
-    const timestampDiff = Math.abs(aliceMsg!.timestamp - bobMsg!.timestamp);
-    expect(timestampDiff).toBeLessThanOrEqual(timestampToleranceMs);
-  }, 45000);
+      // Timestamps should be (nearly) identical (server-side timestamp)
+      // Allow tolerance for CI timing variations: 2s on CI, 100ms locally
+      const timestampToleranceMs = isCI ? 2000 : 100;
+      const timestampDiff = Math.abs(aliceMsg!.timestamp - bobMsg!.timestamp);
+      expect(timestampDiff).toBeLessThanOrEqual(timestampToleranceMs);
+    },
+    45000,
+  );
 });

@@ -320,31 +320,37 @@ describe('Family Room', () => {
 
     // Test for idempotency: calling getOrCreateDmRoom twice should return the same room
     // Uses longer wait on CI due to slower m.direct account data propagation
-    test.skip('should return existing DM room on second call', async () => {
-      // Given: alice and bob have existing DM (from previous call in same session)
-      await aliceService.login(
-        TEST_USERS.alice.username,
-        TEST_USERS.alice.password,
-      );
-      await aliceService.waitForSync();
+    // DISABLED on CI: m.direct account data doesn't sync reliably even with long waits
+    const testFn = isCI ? test.skip : test;
+    testFn(
+      'should return existing DM room on second call',
+      async () => {
+        // Given: alice and bob have existing DM (from previous call in same session)
+        await aliceService.login(
+          TEST_USERS.alice.username,
+          TEST_USERS.alice.password,
+        );
+        await aliceService.waitForSync();
 
-      // Create first DM room
-      const firstRoomId =
-        await aliceService.getOrCreateDmRoom('@bob:localhost');
-      expect(firstRoomId).toBeTruthy();
+        // Create first DM room
+        const firstRoomId =
+          await aliceService.getOrCreateDmRoom('@bob:localhost');
+        expect(firstRoomId).toBeTruthy();
 
-      // Wait for account data to sync (use longer wait on CI)
-      // CI can be significantly slower for account data propagation
-      const syncWaitMs = isCI ? 10000 : 2000;
-      await new Promise(resolve => setTimeout(resolve, syncWaitMs));
+        // Wait for account data to sync (use longer wait on CI)
+        // CI can be significantly slower for account data propagation
+        const syncWaitMs = isCI ? 10000 : 2000;
+        await new Promise(resolve => setTimeout(resolve, syncWaitMs));
 
-      // When: alice calls getOrCreateDmRoom('@bob:localhost') again
-      const secondRoomId =
-        await aliceService.getOrCreateDmRoom('@bob:localhost');
+        // When: alice calls getOrCreateDmRoom('@bob:localhost') again
+        const secondRoomId =
+          await aliceService.getOrCreateDmRoom('@bob:localhost');
 
-      // Then: returns existing room ID
-      expect(secondRoomId).toBe(firstRoomId);
-    }, 35000);
+        // Then: returns existing room ID
+        expect(secondRoomId).toBe(firstRoomId);
+      },
+      35000,
+    );
   });
 
   describe('sendVoiceMessage to family room', () => {
