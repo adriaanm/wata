@@ -147,7 +147,7 @@ export class TestClient {
       let pollInterval: ReturnType<typeof setInterval> | undefined;
 
       const timeout = setTimeout(() => {
-        pollInterval && clearInterval(pollInterval);
+        if (pollInterval) clearInterval(pollInterval);
         this.client?.off(matrix.ClientEvent.Room, checkRoom);
         reject(new Error(`Room ${roomId} not found after ${timeoutMs}ms`));
       }, timeoutMs);
@@ -158,7 +158,7 @@ export class TestClient {
         const room = this.client!.getRoom(roomId);
         if (room) {
           clearTimeout(timeout);
-          pollInterval && clearInterval(pollInterval);
+          if (pollInterval) clearInterval(pollInterval);
           this.client!.off(matrix.ClientEvent.Room, checkRoom);
           console.log(
             `[TestClient:${this.username}] Room found (after ${checkCount} checks)`,
@@ -215,7 +215,7 @@ export class TestClient {
 
       const timeout = setTimeout(() => {
         if (!resolved) {
-          pollInterval && clearInterval(pollInterval);
+          if (pollInterval) clearInterval(pollInterval);
           this.client?.off(matrix.RoomEvent.Timeline, onTimeline);
           reject(
             new Error(
@@ -229,7 +229,7 @@ export class TestClient {
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
-          pollInterval && clearInterval(pollInterval);
+          if (pollInterval) clearInterval(pollInterval);
           this.client?.off(matrix.RoomEvent.Timeline, onTimeline);
           console.log(
             `[TestClient:${this.username}] Message received (${source})`,
