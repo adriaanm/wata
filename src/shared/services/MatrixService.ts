@@ -42,6 +42,11 @@ const logError = (message: string): void => {
 // Configurable for testing - defaults to config
 let HOMESERVER_URL = MATRIX_CONFIG.homeserverUrl;
 
+// Family room alias prefix - can be overridden for tests to avoid conflicts
+// Default: 'family' -> creates #family:server
+// Test: 'family-test' -> creates #family-test:server
+let FAMILY_ALIAS_PREFIX = 'family';
+
 // Allow overriding homeserver for tests
 export function setHomeserverUrl(url: string): void {
   HOMESERVER_URL = url;
@@ -49,6 +54,15 @@ export function setHomeserverUrl(url: string): void {
 
 export function getHomeserverUrl(): string {
   return HOMESERVER_URL;
+}
+
+// Allow overriding family alias prefix for tests
+export function setFamilyAliasPrefix(prefix: string): void {
+  FAMILY_ALIAS_PREFIX = prefix;
+}
+
+export function getFamilyAliasPrefix(): string {
+  return FAMILY_ALIAS_PREFIX;
 }
 
 export interface MatrixRoom {
@@ -543,7 +557,7 @@ class MatrixService {
   }
 
   /**
-   * Get the family room by alias (#family:server)
+   * Get the family room by alias (#family:server or #family-test:server)
    * Returns null if not found or not joined
    */
   async getFamilyRoom(): Promise<matrix.Room | null> {
@@ -552,7 +566,7 @@ class MatrixService {
     try {
       // Extract server name from homeserver URL
       const serverName = new URL(HOMESERVER_URL).hostname;
-      const alias = `#family:${serverName}`;
+      const alias = `#${FAMILY_ALIAS_PREFIX}:${serverName}`;
 
       // Try to resolve the alias
       const result = await this.client.getRoomIdForAlias(alias);
@@ -761,22 +775,21 @@ class MatrixService {
 
   /**
    * Create the family room (admin operation)
-   * Creates a private room with alias #family:server
+   * Creates a private room with configurable alias (default: #family:server)
    * Uses TrustedPrivateChat preset so all members can invite new family members
    */
   async createFamilyRoom(): Promise<string> {
     if (!this.client) throw new Error('Not logged in');
 
     const serverName = new URL(HOMESERVER_URL).hostname;
-    const alias = `family`; // Will become #family:server
 
     log(
-      `[MatrixService] Creating family room with alias #${alias}:${serverName}`,
+      `[MatrixService] Creating family room with alias #${FAMILY_ALIAS_PREFIX}:${serverName}`,
     );
 
     const result = await this.client.createRoom({
       name: 'Family',
-      room_alias_name: alias,
+      room_alias_name: FAMILY_ALIAS_PREFIX,
       visibility: matrix.Visibility.Private,
       // TrustedPrivateChat allows all members to invite, which is appropriate
       // for a family room where any parent should be able to add members
@@ -831,7 +844,7 @@ class MatrixService {
 
     try {
       const serverName = new URL(HOMESERVER_URL).hostname;
-      const alias = `#family:${serverName}`;
+      const alias = `#${FAMILY_ALIAS_PREFIX}:${serverName}`;
 
       const result = await this.client.getRoomIdForAlias(alias);
       return result?.room_id || null;

@@ -11,6 +11,7 @@
 import {
   MatrixService,
   setHomeserverUrl,
+  setFamilyAliasPrefix,
 } from '../../src/shared/services/MatrixService';
 import { createFakeAudioBuffer } from './helpers/audio-helpers';
 
@@ -87,6 +88,9 @@ describe('Family Room', () => {
 
     // Set homeserver URL for MatrixService
     setHomeserverUrl(TEST_HOMESERVER);
+
+    // Use a separate family room for tests to avoid interfering with manual testing
+    setFamilyAliasPrefix('family-test');
   }, 10000);
 
   beforeEach(async () => {
@@ -126,6 +130,9 @@ describe('Family Room', () => {
       // Then: room exists and can be retrieved
       expect(roomId).toBeTruthy();
       expect(roomId).toMatch(/^!/);
+
+      // Wait for room to be synced
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Verify we can get the family room back
       const familyRoom = await aliceService.getFamilyRoom();
@@ -622,6 +629,9 @@ describe('Family Onboarding Flow (E2E)', () => {
     }
 
     setHomeserverUrl(TEST_HOMESERVER);
+
+    // Use a separate family room for tests to avoid interfering with manual testing
+    setFamilyAliasPrefix('family-test');
   }, 10000);
 
   beforeEach(async () => {
