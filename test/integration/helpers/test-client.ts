@@ -144,8 +144,10 @@ export class TestClient {
 
     // Wait for room to appear with retry logic
     return new Promise((resolve, reject) => {
+      let pollInterval: ReturnType<typeof setInterval> | undefined;
+
       const timeout = setTimeout(() => {
-        clearInterval(pollInterval);
+        pollInterval && clearInterval(pollInterval);
         this.client?.off(matrix.ClientEvent.Room, checkRoom);
         reject(new Error(`Room ${roomId} not found after ${timeoutMs}ms`));
       }, timeoutMs);
@@ -156,7 +158,7 @@ export class TestClient {
         const room = this.client!.getRoom(roomId);
         if (room) {
           clearTimeout(timeout);
-          clearInterval(pollInterval);
+          pollInterval && clearInterval(pollInterval);
           this.client!.off(matrix.ClientEvent.Room, checkRoom);
           console.log(
             `[TestClient:${this.username}] Room found (after ${checkCount} checks)`,
@@ -174,7 +176,7 @@ export class TestClient {
       let pollDelay = 100;
       const maxPollDelay = 2000;
 
-      const pollInterval = setInterval(() => {
+      pollInterval = setInterval(() => {
         checkCount++;
         if (!checkRoom()) {
           // Exponential backoff up to max delay
@@ -209,10 +211,11 @@ export class TestClient {
 
     return new Promise((resolve, reject) => {
       let resolved = false;
+      let pollInterval: ReturnType<typeof setInterval> | undefined;
 
       const timeout = setTimeout(() => {
         if (!resolved) {
-          clearInterval(pollInterval);
+          pollInterval && clearInterval(pollInterval);
           this.client?.off(matrix.RoomEvent.Timeline, onTimeline);
           reject(
             new Error(
@@ -226,7 +229,7 @@ export class TestClient {
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
-          clearInterval(pollInterval);
+          pollInterval && clearInterval(pollInterval);
           this.client?.off(matrix.RoomEvent.Timeline, onTimeline);
           console.log(
             `[TestClient:${this.username}] Message received (${source})`,
@@ -274,7 +277,7 @@ export class TestClient {
 
       // Poll periodically as fallback (handles missed events)
       let pollCount = 0;
-      const pollInterval = setInterval(() => {
+      pollInterval = setInterval(() => {
         if (!resolved) {
           pollCount++;
           if (pollCount % 5 === 0) {
