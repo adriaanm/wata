@@ -30,13 +30,9 @@ export function HistoryView({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const { stdout } = useStdout();
 
-  // Filter messages based on contact type:
-  // - For DMs: show only messages from the other person (not your own)
-  // - For family: show all messages from others
+  // Show all messages (both sent and received), most recent first
   const messages = useMemo(() => {
-    const filtered = allMessages.filter(msg => !msg.isOwn);
-    // Reverse to show most recent first
-    return [...filtered].reverse();
+    return [...allMessages].reverse();
   }, [allMessages]);
 
   // Reset selection when messages change
@@ -149,6 +145,17 @@ export function HistoryView({
           stop();
         } else {
           play(message.audioUrl);
+          // Mark incoming messages as played by sending a read receipt
+          if (!message.isOwn) {
+            matrixService
+              .markMessageAsPlayed(roomId, message.eventId)
+              .catch(err => {
+                LogService.getInstance().addEntry(
+                  'warn',
+                  `Failed to mark message as played: ${err}`,
+                );
+              });
+          }
         }
       }
     }
@@ -223,6 +230,7 @@ export function HistoryView({
         const actualIndex = startIndex + visibleIndex;
         const isFocused = actualIndex === selectedIndex;
         const isCurrentlyPlaying = isPlaying && currentUri === message.audioUrl;
+        const wasPlayed = message.readBy && message.readBy.length > 0;
 
         return (
           <Box key={message.eventId} paddingX={1} marginY={0}>
@@ -230,6 +238,15 @@ export function HistoryView({
             <Text color={isFocused ? colors.focus : undefined}>
               {isFocused ? '▶ ' : '  '}
             </Text>
+
+            {/* Direction indicator and status for own messages */}
+            {message.isOwn ? (
+              <Text color={wasPlayed ? colors.accent : colors.textMuted}>
+                {wasPlayed ? '✓✓' : '✓ '}
+              </Text>
+            ) : (
+              <Text color={colors.textMuted}>{'  '}</Text>
+            )}
 
             {/* Duration */}
             <Text color={isCurrentlyPlaying ? colors.playing : undefined}>
@@ -239,10 +256,13 @@ export function HistoryView({
             {/* Spacer */}
             <Box flexGrow={1} />
 
-            {/* Sender name (for family room) */}
-            {contactType === 'family' && (
-              <Text color={colors.textMuted} dimColor>
-                {message.senderName}
+            {/* Sender name (for family room or to distinguish own messages) */}
+            {(contactType === 'family' || message.isOwn) && (
+              <Text
+                color={message.isOwn ? colors.accent : colors.textMuted}
+                dimColor={!message.isOwn}
+              >
+                {message.isOwn ? 'You' : message.senderName}
                 {'  '}
               </Text>
             )}

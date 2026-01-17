@@ -91,6 +91,8 @@ export interface VoiceMessage {
   audioUrl: string;
   duration: number;
   isOwn: boolean;
+  /** For outgoing messages: list of user IDs who have read/played this message */
+  readBy?: string[];
 }
 
 type SyncCallback = (state: string) => void;
@@ -477,7 +479,10 @@ class MatrixService {
     });
   }
 
-  private eventToVoiceMessage(event: matrix.MatrixEvent): VoiceMessage | null {
+  private eventToVoiceMessage(
+    event: matrix.MatrixEvent,
+    room?: matrix.Room,
+  ): VoiceMessage | null {
     const content = event.getContent();
     if (content.msgtype !== 'm.audio') return null;
 
@@ -511,6 +516,16 @@ class MatrixService {
       logWarn(`[MatrixService] Invalid MXC URL format: ${mxcUrl}`);
     }
 
+    const isOwn = sender === this.client?.getUserId();
+
+    // For own messages, get list of users who have read/played
+    let readBy: string[] | undefined;
+    if (isOwn && room) {
+      const readers = room.getUsersReadUpTo(event);
+      // Filter out self
+      readBy = readers.filter(userId => userId !== sender);
+    }
+
     return {
       eventId: event.getId() || '',
       sender: sender,
@@ -518,7 +533,8 @@ class MatrixService {
       timestamp: event.getTs(),
       audioUrl,
       duration: content.info?.duration || 0,
-      isOwn: sender === this.client?.getUserId(),
+      isOwn,
+      readBy,
     };
   }
 
@@ -1039,8 +1055,42 @@ class MatrixService {
           event.getType() === 'm.room.message' && content.msgtype === 'm.audio'
         );
       })
-      .map(event => this.eventToVoiceMessage(event))
+      .map(event => this.eventToVoiceMessage(event, room))
       .filter((msg): msg is VoiceMessage => msg !== null);
+  }
+
+  /**
+   * Mark a message as played by sending a read receipt
+   */
+  async markMessageAsPlayed(roomId: string, eventId: string): Promise<void> {
+    if (!this.client) throw new Error('Not logged in');
+
+    const room = this.client.getRoom(roomId);
+    if (!room) throw new Error('Room not found');
+
+    const event = room.findEventById(eventId);
+    if (!event) throw new Error('Event not found');
+
+    await this.client.sendReadReceipt(event);
+  }
+
+  /**
+   * Get list of users who have read/played a specific message
+   */
+  getMessageReadBy(roomId: string, eventId: string): string[] {
+    if (!this.client) return [];
+
+    const room = this.client.getRoom(roomId);
+    if (!room) return [];
+
+    const event = room.findEventById(eventId);
+    if (!event) return [];
+
+    // Get users who have read up to this event
+    const readers = room.getUsersReadUpTo(event);
+    // Filter out the sender (they don't need to "read" their own message)
+    const sender = event.getSender();
+    return readers.filter(userId => userId !== sender);
   }
 
   onSyncStateChange(callback: SyncCallback): () => void {
