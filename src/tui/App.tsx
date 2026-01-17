@@ -77,7 +77,10 @@ export function App({ initialProfile }: AppProps) {
         const unsubscribe = matrixService.onSyncStateChange(state => {
           setSyncState(state);
           if (state === 'PREPARED' || state === 'SYNCING') {
-            setNavigation({ screen: 'main' });
+            // Only navigate to main if we're still on the loading screen
+            setNavigation(prev =>
+              prev.screen === 'loading' ? { screen: 'main' } : prev,
+            );
           }
           if (state === 'ERROR') {
             setError('Sync error - retrying...');
