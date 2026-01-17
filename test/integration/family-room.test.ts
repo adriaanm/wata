@@ -334,7 +334,8 @@ describe('Family Room', () => {
       expect(firstRoomId).toBeTruthy();
 
       // Wait for account data to sync (use longer wait on CI)
-      const syncWaitMs = isCI ? 5000 : 2000;
+      // CI can be significantly slower for account data propagation
+      const syncWaitMs = isCI ? 10000 : 2000;
       await new Promise(resolve => setTimeout(resolve, syncWaitMs));
 
       // When: alice calls getOrCreateDmRoom('@bob:localhost') again

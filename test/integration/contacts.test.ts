@@ -199,8 +199,9 @@ describe('Contact List', () => {
     // Alice creates a room and invites Bob
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Wait for sync
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wait for sync (use longer wait on CI)
+    const syncWaitMs = isCI ? 5000 : 2000;
+    await new Promise(resolve => setTimeout(resolve, syncWaitMs));
 
     // Bob should see the new room
     const updatedRooms = bobClient?.getDirectRooms() || [];

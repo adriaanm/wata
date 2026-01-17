@@ -355,6 +355,7 @@ describe('Message Ordering', () => {
     // Timestamps should be (nearly) identical (server-side timestamp)
     // Allow tolerance for CI timing variations: 2s on CI, 100ms locally
     const timestampToleranceMs = isCI ? 2000 : 100;
-    expect(aliceMsg!.timestamp).toBeCloseTo(bobMsg!.timestamp, timestampToleranceMs);
+    const timestampDiff = Math.abs(aliceMsg!.timestamp - bobMsg!.timestamp);
+    expect(timestampDiff).toBeLessThanOrEqual(timestampToleranceMs);
   }, 45000);
 });
