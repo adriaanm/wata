@@ -593,15 +593,35 @@ class MatrixService {
     const myUserId = this.client?.getUserId();
     const members = familyRoom.getJoinedMembers();
 
-    return members
-      .filter(member => includeSelf || member.userId !== myUserId)
-      .map(member => ({
+    const filteredMembers = members.filter(
+      member => includeSelf || member.userId !== myUserId,
+    );
+
+    // Fetch profile info for each member to get their global display name
+    const familyMembers: FamilyMember[] = [];
+    for (const member of filteredMembers) {
+      let displayName = member.name;
+
+      // Try to get the global profile display name
+      try {
+        const profile = await this.client?.getProfileInfo(member.userId);
+        if (profile?.displayname) {
+          displayName = profile.displayname;
+        }
+      } catch {
+        // Fall back to room member name or username
+      }
+
+      familyMembers.push({
         userId: member.userId,
-        displayName: member.name || member.userId.split(':')[0].substring(1),
+        displayName: displayName || member.userId.split(':')[0].substring(1),
         avatarUrl:
           member.getAvatarUrl(HOMESERVER_URL, 48, 48, 'crop', false, false) ||
           null,
-      }));
+      });
+    }
+
+    return familyMembers;
   }
 
   /**

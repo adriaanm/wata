@@ -482,19 +482,12 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
                 <Text dimColor>{'─'.repeat(40)}</Text>
               </Box>
             )}
-            <Box>
-              <FocusableItem
-                label={contact.name}
-                isFocused={isFocused}
-                onSelect={() => onSelectContact(contact)}
-              />
-              {/* Status indicator */}
-              {status && (
-                <Box marginLeft={1}>
-                  <Text color={status.color}>{status.symbol}</Text>
-                </Box>
-              )}
-            </Box>
+            <FocusableItem
+              label={contact.name}
+              isFocused={isFocused}
+              onSelect={() => onSelectContact(contact)}
+              statusIndicator={status}
+            />
           </Box>
         );
       })}

@@ -8,6 +8,7 @@ interface Props {
   timestamp?: string;
   isFocused: boolean;
   onSelect: () => void;
+  statusIndicator?: { symbol: string; color: string } | null;
 }
 
 /**
@@ -18,6 +19,7 @@ export function FocusableItem({
   sublabel,
   timestamp,
   isFocused,
+  statusIndicator,
 }: Props) {
   return (
     <Box
@@ -28,10 +30,15 @@ export function FocusableItem({
       marginY={0}
     >
       <Box justifyContent="space-between">
-        <Text bold color={isFocused ? colors.accent : colors.text}>
-          {isFocused ? '▶ ' : '  '}
-          {label}
-        </Text>
+        <Box>
+          <Text bold color={isFocused ? colors.accent : colors.text}>
+            {isFocused ? '▶ ' : '  '}
+            {label}
+          </Text>
+          {statusIndicator && (
+            <Text color={statusIndicator.color}> {statusIndicator.symbol}</Text>
+          )}
+        </Box>
         {timestamp && <Text dimColor>{timestamp}</Text>}
       </Box>
       {sublabel && (
