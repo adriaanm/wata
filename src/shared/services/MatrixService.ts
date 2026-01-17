@@ -98,6 +98,8 @@ class MatrixService {
   private credentialStorage: CredentialStorage;
   private logger?: MatrixLogger;
   private currentSyncState: string = 'STOPPED';
+  private currentUsername: string | null = null;
+  private currentPassword: string | null = null;
 
   constructor(credentialStorage: CredentialStorage, logger?: MatrixLogger) {
     this.credentialStorage = credentialStorage;
@@ -108,10 +110,63 @@ class MatrixService {
     log('[MatrixService] login() called with:');
     log(`  username: ${username}, homeserver: ${HOMESERVER_URL}`);
 
+    // Store credentials for token refresh
+    this.currentUsername = username;
+    this.currentPassword = password;
+
+    // Create refresh callback for token renewal
+    const refreshToken = async () => {
+      log('[MatrixService] Refreshing access token...');
+      if (!this.currentUsername || !this.currentPassword) {
+        logError('[MatrixService] Cannot refresh token: missing credentials');
+        throw new Error('No credentials available for token refresh');
+      }
+
+      try {
+        // Re-login to get a fresh access token
+        const newClient = await loginToMatrix(
+          HOMESERVER_URL,
+          this.currentUsername,
+          this.currentPassword,
+          {
+            deviceName: 'Wata',
+            logger: this.logger,
+          },
+        );
+
+        const newAccessToken = newClient.getAccessToken();
+        if (!newAccessToken) {
+          throw new Error('No access token in refresh response');
+        }
+
+        log('[MatrixService] Token refresh successful');
+
+        // Update stored credentials
+        const credentials: StoredCredentials = {
+          accessToken: newAccessToken,
+          userId: newClient.getUserId() || '',
+          deviceId: newClient.getDeviceId() || '',
+          homeserverUrl: HOMESERVER_URL,
+        };
+        await this.credentialStorage.storeSession(
+          this.currentUsername,
+          credentials,
+        );
+
+        // The newClient will be discarded; the SDK will update the current client
+        // with the new access token
+        return { access_token: newAccessToken };
+      } catch (error) {
+        logError(`[MatrixService] Token refresh failed: ${error}`);
+        throw error;
+      }
+    };
+
     // Use shared login helper to ensure consistency with tests
     this.client = await loginToMatrix(HOMESERVER_URL, username, password, {
       deviceName: 'Wata',
       logger: this.logger,
+      refreshToken,
     });
 
     log('[MatrixService] Login successful, storing credentials');
@@ -157,6 +212,57 @@ class MatrixService {
         return false;
       }
 
+      // Store username for token refresh
+      this.currentUsername = user;
+      // For prototype, use config password for refresh
+      this.currentPassword = MATRIX_CONFIG.password;
+
+      // Create refresh callback for token renewal
+      const refreshToken = async () => {
+        log('[MatrixService] Refreshing access token...');
+        if (!this.currentUsername || !this.currentPassword) {
+          logError('[MatrixService] Cannot refresh token: missing credentials');
+          throw new Error('No credentials available for token refresh');
+        }
+
+        try {
+          // Re-login to get a fresh access token
+          const newClient = await loginToMatrix(
+            HOMESERVER_URL,
+            this.currentUsername,
+            this.currentPassword,
+            {
+              deviceName: 'Wata',
+              logger: this.logger,
+            },
+          );
+
+          const newAccessToken = newClient.getAccessToken();
+          if (!newAccessToken) {
+            throw new Error('No access token in refresh response');
+          }
+
+          log('[MatrixService] Token refresh successful');
+
+          // Update stored credentials
+          const credentials: StoredCredentials = {
+            accessToken: newAccessToken,
+            userId: newClient.getUserId() || '',
+            deviceId: newClient.getDeviceId() || '',
+            homeserverUrl: HOMESERVER_URL,
+          };
+          await this.credentialStorage.storeSession(
+            this.currentUsername,
+            credentials,
+          );
+
+          return { access_token: newAccessToken };
+        } catch (error) {
+          logError(`[MatrixService] Token refresh failed: ${error}`);
+          throw error;
+        }
+      };
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const clientOpts: any = {
         baseUrl: stored.homeserverUrl,
@@ -164,6 +270,7 @@ class MatrixService {
         userId: stored.userId,
         deviceId: stored.deviceId,
         fetchFn: createFixedFetch(),
+        refreshToken,
       };
 
       // Add custom logger if provided (for TUI to suppress console output)
@@ -205,7 +312,10 @@ class MatrixService {
       }
       this.client = null;
     }
+    // Clear stored credentials and in-memory credentials
     await this.credentialStorage.clear();
+    this.currentUsername = null;
+    this.currentPassword = null;
   }
 
   /**

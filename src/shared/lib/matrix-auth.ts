@@ -66,6 +66,7 @@ interface MatrixLogger {
 export interface LoginOptions {
   deviceName?: string;
   logger?: MatrixLogger;
+  refreshToken?: () => Promise<{ access_token: string }>;
 }
 
 /**
@@ -156,6 +157,11 @@ export async function loginToMatrix(
     // Add custom logger if provided (for TUI to suppress console output)
     if (opts.logger) {
       clientOpts.logger = opts.logger;
+    }
+
+    // Add refresh callback if provided (for token renewal)
+    if (opts.refreshToken) {
+      clientOpts.refreshToken = opts.refreshToken;
     }
 
     return matrix.createClient(clientOpts);
