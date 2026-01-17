@@ -8,6 +8,7 @@ import React, {
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import { useRooms, useMatrixSync } from '../hooks/useMatrix.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
+import { useContactStatus } from '../hooks/useContactStatus.js';
 import { matrixService } from '../App.js';
 import { FocusableItem } from '../components/FocusableItem.js';
 import { PROFILES, type ProfileKey } from '../types/profile';
@@ -55,6 +56,16 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
   const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isStoppingRef = useRef(false);
   const [isHoldingSpace, setIsHoldingSpace] = useState(false);
+
+  // Contact status tracking (unread messages and send errors)
+  const {
+    getStatus,
+    markAsRead,
+    setSendError: setContactSendError,
+    clearSendError: clearContactSendError,
+  } = useContactStatus();
+
+  // Track global send error for display
   const [sendError, setSendError] = useState<string | null>(null);
 
   // Family members state (loaded async from family room)
@@ -109,32 +120,37 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
         r => r.isDirect && r.name === member.displayName,
       );
 
+      const contactId = member.userId;
+      const roomId = existingDmRoom?.roomId || null;
+      const status = getStatus(contactId, roomId);
+
       result.push({
-        id: member.userId,
+        id: contactId,
         name: member.displayName,
         type: 'dm',
-        roomId: existingDmRoom?.roomId || null, // null = will create on first message
+        roomId: roomId, // null = will create on first message
         userId: member.userId,
-        hasUnread: false, // TODO: Track unread state
-        hasError: false,
+        hasUnread: status.hasUnread,
+        hasError: status.hasError,
       });
     }
 
     // Add family broadcast option if we have family members
     if (familyRoomId && familyMembers.length > 0) {
+      const status = getStatus('family', familyRoomId);
       result.push({
         id: 'family',
         name: 'Family',
         type: 'family',
         roomId: familyRoomId,
         userId: null,
-        hasUnread: false,
-        hasError: false,
+        hasUnread: status.hasUnread,
+        hasError: status.hasError,
       });
     }
 
     return result;
-  }, [rooms, familyMembers, familyRoomId]);
+  }, [rooms, familyMembers, familyRoomId, getStatus]);
 
   // Stop recording and send message
   const doStopAndSend = useCallback(async () => {
@@ -206,14 +222,23 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
         `Voice message sent to ${contact.name}`,
       );
       setSendError(null);
+      clearContactSendError(contact.id);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       LogService.getInstance().addEntry('error', `Failed to send: ${errorMsg}`);
       setSendError(errorMsg);
+      setContactSendError(contact.id, errorMsg);
     } finally {
       isStoppingRef.current = false;
     }
-  }, [isRecording, stopRecording, contacts, selectedIndex]);
+  }, [
+    isRecording,
+    stopRecording,
+    contacts,
+    selectedIndex,
+    clearContactSendError,
+    setContactSendError,
+  ]);
 
   // Clear PTT timeout on unmount or when recording stops
   useEffect(() => {
@@ -299,12 +324,14 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
       if (contact.type === 'dm') {
         // For DMs, we need a roomId. If it doesn't exist, create it on-demand
         if (contact.roomId) {
+          markAsRead(contact.roomId);
           onSelectContact(contact);
         } else if (contact.userId) {
           // Create DM room on-demand for viewing history
           matrixService
             .getOrCreateDmRoom(contact.userId)
             .then(roomId => {
+              markAsRead(roomId);
               // Update the contact with the new roomId and select it
               const updatedContact = { ...contact, roomId };
               onSelectContact(updatedContact);
@@ -318,13 +345,16 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
             });
         }
       } else if (contact.type === 'family') {
-        // TODO: Show family room history
+        if (contact.roomId) {
+          markAsRead(contact.roomId);
+        }
         onSelectContact(contact);
       }
     }
 
     // Space for PTT (hold-to-record)
     if (input === ' ') {
+      const contact = contacts[selectedIndex];
       if (isRecording) {
         setIsHoldingSpace(true);
         if (pttTimeoutRef.current) {
@@ -336,6 +366,9 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
       } else {
         // Clear any previous send error when starting a new recording
         setSendError(null);
+        if (contact) {
+          clearContactSendError(contact.id);
+        }
         startRecording().catch(err => {
           const errorMsg = err instanceof Error ? err.message : String(err);
           LogService.getInstance().addEntry(

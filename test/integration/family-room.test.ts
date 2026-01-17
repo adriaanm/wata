@@ -589,7 +589,8 @@ describe('Family Room', () => {
       // And: Bob should be able to find a valid DM room when messaging Alice
       // Note: Due to test data accumulation, Bob may have older DM rooms with Alice.
       // The important thing is that getOrCreateDmRoom returns a valid, joined room.
-      const bobsDmRoomId = await bobService.getOrCreateDmRoom('@alice:localhost');
+      const bobsDmRoomId =
+        await bobService.getOrCreateDmRoom('@alice:localhost');
 
       // Verify it's a valid room Bob is joined to
       const bobClient = (bobService as any).client;
@@ -600,7 +601,9 @@ describe('Family Room', () => {
       // Verify it's a 2-person room with Alice
       const members = foundRoom?.getJoinedMembers();
       expect(members?.length).toBe(2);
-      expect(members?.some((m: any) => m.userId === '@alice:localhost')).toBe(true);
+      expect(members?.some((m: any) => m.userId === '@alice:localhost')).toBe(
+        true,
+      );
 
       console.log('[Test] Bob found valid DM room with Alice:', bobsDmRoomId);
     }, 60000);

@@ -768,7 +768,10 @@ class MatrixService {
     if (updated) {
       log('[MatrixService] Updating m.direct with newly discovered DM rooms');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await this.client.setAccountData('m.direct' as any, existingDirect as any);
+      await this.client.setAccountData(
+        'm.direct' as any,
+        existingDirect as any,
+      );
       this.notifyRoomUpdate();
     }
   }
