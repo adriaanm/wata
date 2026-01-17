@@ -302,7 +302,8 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
 
       // Download the audio using authenticated request
       const bobClient = orchestrator.getClient('bob');
-      const { buffer: downloadedBuffer, contentType } = await bobClient.downloadMedia(receivedMessage.mxcUrl!);
+      const { buffer: downloadedBuffer, contentType } =
+        await bobClient.downloadMedia(receivedMessage.mxcUrl!);
 
       expect(contentType).toMatch(/audio/);
       expect(downloadedBuffer.length).toBeGreaterThan(0);
@@ -342,7 +343,9 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
 
       // Verify Alice can download Bob's audio using authenticated request
       const aliceClient = orchestrator.getClient('alice');
-      const { buffer: downloadedBuffer } = await aliceClient.downloadMedia(receivedMessage.mxcUrl!);
+      const { buffer: downloadedBuffer } = await aliceClient.downloadMedia(
+        receivedMessage.mxcUrl!,
+      );
 
       expect(downloadedBuffer.equals(audioBuffer)).toBe(true);
     }, 30000);

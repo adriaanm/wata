@@ -506,7 +506,9 @@ export class TestClient {
   /**
    * Download media with authentication
    */
-  async downloadMedia(mxcUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
+  async downloadMedia(
+    mxcUrl: string,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
     const mxcMatch = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
     if (!mxcMatch) {
       throw new Error(`Invalid MXC URL: ${mxcUrl}`);
@@ -520,11 +522,14 @@ export class TestClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to download media: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Failed to download media: ${response.status} ${response.statusText}`,
+      );
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const contentType =
+      response.headers.get('content-type') || 'application/octet-stream';
 
     return { buffer, contentType };
   }
@@ -592,7 +597,6 @@ export class TestClient {
   }
 
   private isDirectRoom(room: matrix.Room): boolean {
-     
     const dmData = this.client?.getAccountData('m.direct' as any);
     if (!dmData) return false;
 

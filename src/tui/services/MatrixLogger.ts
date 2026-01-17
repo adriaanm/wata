@@ -14,7 +14,6 @@ import { LogService } from './LogService.js';
  * to LogService, ensuring complete silence on console/stdout.
  */
 export async function configureGlobalMatrixLogger(): Promise<void> {
-   
   const loglevel = (await import('loglevel')).default;
 
   // Store original loglevel methodFactory (currently unused, kept for potential future use)

@@ -1,12 +1,8 @@
 import { Buffer } from 'buffer';
 
-
 import { MATRIX_CONFIG } from '@shared/config/matrix';
 import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
-import {
-  loginToMatrix,
-  type StoredCredentials,
-} from '@shared/lib/matrix-auth';
+import { loginToMatrix, type StoredCredentials } from '@shared/lib/matrix-auth';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';
 import { LogService } from '@tui/services/LogService';
 import type { MatrixClient } from 'matrix-js-sdk';
@@ -703,7 +699,10 @@ class MatrixService {
 
       // If still unsure, check the room creation event for is_direct flag
       if (!isDirectRoom) {
-        const createEvent = room.currentState.getStateEvents('m.room.create', '');
+        const createEvent = room.currentState.getStateEvents(
+          'm.room.create',
+          '',
+        );
         if (createEvent) {
           const content = createEvent.getContent();
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -840,7 +839,7 @@ class MatrixService {
     // Save updated m.direct if we found new DM rooms
     if (updated) {
       log('[MatrixService] Updating m.direct with newly discovered DM rooms');
-       
+
       await this.client.setAccountData(
         'm.direct' as any,
         existingDirect as any,

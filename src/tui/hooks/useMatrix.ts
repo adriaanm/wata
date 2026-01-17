@@ -77,14 +77,12 @@ export function useVoiceMessages(roomId: string) {
     );
 
     // Subscribe to receipt updates to refresh readBy status
-    const unsubscribeReceipts = matrixService.onReceiptUpdate(
-      (receiptRoomId) => {
-        if (receiptRoomId === roomId) {
-          // Re-fetch all messages to get updated readBy
-          setMessages(matrixService.getVoiceMessages(roomId));
-        }
-      },
-    );
+    const unsubscribeReceipts = matrixService.onReceiptUpdate(receiptRoomId => {
+      if (receiptRoomId === roomId) {
+        // Re-fetch all messages to get updated readBy
+        setMessages(matrixService.getVoiceMessages(roomId));
+      }
+    });
 
     return () => {
       unsubscribeMessages();

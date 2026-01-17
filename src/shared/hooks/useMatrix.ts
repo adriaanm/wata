@@ -1,4 +1,3 @@
-
 import type { MatrixRoom, VoiceMessage } from '@shared/services/MatrixService';
 import { matrixService } from '@shared/services/MatrixService.rn';
 import { useState, useEffect, useCallback } from 'react';

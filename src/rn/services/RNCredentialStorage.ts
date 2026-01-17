@@ -4,7 +4,6 @@ import type {
 } from '@shared/services/CredentialStorage';
 import * as Keychain from 'react-native-keychain';
 
-
 const KEYCHAIN_SERVICE = 'wata-matrix-credentials';
 
 /**
