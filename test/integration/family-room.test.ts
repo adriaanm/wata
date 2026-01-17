@@ -328,8 +328,8 @@ describe('Family Room', () => {
         await aliceService.getOrCreateDmRoom('@bob:localhost');
       expect(firstRoomId).toBeTruthy();
 
-      // Wait for account data to sync
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for account data to sync (increased for CI which is slower)
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       // When: alice calls getOrCreateDmRoom('@bob:localhost') again
       const secondRoomId =
