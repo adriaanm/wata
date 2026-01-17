@@ -152,6 +152,30 @@ export function HistoryView({
         }
       }
     }
+
+    // Delete message
+    if (input === 'd' || key.delete) {
+      const message = messages[selectedIndex];
+      if (message) {
+        // Stop playback if this message is playing
+        if (isPlaying && currentUri === message.audioUrl) {
+          stop();
+        }
+
+        matrixService.redactMessage(roomId, message.eventId).catch(err => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          LogService.getInstance().addEntry(
+            'error',
+            `Failed to delete message: ${errorMsg}`,
+          );
+        });
+
+        // Adjust selection if we deleted the last item
+        if (selectedIndex >= messages.length - 1 && selectedIndex > 0) {
+          setSelectedIndex(selectedIndex - 1);
+        }
+      }
+    }
   });
 
   return (
@@ -241,7 +265,7 @@ export function HistoryView({
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text dimColor>↑↓ Navigate Enter Play l Logs Esc Back</Text>
+        <Text dimColor>↑↓ Navigate Enter Play d Delete Esc Back</Text>
       </Box>
     </Box>
   );
