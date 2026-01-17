@@ -47,6 +47,9 @@ let HOMESERVER_URL = MATRIX_CONFIG.homeserverUrl;
 // Test: 'family-test' -> creates #family-test:server
 let FAMILY_ALIAS_PREFIX = 'family';
 
+// Message retention period (1 day in milliseconds)
+const MESSAGE_RETENTION_MS = 24 * 60 * 60 * 1000;
+
 // Allow overriding homeserver for tests
 export function setHomeserverUrl(url: string): void {
   HOMESERVER_URL = url;
@@ -685,6 +688,16 @@ class MatrixService {
       is_direct: true,
       invite: [userId],
       preset: matrix.Preset.TrustedPrivateChat,
+      // Set message retention to 1 day
+      initial_state: [
+        {
+          type: 'm.room.retention',
+          state_key: '',
+          content: {
+            max_lifetime: MESSAGE_RETENTION_MS,
+          },
+        },
+      ],
     });
 
     // Update m.direct account data
@@ -817,6 +830,16 @@ class MatrixService {
       // TrustedPrivateChat allows all members to invite, which is appropriate
       // for a family room where any parent should be able to add members
       preset: matrix.Preset.TrustedPrivateChat,
+      // Set message retention to 1 day
+      initial_state: [
+        {
+          type: 'm.room.retention',
+          state_key: '',
+          content: {
+            max_lifetime: MESSAGE_RETENTION_MS,
+          },
+        },
+      ],
     });
 
     log(`[MatrixService] Family room created: ${result.room_id}`);
