@@ -475,16 +475,13 @@ export class PvRecorderAudioService {
 
         await writeFile(oggPath, audioBuffer);
 
-        // Decode with FFmpeg
+        // Decode with FFmpeg (suppress output to avoid terminal interference)
         await new Promise<void>((resolve, reject) => {
-          const ffmpeg = spawn('ffmpeg', [
-            '-i',
-            oggPath,
-            '-f',
-            'wav',
-            '-y',
-            wavPath,
-          ]);
+          const ffmpeg = spawn(
+            'ffmpeg',
+            ['-i', oggPath, '-f', 'wav', '-y', wavPath],
+            { stdio: 'ignore' },
+          );
 
           ffmpeg.on('close', code => {
             // Cleanup source file
@@ -510,7 +507,8 @@ export class PvRecorderAudioService {
       }
 
       // Play using afplay (macOS built-in)
-      this.playProcess = spawn('afplay', [playPath]);
+      // Use 'ignore' for stdio to prevent any output from interfering with terminal input
+      this.playProcess = spawn('afplay', [playPath], { stdio: 'ignore' });
 
       this.playProcess.on('close', () => {
         this.isPlaying = false;
