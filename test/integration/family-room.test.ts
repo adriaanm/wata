@@ -16,6 +16,9 @@ import {
 
 import { createFakeAudioBuffer } from './helpers/audio-helpers';
 
+// Detect if running in CI for timing adjustments
+const isCI = process.env.CI === 'true';
+
 // Simple in-memory credential storage for testing
 class TestCredentialStorage {
   private sessions = new Map<string, object>();
@@ -315,11 +318,9 @@ describe('Family Room', () => {
       expect(roomId).toMatch(/^!/);
     }, 30000);
 
-    // DISABLED: Flaky on CI due to timing issues with m.direct account data propagation.
-    // The test expects that calling getOrCreateDmRoom twice returns the same room ID,
-    // but on CI the account data doesn't propagate in time, causing a new room to be created.
-    // TODO: Re-enable after fixing test isolation or improving the fallback logic.
-    test.skip('should return existing DM room on second call', async () => {
+    // Test for idempotency: calling getOrCreateDmRoom twice should return the same room
+    // Uses longer wait on CI due to slower m.direct account data propagation
+    test('should return existing DM room on second call', async () => {
       // Given: alice and bob have existing DM (from previous call in same session)
       await aliceService.login(
         TEST_USERS.alice.username,
@@ -332,8 +333,9 @@ describe('Family Room', () => {
         await aliceService.getOrCreateDmRoom('@bob:localhost');
       expect(firstRoomId).toBeTruthy();
 
-      // Wait for account data to sync (increased for CI which is slower)
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for account data to sync (use longer wait on CI)
+      const syncWaitMs = isCI ? 5000 : 2000;
+      await new Promise(resolve => setTimeout(resolve, syncWaitMs));
 
       // When: alice calls getOrCreateDmRoom('@bob:localhost') again
       const secondRoomId =

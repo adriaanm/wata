@@ -17,6 +17,9 @@ const TEST_USERS = {
   bob: { username: 'bob', password: 'testpass123' },
 };
 
+// Detect if running in CI for timing adjustments
+const isCI = process.env.CI === 'true';
+
 describe('Contact List', () => {
   let orchestrator: TestOrchestrator;
 
@@ -94,9 +97,8 @@ describe('Contact List', () => {
     expect(typeof ourRoom?.name).toBe('string');
   }, 30000);
 
-  // DISABLED: Flaky on CI due to timing issues with message reception
-  // TODO: Re-enable after fixing test isolation
-  test.skip('should show last message preview', async () => {
+  // Test for last message preview in room list
+  test('should show last message preview', async () => {
     await orchestrator.createClient(
       TEST_USERS.alice.username,
       TEST_USERS.alice.password,
@@ -118,8 +120,9 @@ describe('Contact List', () => {
       AudioDurations.SHORT,
     );
 
-    // Wait for message to sync
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wait for message to sync (use longer wait on CI)
+    const syncWaitMs = isCI ? 5000 : 2000;
+    await new Promise(resolve => setTimeout(resolve, syncWaitMs));
 
     // Check room list shows last message
     const bobClient = orchestrator.getClient('bob');
@@ -128,6 +131,7 @@ describe('Contact List', () => {
     const ourRoom = rooms?.find(r => r.roomId === roomId);
     expect(ourRoom?.lastMessage).toBeDefined();
     expect(ourRoom?.lastMessageTime).toBeDefined();
+    // Timestamp should be positive (message was received)
     expect(ourRoom?.lastMessageTime).toBeGreaterThan(0);
   }, 35000);
 
