@@ -61,7 +61,8 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     }>
   >([]);
   const [familyRoomId, setFamilyRoomId] = useState<string | null>(null);
-  const [familyError, setFamilyError] = useState<string | null>(null);
+  // Error state is set but not currently displayed to user (TODO: add error UI)
+  const [_familyError, setFamilyError] = useState<string | null>(null);
 
   // Load family members from family room
   useEffect(() => {
@@ -89,7 +90,8 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     const result: Contact[] = [];
 
     // Build a map of userId -> roomId from existing DM rooms
-    const dmRoomByUser = new Map<string, string>();
+    // Note: Currently not used, kept for potential future optimization
+    const _dmRoomByUser = new Map<string, string>();
     for (const room of rooms) {
       if (room.isDirect) {
         // Extract the other user's ID from the room name or members

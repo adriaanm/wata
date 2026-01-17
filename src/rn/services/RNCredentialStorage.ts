@@ -52,7 +52,7 @@ export class RNCredentialStorage implements CredentialStorage {
   /**
    * Retrieve Matrix session credentials (used by MatrixService)
    */
-  async retrieveSession(username: string): Promise<StoredCredentials | null> {
+  async retrieveSession(_username: string): Promise<StoredCredentials | null> {
     const credentials = await Keychain.getGenericPassword({
       service: KEYCHAIN_SERVICE,
     });
@@ -67,7 +67,7 @@ export class RNCredentialStorage implements CredentialStorage {
   /**
    * Clear credentials for a specific user
    */
-  async clearUser(username: string): Promise<void> {
+  async clearUser(_username: string): Promise<void> {
     // RN Keychain doesn't support per-user deletion in the same service
     // We clear all credentials since RN uses single-user model
     await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });

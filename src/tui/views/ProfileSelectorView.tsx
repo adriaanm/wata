@@ -1,5 +1,5 @@
-import { Box, Text, useInput, useStdout } from 'ink';
-import React, { useMemo } from 'react';
+import { Box, Text, useInput } from 'ink';
+import React from 'react';
 
 import { colors } from '../theme.js';
 import { PROFILES, type ProfileKey } from '../types/profile.js';
@@ -20,7 +20,6 @@ export function ProfileSelectorView({
   const [selectedIndex, setSelectedIndex] = React.useState(
     PROFILE_KEYS.indexOf(currentProfile),
   );
-  const { stdout } = useStdout();
 
   const handleSelect = () => {
     onSelectProfile(PROFILE_KEYS[selectedIndex]);

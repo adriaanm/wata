@@ -5,7 +5,6 @@ import { MATRIX_CONFIG } from '@shared/config/matrix';
 import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
 import {
   loginToMatrix,
-  createStoredCredentials,
   type StoredCredentials,
 } from '@shared/lib/matrix-auth';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';

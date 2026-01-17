@@ -25,7 +25,8 @@ process.stdout.write('\x1Bc');
 
 async function bootstrap() {
   // Step 1: Import and install LogService FIRST
-  const { LogService } = await import('./services/LogService.js');
+  // Note: LogService auto-installs on import, so we don't need to use the value
+  const { LogService: _LogService } = await import('./services/LogService.js');
   // Note: LogService auto-installs on import, but we can verify it's installed
   console.log(
     '[bootstrap] LogService installed, this message should be captured',

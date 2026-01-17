@@ -17,8 +17,8 @@ export async function configureGlobalMatrixLogger(): Promise<void> {
    
   const loglevel = (await import('loglevel')).default;
 
-  // Store original loglevel methodFactory
-  const originalFactory = loglevel.methodFactory;
+  // Store original loglevel methodFactory (currently unused, kept for potential future use)
+  const _originalFactory = loglevel.methodFactory;
 
   // Custom method factory that redirects to LogService
   loglevel.methodFactory = function (
@@ -91,7 +91,7 @@ export async function ensureGlobalMatrixLogger(): Promise<void> {
   try {
     await configureGlobalMatrixLogger();
     globalLoggerConfigured = true;
-  } catch (error) {
+  } catch (_error) {
     // If loglevel is not available or setup fails, silently continue
     // LogService may not be fully initialized yet
   }

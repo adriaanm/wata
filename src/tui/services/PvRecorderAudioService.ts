@@ -360,7 +360,7 @@ export class PvRecorderAudioService {
       if (this.recorder) {
         this.recorder.stop();
       }
-    } catch (error) {
+    } catch (_error) {
       // Ignore stop errors
     }
 
