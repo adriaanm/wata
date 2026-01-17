@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
-import { PROFILES, type ProfileKey } from '../types/profile.js';
+import React, { useMemo } from 'react';
+
 import { colors } from '../theme.js';
+import { PROFILES, type ProfileKey } from '../types/profile.js';
 
 const PROFILE_KEYS = Object.keys(PROFILES) as ProfileKey[];
 

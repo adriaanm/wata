@@ -1,5 +1,6 @@
-import React from 'react';
 import { Box, Text } from 'ink';
+import React from 'react';
+
 import type { VoiceMessage } from '../../shared/services/MatrixService.js';
 import { colors } from '../theme.js';
 

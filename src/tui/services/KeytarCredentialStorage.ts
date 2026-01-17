@@ -1,4 +1,5 @@
 import keytar from 'keytar';
+
 import type { StoredCredentials } from '../../shared/services/CredentialStorage.js';
 
 const SERVICE_NAME_BASE = 'wata-matrix-credentials';

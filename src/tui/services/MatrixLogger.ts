@@ -14,7 +14,7 @@ import { LogService } from './LogService.js';
  * to LogService, ensuring complete silence on console/stdout.
  */
 export async function configureGlobalMatrixLogger(): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const loglevel = (await import('loglevel')).default;
 
   // Store original loglevel methodFactory

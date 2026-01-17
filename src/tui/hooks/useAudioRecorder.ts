@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
+
+import { LogService } from '../services/LogService.js';
 import { pvRecorderAudioService } from '../services/PvRecorderAudioService.js';
 import type { RecordingResult } from '../services/PvRecorderAudioService.js';
-import { LogService } from '../services/LogService.js';
 
 /**
  * Hook for audio recording in TUI using PvRecorder + Opus

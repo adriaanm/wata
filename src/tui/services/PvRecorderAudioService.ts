@@ -1,10 +1,12 @@
 /// <reference types="node" />
 
-import { PvRecorder } from '@picovoice/pvrecorder-node';
-import { writeFile, unlink, readFile } from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
+import { writeFile, unlink, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+import { PvRecorder } from '@picovoice/pvrecorder-node';
+
 import { LogService } from './LogService.js';
 
 export interface RecordingResult {
@@ -439,7 +441,7 @@ export class PvRecorderAudioService {
       // Build fetch headers with authentication if token is provided
       const headers: Record<string, string> = {};
       if (accessToken) {
-        headers['Authorization'] = `Bearer ${accessToken}`;
+        headers.Authorization = `Bearer ${accessToken}`;
         LogService.getInstance().addEntry(
           'log',
           `Playback: Using authenticated download`,

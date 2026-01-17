@@ -25,7 +25,7 @@ if (!Promise.withResolvers) {
 
 import { AppRegistry } from 'react-native';
 
-import App from './src/rn/App';
 import { name as appName } from './app.json';
+import App from './src/rn/App';
 
 AppRegistry.registerComponent(appName, () => App);

@@ -6,8 +6,9 @@
  * PTT handhelds without keyboard input.
  */
 
-import { TestOrchestrator } from './helpers';
 import { MATRIX_CONFIG } from '../../src/shared/config/matrix';
+
+import { TestOrchestrator } from './helpers';
 
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {

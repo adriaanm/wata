@@ -1,18 +1,18 @@
 import { Buffer } from 'buffer';
 
-import * as matrix from 'matrix-js-sdk';
-import { MsgType } from 'matrix-js-sdk';
-import type { MatrixClient } from 'matrix-js-sdk';
 
 import { MATRIX_CONFIG } from '@shared/config/matrix';
+import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
 import {
   loginToMatrix,
   createStoredCredentials,
   type StoredCredentials,
 } from '@shared/lib/matrix-auth';
-import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';
 import { LogService } from '@tui/services/LogService';
+import type { MatrixClient } from 'matrix-js-sdk';
+import { MsgType } from 'matrix-js-sdk';
+import * as matrix from 'matrix-js-sdk';
 
 // Helper to log to LogService (works in both TUI and RN environments)
 const log = (message: string): void => {
@@ -841,7 +841,7 @@ class MatrixService {
     // Save updated m.direct if we found new DM rooms
     if (updated) {
       log('[MatrixService] Updating m.direct with newly discovered DM rooms');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       await this.client.setAccountData(
         'm.direct' as any,
         existingDirect as any,

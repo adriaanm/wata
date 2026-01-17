@@ -1,14 +1,15 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
-import { useRooms, useMatrixSync } from '../hooks/useMatrix.js';
-import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
-import { useContactStatus } from '../hooks/useContactStatus.js';
-import { usePtt } from '../hooks/usePtt.js';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+
 import { matrixService } from '../App.js';
 import { FocusableItem } from '../components/FocusableItem.js';
-import { PROFILES, type ProfileKey } from '../types/profile';
-import { colors } from '../theme.js';
+import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
+import { useContactStatus } from '../hooks/useContactStatus.js';
+import { useRooms, useMatrixSync } from '../hooks/useMatrix.js';
+import { usePtt } from '../hooks/usePtt.js';
 import { LogService } from '../services/LogService.js';
+import { colors } from '../theme.js';
+import { PROFILES, type ProfileKey } from '../types/profile';
 
 interface Contact {
   id: string; // Either a room ID (for DMs) or 'family' for broadcast
@@ -249,7 +250,7 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
 
     const halfWindow = Math.floor(preferredMaxItems / 2);
     let start = Math.max(0, selectedIndex - halfWindow);
-    let endIndex = Math.min(contacts.length, start + preferredMaxItems);
+    const endIndex = Math.min(contacts.length, start + preferredMaxItems);
 
     if (endIndex - start < preferredMaxItems) {
       start = Math.max(0, endIndex - preferredMaxItems);

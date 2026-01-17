@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
+import React, { useState, useEffect } from 'react';
+
 import { matrixService } from '../App.js';
-import { PROFILES, type ProfileKey } from '../types/profile';
-import { colors } from '../theme.js';
 import { LogService } from '../services/LogService.js';
+import { colors } from '../theme.js';
+import { PROFILES, type ProfileKey } from '../types/profile';
 
 interface FamilyMember {
   userId: string;

@@ -1,10 +1,11 @@
 /// <reference types="node" />
 
+import { Buffer } from 'buffer';
 import { spawn, ChildProcess } from 'child_process';
 import { writeFile, unlink, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { Buffer } from 'buffer';
+
 import { LogService } from './LogService.js';
 
 export interface RecordingResult {
@@ -45,7 +46,7 @@ export class TuiAudioService {
       // Build fetch headers with authentication if token is provided
       const headers: Record<string, string> = {};
       if (accessToken) {
-        headers['Authorization'] = `Bearer ${accessToken}`;
+        headers.Authorization = `Bearer ${accessToken}`;
       }
 
       // Download the audio file

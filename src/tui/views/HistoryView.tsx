@@ -1,13 +1,14 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
-import { useVoiceMessages } from '../hooks/useMatrix.js';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+
+import { matrixService } from '../App.js';
 import { useAudioPlayer } from '../hooks/useAudioPlayer.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
+import { useVoiceMessages } from '../hooks/useMatrix.js';
 import { usePtt } from '../hooks/usePtt.js';
-import { matrixService } from '../App.js';
-import { PROFILES, type ProfileKey } from '../types/profile';
-import { colors } from '../theme.js';
 import { LogService } from '../services/LogService.js';
+import { colors } from '../theme.js';
+import { PROFILES, type ProfileKey } from '../types/profile';
 
 interface Props {
   roomId: string;
@@ -117,7 +118,7 @@ export function HistoryView({
 
     const halfWindow = Math.floor(preferredMaxItems / 2);
     let start = Math.max(0, selectedIndex - halfWindow);
-    let endIndex = Math.min(messages.length, start + preferredMaxItems);
+    const endIndex = Math.min(messages.length, start + preferredMaxItems);
 
     if (endIndex - start < preferredMaxItems) {
       start = Math.max(0, endIndex - preferredMaxItems);

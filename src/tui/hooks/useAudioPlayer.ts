@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { pvRecorderAudioService } from '../services/PvRecorderAudioService.js';
+
 import { LogService } from '../services/LogService.js';
+import { pvRecorderAudioService } from '../services/PvRecorderAudioService.js';
 
 /**
  * Hook for audio playback in TUI using PvRecorderAudioService

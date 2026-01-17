@@ -1,5 +1,6 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { matrixService } from '@shared/services/MatrixService.rn';
 import React, { useState, useEffect } from 'react';
 import { StatusBar, ActivityIndicator, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -7,7 +8,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyDebugOverlay } from './components/KeyDebugOverlay';
 import { ChatScreen } from './screens/ChatScreen';
 import { ContactListScreen } from './screens/ContactListScreen';
-import { matrixService } from '@shared/services/MatrixService.rn';
 import { colors } from './theme';
 
 // Set to false to hide key debug overlay

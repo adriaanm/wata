@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
 import { Box, useInput } from 'ink';
+import React, { useState, useEffect } from 'react';
+
 import { MatrixService } from '../shared/services/MatrixService.js';
+
 import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
+import { LogService } from './services/LogService.js';
 import { silentLogger } from './services/SilentLogger';
 import { PROFILES, type ProfileKey } from './types/profile';
-import { LoadingView } from './views/LoadingView';
-import { MainView } from './views/MainView';
-import { HistoryView } from './views/HistoryView';
 import { AdminView } from './views/AdminView';
+import { HistoryView } from './views/HistoryView';
+import { LoadingView } from './views/LoadingView';
 import { LogView } from './views/LogView';
+import { MainView } from './views/MainView';
 import { ProfileSelectorView } from './views/ProfileSelectorView';
-import { LogService } from './services/LogService.js';
 
 // Logging helpers
 const log = (message: string): void => {

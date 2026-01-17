@@ -592,7 +592,7 @@ export class TestClient {
   }
 
   private isDirectRoom(room: matrix.Room): boolean {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const dmData = this.client?.getAccountData('m.direct' as any);
     if (!dmData) return false;
 

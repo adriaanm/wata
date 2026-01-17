@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
+import React, { useState, useMemo } from 'react';
+
 import { LogService } from '../services/LogService.js';
 import { colors } from '../theme.js';
 
@@ -31,7 +32,7 @@ export function LogView({ onBack }: Props) {
     // Center viewport around selected item
     const halfWindow = Math.floor(maxItems / 2);
     let startIndex = Math.max(0, selectedIndex - halfWindow);
-    let endIndex = Math.min(logs.length, startIndex + maxItems);
+    const endIndex = Math.min(logs.length, startIndex + maxItems);
 
     // Adjust if we're near the end
     if (endIndex - startIndex < maxItems) {

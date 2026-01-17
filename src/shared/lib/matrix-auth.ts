@@ -5,10 +5,10 @@
  * This ensures consistent authentication flow across all environments.
  */
 
+import { LogService } from '@tui/services/LogService';
 import * as matrix from 'matrix-js-sdk';
 
 import { createFixedFetch } from './fixed-fetch-api';
-import { LogService } from '@tui/services/LogService';
 
 // Helper to log to LogService (works in both TUI and RN environments)
 const log = (message: string): void => {

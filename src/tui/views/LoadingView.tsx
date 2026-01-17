@@ -1,6 +1,7 @@
-import React from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
+import React from 'react';
+
 import { PROFILES, type ProfileKey } from '../types/profile';
 
 interface Props {

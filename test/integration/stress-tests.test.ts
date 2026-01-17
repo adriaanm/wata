@@ -29,6 +29,7 @@ const TEST_USERS = {
   bob: { username: 'bob', password: 'testpass123' },
 };
 
+// eslint-disable-next-line jest/no-disabled-tests
 describe.skip('Stress Tests', () => {
   let orchestrator: TestOrchestrator;
 
