@@ -1,21 +1,13 @@
-import React, {
-  useState,
-  useMemo,
-  useEffect,
-  useRef,
-  useCallback,
-} from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import { useVoiceMessages } from '../hooks/useMatrix.js';
 import { useAudioPlayer } from '../hooks/useAudioPlayer.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
+import { usePtt } from '../hooks/usePtt.js';
 import { matrixService } from '../App.js';
 import { PROFILES, type ProfileKey } from '../types/profile';
 import { colors } from '../theme.js';
 import { LogService } from '../services/LogService.js';
-
-// PTT hold-to-record: detect key release by gap in key repeat events
-const PTT_RELEASE_TIMEOUT_MS = 200;
 
 interface Props {
   roomId: string;
@@ -51,20 +43,14 @@ export function HistoryView({
     formatDuration: formatRecordingDuration,
   } = useAudioRecorder();
 
-  // PTT state
-  const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isStoppingRef = useRef(false);
-  const [isHoldingSpace, setIsHoldingSpace] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-
-  // Stop recording and send message
-  const doStopAndSend = useCallback(async () => {
-    if (isStoppingRef.current || !isRecording) return;
-    isStoppingRef.current = true;
-
-    try {
-      const result = await stopRecording();
-
+  // Send callback for PTT
+  const handleSend = useCallback(
+    async (result: {
+      buffer: Buffer;
+      mimeType: string;
+      duration: number;
+      size: number;
+    }) => {
       LogService.getInstance().addEntry(
         'log',
         `Sending voice message to room ${roomId}`,
@@ -76,36 +62,22 @@ export function HistoryView({
         result.duration,
         result.size,
       );
-
       LogService.getInstance().addEntry(
         'success',
         `Voice message sent to ${contactName}`,
       );
-      setSendError(null);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      LogService.getInstance().addEntry('error', `Failed to send: ${errorMsg}`);
-      setSendError(errorMsg);
-    } finally {
-      isStoppingRef.current = false;
-    }
-  }, [isRecording, stopRecording, roomId, contactName]);
+    },
+    [roomId, contactName],
+  );
 
-  // Clear PTT timeout on unmount or when recording stops
-  useEffect(() => {
-    if (!isRecording) {
-      if (pttTimeoutRef.current) {
-        clearTimeout(pttTimeoutRef.current);
-        pttTimeoutRef.current = null;
-      }
-      setIsHoldingSpace(false);
-    }
-    return () => {
-      if (pttTimeoutRef.current) {
-        clearTimeout(pttTimeoutRef.current);
-      }
-    };
-  }, [isRecording]);
+  // PTT hook
+  const { isHoldingSpace, sendError, handleSpacePress } = usePtt({
+    isRecording,
+    startRecording,
+    stopRecording,
+    onSend: handleSend,
+    onRecordingStart: clearRecordingError,
+  });
 
   // Show all messages (both sent and received), most recent first
   const messages = useMemo(() => {
@@ -277,30 +249,7 @@ export function HistoryView({
       if (isPlaying) {
         stop();
       }
-
-      if (isRecording) {
-        setIsHoldingSpace(true);
-        if (pttTimeoutRef.current) {
-          clearTimeout(pttTimeoutRef.current);
-        }
-        pttTimeoutRef.current = setTimeout(() => {
-          doStopAndSend();
-        }, PTT_RELEASE_TIMEOUT_MS);
-      } else {
-        // Clear any previous send error when starting a new recording
-        setSendError(null);
-        clearRecordingError();
-        startRecording().catch(err => {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          LogService.getInstance().addEntry(
-            'error',
-            `Failed to start recording: ${errorMsg}`,
-          );
-        });
-        pttTimeoutRef.current = setTimeout(() => {
-          doStopAndSend();
-        }, PTT_RELEASE_TIMEOUT_MS);
-      }
+      handleSpacePress();
     }
   });
 

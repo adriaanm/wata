@@ -1,22 +1,14 @@
-import React, {
-  useState,
-  useMemo,
-  useRef,
-  useEffect,
-  useCallback,
-} from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import { useRooms, useMatrixSync } from '../hooks/useMatrix.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
 import { useContactStatus } from '../hooks/useContactStatus.js';
+import { usePtt } from '../hooks/usePtt.js';
 import { matrixService } from '../App.js';
 import { FocusableItem } from '../components/FocusableItem.js';
 import { PROFILES, type ProfileKey } from '../types/profile';
 import { colors } from '../theme.js';
 import { LogService } from '../services/LogService.js';
-
-// PTT hold-to-record: detect key release by gap in key repeat events
-const PTT_RELEASE_TIMEOUT_MS = 200;
 
 interface Contact {
   id: string; // Either a room ID (for DMs) or 'family' for broadcast
@@ -52,11 +44,6 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     formatDuration,
   } = useAudioRecorder();
 
-  // PTT state
-  const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isStoppingRef = useRef(false);
-  const [isHoldingSpace, setIsHoldingSpace] = useState(false);
-
   // Contact status tracking (unread messages and send errors)
   const {
     getStatus,
@@ -64,9 +51,6 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     setSendError: setContactSendError,
     clearSendError: clearContactSendError,
   } = useContactStatus();
-
-  // Track global send error for display
-  const [sendError, setSendError] = useState<string | null>(null);
 
   // Family members state (loaded async from family room)
   const [familyMembers, setFamilyMembers] = useState<
@@ -152,47 +136,38 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     return result;
   }, [rooms, familyMembers, familyRoomId, getStatus]);
 
-  // Stop recording and send message
-  const doStopAndSend = useCallback(async () => {
-    if (isStoppingRef.current || !isRecording) return;
-    isStoppingRef.current = true;
-
-    const contact = contacts[selectedIndex];
-    if (!contact) {
-      isStoppingRef.current = false;
-      return;
-    }
-
-    try {
-      const result = await stopRecording();
+  // Send callback for PTT
+  const handleSend = useCallback(
+    async (result: {
+      buffer: Buffer;
+      mimeType: string;
+      duration: number;
+      size: number;
+    }) => {
+      const contact = contacts[selectedIndex];
+      if (!contact) {
+        throw new Error('No contact selected');
+      }
 
       // Get or create the room to send to
       let targetRoomId: string | null = null;
 
       if (contact.type === 'family') {
-        // Send to family room
         LogService.getInstance().addEntry(
           'log',
           `Sending to family room: ${contact.name}`,
         );
         targetRoomId = await matrixService.getFamilyRoomId();
         if (!targetRoomId) {
-          // Fallback: if no family room, we can't broadcast
           throw new Error('Family room not available');
         }
-        LogService.getInstance().addEntry(
-          'log',
-          `Family room ID: ${targetRoomId}`,
-        );
       } else {
-        // Send to DM room
         LogService.getInstance().addEntry(
           'log',
           `Sending to DM: ${contact.name} (${contact.userId})`,
         );
         targetRoomId = contact.roomId;
         if (!targetRoomId && contact.userId) {
-          // Create DM room on-demand
           LogService.getInstance().addEntry(
             'log',
             `Creating DM room with ${contact.userId}`,
@@ -221,40 +196,34 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
         'success',
         `Voice message sent to ${contact.name}`,
       );
-      setSendError(null);
       clearContactSendError(contact.id);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      LogService.getInstance().addEntry('error', `Failed to send: ${errorMsg}`);
-      setSendError(errorMsg);
-      setContactSendError(contact.id, errorMsg);
-    } finally {
-      isStoppingRef.current = false;
-    }
-  }, [
-    isRecording,
-    stopRecording,
-    contacts,
-    selectedIndex,
-    clearContactSendError,
-    setContactSendError,
-  ]);
+    },
+    [contacts, selectedIndex, clearContactSendError],
+  );
 
-  // Clear PTT timeout on unmount or when recording stops
+  // PTT hook
+  const { isHoldingSpace, sendError, handleSpacePress } = usePtt({
+    isRecording,
+    startRecording,
+    stopRecording,
+    onSend: handleSend,
+    onRecordingStart: () => {
+      const contact = contacts[selectedIndex];
+      if (contact) {
+        clearContactSendError(contact.id);
+      }
+    },
+  });
+
+  // Track send errors per contact
   useEffect(() => {
-    if (!isRecording) {
-      if (pttTimeoutRef.current) {
-        clearTimeout(pttTimeoutRef.current);
-        pttTimeoutRef.current = null;
+    if (sendError) {
+      const contact = contacts[selectedIndex];
+      if (contact) {
+        setContactSendError(contact.id, sendError);
       }
-      setIsHoldingSpace(false);
     }
-    return () => {
-      if (pttTimeoutRef.current) {
-        clearTimeout(pttTimeoutRef.current);
-      }
-    };
-  }, [isRecording]);
+  }, [sendError, contacts, selectedIndex, setContactSendError]);
 
   // Calculate viewport dimensions
   const terminalHeight = stdout?.rows || 24;
@@ -354,32 +323,7 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
 
     // Space for PTT (hold-to-record)
     if (input === ' ') {
-      const contact = contacts[selectedIndex];
-      if (isRecording) {
-        setIsHoldingSpace(true);
-        if (pttTimeoutRef.current) {
-          clearTimeout(pttTimeoutRef.current);
-        }
-        pttTimeoutRef.current = setTimeout(() => {
-          doStopAndSend();
-        }, PTT_RELEASE_TIMEOUT_MS);
-      } else {
-        // Clear any previous send error when starting a new recording
-        setSendError(null);
-        if (contact) {
-          clearContactSendError(contact.id);
-        }
-        startRecording().catch(err => {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          LogService.getInstance().addEntry(
-            'error',
-            `Failed to start recording: ${errorMsg}`,
-          );
-        });
-        pttTimeoutRef.current = setTimeout(() => {
-          doStopAndSend();
-        }, PTT_RELEASE_TIMEOUT_MS);
-      }
+      handleSpacePress();
     }
   });
 
