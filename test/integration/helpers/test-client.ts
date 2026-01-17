@@ -144,6 +144,7 @@ export class TestClient {
 
     // Wait for room to appear with retry logic
     return new Promise((resolve, reject) => {
+      // eslint-disable-next-line prefer-const -- reassigned when setInterval is called
       let pollInterval: ReturnType<typeof setInterval> | undefined;
 
       const timeout = setTimeout(() => {
@@ -211,6 +212,7 @@ export class TestClient {
 
     return new Promise((resolve, reject) => {
       let resolved = false;
+      // eslint-disable-next-line prefer-const -- reassigned when setInterval is called
       let pollInterval: ReturnType<typeof setInterval> | undefined;
 
       const timeout = setTimeout(() => {
