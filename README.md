@@ -1,6 +1,15 @@
 # Wata
 
-A minimalist push-to-talk voice messaging app for Android (and macOS Terminal), built on the Matrix protocol.
+A minimalist push-to-talk voice messaging app for Android (and macOS Terminal), built on the Matrix protocol. "Wata" is short for walkie-talkie, in case it wasn't obvious (zie ook: "watte"!?).
+
+## Disclaimer
+Greetings! First, some words of discouragement for those actually reading the README.
+
+I'm building this for my personal use, as well as to learn some new skills by doing some new stuff. I'm sharing the source because why not; I didn't even write it myself.
+
+I make no claims regarding its quality or utility, nor do I make any commitments regarding fixing bugs or accepting changes.
+
+Have fun with it!
 
 ## Frontends
 
