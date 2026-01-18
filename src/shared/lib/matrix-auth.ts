@@ -5,26 +5,31 @@
  * This ensures consistent authentication flow across all environments.
  */
 
-import { LogService } from '@tui/services/LogService';
 import * as matrix from 'matrix-js-sdk';
 
 import { createFixedFetch } from './fixed-fetch-api';
 
-// Helper to log to LogService (works in both TUI and RN environments)
+// Optional logger interface that platforms can provide
+export interface Logger {
+  log(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+// Default no-op logger (platforms can override via setLogger)
+let logger: Logger | undefined;
+
+export function setLogger(l: Logger | undefined): void {
+  logger = l;
+}
+
+// Helper to log to platform logger (no-op if not set)
 const log = (message: string): void => {
-  try {
-    LogService.getInstance()?.addEntry('log', message);
-  } catch {
-    // LogService not available (e.g., in React Native), silently ignore
-  }
+  logger?.log(message);
 };
 
 const logError = (message: string): void => {
-  try {
-    LogService.getInstance()?.addEntry('error', message);
-  } catch {
-    // LogService not available (e.g., in React Native), silently ignore
-  }
+  logger?.error(message);
 };
 
 /**

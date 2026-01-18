@@ -1,7 +1,7 @@
 import { Box, useInput } from 'ink';
 import React, { useState, useEffect } from 'react';
 
-import { MatrixService } from '../shared/services/MatrixService.js';
+import { MatrixService, setLogger } from '../shared/services/MatrixService.js';
 
 import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
 import { LogService } from './services/LogService.js';
@@ -22,6 +22,13 @@ const log = (message: string): void => {
 const logError = (message: string): void => {
   LogService.getInstance().addEntry('error', message);
 };
+
+// Wire up TUI's LogService to the shared code
+setLogger({
+  log: (message: string) => LogService.getInstance().addEntry('log', message),
+  warn: (message: string) => LogService.getInstance().addEntry('warn', message),
+  error: (message: string) => LogService.getInstance().addEntry('error', message),
+});
 
 // Create TUI-specific MatrixService instance with keytar storage and silent logger
 const credentialStorage = new KeytarCredentialStorage();

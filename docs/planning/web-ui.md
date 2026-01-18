@@ -205,9 +205,10 @@ web/src/
 │   ├── ContactCard.tsx           # Individual contact (PTT target) ✅
 │   ├── PttButton.tsx             # Desktop PTT button (inline in ContactCard)
 │   ├── RecordingIndicator.tsx    # Recording state banner ✅
+│   ├── LoginView.tsx             # Authentication form ✅
+│   ├── LoadingView.tsx           # Loading/auth state ✅
 │   ├── HistoryView.tsx           # Message playback (TODO)
 │   ├── MessageItem.tsx           # Voice message row (TODO)
-│   ├── LoadingView.tsx           # Loading/auth state ✅
 │   └── admin/
 │       ├── AdminDrawer.tsx       # Side drawer (desktop) (TODO)
 │       ├── AdminSheet.tsx        # Bottom sheet (mobile) (TODO)
@@ -221,14 +222,15 @@ web/src/
 │   ├── useAudioPlayer.ts         # Web Audio API playback (TODO)
 │   ├── useContactSelection.ts    # Keyboard selection state ✅
 │   ├── useContactStatus.ts       # Unread/error tracking (TODO)
-│   ├── useMatrix.ts              # Matrix integration hooks ✅ (stub)
-│   └── useContacts.ts            # Build contacts from Matrix data ✅ (stub)
+│   ├── useMatrix.ts              # Matrix integration hooks ✅ (useAuth, useMatrixSync, useRooms)
+│   └── useContacts.ts            # Build contacts from Matrix data ✅
 │
 ├── services/
-│   ├── matrixService.ts          # Web-specific MatrixService singleton ✅ (stub)
+│   ├── matrixService.ts          # Web-specific MatrixService singleton ✅
 │   ├── WebAudioService.ts        # AudioWorklet recording ✅ (stub)
 │   ├── OpusEncoder.ts            # WebAssembly Opus (TODO - Phase 3)
-│   └── WebCredentialStorage.ts   # localStorage adapter ✅
+│   ├── WebCredentialStorage.ts   # localStorage adapter ✅
+│   └── LogService.ts             # Web logging adapter ✅
 │
 ├── styles/
 │   ├── variables.css             # Design tokens ✅
@@ -254,12 +256,12 @@ web/src/
 - ✅ WebCredentialStorage adapter (`services/WebCredentialStorage.ts`)
 - ✅ Project structure with proper directories
 
-**Deferred to Phase 3:**
-- TypeScript path aliases to `src/shared/` - Vite path resolution issues
-- Real Matrix connection - Using mock MatrixService for UI development
-- Buffer polyfill - Not needed until real Matrix integration
-
-**Note:** The web project is located at `/web/` while shared code is at `/src/shared/`. Vite's path resolution for parent directory imports requires additional configuration. For UI development (Phases 1-2), a mock MatrixService is sufficient.
+**Completed in Phase 2.5:**
+- ✅ TypeScript path aliases to `src/shared/` - Proper Vite configuration
+- ✅ Real Matrix connection - Full integration with shared MatrixService
+- ✅ Buffer polyfill - Added for Matrix SDK compatibility
+- ✅ LoginView component - Authentication form
+- ✅ Session persistence - Auto-login via stored credentials
 
 ### Phase 2: Core UI ✅ COMPLETE
 
@@ -290,8 +292,38 @@ web/src/
   - `useContactSelection` - Keyboard navigation state
 
 **Deferred:**
-- Real Matrix data integration (using mock data for now)
 - Audio recording (uses MediaRecorder stub)
+
+### Phase 2.5: Auth & Real Matrix Integration ✅ COMPLETE
+
+**Completed:**
+- ✅ LoginView component (`components/LoginView.tsx`)
+  - Username/password form
+  - Loading state with spinner
+  - Error display
+  - Auto-focus on username field
+- ✅ App.tsx authentication flow
+  - Conditional rendering (loading → login → main)
+  - Real contacts from `useContacts` hook
+  - Session restoration
+- ✅ Shared module resolution fix
+  - Removed `@tui/services/LogService` import from shared code
+  - Added `Logger` interface with `setLogger()` function
+  - Web and TUI wire up their own LogService implementations
+- ✅ WebCredentialStorage fully functional
+  - Session persistence via localStorage
+  - Auto-login on revisit
+
+**Implementation Details:**
+The shared code (`MatrixService.ts`, `matrix-auth.ts`) no longer imports platform-specific LogService. Instead, it provides a `Logger` interface and `setLogger()` function. Each platform (web, TUI) injects its own logger implementation.
+
+**Files Modified:**
+- `src/shared/services/MatrixService.ts` - Removed LogService import, added Logger interface
+- `src/shared/lib/matrix-auth.ts` - Removed LogService import, added Logger interface
+- `src/web/src/App.tsx` - Wired up auth flow and real contacts
+- `src/web/src/components/LoginView.tsx` - New login form component
+- `src/web/src/services/matrixService.ts` - Wire up web's LogService
+- `src/tui/App.tsx` - Wire up TUI's LogService
 
 ### Phase 3: Audio Pipeline (TODO)
 
@@ -360,22 +392,15 @@ web/src/
 
 ## Known Issues & TODOs
 
-### Path Resolution for Shared Code
+### Path Resolution for Shared Code ✅ RESOLVED
 
-**Issue:** Vite cannot resolve `@shared/*` imports from the parent directory (`../src/shared/`).
+**Previous Issue:** Vite could not resolve `@shared/*` imports properly, and shared code imported platform-specific LogService.
 
-**Current Workaround:** Using mock MatrixService for UI development.
-
-**Options for Resolution:**
-1. **Configure Vite properly** - Update `vite.config.ts` with correct resolve configuration
-2. **Use tsconfig paths only** - Remove Vite alias, rely on TypeScript
-3. **Monorepo setup** - Restructure as proper monorepo with workspaces
-4. **Copy shared files** - Duplicate code (NOT recommended)
-5. **Build shared as package** - Pre-build shared code as importable package
-
-**Next Steps:**
-- Before Phase 3, resolve shared code imports to enable real Matrix connectivity
-- Consider restructuring web project location or using a monorepo tool (Turborepo, Nx)
+**Resolution (Phase 2.5):**
+- ✅ Fixed module resolution by removing platform-specific imports from shared code
+- ✅ Added `Logger` interface with `setLogger()` for dependency injection
+- ✅ Web and TUI each wire up their own LogService implementations
+- ✅ Shared code is now truly platform-agnostic
 
 ### WebCredentialStorage Security
 
@@ -406,23 +431,30 @@ npm run preview          # Preview production build
 
 ---
 
-## Running the Mockup
+## Running the Web UI
 
-The current implementation (Phases 1-2) uses mock data to demonstrate the UI:
+The current implementation (Phases 1-2.5) has real Matrix integration:
 
 ```bash
-cd web
+cd src/web
 npm install
 npm run dev
 ```
 
 Navigate to http://localhost:3000
 
+**Authentication:**
+- First visit: Login form appears (enter Matrix username/password)
+- Subsequent visits: Auto-logs in via stored credentials
+- Requires a running Matrix server (e.g., local Conduit)
+
 **Try it out:**
 - **Desktop:** Use arrow keys to select contacts, hold Space to record
 - **Desktop:** Hover over contacts to see PTT button, click and hold to record
 - **Mobile:** Tap and hold contact cards to record
 - Visual feedback shows recording state with ripple animation and dimmed contacts
+
+**Note:** Voice message recording currently uses a stub (Phase 3 will implement real audio).
 
 ---
 
