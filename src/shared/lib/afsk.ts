@@ -240,14 +240,43 @@ function findAfskSignalBoundaries(
   // Sort to find percentiles for robust thresholding
   const sortedPowers = [...afskPowers].sort((a, b) => a - b);
   const p10 = sortedPowers[Math.floor(sortedPowers.length * 0.1)]; // 10th percentile (noise floor)
+  const p50 = sortedPowers[Math.floor(sortedPowers.length * 0.5)]; // 50th percentile (median)
   const p90 = sortedPowers[Math.floor(sortedPowers.length * 0.9)]; // 90th percentile (signal level)
 
-  // Threshold: very low to catch preamble which has alternating frequencies
-  // Use 5% of the way from noise to max, or 1% of max, whichever is lower
-  const threshold = Math.min(
-    p10 + (maxPower - p10) * 0.05,
-    maxPower * 0.01
-  );
+  // Calculate signal-to-noise ratio indicator
+  const snrRatio = maxPower / (p50 + 0.001);
+
+  // For reliable detection, max should be significantly above median (SNR > 3)
+  if (snrRatio < 3) {
+    debugLog(`WARNING: Poor SNR (${snrRatio.toFixed(1)}x) - signal may be too weak or too much noise`);
+  }
+
+  // Check if this looks like a pure signal (loopback) vs signal embedded in noise
+  // For pure signal: p10 and p50 are similar (both are signal, just different windows)
+  // For signal+noise: p10 is much lower than p50 (p10 is noise, p50 may include signal)
+  const isPureSignal = p10 > p50 * 0.3;
+
+  // Threshold: balance between catching signal and rejecting noise
+  let threshold: number;
+  if (isPureSignal) {
+    // Pure signal (loopback test) - use very low threshold
+    threshold = p10 * 0.5;
+    debugLog(`Pure signal detected (p10/p50=${(p10/p50).toFixed(2)}) - using low threshold`);
+  } else if (snrRatio > 10) {
+    // Good SNR - use low threshold to catch full signal
+    threshold = p50 * 1.5;
+  } else if (snrRatio > 5) {
+    // Medium SNR - moderate threshold
+    threshold = p50 + (maxPower - p50) * 0.15;
+  } else {
+    // Poor SNR - higher threshold to reject noise
+    threshold = p50 + (maxPower - p50) * 0.3;
+  }
+
+  // Ensure minimum threshold above absolute minimum (for noisy recordings)
+  if (!isPureSignal) {
+    threshold = Math.max(threshold, p10 * 2);
+  }
 
   // Find first and last windows exceeding threshold
   let startIdx = -1;
@@ -262,8 +291,29 @@ function findAfskSignalBoundaries(
 
   if (startIdx === -1) {
     // No clear AFSK signal found - return full range
-    debugLog(`WARNING: No clear AFSK signal detected (max power: ${maxPower.toFixed(1)}, threshold: ${threshold.toFixed(1)})`);
+    debugLog(`WARNING: No clear AFSK signal detected (max: ${maxPower.toFixed(1)}, threshold: ${threshold.toFixed(1)}, SNR: ${snrRatio.toFixed(1)}x)`);
     return { start: 0, end: samples.length };
+  }
+
+  // Also check that the detected region isn't too long (max ~3s for typical message)
+  const maxSignalWindows = Math.round(3 * sampleRate / windowStep);
+  if (endIdx - startIdx > maxSignalWindows) {
+    debugLog(`WARNING: Detected region too long (${endIdx - startIdx} windows) - likely noise, narrowing search`);
+    // Try to find a tighter region with higher threshold
+    const higherThreshold = threshold * 2;
+    let newStartIdx = -1;
+    let newEndIdx = -1;
+    for (let i = 0; i < afskPowers.length; i++) {
+      if (afskPowers[i] > higherThreshold) {
+        if (newStartIdx === -1) newStartIdx = i;
+        newEndIdx = i;
+      }
+    }
+    if (newStartIdx !== -1 && newEndIdx - newStartIdx < maxSignalWindows) {
+      startIdx = newStartIdx;
+      endIdx = newEndIdx;
+      debugLog(`Narrowed to ${endIdx - startIdx} windows with threshold ${higherThreshold.toFixed(1)}`);
+    }
   }
 
   // Convert window indices to sample positions with margin
@@ -274,7 +324,7 @@ function findAfskSignalBoundaries(
     windowStarts[Math.min(afskPowers.length - 1, endIdx + marginWindows)] + windowSize
   );
 
-  debugLog(`AFSK detection: p10=${p10.toFixed(1)}, p90=${p90.toFixed(1)}, threshold=${threshold.toFixed(1)}, max=${maxPower.toFixed(1)}`);
+  debugLog(`AFSK detection: noise(p50)=${p50.toFixed(1)}, signal(max)=${maxPower.toFixed(1)}, threshold=${threshold.toFixed(1)}, SNR=${snrRatio.toFixed(1)}x`);
 
   return { start, end };
 }
@@ -363,9 +413,21 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   }
   debugLog(`Max amplitude: ${maxAmp.toFixed(3)} (signal quality: ${maxAmp > 0.1 ? 'GOOD' : 'WEAK'})`);
 
+  // Normalize audio if signal is weak (amplify to use full range)
+  // This helps with quiet recordings from distant speakers
+  let normalizedSamples = samples;
+  if (maxAmp > 0.01 && maxAmp < 0.5) {
+    const gain = 0.8 / maxAmp;
+    normalizedSamples = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      normalizedSamples[i] = samples[i] * gain;
+    }
+    debugLog(`Normalized audio: gain=${gain.toFixed(1)}x (${maxAmp.toFixed(3)} → 0.8)`);
+  }
+
   // Find signal boundaries using frequency-specific detection
   const { start: signalStart, end: signalEnd } = findAfskSignalBoundaries(
-    samples, sampleRate, markFreq, spaceFreq
+    normalizedSamples, sampleRate, markFreq, spaceFreq
   );
   const signalLength = signalEnd - signalStart;
 
@@ -401,7 +463,7 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
 
       // Decode first ~50 bytes worth of bits
       const testBits = decodeBitsFromOffset(
-        samples, testStart, 400, samplesPerBitExact, windowSize,
+        normalizedSamples, testStart, 400, samplesPerBitExact, windowSize,
         markFreq, spaceFreq, sampleRate
       );
       const testBytes = bitsToBytes(testBits);
@@ -419,7 +481,7 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   // Now decode all bits from the synchronized position
   const maxBits = Math.floor((signalEnd - bestOffset) / samplesPerBitExact);
   const bits = decodeBitsFromOffset(
-    samples, bestOffset, maxBits, samplesPerBitExact, windowSize,
+    normalizedSamples, bestOffset, maxBits, samplesPerBitExact, windowSize,
     markFreq, spaceFreq, sampleRate
   );
 
