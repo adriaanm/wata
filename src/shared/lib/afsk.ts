@@ -202,67 +202,81 @@ function goertzelMagnitude(samples: Float32Array, start: number, length: number,
 }
 
 /**
- * Find the start of the AFSK signal using energy detection.
- * Returns the sample index where the signal starts.
+ * Find AFSK signal boundaries using frequency-specific detection.
+ * Looks for the presence of mark (1200Hz) and space (2200Hz) frequencies
+ * rather than just energy, making it robust against broadband noise.
+ * Returns {start, end} sample indices.
  */
-function findSignalStart(samples: Float32Array, sampleRate: number, windowMs: number = 10): number {
+function findAfskSignalBoundaries(
+  samples: Float32Array,
+  sampleRate: number,
+  markFreq: number,
+  spaceFreq: number,
+  windowMs: number = 15
+): { start: number; end: number } {
   const windowSize = Math.round(sampleRate * windowMs / 1000);
+  const windowStep = Math.round(windowSize / 4); // 75% overlap for finer resolution
 
-  // Calculate RMS energy for each window
-  const energies: number[] = [];
-  for (let i = 0; i < samples.length - windowSize; i += windowSize) {
-    let sum = 0;
-    for (let j = 0; j < windowSize; j++) {
-      sum += samples[i + j] * samples[i + j];
-    }
-    energies.push(Math.sqrt(sum / windowSize));
+  // Calculate AFSK power for each window
+  const afskPowers: number[] = [];
+  const windowStarts: number[] = [];
+
+  for (let i = 0; i < samples.length - windowSize; i += windowStep) {
+    const markPower = goertzelMagnitude(samples, i, windowSize, markFreq, sampleRate);
+    const spacePower = goertzelMagnitude(samples, i, windowSize, spaceFreq, sampleRate);
+    const afskPower = markPower + spacePower;
+
+    afskPowers.push(afskPower);
+    windowStarts.push(i);
   }
 
-  // Find max energy and set threshold
-  const maxEnergy = Math.max(...energies);
-  const threshold = maxEnergy * 0.2; // 20% of max as threshold
-
-  // Find first window exceeding threshold
-  for (let i = 0; i < energies.length; i++) {
-    if (energies[i] > threshold) {
-      // Return sample index, backing up a bit for safety
-      return Math.max(0, (i - 2) * windowSize);
-    }
+  if (afskPowers.length === 0) {
+    return { start: 0, end: samples.length };
   }
 
-  return 0; // No signal found, start from beginning
-}
+  // Find max power and use percentage threshold
+  const maxPower = Math.max(...afskPowers);
 
-/**
- * Find the end of the AFSK signal using energy detection.
- * Returns the sample index where the signal ends.
- */
-function findSignalEnd(samples: Float32Array, sampleRate: number, windowMs: number = 10): number {
-  const windowSize = Math.round(sampleRate * windowMs / 1000);
+  // Sort to find percentiles for robust thresholding
+  const sortedPowers = [...afskPowers].sort((a, b) => a - b);
+  const p10 = sortedPowers[Math.floor(sortedPowers.length * 0.1)]; // 10th percentile (noise floor)
+  const p90 = sortedPowers[Math.floor(sortedPowers.length * 0.9)]; // 90th percentile (signal level)
 
-  // Calculate RMS energy for each window
-  const energies: number[] = [];
-  for (let i = 0; i < samples.length - windowSize; i += windowSize) {
-    let sum = 0;
-    for (let j = 0; j < windowSize; j++) {
-      sum += samples[i + j] * samples[i + j];
-    }
-    energies.push(Math.sqrt(sum / windowSize));
-  }
+  // Threshold: very low to catch preamble which has alternating frequencies
+  // Use 5% of the way from noise to max, or 1% of max, whichever is lower
+  const threshold = Math.min(
+    p10 + (maxPower - p10) * 0.05,
+    maxPower * 0.01
+  );
 
-  // Find max energy and set threshold
-  const maxEnergy = Math.max(...energies);
-  const threshold = maxEnergy * 0.2;
+  // Find first and last windows exceeding threshold
+  let startIdx = -1;
+  let endIdx = -1;
 
-  // Find last window exceeding threshold
-  for (let i = energies.length - 1; i >= 0; i--) {
-    if (energies[i] > threshold) {
-      // Return sample index, adding a bit for safety
-      return Math.min(samples.length, (i + 3) * windowSize);
+  for (let i = 0; i < afskPowers.length; i++) {
+    if (afskPowers[i] > threshold) {
+      if (startIdx === -1) startIdx = i;
+      endIdx = i;
     }
   }
 
-  return samples.length;
+  if (startIdx === -1) {
+    // No clear AFSK signal found - return full range
+    debugLog(`WARNING: No clear AFSK signal detected (max power: ${maxPower.toFixed(1)}, threshold: ${threshold.toFixed(1)})`);
+    return { start: 0, end: samples.length };
+  }
+
+  // Convert window indices to sample positions with margin
+  const marginWindows = 3;
+  const start = windowStarts[Math.max(0, startIdx - marginWindows)];
+  const end = Math.min(
+    samples.length,
+    windowStarts[Math.min(afskPowers.length - 1, endIdx + marginWindows)] + windowSize
+  );
+
+  debugLog(`AFSK detection: p10=${p10.toFixed(1)}, p90=${p90.toFixed(1)}, threshold=${threshold.toFixed(1)}, max=${maxPower.toFixed(1)}`);
+
+  return { start, end };
 }
 
 /**
@@ -349,9 +363,10 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   }
   debugLog(`Max amplitude: ${maxAmp.toFixed(3)} (signal quality: ${maxAmp > 0.1 ? 'GOOD' : 'WEAK'})`);
 
-  // Find signal boundaries using energy detection
-  const signalStart = findSignalStart(samples, sampleRate);
-  const signalEnd = findSignalEnd(samples, sampleRate);
+  // Find signal boundaries using frequency-specific detection
+  const { start: signalStart, end: signalEnd } = findAfskSignalBoundaries(
+    samples, sampleRate, markFreq, spaceFreq
+  );
   const signalLength = signalEnd - signalStart;
 
   debugLog(`Signal detected: samples ${signalStart} to ${signalEnd} (${(signalLength / sampleRate).toFixed(2)}s)`);
