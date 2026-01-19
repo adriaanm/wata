@@ -1,5 +1,5 @@
-import { Box, useInput } from 'ink';
-import React, { useState, useEffect } from 'react';
+import { Box, useInput, useStdout } from 'ink';
+import React, { useState, useEffect, useCallback } from 'react';
 
 import { MatrixService, setLogger } from '../shared/services/MatrixService.js';
 
@@ -71,6 +71,30 @@ export function App({ initialProfile }: AppProps) {
   const [currentProfile, setCurrentProfile] = useState<ProfileKey>(
     initialProfile && PROFILES[initialProfile] ? initialProfile : 'alice',
   );
+  const { stdout } = useStdout();
+  const [terminalDimensions, setTerminalDimensions] = useState({
+    columns: stdout?.columns || 80,
+    rows: stdout?.rows || 24,
+  });
+
+  // Handle terminal resize - force re-render when dimensions change
+  useEffect(() => {
+    const handleResize = () => {
+      if (stdout) {
+        setTerminalDimensions({
+          columns: stdout.columns,
+          rows: stdout.rows,
+        });
+      }
+    };
+
+    // Listen for SIGWINCH (terminal resize signal)
+    stdout?.on('resize', handleResize);
+
+    return () => {
+      stdout?.off('resize', handleResize);
+    };
+  }, [stdout]);
 
   useEffect(() => {
     const initAuth = async () => {
