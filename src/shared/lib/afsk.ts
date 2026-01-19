@@ -108,19 +108,23 @@ export function encodeAfsk(data: unknown, config: AfskConfig = DEFAULT_CONFIG): 
 
 /**
  * Modulate bits to AFSK audio samples using proper continuous-phase FSK.
+ * Uses fractional bit timing for accurate sample generation.
  * Phase is maintained in radians and accumulated continuously across
  * frequency transitions to avoid discontinuities.
  */
 function modulateAfsk(bytes: Buffer, config: AfskConfig): Float32Array {
   const { sampleRate, baudRate, markFreq, spaceFreq } = config;
-  const samplesPerBit = Math.round(sampleRate / baudRate);
-  const totalSamples = bytes.length * 8 * samplesPerBit;
+  const samplesPerBitExact = sampleRate / baudRate; // Fractional (e.g., 13.333)
+  const totalBits = bytes.length * 8;
+  const totalSamples = Math.round(totalBits * samplesPerBitExact);
 
   const samples = new Float32Array(totalSamples);
   let phase = 0; // Phase in radians, accumulated continuously
   const dt = 1 / sampleRate; // Time step per sample
 
   let sampleIndex = 0;
+  let bitPosition = 0; // Fractional bit boundary position
+
   for (let byteIndex = 0; byteIndex < bytes.length; byteIndex++) {
     const byte = bytes[byteIndex];
 
@@ -130,17 +134,19 @@ function modulateAfsk(bytes: Buffer, config: AfskConfig): Float32Array {
       const freq = bit ? markFreq : spaceFreq;
       const omega = 2 * Math.PI * freq; // Angular frequency
 
+      // Calculate where this bit ends (fractional)
+      const nextBitPosition = bitPosition + samplesPerBitExact;
+      const endSample = Math.round(nextBitPosition);
+
       // Generate samples for this bit with continuous phase
-      for (let i = 0; i < samplesPerBit; i++) {
+      while (sampleIndex < endSample && sampleIndex < totalSamples) {
         samples[sampleIndex++] = 0.8 * Math.sin(phase);
         phase += omega * dt; // Accumulate phase
       }
+
+      bitPosition = nextBitPosition;
     }
   }
-
-  // Normalize phase to prevent floating point drift over long messages
-  // (Not strictly necessary but good practice)
-  // phase = phase % (2 * Math.PI);
 
   return samples;
 }
@@ -260,15 +266,78 @@ function findSignalEnd(samples: Float32Array, sampleRate: number, windowMs: numb
 }
 
 /**
+ * Decode bits from samples starting at a given offset with fractional timing.
+ * Returns array of decoded bits.
+ */
+function decodeBitsFromOffset(
+  samples: Float32Array,
+  startOffset: number,
+  numBits: number,
+  samplesPerBitExact: number,
+  windowSize: number,
+  markFreq: number,
+  spaceFreq: number,
+  sampleRate: number
+): number[] {
+  const bits: number[] = [];
+  let bitPosition = 0;
+
+  for (let i = 0; i < numBits; i++) {
+    const start = startOffset + Math.round(bitPosition);
+    if (start + windowSize > samples.length) break;
+
+    const markPower = goertzelMagnitude(samples, start, windowSize, markFreq, sampleRate);
+    const spacePower = goertzelMagnitude(samples, start, windowSize, spaceFreq, sampleRate);
+
+    bits.push(markPower > spacePower ? 1 : 0);
+    bitPosition += samplesPerBitExact;
+  }
+
+  return bits;
+}
+
+/**
+ * Convert bits to bytes (LSB first encoding)
+ */
+function bitsToBytes(bits: number[]): Buffer {
+  const numBytes = Math.floor(bits.length / 8);
+  const bytes = Buffer.alloc(numBytes);
+
+  for (let byteIndex = 0; byteIndex < numBytes; byteIndex++) {
+    let byte = 0;
+    for (let bitIndex = 0; bitIndex < 8; bitIndex++) {
+      if (bits[byteIndex * 8 + bitIndex] === 1) {
+        byte |= (1 << bitIndex);
+      }
+    }
+    bytes[byteIndex] = byte;
+  }
+
+  return bytes;
+}
+
+/**
+ * Count how many preamble bytes (0x55) appear in a sequence
+ */
+function countPreambleBytes(bytes: Buffer, maxCheck: number = 40): number {
+  let count = 0;
+  for (let i = 0; i < Math.min(bytes.length, maxCheck); i++) {
+    if (bytes[i] === PREAMBLE_BYTE) count++;
+  }
+  return count;
+}
+
+/**
  * Demodulate AFSK audio samples to bytes.
- * Uses Goertzel algorithm for robust frequency detection per bit window.
+ * Uses Goertzel algorithm for frequency detection and preamble-based synchronization.
  */
 function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   clearAfskDebugLog();
   const { sampleRate, baudRate, markFreq, spaceFreq } = config;
-  const samplesPerBit = Math.round(sampleRate / baudRate);
+  const samplesPerBitExact = sampleRate / baudRate; // Use exact fractional value
+  const windowSize = Math.round(samplesPerBitExact);
 
-  debugLog(`Sample rate: ${sampleRate}Hz, Baud: ${baudRate}, Samples/bit: ${samplesPerBit}`);
+  debugLog(`Sample rate: ${sampleRate}Hz, Baud: ${baudRate}, Samples/bit: ${samplesPerBitExact.toFixed(2)}`);
   debugLog(`Mark: ${markFreq}Hz, Space: ${spaceFreq}Hz`);
   debugLog(`Total samples: ${samples.length}`);
 
@@ -287,28 +356,45 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
 
   debugLog(`Signal detected: samples ${signalStart} to ${signalEnd} (${(signalLength / sampleRate).toFixed(2)}s)`);
 
-  if (signalLength < samplesPerBit * 100) {
+  if (signalLength < windowSize * 100) {
     debugLog('WARNING: Signal too short, may not contain valid data');
   }
 
-  // Decode bits using Goertzel algorithm for frequency detection
-  const bits: number[] = [];
-  const numBits = Math.floor(signalLength / samplesPerBit);
+  // Preamble synchronization: try different phase offsets to find the best alignment
+  // The preamble is 0x55 (alternating bits), so we look for the offset that produces
+  // the most 0x55 bytes in the first ~40 bytes
+  debugLog('Synchronizing to preamble...');
 
-  debugLog(`Expected bits from signal: ${numBits}`);
+  let bestOffset = signalStart;
+  let bestPreambleCount = 0;
+  const searchRange = Math.min(windowSize * 2, 30); // Search +/- 1-2 bit periods
 
-  for (let bitIndex = 0; bitIndex < numBits; bitIndex++) {
-    const start = signalStart + bitIndex * samplesPerBit;
+  for (let offset = -searchRange; offset <= searchRange; offset++) {
+    const testStart = signalStart + offset;
+    if (testStart < 0) continue;
 
-    // Use Goertzel to measure power at mark and space frequencies
-    const markPower = goertzelMagnitude(samples, start, samplesPerBit, markFreq, sampleRate);
-    const spacePower = goertzelMagnitude(samples, start, samplesPerBit, spaceFreq, sampleRate);
+    // Decode first ~50 bytes worth of bits
+    const testBits = decodeBitsFromOffset(
+      samples, testStart, 400, samplesPerBitExact, windowSize,
+      markFreq, spaceFreq, sampleRate
+    );
+    const testBytes = bitsToBytes(testBits);
+    const preambleCount = countPreambleBytes(testBytes);
 
-    // Compare powers to determine bit value
-    // Mark (1200Hz) = 1, Space (2200Hz) = 0
-    const bit = markPower > spacePower ? 1 : 0;
-    bits.push(bit);
+    if (preambleCount > bestPreambleCount) {
+      bestPreambleCount = preambleCount;
+      bestOffset = testStart;
+    }
   }
+
+  debugLog(`Best sync offset: ${bestOffset - signalStart} samples (${bestPreambleCount} preamble bytes found)`);
+
+  // Now decode all bits from the synchronized position
+  const maxBits = Math.floor((signalEnd - bestOffset) / samplesPerBitExact);
+  const bits = decodeBitsFromOffset(
+    samples, bestOffset, maxBits, samplesPerBitExact, windowSize,
+    markFreq, spaceFreq, sampleRate
+  );
 
   debugLog(`Bits decoded: ${bits.length}`);
 
@@ -316,7 +402,6 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   if (bits.length >= 64) {
     const first64 = bits.slice(0, 64).join('');
     debugLog(`First 64 bits: ${first64}`);
-    // Also show as bytes
     const firstBytes: string[] = [];
     for (let i = 0; i < 64; i += 8) {
       let byte = 0;
@@ -328,25 +413,13 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
     debugLog(`First 8 bytes: ${firstBytes.join(' ')}`);
   }
 
-  // Convert bits to bytes (LSB first)
-  const numBytes = Math.floor(bits.length / 8);
-  const bytes = Buffer.alloc(numBytes);
+  // Convert bits to bytes
+  const bytes = bitsToBytes(bits);
 
-  for (let byteIndex = 0; byteIndex < numBytes; byteIndex++) {
-    let byte = 0;
-    for (let bitIndex = 0; bitIndex < 8; bitIndex++) {
-      if (bits[byteIndex * 8 + bitIndex] === 1) {
-        byte |= (1 << bitIndex);
-      }
-    }
-    bytes[byteIndex] = byte;
-  }
+  debugLog(`Bytes decoded: ${bytes.length}`);
 
-  debugLog(`Bytes decoded: ${numBytes}`);
-
-  // Show first few bytes for debugging
-  if (numBytes > 0) {
-    const preview = bytes.subarray(0, Math.min(16, numBytes)).toString('hex');
+  if (bytes.length > 0) {
+    const preview = bytes.subarray(0, Math.min(16, bytes.length)).toString('hex');
     debugLog(`First bytes (hex): ${preview}`);
   }
 
