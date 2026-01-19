@@ -1,5 +1,5 @@
 import { Box, useInput, useStdout } from 'ink';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 import { MatrixService, setLogger } from '../shared/services/MatrixService.js';
 
@@ -77,14 +77,30 @@ export function App({ initialProfile }: AppProps) {
     rows: stdout?.rows || 24,
   });
 
+  // Track previous dimensions to detect significant changes
+  const prevDimensionsRef = useRef({ columns: stdout?.columns || 80, rows: stdout?.rows || 24 });
+
   // Handle terminal resize - force re-render when dimensions change
   useEffect(() => {
     const handleResize = () => {
       if (stdout) {
+        const newCols = stdout.columns;
+        const newRows = stdout.rows;
+        const prevCols = prevDimensionsRef.current.columns;
+        const prevRows = prevDimensionsRef.current.rows;
+
+        // If terminal grew in either dimension, clear screen to prevent artifacts
+        if (newCols > prevCols || newRows > prevRows) {
+          // Clear screen and move cursor to top-left
+          process.stdout.write('\x1b[2J\x1b[H');
+        }
+
         setTerminalDimensions({
-          columns: stdout.columns,
-          rows: stdout.rows,
+          columns: newCols,
+          rows: newRows,
         });
+
+        prevDimensionsRef.current = { columns: newCols, rows: newRows };
       }
     };
 
