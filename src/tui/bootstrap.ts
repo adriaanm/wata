@@ -20,18 +20,16 @@ const profileIndex = args.indexOf('--profile');
 const initialProfile =
   profileIndex !== -1 && args[profileIndex + 1] ? args[profileIndex + 1] : null;
 
-// Enable alternate screen buffer using both common escape sequences
-// This ensures compatibility with more terminals
-// 1049h = DECSET 1049 (alternate screen with cursor state save)
-// 47h   = DECSET 47 (use alternate screen buffer)
-process.stdout.write('\x1b[?1049h\x1b[?47h');
+// Enable alternate screen buffer (should disable scrollback)
+// Note: This works in most terminals but NOT in macOS Terminal.app
+// TODO: Terminal.app doesn't respect DECSET 1049/47 - investigate alternatives
+// See: https://github.com/derv92/wata/issues
+process.stdout.write('\x1b[?1049h');
 
 // Cleanup function to restore terminal state
 const restoreTerminal = () => {
-  // Disable alternate screen buffer (restore normal screen with scrollback)
-  // 1049l = DECRST 1049
-  // 47l   = DECRST 47
-  process.stdout.write('\x1b[?47l\x1b[?1049l');
+  // Disable alternate screen buffer
+  process.stdout.write('\x1b[?1049l');
 };
 
 // Ensure terminal is restored on exit
