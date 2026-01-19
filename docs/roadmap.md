@@ -73,6 +73,21 @@ The prototype focuses on 1:1 voice messaging (DMs). Even for hobbyist usage in v
 ## App store ready
 Build does not contain any credentials. Provisioning happens through some tbd mechanism (admin part of app, the TUI, some web app,...)
 
+## Invite Security
+
+Currently, all room invites are auto-accepted (trusted family environment). For public deployment or multi-tenant servers, add validation:
+
+**Safety improvements:**
+- Only accept invites from users who share a family room with us
+- Reject DM invites from unknown users
+- Add admin settings to configure invite acceptance policy
+- Consider adding blocklist/allowlist for specific users
+
+**Implementation:**
+- Check inviter's membership in family rooms before accepting DM invites
+- Add user preference for "Auto-accept invites from family members only"
+- Log rejected invites for security auditing
+
 ## Message History / Offline Support
 Full offline support for incoming and outgoing messages. Retention is configurable. Clear errors when outgoing messages fail to send after some short retries.
 
