@@ -151,9 +151,11 @@ const familyRoom = await client.createRoom({
 // 1. Create user account (via Conduit admin room or registration)
 // 2. Invite to family room
 await client.invite(familyRoomId, '@newmember:server.local');
-// 3. New member accepts invite (or auto-accept)
+// 3. New member auto-joins (invite is accepted automatically)
 // 4. New member appears in everyone's contact list
 ```
+
+**Auto-join behavior:** Since Wata runs in a trusted environment (family-owned server), invites to the family room are automatically accepted. When a family member receives an invite to `#family:server`, the client immediately joins without user interaction. This simplifies onboarding - admins just need to invite new members, and they appear in everyone's contact list automatically.
 
 ### Removing a Family Member
 
@@ -212,21 +214,31 @@ If the recipient doesn't update their `m.direct`, they won't recognize the room 
 **Solution:** When joining a room, check if the invite event had `is_direct: true`. If so, update the local user's `m.direct`:
 
 ```typescript
-// When user joins a room, check if it's a DM
+// When user's membership changes, handle DM room tracking
 client.on(RoomMemberEvent.Membership, async (event, member) => {
   if (member.userId !== client.getUserId()) return;
-  if (member.membership !== 'join') return;
 
-  // Check if the invite had is_direct flag
-  const dominated = event.getPrevContent()?.is_direct;
-  if (isDirect) {
-    const inviterId = event.getSender();
-    await updateDirectRoomData(inviterId, event.getRoomId());
+  // Auto-join family room invites
+  if (member.membership === 'invite') {
+    const isFamilyRoom = await checkIsFamilyRoom(event.getRoomId());
+    if (isFamilyRoom) {
+      await client.joinRoom(event.getRoomId());
+      return;
+    }
+  }
+
+  // Update m.direct for DM rooms when joining
+  if (member.membership === 'join') {
+    const isDirect = event.getPrevContent()?.is_direct;
+    if (isDirect) {
+      const inviterId = event.getSender();
+      await updateDirectRoomData(inviterId, event.getRoomId());
+    }
   }
 });
 ```
 
-This ensures both parties recognize the room as a DM and prevents duplicate room creation.
+This ensures both parties recognize the room as a DM and prevents duplicate room creation. The membership handler also processes `invite` events to auto-join family room invites in this trusted environment.
 
 ## Future Considerations
 

@@ -448,42 +448,48 @@ class MatrixService {
         // Only care about our own membership changes
         if (member.userId !== this.client.getUserId()) return;
 
-        // Only care when we join a room (from any previous state)
-        if (member.membership !== 'join') return;
-
-        // Skip if we were already joined (no change)
-        if (oldMembership === 'join') return;
-
-        // Check if this room was created as a DM using getDMInviter()
-        // This is the recommended way per matrix-js-sdk docs
-        const dmInviter = member.getDMInviter();
-        if (!dmInviter) return;
-
         const roomId = event.getRoomId();
         if (!roomId) return;
 
-        // Check if already in m.direct
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const dmData = this.client.getAccountData('m.direct' as any);
-        const existingDirect = dmData
-          ? (dmData.getContent() as Record<string, string[]>)
-          : {};
-        if (existingDirect[dmInviter]?.includes(roomId)) {
-          // Already tracked, no need to update
+        // Handle invites - auto-join family room invites
+        if (member.membership === 'invite') {
+          await this.handleRoomInvite(roomId);
           return;
         }
 
-        log(
-          `[MatrixService] Joined DM room ${roomId} from ${dmInviter}, updating m.direct`,
-        );
+        // Handle joins - update m.direct for DM rooms
+        if (member.membership === 'join') {
+          // Skip if we were already joined (no change)
+          if (oldMembership === 'join') return;
 
-        // Update our m.direct to recognize this as a DM room
-        try {
-          await this.updateDirectRoomData(dmInviter, roomId);
-          // Notify about room updates so UI refreshes
-          this.notifyRoomUpdate();
-        } catch (err) {
-          logError(`[MatrixService] Failed to update m.direct: ${err}`);
+          // Check if this room was created as a DM using getDMInviter()
+          // This is the recommended way per matrix-js-sdk docs
+          const dmInviter = member.getDMInviter();
+          if (!dmInviter) return;
+
+          // Check if already in m.direct
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dmData = this.client.getAccountData('m.direct' as any);
+          const existingDirect = dmData
+            ? (dmData.getContent() as Record<string, string[]>)
+            : {};
+          if (existingDirect[dmInviter]?.includes(roomId)) {
+            // Already tracked, no need to update
+            return;
+          }
+
+          log(
+            `[MatrixService] Joined DM room ${roomId} from ${dmInviter}, updating m.direct`,
+          );
+
+          // Update our m.direct to recognize this as a DM room
+          try {
+            await this.updateDirectRoomData(dmInviter, roomId);
+            // Notify about room updates so UI refreshes
+            this.notifyRoomUpdate();
+          } catch (err) {
+            logError(`[MatrixService] Failed to update m.direct: ${err}`);
+          }
         }
       },
     );
@@ -914,6 +920,40 @@ class MatrixService {
 
     log(`[MatrixService] Inviting ${userId} to family room`);
     await this.client.invite(familyRoom.roomId, userId);
+  }
+
+  /**
+   * Handle incoming room invites
+   * Auto-joins family room invites (trusted environment)
+   * Ignores other invites (DMs are created on-demand when needed)
+   */
+  private async handleRoomInvite(roomId: string): Promise<void> {
+    if (!this.client) return;
+
+    try {
+      // Check if this room is the family room by resolving the family alias
+      // and comparing it to the invited room ID
+      const serverName = new URL(HOMESERVER_URL).hostname;
+      const expectedAlias = `#${FAMILY_ALIAS_PREFIX}:${serverName}`;
+
+      try {
+        const result = await this.client.getRoomIdForAlias(expectedAlias);
+        if (result?.room_id === roomId) {
+          log(`[MatrixService] Auto-joining family room invite: ${roomId}`);
+          await this.client.joinRoom(roomId);
+          log(`[MatrixService] Joined family room`);
+          // notifyRoomUpdate will be called when we receive the join event
+          return;
+        }
+      } catch {
+        // Alias doesn't exist or not accessible - not the family room
+      }
+
+      // Not a family room invite - log and ignore
+      log(`[MatrixService] Ignoring invite to non-family room: ${roomId}`);
+    } catch (error) {
+      logError(`[MatrixService] Failed to handle room invite for ${roomId}: ${error}`);
+    }
   }
 
   /**
