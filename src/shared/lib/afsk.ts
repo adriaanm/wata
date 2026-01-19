@@ -375,30 +375,42 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
     debugLog('WARNING: Signal too short, may not contain valid data');
   }
 
-  // Preamble synchronization: try different phase offsets to find the best alignment
-  // The preamble is 0x55 (alternating bits), so we look for the offset that produces
-  // the most 0x55 bytes in the first ~40 bytes
+  // Preamble synchronization: search through the signal to find where the preamble starts
+  // Speaker/mic artifacts may cause garbage at the start, so search deeper into the signal
   debugLog('Synchronizing to preamble...');
 
   let bestOffset = signalStart;
   let bestPreambleCount = 0;
-  const searchRange = Math.min(windowSize * 2, 30); // Search +/- 1-2 bit periods
 
-  for (let offset = -searchRange; offset <= searchRange; offset++) {
-    const testStart = signalStart + offset;
-    if (testStart < 0) continue;
+  // Search range: up to ~100 bytes into the signal (to skip startup artifacts)
+  // Also try different bit phases (sub-bit alignment)
+  const maxSearchBytes = 100;
+  const maxSearchSamples = Math.round(maxSearchBytes * 8 * samplesPerBitExact);
+  const searchEnd = Math.min(signalStart + maxSearchSamples, signalEnd - 1000);
 
-    // Decode first ~50 bytes worth of bits
-    const testBits = decodeBitsFromOffset(
-      samples, testStart, 400, samplesPerBitExact, windowSize,
-      markFreq, spaceFreq, sampleRate
-    );
-    const testBytes = bitsToBytes(testBits);
-    const preambleCount = countPreambleBytes(testBytes);
+  // Step through byte boundaries (8 bits = ~107 samples)
+  const byteStep = Math.round(8 * samplesPerBitExact);
+  // Also try different phases within each byte
+  const phaseStep = Math.round(samplesPerBitExact / 2);
 
-    if (preambleCount > bestPreambleCount) {
-      bestPreambleCount = preambleCount;
-      bestOffset = testStart;
+  for (let byteOffset = 0; byteOffset < maxSearchSamples && signalStart + byteOffset < searchEnd; byteOffset += byteStep) {
+    // Try different bit phases at this byte boundary
+    for (let phase = -windowSize; phase <= windowSize; phase += phaseStep) {
+      const testStart = signalStart + byteOffset + phase;
+      if (testStart < 0 || testStart >= searchEnd) continue;
+
+      // Decode first ~50 bytes worth of bits
+      const testBits = decodeBitsFromOffset(
+        samples, testStart, 400, samplesPerBitExact, windowSize,
+        markFreq, spaceFreq, sampleRate
+      );
+      const testBytes = bitsToBytes(testBits);
+      const preambleCount = countPreambleBytes(testBytes);
+
+      if (preambleCount > bestPreambleCount) {
+        bestPreambleCount = preambleCount;
+        bestOffset = testStart;
+      }
     }
   }
 
