@@ -33,7 +33,7 @@ export class LogService {
    * Add a log entry (outputs to console)
    */
   addEntry(level: 'log' | 'warn' | 'error' | 'success', message: string): void {
-    const timestamp = Date.now();
+    // const timestamp = Date.now(); // Available for future logging features
     const logFn = level === 'log' ? console.log :
                     level === 'warn' ? console.warn :
                     level === 'error' ? console.error :

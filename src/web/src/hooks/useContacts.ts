@@ -23,7 +23,7 @@ export function useContacts(): Contact[] {
     }>
   >([]);
   const [familyRoomId, setFamilyRoomId] = useState<string | null>(null);
-  const [contactStatus, setContactStatus] = useState<Record<string, ContactStatus>>({});
+  const [contactStatus, _setContactStatus] = useState<Record<string, ContactStatus>>({});
 
   // Load family members from family room
   useEffect(() => {

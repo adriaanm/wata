@@ -1,4 +1,3 @@
-import React from 'react';
 import { MainView } from './components/MainView.js';
 import { LoginView } from './components/LoginView.js';
 import { LoadingView } from './components/LoadingView.js';

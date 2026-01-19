@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { ContactCard } from './ContactCard.js';
 import { RecordingIndicator } from './RecordingIndicator.js';
 import { useContactSelection } from '../hooks/useContactSelection.js';
@@ -18,14 +18,16 @@ export function MainView({ contacts }: MainViewProps) {
   } = useContactSelection(contacts);
 
   const {
-    recordingState,
     recordingDuration,
     recordingContactId,
     isSpaceHeld,
+    sendError,
     startRecording,
     stopRecording,
     cancelRecording,
+    clearError,
     isRecording,
+    isSending,
   } = usePtt({
     onStartRecording: (contactId) => {
       console.log('Started recording to', contactId);
@@ -33,16 +35,17 @@ export function MainView({ contacts }: MainViewProps) {
     onStopRecording: (contactId, duration) => {
       console.log('Stopped recording to', contactId, 'duration:', duration);
     },
-    onCancelRecording: () => {
-      console.log('Cancelled recording');
+    onSendError: (error) => {
+      console.error('Failed to send voice message:', error);
     },
   });
 
   // Handle space bar PTT for selected contact
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' && !isRecording && selectedContact) {
+      if (e.key === ' ' && !isRecording && !isSending && selectedContact) {
         e.preventDefault();
+        clearError(); // Clear any previous errors when starting new recording
         startRecording(selectedContact.id);
       }
     };
@@ -60,23 +63,31 @@ export function MainView({ contacts }: MainViewProps) {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isRecording, selectedContact, startRecording, stopRecording]);
+  }, [isRecording, isSending, selectedContact, startRecording, stopRecording, clearError]);
 
   const handleSelectContact = (index: number) => {
     setSelectedIndex(index);
   };
 
   const handleStartRecording = (index: number, _ripplePosition: { x: number; y: number }) => {
+    clearError(); // Clear any previous errors when starting new recording
     startRecording(contacts[index].id);
   };
 
+  // Find the contact being recorded to for the recording indicator
+  const recordingContact = recordingContactId
+    ? contacts.find(c => c.id === recordingContactId)
+    : null;
+
   return (
     <>
-      {isRecording && recordingContactId && selectedContact && (
+      {isRecording && recordingContact && (
         <RecordingIndicator
           duration={recordingDuration}
-          contactName={selectedContact.name}
+          contactName={recordingContact.name}
           isSpaceHeld={isSpaceHeld}
+          isSending={isSending}
+          error={sendError}
         />
       )}
 
