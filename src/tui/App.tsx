@@ -83,6 +83,8 @@ export function App({ initialProfile }: AppProps) {
         }
 
         // Listen for sync state changes
+        // Note: ERROR state is transient and handled by Matrix SDK auto-retry + token refresh
+        // We don't show ERROR to users - it will recover automatically
         const unsubscribe = matrixService.onSyncStateChange(state => {
           setSyncState(state);
           if (state === 'PREPARED' || state === 'SYNCING') {
@@ -91,8 +93,9 @@ export function App({ initialProfile }: AppProps) {
               prev.screen === 'loading' ? { screen: 'main' } : prev,
             );
           }
-          if (state === 'ERROR') {
-            setError('Sync error - retrying...');
+          // Clear error when syncing recovers
+          if (state === 'PREPARED' || state === 'SYNCING') {
+            setError(null);
           }
         });
 

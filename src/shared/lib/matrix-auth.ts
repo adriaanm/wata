@@ -46,6 +46,17 @@ export interface MatrixLoginRequest {
 }
 
 /**
+ * OAuth2-style access tokens (for SDK compatibility)
+ * Conduit doesn't use OAuth2, but we store a dummy refresh token
+ * to make the SDK call our refresh callback.
+ */
+export interface AccessTokens {
+  accessToken: string;
+  refreshToken?: string;
+  expiry?: Date;
+}
+
+/**
  * Login response from Matrix server
  */
 export interface MatrixLoginResponse {
@@ -71,7 +82,12 @@ interface MatrixLogger {
 export interface LoginOptions {
   deviceName?: string;
   logger?: MatrixLogger;
-  refreshToken?: () => Promise<{ access_token: string }>;
+  /**
+   * Callback to refresh the access token when it expires.
+   * For Conduit (no OAuth2), the refresh token parameter is ignored;
+   * the callback should do a password-based re-login.
+   */
+  tokenRefreshFunction?: (refreshToken: string) => Promise<AccessTokens>;
 }
 
 /**
@@ -88,10 +104,18 @@ export async function loginToMatrix(
   username: string,
   password: string,
   options?: LoginOptions | string, // string for backwards compatibility (deviceName)
+  /** Refresh token callback to pass through (for use by refresh callbacks themselves) */
+  passThroughRefreshFunction?: (refreshToken: string) => Promise<AccessTokens>,
 ): Promise<matrix.MatrixClient> {
   // Handle backwards compatibility - old signature passed deviceName as string
   const opts: LoginOptions =
     typeof options === 'string' ? { deviceName: options } : options || {};
+
+  // If a refresh callback was explicitly passed (for recursive refresh scenarios),
+  // it takes precedence over any option in the LoginOptions
+  if (passThroughRefreshFunction) {
+    opts.tokenRefreshFunction = passThroughRefreshFunction;
+  }
   log('[matrix-auth] loginToMatrix called:');
   log(`  baseUrl: ${baseUrl}`);
   log(`  username: ${username}`);
@@ -165,8 +189,14 @@ export async function loginToMatrix(
     }
 
     // Add refresh callback if provided (for token renewal)
-    if (opts.refreshToken) {
-      clientOpts.refreshToken = opts.refreshToken;
+    // Note: SDK expects 'tokenRefreshFunction' (not 'refreshTokens' or 'refreshToken')
+    // The SDK only calls this function when a 'refreshToken' string is also present.
+    // Since Conduit doesn't use OAuth2 refresh tokens, we use a dummy string.
+    if (opts.tokenRefreshFunction) {
+      clientOpts.tokenRefreshFunction = opts.tokenRefreshFunction;
+      // Store a dummy refresh token so the SDK actually calls our refresh function
+      // Conduit doesn't use OAuth2, so this is just a trigger value
+      clientOpts.refreshToken = 'conduit-dummy-refresh-token';
     }
 
     return matrix.createClient(clientOpts);

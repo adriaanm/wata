@@ -2,7 +2,7 @@ import { Buffer } from 'buffer';
 
 import { MATRIX_CONFIG } from '@shared/config/matrix';
 import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
-import { loginToMatrix, type StoredCredentials } from '@shared/lib/matrix-auth';
+import { loginToMatrix, type AccessTokens, type StoredCredentials } from '@shared/lib/matrix-auth';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';
 import type { MatrixClient } from 'matrix-js-sdk';
 import { MsgType } from 'matrix-js-sdk';
@@ -132,7 +132,9 @@ class MatrixService {
     this.currentPassword = password;
 
     // Create refresh callback for token renewal
-    const refreshToken = async () => {
+    // Note: The SDK passes a refreshToken string, but for Conduit we ignore it
+    // and do a password-based re-login instead
+    const tokenRefreshFunction = async (_refreshToken: string): Promise<AccessTokens> => {
       log('[MatrixService] Refreshing access token...');
       if (!this.currentUsername || !this.currentPassword) {
         logError('[MatrixService] Cannot refresh token: missing credentials');
@@ -140,7 +142,7 @@ class MatrixService {
       }
 
       try {
-        // Re-login to get a fresh access token
+        // Re-login to get a fresh access token, passing this same refresh callback
         const newClient = await loginToMatrix(
           HOMESERVER_URL,
           this.currentUsername,
@@ -149,6 +151,7 @@ class MatrixService {
             deviceName: 'Wata',
             logger: this.logger,
           },
+          tokenRefreshFunction, // Pass refresh callback through so new client can also refresh
         );
 
         const newAccessToken = newClient.getAccessToken();
@@ -170,9 +173,11 @@ class MatrixService {
           credentials,
         );
 
-        // The newClient will be discarded; the SDK will update the current client
-        // with the new access token
-        return { access_token: newAccessToken };
+        // Return in the format the SDK expects
+        return {
+          accessToken: newAccessToken,
+          refreshToken: 'conduit-dummy-refresh-token', // Keep the dummy token
+        };
       } catch (error) {
         logError(`[MatrixService] Token refresh failed: ${error}`);
         throw error;
@@ -183,7 +188,7 @@ class MatrixService {
     this.client = await loginToMatrix(HOMESERVER_URL, username, password, {
       deviceName: 'Wata',
       logger: this.logger,
-      refreshToken,
+      tokenRefreshFunction,
     });
 
     log('[MatrixService] Login successful, storing credentials');
@@ -235,7 +240,9 @@ class MatrixService {
       this.currentPassword = MATRIX_CONFIG.password;
 
       // Create refresh callback for token renewal
-      const refreshToken = async () => {
+      // Note: The SDK passes a refreshToken string, but for Conduit we ignore it
+      // and do a password-based re-login instead
+      const tokenRefreshFunction = async (_refreshToken: string): Promise<AccessTokens> => {
         log('[MatrixService] Refreshing access token...');
         if (!this.currentUsername || !this.currentPassword) {
           logError('[MatrixService] Cannot refresh token: missing credentials');
@@ -243,7 +250,7 @@ class MatrixService {
         }
 
         try {
-          // Re-login to get a fresh access token
+          // Re-login to get a fresh access token, passing this same refresh callback
           const newClient = await loginToMatrix(
             HOMESERVER_URL,
             this.currentUsername,
@@ -252,6 +259,7 @@ class MatrixService {
               deviceName: 'Wata',
               logger: this.logger,
             },
+            tokenRefreshFunction, // Pass refresh callback through so new client can also refresh
           );
 
           const newAccessToken = newClient.getAccessToken();
@@ -273,7 +281,11 @@ class MatrixService {
             credentials,
           );
 
-          return { access_token: newAccessToken };
+          // Return in the format the SDK expects
+          return {
+            accessToken: newAccessToken,
+            refreshToken: 'conduit-dummy-refresh-token', // Keep the dummy token
+          };
         } catch (error) {
           logError(`[MatrixService] Token refresh failed: ${error}`);
           throw error;
@@ -287,7 +299,10 @@ class MatrixService {
         userId: stored.userId,
         deviceId: stored.deviceId,
         fetchFn: createFixedFetch(),
-        refreshToken,
+        // Note: SDK expects 'tokenRefreshFunction' (not 'refreshTokens' or 'refreshToken')
+        tokenRefreshFunction,
+        // Store a dummy refresh token so the SDK actually calls our refresh function
+        refreshToken: 'conduit-dummy-refresh-token',
       };
 
       // Add custom logger if provided (for TUI to suppress console output)
@@ -976,8 +991,11 @@ class MatrixService {
 
     log(`[MatrixService] Uploading audio: ${size} bytes, type=${mimeType}`);
 
+    // Convert Buffer to Uint8Array for browser compatibility
+    const uint8Array = new Uint8Array(audioBuffer);
+
     // Log the full upload response for debugging
-    const uploadResponse = await this.client.uploadContent(audioBuffer, {
+    const uploadResponse = await this.client.uploadContent(uint8Array, {
       type: mimeType,
       name: `voice-message.${extension}`,
     });
