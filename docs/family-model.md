@@ -155,7 +155,11 @@ await client.invite(familyRoomId, '@newmember:server.local');
 // 4. New member appears in everyone's contact list
 ```
 
-**Auto-join behavior:** Since Wata runs in a trusted environment (family-owned server), invites to the family room are automatically accepted. When a family member receives an invite to `#family:server`, the client immediately joins without user interaction. This simplifies onboarding - admins just need to invite new members, and they appear in everyone's contact list automatically.
+**Auto-join behavior:** Since Wata runs in a trusted environment (family-owned server with controlled accounts), **all room invites are automatically accepted**. When a family member receives an invite, the client immediately joins without user interaction. This includes:
+- Family room invites - for joining the family broadcast channel
+- DM room invites - prevents duplicate room creation when another member initiates a DM
+
+This simplifies onboarding - admins just need to invite new members, and they appear in everyone's contact list automatically. It also ensures DM conversations work bidirectionally without creating duplicate rooms.
 
 ### Removing a Family Member
 
@@ -218,13 +222,10 @@ If the recipient doesn't update their `m.direct`, they won't recognize the room 
 client.on(RoomMemberEvent.Membership, async (event, member) => {
   if (member.userId !== client.getUserId()) return;
 
-  // Auto-join family room invites
+  // Auto-join all invites (trusted family environment)
   if (member.membership === 'invite') {
-    const isFamilyRoom = await checkIsFamilyRoom(event.getRoomId());
-    if (isFamilyRoom) {
-      await client.joinRoom(event.getRoomId());
-      return;
-    }
+    await client.joinRoom(event.getRoomId());
+    return;
   }
 
   // Update m.direct for DM rooms when joining
@@ -238,7 +239,7 @@ client.on(RoomMemberEvent.Membership, async (event, member) => {
 });
 ```
 
-This ensures both parties recognize the room as a DM and prevents duplicate room creation. The membership handler also processes `invite` events to auto-join family room invites in this trusted environment.
+This ensures both parties recognize the room as a DM and prevents duplicate room creation. The membership handler auto-joins all invites in this trusted environment.
 
 ## Future Considerations
 

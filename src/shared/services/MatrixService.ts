@@ -924,35 +924,24 @@ class MatrixService {
 
   /**
    * Handle incoming room invites
-   * Auto-joins family room invites (trusted environment)
-   * Ignores other invites (DMs are created on-demand when needed)
+   * Auto-joins all room invites (trusted family environment)
+   *
+   * Since this is a trusted family walkie-talkie app, we auto-join all invites:
+   * - Family room invites: So members can join the family room
+   * - DM room invites: So we don't create duplicate DM rooms
+   *
+   * In a trusted environment with controlled user accounts, this is safe.
    */
   private async handleRoomInvite(roomId: string): Promise<void> {
     if (!this.client) return;
 
     try {
-      // Check if this room is the family room by resolving the family alias
-      // and comparing it to the invited room ID
-      const serverName = new URL(HOMESERVER_URL).hostname;
-      const expectedAlias = `#${FAMILY_ALIAS_PREFIX}:${serverName}`;
-
-      try {
-        const result = await this.client.getRoomIdForAlias(expectedAlias);
-        if (result?.room_id === roomId) {
-          log(`[MatrixService] Auto-joining family room invite: ${roomId}`);
-          await this.client.joinRoom(roomId);
-          log(`[MatrixService] Joined family room`);
-          // notifyRoomUpdate will be called when we receive the join event
-          return;
-        }
-      } catch {
-        // Alias doesn't exist or not accessible - not the family room
-      }
-
-      // Not a family room invite - log and ignore
-      log(`[MatrixService] Ignoring invite to non-family room: ${roomId}`);
+      log(`[MatrixService] Auto-joining room invite: ${roomId}`);
+      await this.client.joinRoom(roomId);
+      log(`[MatrixService] Joined room ${roomId}`);
+      // notifyRoomUpdate will be called when we receive the join event
     } catch (error) {
-      logError(`[MatrixService] Failed to handle room invite for ${roomId}: ${error}`);
+      logError(`[MatrixService] Failed to join room ${roomId}: ${error}`);
     }
   }
 
