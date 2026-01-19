@@ -20,7 +20,8 @@ const profileIndex = args.indexOf('--profile');
 const initialProfile =
   profileIndex !== -1 && args[profileIndex + 1] ? args[profileIndex + 1] : null;
 
-// Enable alternate screen buffer (no scrollback)
+// Enable alternate screen buffer IMMEDIATELY (before any console output)
+// This ensures all output goes to the alternate buffer with no scrollback
 process.stdout.write('\x1b[?1049h');
 
 // Cleanup function to restore terminal state
@@ -31,9 +32,6 @@ const restoreTerminal = () => {
 
 // Ensure terminal is restored on exit
 process.on('exit', restoreTerminal);
-
-// Clear screen first (using alternate screen buffer now)
-process.stdout.write('\x1B[H\x1B[J');
 
 async function bootstrap() {
   // Step 1: Import and install LogService FIRST
@@ -88,6 +86,7 @@ async function bootstrap() {
   const { App } = await import('./App.js');
 
   // Step 6: Render with initial profile
+  // Ink will now render to the alternate screen buffer (no scrollback)
   render(React.createElement(App, { initialProfile }));
 }
 
