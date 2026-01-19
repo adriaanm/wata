@@ -20,14 +20,18 @@ const profileIndex = args.indexOf('--profile');
 const initialProfile =
   profileIndex !== -1 && args[profileIndex + 1] ? args[profileIndex + 1] : null;
 
-// Enable alternate screen buffer IMMEDIATELY (before any console output)
-// This ensures all output goes to the alternate buffer with no scrollback
-process.stdout.write('\x1b[?1049h');
+// Enable alternate screen buffer using both common escape sequences
+// This ensures compatibility with more terminals
+// 1049h = DECSET 1049 (alternate screen with cursor state save)
+// 47h   = DECSET 47 (use alternate screen buffer)
+process.stdout.write('\x1b[?1049h\x1b[?47h');
 
 // Cleanup function to restore terminal state
 const restoreTerminal = () => {
   // Disable alternate screen buffer (restore normal screen with scrollback)
-  process.stdout.write('\x1b[?1049l');
+  // 1049l = DECRST 1049
+  // 47l   = DECRST 47
+  process.stdout.write('\x1b[?47l\x1b[?1049l');
 };
 
 // Ensure terminal is restored on exit
