@@ -1,5 +1,5 @@
 import { Box, useInput, useStdout } from 'ink';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
 import { MatrixService, setLogger } from '../shared/services/MatrixService.js';
 
@@ -72,36 +72,14 @@ export function App({ initialProfile }: AppProps) {
     initialProfile && PROFILES[initialProfile] ? initialProfile : 'alice',
   );
   const { stdout } = useStdout();
-  const [terminalDimensions, setTerminalDimensions] = useState({
-    columns: stdout?.columns || 80,
-    rows: stdout?.rows || 24,
-  });
-
-  // Track previous dimensions to detect significant changes
-  const prevDimensionsRef = useRef({ columns: stdout?.columns || 80, rows: stdout?.rows || 24 });
+  // Force re-render key that increments on resize
+  const [renderKey, setRenderKey] = useState(0);
 
   // Handle terminal resize - force re-render when dimensions change
   useEffect(() => {
     const handleResize = () => {
-      if (stdout) {
-        const newCols = stdout.columns;
-        const newRows = stdout.rows;
-        const prevCols = prevDimensionsRef.current.columns;
-        const prevRows = prevDimensionsRef.current.rows;
-
-        // If terminal grew in either dimension, clear screen to prevent artifacts
-        if (newCols > prevCols || newRows > prevRows) {
-          // Clear screen and move cursor to top-left
-          process.stdout.write('\x1b[2J\x1b[H');
-        }
-
-        setTerminalDimensions({
-          columns: newCols,
-          rows: newRows,
-        });
-
-        prevDimensionsRef.current = { columns: newCols, rows: newRows };
-      }
+      // Increment render key to force complete re-mount of components
+      setRenderKey(prev => prev + 1);
     };
 
     // Listen for SIGWINCH (terminal resize signal)
@@ -245,64 +223,78 @@ export function App({ initialProfile }: AppProps) {
 
   if (navigation.screen === 'loading') {
     return (
-      <LoadingView
-        syncState={syncState}
-        error={error}
-        currentProfile={currentProfile}
-      />
+      <Box key={renderKey}>
+        <LoadingView
+          syncState={syncState}
+          error={error}
+          currentProfile={currentProfile}
+        />
+      </Box>
     );
   }
 
   if (navigation.screen === 'main') {
     return (
-      <MainView
-        onSelectContact={handleSelectContact}
-        currentProfile={currentProfile}
-      />
+      <Box key={renderKey}>
+        <MainView
+          onSelectContact={handleSelectContact}
+          currentProfile={currentProfile}
+        />
+      </Box>
     );
   }
 
   if (navigation.screen === 'history' && navigation.contact?.roomId) {
     return (
-      <HistoryView
-        roomId={navigation.contact.roomId}
-        contactName={navigation.contact.name}
-        contactType={navigation.contact.type}
-        onBack={handleBack}
-        currentProfile={currentProfile}
-      />
+      <Box key={renderKey}>
+        <HistoryView
+          roomId={navigation.contact.roomId}
+          contactName={navigation.contact.name}
+          contactType={navigation.contact.type}
+          onBack={handleBack}
+          currentProfile={currentProfile}
+        />
+      </Box>
     );
   }
 
   if (navigation.screen === 'admin') {
-    return <AdminView onBack={handleBack} currentProfile={currentProfile} />;
+    return (
+      <Box key={renderKey}>
+        <AdminView onBack={handleBack} currentProfile={currentProfile} />
+      </Box>
+    );
   }
 
   if (navigation.screen === 'log') {
     return (
-      <LogView
-        onBack={() => {
-          setNavigation({
-            screen: navigation.previousScreen || 'main',
-            contact: navigation.contact,
-          });
-        }}
-      />
+      <Box key={renderKey}>
+        <LogView
+          onBack={() => {
+            setNavigation({
+              screen: navigation.previousScreen || 'main',
+              contact: navigation.contact,
+            });
+          }}
+        />
+      </Box>
     );
   }
 
   if (navigation.screen === 'profile-select') {
     return (
-      <ProfileSelectorView
-        currentProfile={currentProfile}
-        onSelectProfile={handleSelectProfile}
-        onBack={() => {
-          setNavigation({
-            screen: navigation.previousScreen || 'main',
-            contact: navigation.contact,
-          });
-        }}
-      />
+      <Box key={renderKey}>
+        <ProfileSelectorView
+          currentProfile={currentProfile}
+          onSelectProfile={handleSelectProfile}
+          onBack={() => {
+            setNavigation({
+              screen: navigation.previousScreen || 'main',
+              contact: navigation.contact,
+            });
+          }}
+        />
+      </Box>
     );
   }
 
