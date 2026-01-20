@@ -4,7 +4,11 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import React, { useState, useEffect } from 'react';
 
-import { encodeAfsk, decodeAfsk, DEFAULT_CONFIG } from '../../shared/lib/afsk.js';
+import {
+  encodeAfsk,
+  decodeAfsk,
+  DEFAULT_CONFIG,
+} from '../../shared/lib/afsk.js';
 import { encodeWav, writeWavTempFile } from '../../shared/lib/wav.js';
 import { matrixService } from '../App.js';
 import { LogService } from '../services/LogService.js';
@@ -83,7 +87,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
       // Encode data to AFSK samples
       const samples = encodeAfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
       const duration = samples.length / DEFAULT_CONFIG.sampleRate;
-      setAfskStatus(`Encoded ${duration.toFixed(2)}s of AFSK tones, playing...`);
+      setAfskStatus(
+        `Encoded ${duration.toFixed(2)}s of AFSK tones, playing...`,
+      );
 
       // Convert to WAV and save to temp file
       const wavBuffer = encodeWav(samples, DEFAULT_CONFIG.sampleRate);
@@ -96,7 +102,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
       setSuccess('AFSK transmission complete!');
 
       // Wait for playback to finish, then clean up
-      await new Promise(resolve => setTimeout(resolve, Math.ceil(duration * 1000) + 500));
+      await new Promise(resolve =>
+        setTimeout(resolve, Math.ceil(duration * 1000) + 500),
+      );
       await unlink(wavPath).catch(() => {});
 
       setAfskStatus('Ready');
@@ -424,35 +432,45 @@ export function AdminView({ onBack, currentProfile }: Props) {
 
       {/* AFSK Test Mode */}
       {mode === 'afsk' && (
-        <Box marginTop={1} flexDirection="column" borderStyle="single" paddingX={1}>
+        <Box
+          marginTop={1}
+          flexDirection="column"
+          borderStyle="single"
+          paddingX={1}
+        >
           <Box marginBottom={1}>
-            <Text bold color={profile.color}>AFSK Modem Test</Text>
+            <Text bold color={profile.color}>
+              AFSK Modem Test
+            </Text>
           </Box>
 
           <Box marginBottom={1} flexDirection="column">
             <Text>Old-school credential transfer via audio tones</Text>
             <Text dimColor>
-              Bell 202 | {DEFAULT_CONFIG.baudRate} baud | Mark: {DEFAULT_CONFIG.markFreq}Hz | Space: {DEFAULT_CONFIG.spaceFreq}Hz
+              Bell 202 | {DEFAULT_CONFIG.baudRate} baud | Mark:{' '}
+              {DEFAULT_CONFIG.markFreq}Hz | Space: {DEFAULT_CONFIG.spaceFreq}Hz
             </Text>
           </Box>
 
           <Box marginBottom={1} flexDirection="column">
             <Text bold>Example Payload:</Text>
-            <Text dimColor>
-              {JSON.stringify(EXAMPLE_ONBOARDING_DATA)}
-            </Text>
+            <Text dimColor>{JSON.stringify(EXAMPLE_ONBOARDING_DATA)}</Text>
           </Box>
 
           <Box marginBottom={1}>
             <Text>Status: </Text>
-            <Text color={afskStatus === 'Ready' ? colors.playing : colors.textMuted}>
+            <Text
+              color={afskStatus === 'Ready' ? colors.playing : colors.textMuted}
+            >
               {afskStatus}
             </Text>
           </Box>
 
           {afskDecoded && (
             <Box marginBottom={1} flexDirection="column">
-              <Text bold color={colors.playing}>Decoded Data:</Text>
+              <Text bold color={colors.playing}>
+                Decoded Data:
+              </Text>
               <Text>{afskDecoded}</Text>
             </Box>
           )}

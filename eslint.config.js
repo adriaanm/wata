@@ -16,6 +16,8 @@ module.exports = [
       'metro.config.js',
       'jest.config.js',
       'scripts/**', // Ignore Node.js scripts that have different linting requirements
+      'dist/**', // Build outputs
+      'src/web/dist/**',
     ],
   },
   ...compat.extends('@react-native', 'plugin:@typescript-eslint/recommended'),

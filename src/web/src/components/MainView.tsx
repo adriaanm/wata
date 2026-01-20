@@ -17,11 +17,8 @@ interface MainViewProps {
 export function MainView({ contacts }: MainViewProps) {
   const [showAfskTest, setShowAfskTest] = useState(false);
 
-  const {
-    selectedIndex,
-    selectedContact,
-    setSelectedIndex,
-  } = useContactSelection(contacts);
+  const { selectedIndex, selectedContact, setSelectedIndex } =
+    useContactSelection(contacts);
 
   const {
     recordingDuration,
@@ -115,7 +112,11 @@ export function MainView({ contacts }: MainViewProps) {
         {/* Header */}
         <header className="main-view-header">
           <h1 className="app-title">WATA</h1>
-          <button className="admin-button" aria-label="Admin menu" onClick={() => setShowAfskTest(true)}>
+          <button
+            className="admin-button"
+            aria-label="Admin menu"
+            onClick={() => setShowAfskTest(true)}
+          >
             <span>≡</span>
             <span className="admin-button-label">Admin</span>
           </button>
