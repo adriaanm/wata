@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
+
 import {
   encodeAfsk,
-  decodeAfsk,
   afskSamplesToAudioBuffer,
   DEFAULT_CONFIG,
 } from '../services/AfskService.js';
@@ -109,7 +109,6 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
       processorNodeRef.current = processor;
 
       const recordedSamples: Float32Array[] = [];
-      let startTime = Date.now();
       const RECORDING_DURATION = 5000; // 5 seconds max
 
       processor.onaudioprocess = (e) => {

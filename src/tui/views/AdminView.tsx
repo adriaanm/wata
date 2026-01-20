@@ -1,15 +1,16 @@
+import { unlink } from 'fs/promises';
+
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import React, { useState, useEffect } from 'react';
 
+import { encodeAfsk, decodeAfsk, DEFAULT_CONFIG } from '../../shared/lib/afsk.js';
+import { encodeWav, writeWavTempFile } from '../../shared/lib/wav.js';
 import { matrixService } from '../App.js';
 import { LogService } from '../services/LogService.js';
 import { tuiAudioService } from '../services/TuiAudioService.js';
 import { colors } from '../theme.js';
 import { PROFILES, type ProfileKey } from '../types/profile';
-import { encodeAfsk, decodeAfsk, DEFAULT_CONFIG } from '../../shared/lib/afsk.js';
-import { encodeWav, writeWavTempFile } from '../../shared/lib/wav.js';
-import { unlink } from 'fs/promises';
 
 interface FamilyMember {
   userId: string;

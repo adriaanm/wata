@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ContactCard } from './ContactCard.js';
-import { RecordingIndicator } from './RecordingIndicator.js';
-import { AfskTestHarness } from './AfskTestHarness.js';
+
 import { useContactSelection } from '../hooks/useContactSelection.js';
 import { usePtt } from '../hooks/usePtt.js';
 import type { Contact } from '../types.js';
+
+import { AfskTestHarness } from './AfskTestHarness.js';
+import { ContactCard } from './ContactCard.js';
+import { RecordingIndicator } from './RecordingIndicator.js';
 
 import '../styles/animations.css';
 

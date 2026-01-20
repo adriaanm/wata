@@ -69,7 +69,7 @@ export function useContacts(): Contact[] {
 
     // Add family broadcast option if we have family room
     if (familyRoomId && familyMembers.length > 0) {
-      const status = contactStatus['family'] || {
+      const status = contactStatus.family || {
         hasUnread: false,
         hasError: false,
       };
