@@ -2,21 +2,15 @@
   "name": "wata",
   "version": "0.0.1",
   "private": true,
-  "workspaces": [
-    "src/shared",
-    "src/rn",
-    "src/tui",
-    "src/web"
-  ],
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "start": "react-native start",
     "tui": "node --no-warnings --import tsx/esm src/tui/bootstrap.ts",
     "tui:dev": "node --no-warnings --import tsx/esm --watch src/tui/bootstrap.ts",
-    "web": "npm run dev -w @wata/web",
-    "web:build": "npm run build -w @wata/web",
-    "web:preview": "npm run preview -w @wata/web",
+    "web": "pnpm --filter @wata/web dev",
+    "web:build": "pnpm --filter @wata/web build",
+    "web:preview": "pnpm --filter @wata/web preview",
     "dev:forward": "./scripts/setup-adb-forward.sh",
     "dev:ip": "node scripts/get-local-ip.js",
     "dev:server": "cd test/docker && ./setup.sh",
@@ -36,7 +30,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx}\" \"test/**/*.{ts,tsx,js,jsx}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx}\" \"test/**/*.{ts,tsx,js,jsx}\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
-    "check": "npm run typecheck && npm run lint && npm run format:check"
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check"
   },
   "devDependencies": {
     "@babel/core": "^7.28.6",

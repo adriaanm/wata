@@ -118,10 +118,10 @@ async getFamilyRoomIdFromAlias(): Promise<string | null>
 
 ```bash
 # Start test server
-npm run dev:server
+pnpm dev:server
 
 # Run family room tests only
-npm run test:integration -- --testPathPatterns=family-room
+pnpm test:integration -- --testPathPatterns=family-room
 ```
 
 ## Known Limitations

@@ -63,7 +63,7 @@ Conduit is in Beta status. Known limitations include:
 - ✅ Very fast and lightweight for local development
 - ✅ Perfect for integration testing with Metro bundler workflow
 - ✅ Missing features (federation extras, typing indicators) don't affect PTT voice messaging use case
-- ✅ Works great with the `npm run dev:server` workflow
+- ✅ Works great with the `pnpm dev:server` workflow
 
 ### When to consider Synapse:
 - If you encounter specific bugs with push notifications during Phase 6 testing

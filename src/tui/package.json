@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@wata/shared": "*",
+    "@wata/shared": "workspace:*",
     "@discordjs/opus": "^0.10.0",
     "@evan/opus": "^1.0.3",
     "@picovoice/pvrecorder-node": "^1.2.8",

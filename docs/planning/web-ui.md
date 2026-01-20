@@ -424,9 +424,9 @@ Current `WebAudioService` uses MediaRecorder stub. Phase 3 will implement:
 
 ```bash
 cd web
-npm run dev              # Start development server (http://localhost:3000)
-npm run build            # Build for production
-npm run preview          # Preview production build
+pnpm web                 # Start development server (http://localhost:3000)
+pnpm web:build           # Build for production
+pnpm web:preview         # Preview production build
 ```
 
 ---
@@ -437,8 +437,8 @@ The current implementation (Phases 1-2.5) has real Matrix integration:
 
 ```bash
 cd src/web
-npm install
-npm run dev
+pnpm install
+pnpm web
 ```
 
 Navigate to http://localhost:3000

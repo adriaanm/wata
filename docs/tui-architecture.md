@@ -551,16 +551,16 @@ Recommended: Start with **toggle mode** for simplicity, iterate based on UX feed
 cd tui
 
 # Development
-npm run dev              # Start with hot reload (ink --watch)
-npm run build            # Compile TypeScript
+pnpm tui:dev              # Start with hot reload (ink --watch)
+pnpm tui                  # Run TUI
 
 # With local Conduit
-npm run dev:server       # Start Conduit (shared with mobile)
-npm run start            # Run compiled TUI
+pnpm dev:server           # Start Conduit (shared with mobile)
+pnpm tui                  # Run TUI
 
 # Testing
-npm test                 # Unit tests
-npm run test:integration # Against local Conduit
+pnpm test                 # Unit tests
+pnpm test:integration     # Against local Conduit
 ```
 
 ## Shared Code Strategy
@@ -593,7 +593,7 @@ tui/src/App.tsx
 
 ### Why Not a Monorepo?
 
-A formal monorepo (npm workspaces, Lerna, Nx) adds complexity:
+A formal monorepo (pnpm workspaces, Lerna, Nx) adds complexity:
 - React Native's Metro bundler has monorepo quirks
 - Shared packages need publishing/linking
 - Overkill for two frontends

@@ -27,7 +27,7 @@ v1 will target hobbyist usage (may require custom builds, but no compromises on 
 
 ## Project Structure
 
-This is an npm workspaces monorepo with the following structure:
+This is a pnpm workspaces monorepo with the following structure:
 
 ```
 wata/
@@ -196,16 +196,16 @@ For rapid development with hot reloading:
 
 ```bash
 # Terminal 1: Start Conduit server (one-time setup)
-npm run dev:server
+pnpm dev:server
 
 # Terminal 2: Set up port forwarding (for physical devices, run after connecting)
-npm run dev:forward
+pnpm dev:forward
 
 # Terminal 3: Start Metro bundler
-npm start
+pnpm start
 
 # Terminal 4: Deploy to device/emulator (one-time per session)
-npm run android
+pnpm android
 
 # Now edit code and see changes instantly via hot reload!
 ```
@@ -216,12 +216,12 @@ The app is configured to use `http://localhost:8008` by default, which works for
 
 **Android Emulator:**
 - Works out of the box (emulator has built-in localhost forwarding)
-- Just run `npm run dev:server` and `npm run android`
+- Just run `pnpm dev:server` and `pnpm android`
 
 **Physical Device:**
 - Requires ADB reverse proxy for localhost forwarding
 - Connect device via USB or wireless ADB
-- Run `npm run dev:forward` to set up port forwarding
+- Run `pnpm dev:forward` to set up port forwarding
 - The forwarding persists until device disconnects
 
 **No IP lookup required!** The ADB reverse proxy makes `localhost:8008` on the device map to `localhost:8008` on your host machine.
@@ -230,7 +230,7 @@ The app is configured to use `http://localhost:8008` by default, which works for
 If you can't use ADB reverse proxy, use manual IP configuration:
 ```bash
 # 1. Find your host machine's IP
-npm run dev:ip
+pnpm dev:ip
 
 # 2. Update src/shared/config/matrix.ts with the IP shown
 homeserverUrl: 'http://192.168.x.x:8008'
@@ -240,41 +240,41 @@ homeserverUrl: 'http://192.168.x.x:8008'
 
 ```bash
 # React Native
-npm start                    # Metro bundler (for hot reload)
-npm run android              # Build and run on device/emulator
-npm run ios                  # Build and run on iOS simulator
+pnpm start                    # Metro bundler (for hot reload)
+pnpm android                  # Build and run on device/emulator
+pnpm ios                      # Build and run on iOS simulator
 
 # TUI (Terminal UI)
-npm run tui                  # Run TUI
-npm run tui:dev              # Run TUI with watch mode
+pnpm tui                      # Run TUI
+pnpm tui:dev                  # Run TUI with watch mode
 
 # Web
-npm run web                  # Start Vite dev server (port 3000)
-npm run web:build            # Production build
-npm run web:preview          # Preview production build
+pnpm web                      # Start Vite dev server (port 3000)
+pnpm web:build                # Production build
+pnpm web:preview              # Preview production build
 
 # Development helpers
-npm run dev:server           # Start Conduit Matrix server (Docker)
-npm run dev:forward          # Set up ADB port forwarding (physical devices)
-npm run dev:ip               # Show local IP (fallback if adb reverse fails)
+pnpm dev:server               # Start Conduit Matrix server (Docker)
+pnpm dev:forward              # Set up ADB port forwarding (physical devices)
+pnpm dev:ip                   # Show local IP (fallback if adb reverse fails)
 
 # Testing
-npm run test:integration     # Run against local Matrix server
-npm run test:integration:setup  # Alias for dev:server
+pnpm test:integration         # Run against local Matrix server
+pnpm test:integration:setup   # Alias for dev:server
 
 # Code quality
-npm run check                # Run all checks (typecheck + lint + format)
-npm run lint                 # ESLint
-npm run lint:fix             # ESLint with auto-fix
-npm run format               # Prettier format
-npm run format:check         # Prettier check (CI)
-npm run typecheck            # TypeScript type checking (all workspaces)
+pnpm check                    # Run all checks (typecheck + lint + format)
+pnpm lint                     # ESLint
+pnpm lint:fix                 # ESLint with auto-fix
+pnpm format                   # Prettier format
+pnpm format:check             # Prettier check (CI)
+pnpm typecheck                # TypeScript type checking (all workspaces)
 
 # Production build
 cd android && ./gradlew assembleDebug  # Build APK
 ```
 
-Before committing, run `npm run check` to verify code quality.
+Before committing, run `pnpm check` to verify code quality.
 
 ## Build Output
 

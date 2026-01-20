@@ -515,27 +515,27 @@ describe('Voice Message End-to-End', () => {
 ### Local Development
 ```bash
 # Start Conduit once
-npm run dev:server
+pnpm dev:server
 
 # Run specific test suites
-npm run test:integration -- auth.test.ts
-npm run test:integration -- receive-voice.test.ts
+pnpm test:integration -- auth.test.ts
+pnpm test:integration -- receive-voice.test.ts
 
 # Run all tests
-npm run test:integration
+pnpm test:integration
 ```
 
 ### CI/CD
 ```yaml
 # .github/workflows/integration-tests.yml
 - name: Start Conduit
-  run: npm run dev:server
+  run: pnpm dev:server
 
 - name: Wait for server
   run: timeout 30 bash -c 'until curl -f http://localhost:8008/_matrix/client/versions; do sleep 1; done'
 
 - name: Run tests
-  run: npm run test:integration
+  run: pnpm test:integration
 
 - name: Stop Conduit
   run: docker-compose -f test/docker/docker-compose.yml down
@@ -598,8 +598,8 @@ npm run test:integration
 ## Notes
 
 - The architecture is already well-suited for headless testing (singleton services)
-- Docker must be running for integration tests (`npm run dev:server`)
+- Docker must be running for integration tests (`pnpm dev:server`)
 - Matrix SDK logger must be silenced - see `test/integration/setup.ts`
 - SDK emits noisy RTC/push rule warnings that are filtered in setup.ts
-- Use `VERBOSE_TESTS=1 npm run test:integration` to see all logs when debugging
+- Use `VERBOSE_TESTS=1 pnpm test:integration` to see all logs when debugging
 - Tests use `loginToMatrix()` from `src/shared/lib/matrix-auth.ts` which includes URL normalization via `createFixedFetch()`

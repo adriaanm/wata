@@ -6,10 +6,10 @@ This is a streamlined guide to get you developing on Wata as quickly as possible
 
 ```bash
 # 1. Install dependencies
-npm install
+pnpm install
 
 # 2. Start local Matrix server
-npm run dev:server
+pnpm dev:server
 ```
 
 That's it! The server is now running and ready.
@@ -20,10 +20,10 @@ That's it! The server is now running and ready.
 
 ```bash
 # Terminal 1: Start Metro
-npm start
+pnpm start
 
 # Terminal 2: Run on emulator
-npm run android
+pnpm android
 ```
 
 Hot reload is active. Edit code and see changes instantly!
@@ -32,16 +32,16 @@ Hot reload is active. Edit code and see changes instantly!
 
 ```bash
 # Terminal 1: Start Metro
-npm start
+pnpm start
 
 # Terminal 2: Connect device, then set up port forwarding
-npm run dev:forward
+pnpm dev:forward
 
 # Terminal 3: Run on device
-npm run android
+pnpm android
 ```
 
-**Note:** Run `npm run dev:forward` again if you disconnect/reconnect the device.
+**Note:** Run `pnpm dev:forward` again if you disconnect/reconnect the device.
 
 ## Testing Between Devices
 
@@ -64,13 +64,13 @@ The app auto-logs in as `alice`. To test messaging:
 adb devices
 
 # Re-run port forwarding
-npm run dev:forward
+pnpm dev:forward
 ```
 
 **Port forwarding doesn't work:**
 ```bash
 # Fallback to manual IP
-npm run dev:ip
+pnpm dev:ip
 
 # Update src/shared/config/matrix.ts with the IP shown
 ```

@@ -99,19 +99,19 @@ src/
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Start local Matrix server (one-time setup)
-npm run dev:server
+pnpm dev:server
 
 # For physical devices: Set up port forwarding (after connecting device)
-npm run dev:forward
+pnpm dev:forward
 
 # Start Metro bundler (for hot reload)
-npm start
+pnpm start
 
 # In another terminal: Build and run on device
-npm run android
+pnpm android
 ```
 
 ### Device Testing
@@ -120,11 +120,11 @@ The app auto-logs into your local Matrix server using `http://localhost:8008`.
 
 **For Android Emulator:**
 - Works out of the box
-- Just run `npm run dev:server` and `npm run android`
+- Just run `pnpm dev:server` and `pnpm android`
 
 **For Physical Device:**
 - Connect via USB or wireless ADB
-- Run `npm run dev:forward` to set up ADB port forwarding
+- Run `pnpm dev:forward` to set up ADB port forwarding
 - No IP configuration needed!
 
 The app will auto-login as `alice` (password: `testpass123`). Test messaging by:
@@ -137,10 +137,10 @@ Integration tests run against a local Matrix server (Conduit):
 
 ```bash
 # Start the server (already done if you ran dev:server)
-npm run test:integration:setup
+pnpm test:integration:setup
 
 # Run integration tests
-npm run test:integration
+pnpm test:integration
 
 # Stop the server
 cd test/docker && docker compose down
@@ -166,4 +166,4 @@ The app targets cheap Android PTT handhelds running Android 8. When contributing
 
 - Keep the UI simple - large touch targets, minimal text
 - Voice messages use standard Matrix `m.audio` events
-- Test with `npm run test:integration` before submitting PRs
+- Test with `pnpm test:integration` before submitting PRs

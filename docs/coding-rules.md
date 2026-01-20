@@ -81,8 +81,8 @@ const log = (message: string): void => {
 ### General
 
 - Use TypeScript for all new code
-- Follow the existing code style (use `npm run format` before committing)
-- Run `npm run check` before committing (includes typecheck, lint, and format check)
+- Follow the existing code style (use `pnpm format` before committing)
+- Run `pnpm check` before committing (includes typecheck, lint, and format check)
 - Keep functions small and focused
 - Use descriptive variable and function names
 
