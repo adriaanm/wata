@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
-
+import { useEffect, useState } from 'react';
+import { ContactCard } from './ContactCard.js';
+import { RecordingIndicator } from './RecordingIndicator.js';
+import { AfskTestHarness } from './AfskTestHarness.js';
 import { useContactSelection } from '../hooks/useContactSelection.js';
 import { usePtt } from '../hooks/usePtt.js';
 import type { Contact } from '../types.js';
 
-import { ContactCard } from './ContactCard.js';
-import { RecordingIndicator } from './RecordingIndicator.js';
 import '../styles/animations.css';
 
 interface MainViewProps {
@@ -13,8 +13,13 @@ interface MainViewProps {
 }
 
 export function MainView({ contacts }: MainViewProps) {
-  const { selectedIndex, selectedContact, setSelectedIndex } =
-    useContactSelection(contacts);
+  const [showAfskTest, setShowAfskTest] = useState(false);
+
+  const {
+    selectedIndex,
+    selectedContact,
+    setSelectedIndex,
+  } = useContactSelection(contacts);
 
   const {
     recordingDuration,
@@ -90,6 +95,10 @@ export function MainView({ contacts }: MainViewProps) {
 
   return (
     <>
+      {showAfskTest && (
+        <AfskTestHarness onClose={() => setShowAfskTest(false)} />
+      )}
+
       {isRecording && recordingContact && (
         <RecordingIndicator
           duration={recordingDuration}
@@ -104,7 +113,7 @@ export function MainView({ contacts }: MainViewProps) {
         {/* Header */}
         <header className="main-view-header">
           <h1 className="app-title">WATA</h1>
-          <button className="admin-button" aria-label="Admin menu">
+          <button className="admin-button" aria-label="Admin menu" onClick={() => setShowAfskTest(true)}>
             <span>≡</span>
             <span className="admin-button-label">Admin</span>
           </button>
