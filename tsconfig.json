@@ -1,9 +1,7 @@
 {
-  "extends": "@react-native/typescript-config",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    // This ensures we don't accidentally use Node.js APIs in app code
-    // Tests use a separate tsconfig.test.json with Node types
-    "types": [],
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/shared/*"],
@@ -11,6 +9,13 @@
       "@tui/*": ["src/tui/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "index.js"],
-  "exclude": ["**/node_modules", "**/Pods", "test/**/*", "src/web/**/*"]
+  "include": [
+    "src/shared/**/*.ts",
+    "src/shared/**/*.tsx",
+    "src/rn/**/*.ts",
+    "src/rn/**/*.tsx",
+    "src/tui/**/*.ts",
+    "src/tui/**/*.tsx"
+  ],
+  "exclude": ["**/node_modules", "src/web"]
 }

@@ -48,7 +48,7 @@ npm run android
 The app auto-logs in as `alice`. To test messaging:
 
 **Option 1: Second device**
-- Edit `src/config/matrix.ts` and change username to `'bob'`
+- Edit `src/shared/config/matrix.ts` and change username to `'bob'`
 - Build and run on second device
 
 **Option 2: Element web client**
@@ -72,7 +72,7 @@ npm run dev:forward
 # Fallback to manual IP
 npm run dev:ip
 
-# Update src/config/matrix.ts with the IP shown
+# Update src/shared/config/matrix.ts with the IP shown
 ```
 
 **Server not responding:**

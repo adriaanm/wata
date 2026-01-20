@@ -5,7 +5,12 @@
 **Commit Policy:** Commit coherent changes as soon as they are complete. Don't batch unrelated changes or wait to commit until the end of a session.
 
 ## Project Status
-We are currently developing a prototype. A simple android app (primarily) and a TUI for Mac. v1 will target hobbyist usage (may require custom builds, but no compromises on security and core walkie-talkie functionality). v2 should be ready for deployment to app stores.
+We are currently developing a prototype with three frontend targets:
+- **React Native app** (Android/iOS) - Primary target for PTT handhelds
+- **TUI** (Terminal UI) - macOS/Linux CLI interface
+- **Web app** - Browser-based companion interface
+
+v1 will target hobbyist usage (may require custom builds, but no compromises on security and core walkie-talkie functionality). v2 should be ready for deployment to app stores.
 
 ## Documentation
 
@@ -19,6 +24,47 @@ We are currently developing a prototype. A simple android app (primarily) and a 
 | [docs/testing.md](docs/testing.md) | Test strategy and infrastructure |
 | [docs/voice.md](docs/voice.md) | Audio recording/encoding/playback architecture |
 | [docs/roadmap.md](docs/roadmap.md) | Future work and TODOs |
+
+## Project Structure
+
+This is an npm workspaces monorepo with the following structure:
+
+```
+wata/
+├── src/
+│   ├── shared/      # Shared code (Matrix service, utils, types)
+│   ├── rn/          # React Native app (Android/iOS)
+│   ├── tui/         # Terminal UI (Ink/React)
+│   └── web/         # Web app (Vite/React)
+├── android/         # Native Android configuration
+├── ios/             # Native iOS configuration (future)
+├── test/            # Integration tests
+└── scripts/         # Development utilities
+```
+
+### Workspaces
+
+| Workspace | Package Name | Description |
+|-----------|--------------|-------------|
+| `src/shared` | `@wata/shared` | Matrix SDK integration, shared hooks, utilities |
+| `src/rn` | `@wata/rn` | React Native app |
+| `src/tui` | `@wata/tui` | Terminal UI (Ink) |
+| `src/web` | `@wata/web` | Web app (Vite) |
+
+### Build Tools
+
+| Platform | Bundler | Transpiler |
+|----------|---------|------------|
+| React Native | Metro | Babel |
+| TUI | None (tsx) | TypeScript via tsx |
+| Web | Vite | esbuild |
+
+### Path Aliases
+
+All workspaces use `@shared/*` to import from the shared package:
+```typescript
+import { MatrixService } from '@shared/services/MatrixService';
+```
 
 ## Project Decisions
 
@@ -76,9 +122,9 @@ Note: Exact key codes may vary by device - test on actual hardware.
 
 ### Authentication
 - No login screen (device has no keyboard)
-- Credentials hardcoded in `src/config/matrix.ts` for build-time configuration
+- Credentials hardcoded in `src/shared/config/matrix.ts` for build-time configuration
 - App auto-logs in on startup using configured credentials
-- Modify `src/config/matrix.ts` before building to change:
+- Modify `src/shared/config/matrix.ts` before building to change:
   - Homeserver URL (default: `http://localhost:8008` for local Conduit)
   - Username (default: `alice`)
   - Password (default: `testpass123`)
@@ -92,7 +138,7 @@ Note: Exact key codes may vary by device - test on actual hardware.
 - Requires crypto polyfills for React Native:
   - `react-native-get-random-values` for `crypto.getRandomValues()`
   - `buffer` for Node.js Buffer API
-  - Both imported in `index.js` before app initialization
+  - Both imported in `src/rn/index.js` before app initialization
 
 **Conduit URL Normalization:**
 - Conduit requires trailing slash on `/_matrix/client/v3/pushrules/` but the SDK omits it
@@ -186,16 +232,28 @@ If you can't use ADB reverse proxy, use manual IP configuration:
 # 1. Find your host machine's IP
 npm run dev:ip
 
-# 2. Update src/config/matrix.ts with the IP shown
+# 2. Update src/shared/config/matrix.ts with the IP shown
 homeserverUrl: 'http://192.168.x.x:8008'
 ```
 
 ### Commands Reference
 
 ```bash
-# Development
+# React Native
 npm start                    # Metro bundler (for hot reload)
 npm run android              # Build and run on device/emulator
+npm run ios                  # Build and run on iOS simulator
+
+# TUI (Terminal UI)
+npm run tui                  # Run TUI
+npm run tui:dev              # Run TUI with watch mode
+
+# Web
+npm run web                  # Start Vite dev server (port 3000)
+npm run web:build            # Production build
+npm run web:preview          # Preview production build
+
+# Development helpers
 npm run dev:server           # Start Conduit Matrix server (Docker)
 npm run dev:forward          # Set up ADB port forwarding (physical devices)
 npm run dev:ip               # Show local IP (fallback if adb reverse fails)
@@ -210,7 +268,7 @@ npm run lint                 # ESLint
 npm run lint:fix             # ESLint with auto-fix
 npm run format               # Prettier format
 npm run format:check         # Prettier check (CI)
-npm run typecheck            # TypeScript type checking
+npm run typecheck            # TypeScript type checking (all workspaces)
 
 # Production build
 cd android && ./gradlew assembleDebug  # Build APK
@@ -220,4 +278,8 @@ Before committing, run `npm run check` to verify code quality.
 
 ## Build Output
 
-Debug APK: `android/app/build/outputs/apk/debug/app-debug.apk`
+| Platform | Output |
+|----------|--------|
+| Android | `android/app/build/outputs/apk/debug/app-debug.apk` |
+| Web | `src/web/dist/` |
+| TUI | Runs directly via Node.js |
