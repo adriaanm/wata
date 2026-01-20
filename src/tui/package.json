@@ -12,6 +12,7 @@
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "keytar": "^7.9.0",
-    "libopus-node": "^0.0.4"
+    "libopus-node": "^0.0.4",
+    "loglevel": "^1.9.1"
   }
 }

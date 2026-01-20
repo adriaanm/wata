@@ -170,6 +170,9 @@ importers:
       libopus-node:
         specifier: ^0.0.4
         version: 0.0.4
+      loglevel:
+        specifier: ^1.9.1
+        version: 1.9.2
 
   src/web:
     dependencies:
