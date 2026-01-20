@@ -30,22 +30,22 @@ export const DEFAULT_CONFIG: AfskConfig = {
 };
 
 // Frame markers
-const PREAMBLE_BYTE = 0x55;  // Alternating bits for AGC, clock recovery
-const SYNC_BYTE = 0xFF;       // Sync pattern
+const PREAMBLE_BYTE = 0x55; // Alternating bits for AGC, clock recovery
+const SYNC_BYTE = 0xff; // Sync pattern
 const POSTAMBLE_BYTE = 0x00; // End of frame marker
 
-const PREAMBLE_COUNT = 32;    // Number of preamble bytes
-const POSTAMBLE_COUNT = 4;    // Number of postamble bytes
+const PREAMBLE_COUNT = 32; // Number of preamble bytes
+const POSTAMBLE_COUNT = 4; // Number of postamble bytes
 
 /**
  * CRC-16-CCITT implementation for error detection
  * Polynomial: x^16 + x^12 + x^5 + 1 (0x1021)
  */
 function crc16Ccitt(data: Buffer): number {
-  let crc = 0xFFFF;
+  let crc = 0xffff;
 
   for (let i = 0; i < data.length; i++) {
-    crc ^= (data[i] << 8);
+    crc ^= data[i] << 8;
 
     for (let j = 0; j < 8; j++) {
       if (crc & 0x8000) {
@@ -53,7 +53,7 @@ function crc16Ccitt(data: Buffer): number {
       } else {
         crc = crc << 1;
       }
-      crc &= 0xFFFF; // Keep to 16 bits
+      crc &= 0xffff; // Keep to 16 bits
     }
   }
 
@@ -63,7 +63,10 @@ function crc16Ccitt(data: Buffer): number {
 /**
  * Encode JSON data to AFSK audio samples (Float32Array)
  */
-export function encodeAfsk(data: unknown, config: AfskConfig = DEFAULT_CONFIG): Float32Array {
+export function encodeAfsk(
+  data: unknown,
+  config: AfskConfig = DEFAULT_CONFIG,
+): Float32Array {
   // Serialize to JSON and convert to bytes
   const jsonStr = JSON.stringify(data);
   const dataBuffer = Buffer.from(jsonStr, 'utf-8');
@@ -86,16 +89,16 @@ export function encodeAfsk(data: unknown, config: AfskConfig = DEFAULT_CONFIG): 
   frame[offset++] = SYNC_BYTE;
 
   // Length (big-endian)
-  frame[offset++] = (length >> 8) & 0xFF;
-  frame[offset++] = length & 0xFF;
+  frame[offset++] = (length >> 8) & 0xff;
+  frame[offset++] = length & 0xff;
 
   // Data
   dataBuffer.copy(frame, offset);
   offset += length;
 
   // CRC (big-endian)
-  frame[offset++] = (crc >> 8) & 0xFF;
-  frame[offset++] = crc & 0xFF;
+  frame[offset++] = (crc >> 8) & 0xff;
+  frame[offset++] = crc & 0xff;
 
   // Postamble
   for (let i = 0; i < POSTAMBLE_COUNT; i++) {
@@ -154,7 +157,10 @@ function modulateAfsk(bytes: Buffer, config: AfskConfig): Float32Array {
 /**
  * Decode AFSK audio samples to JSON data
  */
-export async function decodeAfsk(samples: Float32Array, config: AfskConfig = DEFAULT_CONFIG): Promise<unknown> {
+export async function decodeAfsk(
+  samples: Float32Array,
+  config: AfskConfig = DEFAULT_CONFIG,
+): Promise<unknown> {
   const bytes = demodulateAfsk(samples, config);
   const frame = parseAfskFrame(bytes);
 
@@ -184,12 +190,20 @@ function debugLog(msg: string): void {
  * Goertzel algorithm for detecting the magnitude of a specific frequency.
  * More efficient than FFT when we only need one or two frequencies.
  */
-function goertzelMagnitude(samples: Float32Array, start: number, length: number, targetFreq: number, sampleRate: number): number {
+function goertzelMagnitude(
+  samples: Float32Array,
+  start: number,
+  length: number,
+  targetFreq: number,
+  sampleRate: number,
+): number {
   const k = Math.round((length * targetFreq) / sampleRate);
   const omega = (2 * Math.PI * k) / length;
   const coeff = 2 * Math.cos(omega);
 
-  let s0 = 0, s1 = 0, s2 = 0;
+  let s0 = 0,
+    s1 = 0,
+    s2 = 0;
 
   for (let i = 0; i < length; i++) {
     s0 = samples[start + i] + coeff * s1 - s2;
@@ -212,9 +226,9 @@ function findAfskSignalBoundaries(
   sampleRate: number,
   markFreq: number,
   spaceFreq: number,
-  windowMs: number = 15
+  windowMs: number = 15,
 ): { start: number; end: number } {
-  const windowSize = Math.round(sampleRate * windowMs / 1000);
+  const windowSize = Math.round((sampleRate * windowMs) / 1000);
   const windowStep = Math.round(windowSize / 4); // 75% overlap for finer resolution
 
   // Calculate AFSK power for each window
@@ -222,8 +236,20 @@ function findAfskSignalBoundaries(
   const windowStarts: number[] = [];
 
   for (let i = 0; i < samples.length - windowSize; i += windowStep) {
-    const markPower = goertzelMagnitude(samples, i, windowSize, markFreq, sampleRate);
-    const spacePower = goertzelMagnitude(samples, i, windowSize, spaceFreq, sampleRate);
+    const markPower = goertzelMagnitude(
+      samples,
+      i,
+      windowSize,
+      markFreq,
+      sampleRate,
+    );
+    const spacePower = goertzelMagnitude(
+      samples,
+      i,
+      windowSize,
+      spaceFreq,
+      sampleRate,
+    );
     const afskPower = markPower + spacePower;
 
     afskPowers.push(afskPower);
@@ -241,14 +267,16 @@ function findAfskSignalBoundaries(
   const sortedPowers = [...afskPowers].sort((a, b) => a - b);
   const p10 = sortedPowers[Math.floor(sortedPowers.length * 0.1)]; // 10th percentile (noise floor)
   const p50 = sortedPowers[Math.floor(sortedPowers.length * 0.5)]; // 50th percentile (median)
-  const p90 = sortedPowers[Math.floor(sortedPowers.length * 0.9)]; // 90th percentile (signal level)
+  const _p90 = sortedPowers[Math.floor(sortedPowers.length * 0.9)]; // 90th percentile (signal level)
 
   // Calculate signal-to-noise ratio indicator
   const snrRatio = maxPower / (p50 + 0.001);
 
   // For reliable detection, max should be significantly above median (SNR > 3)
   if (snrRatio < 3) {
-    debugLog(`WARNING: Poor SNR (${snrRatio.toFixed(1)}x) - signal may be too weak or too much noise`);
+    debugLog(
+      `WARNING: Poor SNR (${snrRatio.toFixed(1)}x) - signal may be too weak or too much noise`,
+    );
   }
 
   // Check if this looks like a pure signal (loopback) vs signal embedded in noise
@@ -261,7 +289,9 @@ function findAfskSignalBoundaries(
   if (isPureSignal) {
     // Pure signal (loopback test) - use very low threshold
     threshold = p10 * 0.5;
-    debugLog(`Pure signal detected (p10/p50=${(p10/p50).toFixed(2)}) - using low threshold`);
+    debugLog(
+      `Pure signal detected (p10/p50=${(p10 / p50).toFixed(2)}) - using low threshold`,
+    );
   } else if (snrRatio > 10) {
     // Good SNR - use low threshold to catch full signal
     threshold = p50 * 1.5;
@@ -291,14 +321,18 @@ function findAfskSignalBoundaries(
 
   if (startIdx === -1) {
     // No clear AFSK signal found - return full range
-    debugLog(`WARNING: No clear AFSK signal detected (max: ${maxPower.toFixed(1)}, threshold: ${threshold.toFixed(1)}, SNR: ${snrRatio.toFixed(1)}x)`);
+    debugLog(
+      `WARNING: No clear AFSK signal detected (max: ${maxPower.toFixed(1)}, threshold: ${threshold.toFixed(1)}, SNR: ${snrRatio.toFixed(1)}x)`,
+    );
     return { start: 0, end: samples.length };
   }
 
   // Also check that the detected region isn't too long (max ~3s for typical message)
-  const maxSignalWindows = Math.round(3 * sampleRate / windowStep);
+  const maxSignalWindows = Math.round((3 * sampleRate) / windowStep);
   if (endIdx - startIdx > maxSignalWindows) {
-    debugLog(`WARNING: Detected region too long (${endIdx - startIdx} windows) - likely noise, narrowing search`);
+    debugLog(
+      `WARNING: Detected region too long (${endIdx - startIdx} windows) - likely noise, narrowing search`,
+    );
     // Try to find a tighter region with higher threshold
     const higherThreshold = threshold * 2;
     let newStartIdx = -1;
@@ -312,7 +346,9 @@ function findAfskSignalBoundaries(
     if (newStartIdx !== -1 && newEndIdx - newStartIdx < maxSignalWindows) {
       startIdx = newStartIdx;
       endIdx = newEndIdx;
-      debugLog(`Narrowed to ${endIdx - startIdx} windows with threshold ${higherThreshold.toFixed(1)}`);
+      debugLog(
+        `Narrowed to ${endIdx - startIdx} windows with threshold ${higherThreshold.toFixed(1)}`,
+      );
     }
   }
 
@@ -321,10 +357,13 @@ function findAfskSignalBoundaries(
   const start = windowStarts[Math.max(0, startIdx - marginWindows)];
   const end = Math.min(
     samples.length,
-    windowStarts[Math.min(afskPowers.length - 1, endIdx + marginWindows)] + windowSize
+    windowStarts[Math.min(afskPowers.length - 1, endIdx + marginWindows)] +
+      windowSize,
   );
 
-  debugLog(`AFSK detection: noise(p50)=${p50.toFixed(1)}, signal(max)=${maxPower.toFixed(1)}, threshold=${threshold.toFixed(1)}, SNR=${snrRatio.toFixed(1)}x`);
+  debugLog(
+    `AFSK detection: noise(p50)=${p50.toFixed(1)}, signal(max)=${maxPower.toFixed(1)}, threshold=${threshold.toFixed(1)}, SNR=${snrRatio.toFixed(1)}x`,
+  );
 
   return { start, end };
 }
@@ -341,7 +380,7 @@ function decodeBitsFromOffset(
   windowSize: number,
   markFreq: number,
   spaceFreq: number,
-  sampleRate: number
+  sampleRate: number,
 ): number[] {
   const bits: number[] = [];
   let bitPosition = 0;
@@ -350,8 +389,20 @@ function decodeBitsFromOffset(
     const start = startOffset + Math.round(bitPosition);
     if (start + windowSize > samples.length) break;
 
-    const markPower = goertzelMagnitude(samples, start, windowSize, markFreq, sampleRate);
-    const spacePower = goertzelMagnitude(samples, start, windowSize, spaceFreq, sampleRate);
+    const markPower = goertzelMagnitude(
+      samples,
+      start,
+      windowSize,
+      markFreq,
+      sampleRate,
+    );
+    const spacePower = goertzelMagnitude(
+      samples,
+      start,
+      windowSize,
+      spaceFreq,
+      sampleRate,
+    );
 
     bits.push(markPower > spacePower ? 1 : 0);
     bitPosition += samplesPerBitExact;
@@ -371,7 +422,7 @@ function bitsToBytes(bits: number[]): Buffer {
     let byte = 0;
     for (let bitIndex = 0; bitIndex < 8; bitIndex++) {
       if (bits[byteIndex * 8 + bitIndex] === 1) {
-        byte |= (1 << bitIndex);
+        byte |= 1 << bitIndex;
       }
     }
     bytes[byteIndex] = byte;
@@ -401,7 +452,9 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   const samplesPerBitExact = sampleRate / baudRate; // Use exact fractional value
   const windowSize = Math.round(samplesPerBitExact);
 
-  debugLog(`Sample rate: ${sampleRate}Hz, Baud: ${baudRate}, Samples/bit: ${samplesPerBitExact.toFixed(2)}`);
+  debugLog(
+    `Sample rate: ${sampleRate}Hz, Baud: ${baudRate}, Samples/bit: ${samplesPerBitExact.toFixed(2)}`,
+  );
   debugLog(`Mark: ${markFreq}Hz, Space: ${spaceFreq}Hz`);
   debugLog(`Total samples: ${samples.length}`);
 
@@ -411,7 +464,9 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
     const amp = Math.abs(samples[i]);
     if (amp > maxAmp) maxAmp = amp;
   }
-  debugLog(`Max amplitude: ${maxAmp.toFixed(3)} (signal quality: ${maxAmp > 0.1 ? 'GOOD' : 'WEAK'})`);
+  debugLog(
+    `Max amplitude: ${maxAmp.toFixed(3)} (signal quality: ${maxAmp > 0.1 ? 'GOOD' : 'WEAK'})`,
+  );
 
   // Normalize audio if signal is weak (amplify to use full range)
   // This helps with quiet recordings from distant speakers
@@ -422,16 +477,23 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
     for (let i = 0; i < samples.length; i++) {
       normalizedSamples[i] = samples[i] * gain;
     }
-    debugLog(`Normalized audio: gain=${gain.toFixed(1)}x (${maxAmp.toFixed(3)} → 0.8)`);
+    debugLog(
+      `Normalized audio: gain=${gain.toFixed(1)}x (${maxAmp.toFixed(3)} → 0.8)`,
+    );
   }
 
   // Find signal boundaries using frequency-specific detection
   const { start: signalStart, end: signalEnd } = findAfskSignalBoundaries(
-    normalizedSamples, sampleRate, markFreq, spaceFreq
+    normalizedSamples,
+    sampleRate,
+    markFreq,
+    spaceFreq,
   );
   const signalLength = signalEnd - signalStart;
 
-  debugLog(`Signal detected: samples ${signalStart} to ${signalEnd} (${(signalLength / sampleRate).toFixed(2)}s)`);
+  debugLog(
+    `Signal detected: samples ${signalStart} to ${signalEnd} (${(signalLength / sampleRate).toFixed(2)}s)`,
+  );
 
   if (signalLength < windowSize * 100) {
     debugLog('WARNING: Signal too short, may not contain valid data');
@@ -455,7 +517,11 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   // Also try different phases within each byte
   const phaseStep = Math.round(samplesPerBitExact / 2);
 
-  for (let byteOffset = 0; byteOffset < maxSearchSamples && signalStart + byteOffset < searchEnd; byteOffset += byteStep) {
+  for (
+    let byteOffset = 0;
+    byteOffset < maxSearchSamples && signalStart + byteOffset < searchEnd;
+    byteOffset += byteStep
+  ) {
     // Try different bit phases at this byte boundary
     for (let phase = -windowSize; phase <= windowSize; phase += phaseStep) {
       const testStart = signalStart + byteOffset + phase;
@@ -463,8 +529,14 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
 
       // Decode first ~50 bytes worth of bits
       const testBits = decodeBitsFromOffset(
-        normalizedSamples, testStart, 400, samplesPerBitExact, windowSize,
-        markFreq, spaceFreq, sampleRate
+        normalizedSamples,
+        testStart,
+        400,
+        samplesPerBitExact,
+        windowSize,
+        markFreq,
+        spaceFreq,
+        sampleRate,
       );
       const testBytes = bitsToBytes(testBits);
       const preambleCount = countPreambleBytes(testBytes);
@@ -476,13 +548,21 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
     }
   }
 
-  debugLog(`Best sync offset: ${bestOffset - signalStart} samples (${bestPreambleCount} preamble bytes found)`);
+  debugLog(
+    `Best sync offset: ${bestOffset - signalStart} samples (${bestPreambleCount} preamble bytes found)`,
+  );
 
   // Now decode all bits from the synchronized position
   const maxBits = Math.floor((signalEnd - bestOffset) / samplesPerBitExact);
   const bits = decodeBitsFromOffset(
-    normalizedSamples, bestOffset, maxBits, samplesPerBitExact, windowSize,
-    markFreq, spaceFreq, sampleRate
+    normalizedSamples,
+    bestOffset,
+    maxBits,
+    samplesPerBitExact,
+    windowSize,
+    markFreq,
+    spaceFreq,
+    sampleRate,
   );
 
   debugLog(`Bits decoded: ${bits.length}`);
@@ -495,7 +575,7 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
     for (let i = 0; i < 64; i += 8) {
       let byte = 0;
       for (let j = 0; j < 8; j++) {
-        if (bits[i + j] === 1) byte |= (1 << j);
+        if (bits[i + j] === 1) byte |= 1 << j;
       }
       firstBytes.push(byte.toString(16).padStart(2, '0'));
     }
@@ -508,7 +588,9 @@ function demodulateAfsk(samples: Float32Array, config: AfskConfig): Buffer {
   debugLog(`Bytes decoded: ${bytes.length}`);
 
   if (bytes.length > 0) {
-    const preview = bytes.subarray(0, Math.min(16, bytes.length)).toString('hex');
+    const preview = bytes
+      .subarray(0, Math.min(16, bytes.length))
+      .toString('hex');
     debugLog(`First bytes (hex): ${preview}`);
   }
 
@@ -543,7 +625,7 @@ function parseAfskFrame(bytes: Buffer): { data: Buffer } {
 
   // Check sync byte (allow 0xFF or close alternatives)
   const syncByte = bytes[startIndex];
-  if (syncByte !== SYNC_BYTE && syncByte !== 0xFE && syncByte !== 0x7F) {
+  if (syncByte !== SYNC_BYTE && syncByte !== 0xfe && syncByte !== 0x7f) {
     throw new Error(`AFSK: Sync byte mismatch (got ${syncByte.toString(16)})`);
   }
 
@@ -572,7 +654,9 @@ function parseAfskFrame(bytes: Buffer): { data: Buffer } {
   // Validate CRC
   const calculatedCrc = crc16Ccitt(data);
   if (receivedCrc !== calculatedCrc) {
-    throw new Error(`AFSK: CRC mismatch (received ${receivedCrc.toString(16)}, calculated ${calculatedCrc.toString(16)})`);
+    throw new Error(
+      `AFSK: CRC mismatch (received ${receivedCrc.toString(16)}, calculated ${calculatedCrc.toString(16)})`,
+    );
   }
 
   return { data };

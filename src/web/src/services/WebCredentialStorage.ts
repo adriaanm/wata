@@ -1,4 +1,7 @@
-import type { CredentialStorage, StoredCredentials } from '@shared/services/CredentialStorage';
+import type {
+  CredentialStorage,
+  StoredCredentials,
+} from '@shared/services/CredentialStorage';
 
 /**
  * Web credential storage using localStorage.
@@ -36,7 +39,10 @@ export class WebCredentialStorage implements CredentialStorage {
     }
   }
 
-  async storeSession(username: string, credentials: StoredCredentials): Promise<void> {
+  async storeSession(
+    username: string,
+    credentials: StoredCredentials,
+  ): Promise<void> {
     const key = `${this.SESSION_PREFIX}${username}`;
     localStorage.setItem(key, JSON.stringify(credentials));
   }

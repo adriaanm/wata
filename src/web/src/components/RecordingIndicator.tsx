@@ -1,5 +1,4 @@
 import '../styles/animations.css';
-import '../styles/animations.css';
 
 interface RecordingIndicatorProps {
   duration: number;
@@ -40,14 +39,17 @@ export function RecordingIndicator({
   }
 
   return (
-    <div className="recording-banner" data-state={isSending ? 'sending' : error ? 'error' : 'recording'}>
-      <span className="recording-dot" style={{ color: stateColor }}>●</span>
+    <div
+      className="recording-banner"
+      data-state={isSending ? 'sending' : error ? 'error' : 'recording'}
+    >
+      <span className="recording-dot" style={{ color: stateColor }}>
+        ●
+      </span>
       <span style={{ color: stateColor }}>{stateText}</span>
       <span>{formatDuration(duration)}</span>
       <span>→ {contactName}</span>
-      <span className="recording-hint">
-        {hint}
-      </span>
+      <span className="recording-hint">{hint}</span>
       <style>{`
         .recording-banner {
           position: fixed;

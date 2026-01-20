@@ -116,8 +116,9 @@ async function bootstrap() {
  * Receive mode: Record → Decode → Play ACK tones
  */
 async function runAfskCommand(command: 'send' | 'receive') {
-  const { encodeAfsk, decodeAfsk, DEFAULT_CONFIG, getAfskDebugLog } = await import('../shared/lib/afsk.js');
-  const { encodeWav, writeWavTempFile, decodeWav } = await import('../shared/lib/wav.js');
+  const { encodeAfsk, decodeAfsk, DEFAULT_CONFIG, getAfskDebugLog } =
+    await import('../shared/lib/afsk.js');
+  const { encodeWav, writeWavTempFile } = await import('../shared/lib/wav.js');
   const { tuiAudioService } = await import('./services/TuiAudioService.js');
   const { unlink } = await import('fs/promises');
 
@@ -143,7 +144,9 @@ async function runAfskCommand(command: 'send' | 'receive') {
     console.log('[1/4] Encoding onboarding data...');
     const samples = encodeAfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
     const duration = samples.length / DEFAULT_CONFIG.sampleRate;
-    console.log(`      Encoded ${samples.length} samples (${duration.toFixed(2)}s at ${DEFAULT_CONFIG.sampleRate}Hz)`);
+    console.log(
+      `      Encoded ${samples.length} samples (${duration.toFixed(2)}s at ${DEFAULT_CONFIG.sampleRate}Hz)`,
+    );
     console.log(`      Data: ${JSON.stringify(EXAMPLE_ONBOARDING_DATA)}`);
 
     console.log('\n[2/4] Converting to WAV format...');
@@ -157,7 +160,9 @@ async function runAfskCommand(command: 'send' | 'receive') {
     await tuiAudioService.playWav(wavPath);
 
     // Wait for playback to complete
-    await new Promise(resolve => setTimeout(resolve, Math.ceil(duration * 1000) + PLAYBACK_DELAY));
+    await new Promise(resolve =>
+      setTimeout(resolve, Math.ceil(duration * 1000) + PLAYBACK_DELAY),
+    );
     console.log(`      Playback complete (${(duration + 1).toFixed(1)}s)`);
 
     // Clean up temp file
@@ -167,24 +172,34 @@ async function runAfskCommand(command: 'send' | 'receive') {
     console.log('\n=== END ===\n');
   } else {
     console.log('\n=== AFSK RECEIVE MODE ===');
-    console.log(`[1/5] Starting ${RECORDING_DURATION/1000}s recording window...`);
+    console.log(
+      `[1/5] Starting ${RECORDING_DURATION / 1000}s recording window...`,
+    );
     console.log('      ▼ Start sender now! ▼');
 
     const startTime = Date.now();
     const samples = await tuiAudioService.recordRawPcm(RECORDING_DURATION);
     const recordTime = (Date.now() - startTime) / 1000;
 
-    console.log(`\n[2/5] Recording complete: ${samples.length} samples (${recordTime.toFixed(2)}s)`);
+    console.log(
+      `\n[2/5] Recording complete: ${samples.length} samples (${recordTime.toFixed(2)}s)`,
+    );
 
     console.log('\n[3/5] Decoding AFSK tones...');
-    console.log(`      Samples per bit: ${DEFAULT_CONFIG.sampleRate / DEFAULT_CONFIG.baudRate}`);
-    console.log(`      Expected bits: ~${Math.floor(samples.length / (DEFAULT_CONFIG.sampleRate / DEFAULT_CONFIG.baudRate))}`);
+    console.log(
+      `      Samples per bit: ${DEFAULT_CONFIG.sampleRate / DEFAULT_CONFIG.baudRate}`,
+    );
+    console.log(
+      `      Expected bits: ~${Math.floor(samples.length / (DEFAULT_CONFIG.sampleRate / DEFAULT_CONFIG.baudRate))}`,
+    );
 
     try {
       const data = await decodeAfsk(samples, DEFAULT_CONFIG);
       console.log('\n[4/5] ✓ DECODE SUCCESSFUL!');
       console.log('\n      Received data:');
-      console.log('      ' + JSON.stringify(data, null, 2).split('\n').join('\n      '));
+      console.log(
+        '      ' + JSON.stringify(data, null, 2).split('\n').join('\n      '),
+      );
 
       // Send ACK back to sender
       console.log('\n[5/5] Sending ACK acknowledgment...');
@@ -195,7 +210,9 @@ async function runAfskCommand(command: 'send' | 'receive') {
 
       console.log('      Playing ACK tones (sender should hear them)...');
       await tuiAudioService.playWav(ackPath);
-      await new Promise(resolve => setTimeout(resolve, Math.ceil(ackDuration * 1000) + PLAYBACK_DELAY));
+      await new Promise(resolve =>
+        setTimeout(resolve, Math.ceil(ackDuration * 1000) + PLAYBACK_DELAY),
+      );
 
       await unlink(ackPath).catch(() => {});
       console.log('      ACK sent!');

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+
 import type { Contact } from '../types.js';
 
 export function useContactSelection(contacts: Contact[]) {

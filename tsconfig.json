@@ -12,5 +12,5 @@
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "index.js"],
-  "exclude": ["**/node_modules", "**/Pods", "test/**/*"]
+  "exclude": ["**/node_modules", "**/Pods", "test/**/*", "src/web/**/*"]
 }

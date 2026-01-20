@@ -331,21 +331,28 @@ export class TuiAudioService {
     const durationSec = durationMs / 1000;
     const numSamples = Math.floor(sampleRate * durationSec);
     const bytesPerSample = 2; // int16
-    const numBytes = numSamples * bytesPerSample;
+    const _numBytes = numSamples * bytesPerSample;
 
     const outputPath = join(tmpdir(), `wata-pcm-${Date.now()}.raw`);
 
-    console.error(`      [rec] Starting: ${sampleRate}Hz mono, ${durationSec}s...`);
+    console.error(
+      `      [rec] Starting: ${sampleRate}Hz mono, ${durationSec}s...`,
+    );
 
     try {
       // Record using rec (sox) at 16kHz mono
       const rec = spawn('rec', [
         '-q',
-        '-r', sampleRate.toString(),
-        '-c', '1',
-        '-t', 's16', // signed 16-bit
-        '-e', 'signed',
-        '-b', '16',
+        '-r',
+        sampleRate.toString(),
+        '-c',
+        '1',
+        '-t',
+        's16', // signed 16-bit
+        '-e',
+        'signed',
+        '-b',
+        '16',
         outputPath,
       ]);
 
@@ -355,7 +362,7 @@ export class TuiAudioService {
       }, durationMs + 100); // Add small buffer
 
       await new Promise<void>((resolve, reject) => {
-        rec.on('close', (code) => {
+        rec.on('close', code => {
           if (code === 0 || code === null) {
             console.error(`      [rec] Finished (exit code: ${code})`);
             resolve();
@@ -372,7 +379,11 @@ export class TuiAudioService {
 
       // Convert int16 buffer to Float32Array (-1.0 to 1.0)
       const samples = new Float32Array(numSamples);
-      const dataView = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      const dataView = new DataView(
+        buffer.buffer,
+        buffer.byteOffset,
+        buffer.byteLength,
+      );
 
       for (let i = 0; i < numSamples && i * 2 < buffer.length; i++) {
         const int16 = dataView.getInt16(i * 2, true); // little-endian
@@ -392,7 +403,9 @@ export class TuiAudioService {
       await unlink(outputPath).catch(() => {
         // Ignore cleanup errors
       });
-      console.error(`      [rec] Error: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(
+        `      [rec] Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
       throw error;
     }
   }

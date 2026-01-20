@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+
 import { webAudioService } from '../services/WebAudioService.js';
 import type { RecordingResult } from '../services/WebAudioService.js';
 
@@ -85,13 +86,16 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
       await webAudioService.startRecording();
       startDurationTracking();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to start recording';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to start recording';
       setRecordingState(prev => ({
         ...prev,
         isRecording: false,
         error: errorMessage,
       }));
-      options.onError?.(error instanceof Error ? error : new Error(errorMessage));
+      options.onError?.(
+        error instanceof Error ? error : new Error(errorMessage),
+      );
     }
   }, [startDurationTracking, options]);
 
@@ -119,14 +123,17 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
 
       return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to stop recording';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to stop recording';
       setRecordingState(prev => ({
         ...prev,
         isRecording: false,
         isProcessing: false,
         error: errorMessage,
       }));
-      options.onError?.(error instanceof Error ? error : new Error(errorMessage));
+      options.onError?.(
+        error instanceof Error ? error : new Error(errorMessage),
+      );
       throw error;
     }
   }, [stopDurationTracking, options]);

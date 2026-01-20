@@ -12,9 +12,11 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { useAudioRecorder } from './useAudioRecorder.js';
+
 import { matrixService } from '../services/matrixService.js';
 import type { RecordingState } from '../types.js';
+
+import { useAudioRecorder } from './useAudioRecorder.js';
 
 interface UsePttOptions {
   onStartRecording?: (contactId: string) => void;
@@ -22,9 +24,15 @@ interface UsePttOptions {
   onSendError?: (error: Error) => void;
 }
 
-export function usePtt({ onStartRecording, onStopRecording, onSendError }: UsePttOptions = {}) {
+export function usePtt({
+  onStartRecording,
+  onStopRecording,
+  onSendError,
+}: UsePttOptions = {}) {
   const [pttState, setPttState] = useState<RecordingState>('idle');
-  const [recordingContactId, setRecordingContactId] = useState<string | null>(null);
+  const [recordingContactId, setRecordingContactId] = useState<string | null>(
+    null,
+  );
   const [isSpaceHeld, setIsSpaceHeld] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -38,7 +46,7 @@ export function usePtt({ onStartRecording, onStopRecording, onSendError }: UsePt
     isProcessing,
     duration,
   } = useAudioRecorder({
-    onError: (error) => {
+    onError: error => {
       setSendError(error.message);
       setPttState('idle');
       setRecordingContactId(null);
@@ -59,26 +67,30 @@ export function usePtt({ onStartRecording, onStopRecording, onSendError }: UsePt
     return await matrixService.getOrCreateDmRoom(contactId);
   }, []);
 
-  const startRecording = useCallback(async (contactId: string) => {
-    try {
-      setPttState('starting');
-      setRecordingContactId(contactId);
-      setSendError(null);
-      resetAudioRecorder();
+  const startRecording = useCallback(
+    async (contactId: string) => {
+      try {
+        setPttState('starting');
+        setRecordingContactId(contactId);
+        setSendError(null);
+        resetAudioRecorder();
 
-      // Start audio recording
-      await startAudioRecording();
+        // Start audio recording
+        await startAudioRecording();
 
-      setPttState('recording');
-      onStartRecording?.(contactId);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to start recording';
-      setSendError(errorMessage);
-      setPttState('idle');
-      setRecordingContactId(null);
-      onSendError?.(error instanceof Error ? error : new Error(errorMessage));
-    }
-  }, [startAudioRecording, resetAudioRecorder, onStartRecording, onSendError]);
+        setPttState('recording');
+        onStartRecording?.(contactId);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Failed to start recording';
+        setSendError(errorMessage);
+        setPttState('idle');
+        setRecordingContactId(null);
+        onSendError?.(error instanceof Error ? error : new Error(errorMessage));
+      }
+    },
+    [startAudioRecording, resetAudioRecorder, onStartRecording, onSendError],
+  );
 
   const stopRecording = useCallback(async () => {
     if (pttState === 'idle' || pttState === 'starting') return;
@@ -114,14 +126,22 @@ export function usePtt({ onStartRecording, onStopRecording, onSendError }: UsePt
         onStopRecording?.(contactId, result.duration);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to send voice message';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to send voice message';
       setSendError(errorMessage);
       setPttState('idle');
       setRecordingContactId(null);
       setIsSpaceHeld(false);
       onSendError?.(error instanceof Error ? error : new Error(errorMessage));
     }
-  }, [pttState, recordingContactId, stopAudioRecording, getRoomId, onStopRecording, onSendError]);
+  }, [
+    pttState,
+    recordingContactId,
+    stopAudioRecording,
+    getRoomId,
+    onStopRecording,
+    onSendError,
+  ]);
 
   const cancelRecording = useCallback(() => {
     cancelAudioRecording();

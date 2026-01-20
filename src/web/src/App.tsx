@@ -1,8 +1,8 @@
-import { MainView } from './components/MainView.js';
-import { LoginView } from './components/LoginView.js';
 import { LoadingView } from './components/LoadingView.js';
-import { useAuth } from './hooks/useMatrix.js';
+import { LoginView } from './components/LoginView.js';
+import { MainView } from './components/MainView.js';
 import { useContacts } from './hooks/useContacts.js';
+import { useAuth } from './hooks/useMatrix.js';
 import './styles/variables.css';
 import './styles/animations.css';
 
@@ -12,12 +12,20 @@ function App() {
 
   // Show loading screen during initial auth check or login
   if (isLoading) {
-    return <LoadingView message={isLoggedIn ? 'Syncing...' : 'Connecting...'} />;
+    return (
+      <LoadingView message={isLoggedIn ? 'Syncing...' : 'Connecting...'} />
+    );
   }
 
   // Show login form if not authenticated
   if (!isLoggedIn) {
-    return <LoginView onLoginSuccess={() => { /* Auth state change handles transition */ }} />;
+    return (
+      <LoginView
+        onLoginSuccess={() => {
+          /* Auth state change handles transition */
+        }}
+      />
+    );
   }
 
   // Show main app with real contacts

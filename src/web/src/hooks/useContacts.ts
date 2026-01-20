@@ -4,8 +4,10 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import type { Contact } from '../types.js';
+
 import { matrixService } from '../services/matrixService';
+import type { Contact } from '../types.js';
+
 import { useMatrixSync } from './useMatrix.js';
 
 interface ContactStatus {
@@ -23,7 +25,9 @@ export function useContacts(): Contact[] {
     }>
   >([]);
   const [familyRoomId, setFamilyRoomId] = useState<string | null>(null);
-  const [contactStatus, _setContactStatus] = useState<Record<string, ContactStatus>>({});
+  const [contactStatus, _setContactStatus] = useState<
+    Record<string, ContactStatus>
+  >({});
 
   // Load family members from family room
   useEffect(() => {
@@ -48,7 +52,10 @@ export function useContacts(): Contact[] {
 
     // Add family members as contacts
     for (const member of familyMembers) {
-      const status = contactStatus[member.userId] || { hasUnread: false, hasError: false };
+      const status = contactStatus[member.userId] || {
+        hasUnread: false,
+        hasError: false,
+      };
 
       result.push({
         id: member.userId,
@@ -62,7 +69,10 @@ export function useContacts(): Contact[] {
 
     // Add family broadcast option if we have family room
     if (familyRoomId && familyMembers.length > 0) {
-      const status = contactStatus['family'] || { hasUnread: false, hasError: false };
+      const status = contactStatus['family'] || {
+        hasUnread: false,
+        hasError: false,
+      };
 
       result.push({
         id: 'family',

@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
-import { ContactCard } from './ContactCard.js';
-import { RecordingIndicator } from './RecordingIndicator.js';
+
 import { useContactSelection } from '../hooks/useContactSelection.js';
 import { usePtt } from '../hooks/usePtt.js';
 import type { Contact } from '../types.js';
+
+import { ContactCard } from './ContactCard.js';
+import { RecordingIndicator } from './RecordingIndicator.js';
 import '../styles/animations.css';
 
 interface MainViewProps {
@@ -11,11 +13,8 @@ interface MainViewProps {
 }
 
 export function MainView({ contacts }: MainViewProps) {
-  const {
-    selectedIndex,
-    selectedContact,
-    setSelectedIndex,
-  } = useContactSelection(contacts);
+  const { selectedIndex, selectedContact, setSelectedIndex } =
+    useContactSelection(contacts);
 
   const {
     recordingDuration,
@@ -29,13 +28,13 @@ export function MainView({ contacts }: MainViewProps) {
     isRecording,
     isSending,
   } = usePtt({
-    onStartRecording: (contactId) => {
+    onStartRecording: contactId => {
       console.log('Started recording to', contactId);
     },
     onStopRecording: (contactId, duration) => {
       console.log('Stopped recording to', contactId, 'duration:', duration);
     },
-    onSendError: (error) => {
+    onSendError: error => {
       console.error('Failed to send voice message:', error);
     },
   });
@@ -63,13 +62,23 @@ export function MainView({ contacts }: MainViewProps) {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isRecording, isSending, selectedContact, startRecording, stopRecording, clearError]);
+  }, [
+    isRecording,
+    isSending,
+    selectedContact,
+    startRecording,
+    stopRecording,
+    clearError,
+  ]);
 
   const handleSelectContact = (index: number) => {
     setSelectedIndex(index);
   };
 
-  const handleStartRecording = (index: number, _ripplePosition: { x: number; y: number }) => {
+  const handleStartRecording = (
+    index: number,
+    _ripplePosition: { x: number; y: number },
+  ) => {
     clearError(); // Clear any previous errors when starting new recording
     startRecording(contacts[index].id);
   };
@@ -111,7 +120,7 @@ export function MainView({ contacts }: MainViewProps) {
               isDimmed={isRecording && recordingContactId !== contact.id}
               isRecording={recordingContactId === contact.id}
               onSelect={() => handleSelectContact(index)}
-              onStartRecording={(pos) => handleStartRecording(index, pos)}
+              onStartRecording={pos => handleStartRecording(index, pos)}
               onStopRecording={stopRecording}
               onCancelRecording={cancelRecording}
             />

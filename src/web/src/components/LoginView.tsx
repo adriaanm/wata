@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react';
+
 import { useAuth } from '../hooks/useMatrix.js';
 
 interface LoginViewProps {
@@ -38,7 +39,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
               type="text"
               className="login-input"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={e => setUsername(e.target.value)}
               disabled={isLoading}
               autoFocus
               required
@@ -54,7 +55,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
               type="password"
               className="login-input"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={e => setPassword(e.target.value)}
               disabled={isLoading}
               required
             />
@@ -67,7 +68,11 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
             </div>
           )}
 
-          <button type="submit" className="login-button" disabled={isLoading || !username || !password}>
+          <button
+            type="submit"
+            className="login-button"
+            disabled={isLoading || !username || !password}
+          >
             {isLoading ? (
               <>
                 <span className="login-button-spinner" />

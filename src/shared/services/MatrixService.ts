@@ -2,7 +2,11 @@ import { Buffer } from 'buffer';
 
 import { MATRIX_CONFIG } from '@shared/config/matrix';
 import { createFixedFetch } from '@shared/lib/fixed-fetch-api';
-import { loginToMatrix, type AccessTokens, type StoredCredentials } from '@shared/lib/matrix-auth';
+import {
+  loginToMatrix,
+  type AccessTokens,
+  type StoredCredentials,
+} from '@shared/lib/matrix-auth';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';
 import type { MatrixClient } from 'matrix-js-sdk';
 import { MsgType } from 'matrix-js-sdk';
@@ -134,7 +138,9 @@ class MatrixService {
     // Create refresh callback for token renewal
     // Note: The SDK passes a refreshToken string, but for Conduit we ignore it
     // and do a password-based re-login instead
-    const tokenRefreshFunction = async (_refreshToken: string): Promise<AccessTokens> => {
+    const tokenRefreshFunction = async (
+      _refreshToken: string,
+    ): Promise<AccessTokens> => {
       log('[MatrixService] Refreshing access token...');
       if (!this.currentUsername || !this.currentPassword) {
         logError('[MatrixService] Cannot refresh token: missing credentials');
@@ -242,7 +248,9 @@ class MatrixService {
       // Create refresh callback for token renewal
       // Note: The SDK passes a refreshToken string, but for Conduit we ignore it
       // and do a password-based re-login instead
-      const tokenRefreshFunction = async (_refreshToken: string): Promise<AccessTokens> => {
+      const tokenRefreshFunction = async (
+        _refreshToken: string,
+      ): Promise<AccessTokens> => {
         log('[MatrixService] Refreshing access token...');
         if (!this.currentUsername || !this.currentPassword) {
           logError('[MatrixService] Cannot refresh token: missing credentials');

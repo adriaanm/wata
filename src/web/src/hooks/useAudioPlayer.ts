@@ -7,7 +7,12 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { webAudioService, type PlaybackState, type PlaybackOptions } from '../services/WebAudioService.js';
+
+import {
+  webAudioService,
+  type PlaybackState,
+  type PlaybackOptions,
+} from '../services/WebAudioService.js';
 
 export interface PlayerState {
   playbackState: PlaybackState;
@@ -72,53 +77,59 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   /**
    * Load and play audio from a URL
    */
-  const play = useCallback(async (url: string) => {
-    try {
-      currentUrlRef.current = url;
-      setPlayerState(prev => ({
-        ...prev,
-        playbackState: 'playing',
-        currentTime: 0,
-        duration: 0,
-        error: null,
-      }));
+  const play = useCallback(
+    async (url: string) => {
+      try {
+        currentUrlRef.current = url;
+        setPlayerState(prev => ({
+          ...prev,
+          playbackState: 'playing',
+          currentTime: 0,
+          duration: 0,
+          error: null,
+        }));
 
-      const playbackOptions: PlaybackOptions = {
-        onEnded: () => {
-          stopProgressTracking();
-          setPlayerState(prev => ({
-            ...prev,
-            playbackState: 'ended',
-            currentTime: 0,
-          }));
-          options.onEnded?.();
-        },
-        onError: (error) => {
-          stopProgressTracking();
-          setPlayerState(prev => ({
-            ...prev,
-            playbackState: 'idle',
-            error: error.message,
-          }));
-          options.onError?.(error);
-        },
-        onTimeUpdate: (currentTime) => {
-          options.onTimeUpdate?.(currentTime);
-        },
-      };
+        const playbackOptions: PlaybackOptions = {
+          onEnded: () => {
+            stopProgressTracking();
+            setPlayerState(prev => ({
+              ...prev,
+              playbackState: 'ended',
+              currentTime: 0,
+            }));
+            options.onEnded?.();
+          },
+          onError: error => {
+            stopProgressTracking();
+            setPlayerState(prev => ({
+              ...prev,
+              playbackState: 'idle',
+              error: error.message,
+            }));
+            options.onError?.(error);
+          },
+          onTimeUpdate: currentTime => {
+            options.onTimeUpdate?.(currentTime);
+          },
+        };
 
-      await webAudioService.playAudio(url, playbackOptions);
-      startProgressTracking();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to play audio';
-      setPlayerState(prev => ({
-        ...prev,
-        playbackState: 'idle',
-        error: errorMessage,
-      }));
-      options.onError?.(error instanceof Error ? error : new Error(errorMessage));
-    }
-  }, [options, startProgressTracking, stopProgressTracking]);
+        await webAudioService.playAudio(url, playbackOptions);
+        startProgressTracking();
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Failed to play audio';
+        setPlayerState(prev => ({
+          ...prev,
+          playbackState: 'idle',
+          error: errorMessage,
+        }));
+        options.onError?.(
+          error instanceof Error ? error : new Error(errorMessage),
+        );
+      }
+    },
+    [options, startProgressTracking, stopProgressTracking],
+  );
 
   /**
    * Pause the currently playing audio

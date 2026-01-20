@@ -67,14 +67,19 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Buffer {
  * @param wavBuffer - WAV file as Buffer
  * @returns Float32Array of samples and header info
  */
-export function decodeWav(wavBuffer: Buffer): { samples: Float32Array; header: WavHeader } {
+export function decodeWav(wavBuffer: Buffer): {
+  samples: Float32Array;
+  header: WavHeader;
+} {
   // Verify RIFF header
-  if (wavBuffer.readUInt32LE(0) !== 0x46464952) { // 'RIFF' little-endian
+  if (wavBuffer.readUInt32LE(0) !== 0x46464952) {
+    // 'RIFF' little-endian
     throw new Error('Invalid WAV: Missing RIFF header');
   }
 
   // Verify WAVE format
-  if (wavBuffer.readUInt32LE(8) !== 0x45564157) { // 'WAVE' little-endian
+  if (wavBuffer.readUInt32LE(8) !== 0x45564157) {
+    // 'WAVE' little-endian
     throw new Error('Invalid WAV: Missing WAVE format');
   }
 
@@ -86,7 +91,9 @@ export function decodeWav(wavBuffer: Buffer): { samples: Float32Array; header: W
 
   const audioFormat = wavBuffer.readUInt16LE(20);
   if (audioFormat !== 1) {
-    throw new Error(`Unsupported WAV format: ${audioFormat} (only PCM supported)`);
+    throw new Error(
+      `Unsupported WAV format: ${audioFormat} (only PCM supported)`,
+    );
   }
 
   const numChannels = wavBuffer.readUInt16LE(22);
@@ -119,7 +126,7 @@ export function decodeWav(wavBuffer: Buffer): { samples: Float32Array; header: W
   const samples = new Float32Array(numSamples);
 
   for (let i = 0; i < numSamples; i++) {
-    const offset = dataOffset + (i * bytesPerSample);
+    const offset = dataOffset + i * bytesPerSample;
 
     let intSample: number;
     if (bytesPerSample === 1) {
@@ -129,12 +136,13 @@ export function decodeWav(wavBuffer: Buffer): { samples: Float32Array; header: W
       intSample = wavBuffer.readInt16LE(offset);
       samples[i] = intSample / 32768;
     } else if (bytesPerSample === 3) {
-      intSample = wavBuffer.readUInt8(offset) |
+      intSample =
+        wavBuffer.readUInt8(offset) |
         (wavBuffer.readUInt8(offset + 1) << 8) |
         (wavBuffer.readUInt8(offset + 2) << 16);
       // Convert 24-bit signed to float
       if (intSample & 0x800000) {
-        intSample |= 0xFF000000;
+        intSample |= 0xff000000;
       }
       samples[i] = intSample / 8388608;
     } else if (bytesPerSample === 4) {

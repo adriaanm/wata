@@ -4,8 +4,9 @@
  * to provide web-specific functionality where needed.
  */
 
-import { matrixService } from '../services/matrixService';
 import { useState, useEffect, useCallback } from 'react';
+
+import { matrixService } from '../services/matrixService';
 
 export function useMatrixSync() {
   const [syncState, setSyncState] = useState<string>('STOPPED');
@@ -49,7 +50,7 @@ export function useAuth() {
       try {
         const restored = await matrixService.restoreSession();
         setIsLoggedIn(restored);
-      } catch (err) {
+      } catch {
         setIsLoggedIn(false);
       } finally {
         setIsLoading(false);
@@ -87,7 +88,9 @@ export function useAuth() {
 }
 
 export function useVoiceMessages(roomId: string) {
-  const [messages, setMessages] = useState(matrixService.getVoiceMessages(roomId));
+  const [messages, setMessages] = useState(
+    matrixService.getVoiceMessages(roomId),
+  );
 
   useEffect(() => {
     // Subscribe to new messages

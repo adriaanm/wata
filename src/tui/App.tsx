@@ -27,7 +27,8 @@ const logError = (message: string): void => {
 setLogger({
   log: (message: string) => LogService.getInstance().addEntry('log', message),
   warn: (message: string) => LogService.getInstance().addEntry('warn', message),
-  error: (message: string) => LogService.getInstance().addEntry('error', message),
+  error: (message: string) =>
+    LogService.getInstance().addEntry('error', message),
 });
 
 // Create TUI-specific MatrixService instance with keytar storage and silent logger

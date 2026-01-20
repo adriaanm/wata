@@ -68,7 +68,7 @@ export class WebAudioService {
       this.recordedChunks = [];
       this.startTime = Date.now();
 
-      this.mediaRecorder.ondataavailable = (event) => {
+      this.mediaRecorder.ondataavailable = event => {
         if (event.data.size > 0) {
           this.recordedChunks.push(event.data);
         }
@@ -78,9 +78,13 @@ export class WebAudioService {
       this.mediaRecorder.start(100);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
-        throw new Error('Microphone access denied. Please allow microphone access to record voice messages.');
+        throw new Error(
+          'Microphone access denied. Please allow microphone access to record voice messages.',
+        );
       }
-      throw new Error(`Failed to access microphone: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to access microphone: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 
@@ -116,7 +120,11 @@ export class WebAudioService {
             size: blob.size,
           });
         } catch (error) {
-          reject(new Error(`Failed to process recording: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          reject(
+            new Error(
+              `Failed to process recording: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            ),
+          );
         }
       };
 
@@ -150,11 +158,11 @@ export class WebAudioService {
    */
   private getSupportedMimeType(): string {
     const types = [
-      'audio/ogg;codecs=opus',    // Preferred: Ogg Opus (Matrix standard)
-      'audio/webm;codecs=opus',   // WebM Opus (Chrome/Firefox)
-      'audio/ogg',                // Generic Ogg
-      'audio/webm',               // Generic WebM
-      'audio/mp4',                // MP4 with AAC (Safari fallback)
+      'audio/ogg;codecs=opus', // Preferred: Ogg Opus (Matrix standard)
+      'audio/webm;codecs=opus', // WebM Opus (Chrome/Firefox)
+      'audio/ogg', // Generic Ogg
+      'audio/webm', // Generic WebM
+      'audio/mp4', // MP4 with AAC (Safari fallback)
     ];
 
     for (const type of types) {
@@ -192,7 +200,7 @@ export class WebAudioService {
       this.playbackCallbacks.onEnded?.();
     });
 
-    audio.addEventListener('error', (e) => {
+    audio.addEventListener('error', e => {
       this.playbackState = 'idle';
       const error = new Error(`Audio playback failed: ${e}`);
       this.playbackCallbacks.onError?.(error);
@@ -209,7 +217,9 @@ export class WebAudioService {
       await audio.play();
     } catch (error) {
       this.playbackState = 'idle';
-      throw new Error(`Failed to play audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to play audio: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 
@@ -228,11 +238,14 @@ export class WebAudioService {
    */
   resumeAudio(): void {
     if (this.currentAudio && this.playbackState === 'paused') {
-      this.currentAudio.play().then(() => {
-        this.playbackState = 'playing';
-      }).catch(error => {
-        console.error('[WebAudioService] Failed to resume audio:', error);
-      });
+      this.currentAudio
+        .play()
+        .then(() => {
+          this.playbackState = 'playing';
+        })
+        .catch(error => {
+          console.error('[WebAudioService] Failed to resume audio:', error);
+        });
     }
   }
 
@@ -275,7 +288,10 @@ export class WebAudioService {
    */
   seekTo(time: number): void {
     if (this.currentAudio) {
-      this.currentAudio.currentTime = Math.max(0, Math.min(time, this.currentAudio.duration));
+      this.currentAudio.currentTime = Math.max(
+        0,
+        Math.min(time, this.currentAudio.duration),
+      );
     }
   }
 
