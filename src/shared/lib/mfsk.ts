@@ -7,12 +7,13 @@
  * Modulation: 16-MFSK (4 bits per symbol)
  * - 16 frequencies spaced across 1500-3375 Hz
  * - 125 Hz spacing between tones
- * - 50ms per symbol (35ms tone + 15ms guard)
- * - Effective rate: ~48 bps after RS overhead
+ * - 35ms per symbol (25ms tone + 10ms guard)
+ * - Effective rate: ~36 bps after RS overhead
  *
  * Error Correction: Reed-Solomon using reedsolomon.es library
  * - ByteAs8bit preset (GF(256))
- * - 50% redundancy ratio (~25% error correction)
+ * - 50% redundancy (~25% error correction capability)
+ * - Can correct up to 12.5% byte errors per block
  *
  * Frame structure:
  * [PREAMBLE] [SYNC 4 sym] [LEN 2 sym] [RS-ENCODED PAYLOAD] [END 2 sym]
@@ -50,7 +51,7 @@ const PREAMBLE_SYMBOLS = 5; // 250ms of preamble at 50ms/symbol
 
 // RS parameters using high-level API
 const RS_PRESET = 'ByteAs8bit' as const; // 8-bit symbols = GF(256)
-const RS_REDUNDANCY_RATIO = 0.25; // 25% redundancy (~12.5% error correction)
+const RS_REDUNDANCY_RATIO = 0.5; // 50% redundancy (~25% error correction)
 
 /**
  * Encode data bytes with Reed-Solomon error correction
