@@ -51,7 +51,7 @@ const PREAMBLE_SYMBOLS = 5; // 250ms of preamble at 50ms/symbol
 
 // RS parameters using high-level API
 const RS_PRESET = 'ByteAs8bit' as const; // 8-bit symbols = GF(256)
-const RS_REDUNDANCY_RATIO = 0.5; // 50% redundancy (~25% error correction)
+const RS_REDUNDANCY_RATIO = 1.0; // 100% redundancy (~50% error correction)
 
 /**
  * Encode data bytes with Reed-Solomon error correction
@@ -84,7 +84,7 @@ function rsDecode(encoded: Uint8Array, originalDataLength: number): Uint8Array {
     encoded,
     RS_PRESET,
     RS_REDUNDANCY_RATIO,
-    true, // sloppy mode - more tolerant of some errors
+    true, // sloppy mode - strict mode has a bug that fails on clean data
   );
 
   // Return only the original data length (decoded may have padding)

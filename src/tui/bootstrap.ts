@@ -136,7 +136,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
     message: 'Credentials received!',
   };
 
-  const RECORDING_DURATION = 14000; // 14 seconds (MFSK with 50% RS redundancy)
+  const RECORDING_DURATION = 16000; // 16 seconds (MFSK with 100% RS redundancy)
   const PLAYBACK_DELAY = 500; // 500ms delay after playback
 
   if (command === 'send') {
