@@ -9,6 +9,9 @@
       "@tui/*": ["src/tui/*"]
     }
   },
+  "files": [
+    "src/shared/lib/reedsolomon.es.d.ts"
+  ],
   "include": [
     "src/shared/**/*.ts",
     "src/shared/**/*.tsx",

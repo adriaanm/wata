@@ -12,8 +12,8 @@
  *
  * CLI arguments:
  *   --profile <name>   Start with the specified profile (e.g., alice, bob)
- *   --afsk-send        Encode and send AFSK onboarding tones
- *   --afsk-receive     Record and decode AFSK onboarding tones
+ *   --afsk-send        Encode and send MFSK onboarding tones
+ *   --afsk-receive     Record and decode MFSK onboarding tones
  */
 
 // Parse CLI arguments
@@ -110,14 +110,14 @@ async function bootstrap() {
 }
 
 /**
- * Run AFSK command directly (send or receive)
+ * Run audio onboarding command directly (send or receive)
  *
  * Send mode: Encode data → Play tones → (Optionally wait for ACK)
  * Receive mode: Record → Decode → Play ACK tones
  */
 async function runAfskCommand(command: 'send' | 'receive') {
-  const { encodeAfsk, decodeAfsk, DEFAULT_CONFIG, getAfskDebugLog } =
-    await import('../shared/lib/afsk.js');
+  const { encodeMfsk, decodeMfsk, DEFAULT_CONFIG, getMfskDebugLog } =
+    await import('../shared/lib/mfsk.js');
   const { encodeWav, writeWavTempFile } = await import('../shared/lib/wav.js');
   const { tuiAudioService } = await import('./services/TuiAudioService.js');
   const { unlink } = await import('fs/promises');
@@ -136,16 +136,16 @@ async function runAfskCommand(command: 'send' | 'receive') {
     message: 'Credentials received!',
   };
 
-  const RECORDING_DURATION = 10000; // 10 seconds
+  const RECORDING_DURATION = 12000; // 12 seconds (MFSK is slower but more robust)
   const PLAYBACK_DELAY = 500; // 500ms delay after playback
 
   if (command === 'send') {
-    console.log('\n=== AFSK SEND MODE ===');
+    console.log('\n=== AUDIO ONBOARDING SEND MODE (16-MFSK) ===');
     console.log('[1/4] Encoding onboarding data...');
-    const samples = encodeAfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
+    const samples = encodeMfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
     const duration = samples.length / DEFAULT_CONFIG.sampleRate;
     console.log(
-      `      Encoded ${samples.length} samples (${duration.toFixed(2)}s at ${DEFAULT_CONFIG.sampleRate}Hz)`,
+      `      Encoded ${samples.length} samples (${duration.toFixed(1)}s at ${DEFAULT_CONFIG.sampleRate}Hz)`,
     );
     console.log(`      Data: ${JSON.stringify(EXAMPLE_ONBOARDING_DATA)}`);
 
@@ -155,7 +155,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
     const wavPath = await writeWavTempFile(wavBuffer);
     console.log(`      Temp file: ${wavPath}`);
 
-    console.log('\n[3/4] Playing AFSK tones...');
+    console.log('\n[3/4] Playing MFSK tones...');
     console.log('      ▼ Start receiver now! ▼');
     await tuiAudioService.playWav(wavPath);
 
@@ -163,7 +163,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
     await new Promise(resolve =>
       setTimeout(resolve, Math.ceil(duration * 1000) + PLAYBACK_DELAY),
     );
-    console.log(`      Playback complete (${(duration + 1).toFixed(1)}s)`);
+    console.log(`      Playback complete (${duration.toFixed(1)}s)`);
 
     // Clean up temp file
     await unlink(wavPath).catch(() => {});
@@ -171,7 +171,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
     console.log('\n[4/4] Send complete! Receiver should acknowledge.');
     console.log('\n=== END ===\n');
   } else {
-    console.log('\n=== AFSK RECEIVE MODE ===');
+    console.log('\n=== AUDIO ONBOARDING RECEIVE MODE (16-MFSK) ===');
     console.log(
       `[1/5] Starting ${RECORDING_DURATION / 1000}s recording window...`,
     );
@@ -182,19 +182,20 @@ async function runAfskCommand(command: 'send' | 'receive') {
     const recordTime = (Date.now() - startTime) / 1000;
 
     console.log(
-      `\n[2/5] Recording complete: ${samples.length} samples (${recordTime.toFixed(2)}s)`,
+      `\n[2/5] Recording complete: ${samples.length} samples (${recordTime.toFixed(1)}s)`,
     );
 
-    console.log('\n[3/5] Decoding AFSK tones...');
-    console.log(
-      `      Samples per bit: ${DEFAULT_CONFIG.sampleRate / DEFAULT_CONFIG.baudRate}`,
+    const samplesPerSymbol = Math.round(
+      (DEFAULT_CONFIG.sampleRate * DEFAULT_CONFIG.symbolDuration) / 1000,
     );
+    console.log('\n[3/5] Decoding MFSK tones...');
+    console.log(`      Samples per symbol: ${samplesPerSymbol}`);
     console.log(
-      `      Expected bits: ~${Math.floor(samples.length / (DEFAULT_CONFIG.sampleRate / DEFAULT_CONFIG.baudRate))}`,
+      `      Expected symbols: ~${Math.floor(samples.length / samplesPerSymbol)}`,
     );
 
     try {
-      const data = await decodeAfsk(samples, DEFAULT_CONFIG);
+      const data = await decodeMfsk(samples, DEFAULT_CONFIG);
       console.log('\n[4/5] ✓ DECODE SUCCESSFUL!');
       console.log('\n      Received data:');
       console.log(
@@ -203,7 +204,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
 
       // Send ACK back to sender
       console.log('\n[5/5] Sending ACK acknowledgment...');
-      const ackSamples = encodeAfsk(ACK_DATA, DEFAULT_CONFIG);
+      const ackSamples = encodeMfsk(ACK_DATA, DEFAULT_CONFIG);
       const ackDuration = ackSamples.length / DEFAULT_CONFIG.sampleRate;
       const ackWav = encodeWav(ackSamples, DEFAULT_CONFIG.sampleRate);
       const ackPath = await writeWavTempFile(ackWav);
@@ -222,7 +223,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`\n[4/5] ✗ DECODE FAILED: ${msg}`);
       console.error('\n      Debug info:');
-      const debugLogs = getAfskDebugLog();
+      const debugLogs = getMfskDebugLog();
       for (const log of debugLogs) {
         console.error(`      - ${log}`);
       }

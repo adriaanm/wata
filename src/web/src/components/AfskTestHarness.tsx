@@ -1,20 +1,22 @@
 /* eslint-disable */
-// Prototype AFSK test harness - lint checks disabled
+// Prototype audio onboarding test harness - lint checks disabled
 
 import { useState, useRef } from 'react';
 
 import {
-  encodeAfsk,
-  afskSamplesToAudioBuffer,
+  encodeOnboardingAudio,
+  samplesToAudioBuffer,
   DEFAULT_CONFIG,
-} from '../services/AfskService.js';
+  getModulationSpecs,
+  type OnboardingData,
+} from '../services/OnboardingAudioService.js';
 
 interface AfskTestHarnessProps {
   onClose: () => void;
 }
 
 // Example onboarding data (what we'll eventually send)
-const EXAMPLE_ONBOARDING_DATA = {
+const EXAMPLE_ONBOARDING_DATA: OnboardingData = {
   homeserver: 'https://matrix.org',
   username: 'alice',
   password: 'walkietalkie123',
@@ -31,9 +33,13 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const recordedSamplesRef = useRef<Float32Array[]>([]);
+  const recordingStartRef = useRef<number>(0);
+
+  const specs = getModulationSpecs(DEFAULT_CONFIG);
 
   /**
-   * Send onboarding data via AFSK tones
+   * Send onboarding data via MFSK tones
    * Uses Web Audio API directly (no Opus encoding)
    */
   const handleSendOnboarding = async () => {
@@ -41,14 +47,15 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
       setStatus('Encoding onboarding data...');
       setIsPlaying(true);
 
-      // Encode data to AFSK samples
-      const samples = encodeAfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
+      // Encode data to MFSK samples
+      const samples = encodeOnboardingAudio(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
+      const duration = samples.length / DEFAULT_CONFIG.sampleRate;
       setStatus(
-        `Encoded ${samples.length} samples (${(samples.length / DEFAULT_CONFIG.sampleRate).toFixed(2)}s)`,
+        `Encoded ${samples.length} samples (${duration.toFixed(1)}s)`,
       );
 
       // Create audio buffer
-      const audioBuffer = afskSamplesToAudioBuffer(
+      const audioBuffer = samplesToAudioBuffer(
         samples,
         DEFAULT_CONFIG.sampleRate,
       );
@@ -64,11 +71,11 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
       source.connect(audioCtx.destination);
       source.start();
 
-      setStatus('Playing AFSK tones...');
+      setStatus(`Playing ${specs.modulation} tones (${duration.toFixed(1)}s)...`);
 
       source.onended = () => {
         setIsPlaying(false);
-        setStatus('Sent! Play completed.');
+        setStatus('Sent! Playback completed.');
         audioCtx.close();
       };
     } catch (error) {
@@ -80,7 +87,7 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
   };
 
   /**
-   * Receive onboarding data via AFSK tones
+   * Receive onboarding data via MFSK tones
    * Records raw audio (no Opus) and decodes
    */
   const handleReceiveOnboarding = async () => {
@@ -88,6 +95,7 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
       setStatus('Requesting microphone access...');
       setIsRecording(true);
       setDecodedData(null);
+      recordedSamplesRef.current = [];
 
       // Get raw audio stream
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -121,25 +129,23 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
       const processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
       processorNodeRef.current = processor;
 
-      const recordedSamples: Float32Array[] = [];
-      const RECORDING_DURATION = 5000; // 5 seconds max
+      const RECORDING_DURATION = 8000; // 8 seconds max (longer for MFSK)
+      recordingStartRef.current = Date.now();
 
       processor.onaudioprocess = e => {
         const samples = e.inputBuffer.getChannelData(0);
-        recordedSamples.push(new Float32Array(samples));
+        recordedSamplesRef.current.push(new Float32Array(samples));
 
         // Auto-stop after duration
-        if (Date.now() - startTime > RECORDING_DURATION) {
+        if (Date.now() - recordingStartRef.current > RECORDING_DURATION) {
           handleStopRecording();
         }
       };
 
-      const startTime = Date.now();
-
       analyser.connect(processor);
       processor.connect(audioCtx.destination); // Needed for script processor to run
 
-      setStatus('Recording AFSK tones... (5s max, or click Stop)');
+      setStatus(`Recording ${specs.modulation} tones... (8s max, or click Stop)`);
     } catch (error) {
       setStatus(
         `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -164,14 +170,26 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
       // Stop media stream
       mediaStreamRef.current?.getTracks().forEach(track => track.stop());
 
-      // Decode the recorded samples
-      // Note: In a real implementation, we'd need to capture all processed samples
-      // For this prototype, we'll decode the last buffer
-      setStatus('Decoding AFSK tones...');
+      // Combine all recorded samples
+      const totalLength = recordedSamplesRef.current.reduce(
+        (sum, arr) => sum + arr.length,
+        0,
+      );
+      const allSamples = new Float32Array(totalLength);
+      let offset = 0;
+      for (const chunk of recordedSamplesRef.current) {
+        allSamples.set(chunk, offset);
+        offset += chunk.length;
+      }
 
-      // TODO: Collect all recorded samples and decode
-      // For now, show a placeholder
-      setDecodedData(JSON.stringify(EXAMPLE_ONBOARDING_DATA, null, 2));
+      setStatus(`Decoding ${allSamples.length} samples...`);
+
+      // Decode MFSK
+      const { decodeOnboardingAudio } = await import(
+        '../services/OnboardingAudioService.js'
+      );
+      const data = await decodeOnboardingAudio(allSamples, DEFAULT_CONFIG);
+      setDecodedData(JSON.stringify(data, null, 2));
       setStatus('Received! Decoding complete.');
     } catch (error) {
       setStatus(
@@ -189,21 +207,22 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
     <div className="modal-overlay">
       <div className="modal-content">
         <header className="modal-header">
-          <h2>AFSK Modem Test</h2>
+          <h2>Audio Onboarding Test</h2>
           <button className="close-button" onClick={onClose}>
-            ✕
+            &times;
           </button>
         </header>
 
         <main className="modal-body">
           <div className="afsk-info">
             <p className="afsk-description">
-              Old-school modem-style credential transfer (Bell 202, 1200 baud)
+              Robust credential transfer via multi-tone audio ({specs.modulation})
             </p>
             <div className="afsk-specs">
-              <span>Mark: {DEFAULT_CONFIG.markFreq} Hz</span>
-              <span>Space: {DEFAULT_CONFIG.spaceFreq} Hz</span>
-              <span>Rate: {DEFAULT_CONFIG.baudRate} baud</span>
+              <span>Tones: {specs.tones}</span>
+              <span>Freq: {specs.baseFreq}-{specs.maxFreq} Hz</span>
+              <span>Rate: ~{specs.bitRate} bps</span>
+              <span>FEC: {specs.errorCorrection}</span>
             </div>
           </div>
 
@@ -214,7 +233,7 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
               disabled={isPlaying || isRecording}
             >
               <span className="afsk-button-icon">
-                {isPlaying ? '🔊' : '📡'}
+                {isPlaying ? '...' : 'TX'}
               </span>
               <span className="afsk-button-text">
                 {isPlaying ? 'Playing...' : 'Send Onboarding'}
@@ -229,7 +248,7 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
               disabled={isPlaying || (isRecording && false)}
             >
               <span className="afsk-button-icon">
-                {isRecording ? '⏹' : '🎙'}
+                {isRecording ? 'STOP' : 'RX'}
               </span>
               <span className="afsk-button-text">
                 {isRecording ? 'Stop Recording' : 'Receive Onboarding'}
@@ -336,6 +355,7 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
 
           .afsk-specs {
             display: flex;
+            flex-wrap: wrap;
             justify-content: center;
             gap: var(--spacing-md);
             font-size: var(--font-size-xs);
@@ -389,7 +409,8 @@ export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
           }
 
           .afsk-button-icon {
-            font-size: var(--font-size-3xl);
+            font-size: var(--font-size-2xl);
+            font-weight: bold;
           }
 
           .afsk-button-text {

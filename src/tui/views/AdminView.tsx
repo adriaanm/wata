@@ -5,10 +5,10 @@ import TextInput from 'ink-text-input';
 import React, { useState, useEffect } from 'react';
 
 import {
-  encodeAfsk,
-  decodeAfsk,
+  encodeMfsk,
+  decodeMfsk,
   DEFAULT_CONFIG,
-} from '../../shared/lib/afsk.js';
+} from '../../shared/lib/mfsk.js';
 import { encodeWav, writeWavTempFile } from '../../shared/lib/wav.js';
 import { matrixService } from '../App.js';
 import { LogService } from '../services/LogService.js';
@@ -77,18 +77,18 @@ export function AdminView({ onBack, currentProfile }: Props) {
     }
   };
 
-  // AFSK: Send onboarding data
+  // MFSK: Send onboarding data
   const handleAfskSend = async () => {
     try {
       setAfskStatus('Encoding onboarding data...');
       setError(null);
       setSuccess(null);
 
-      // Encode data to AFSK samples
-      const samples = encodeAfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
+      // Encode data to MFSK samples
+      const samples = encodeMfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
       const duration = samples.length / DEFAULT_CONFIG.sampleRate;
       setAfskStatus(
-        `Encoded ${duration.toFixed(2)}s of AFSK tones, playing...`,
+        `Encoded ${duration.toFixed(1)}s of MFSK tones, playing...`,
       );
 
       // Convert to WAV and save to temp file
@@ -98,8 +98,8 @@ export function AdminView({ onBack, currentProfile }: Props) {
       // Play using afplay
       await tuiAudioService.playWav(wavPath);
 
-      setAfskStatus('Sent! Playing AFSK tones...');
-      setSuccess('AFSK transmission complete!');
+      setAfskStatus('Sent! Playing MFSK tones...');
+      setSuccess('Audio onboarding transmission complete!');
 
       // Wait for playback to finish, then clean up
       await new Promise(resolve =>
@@ -110,37 +110,37 @@ export function AdminView({ onBack, currentProfile }: Props) {
       setAfskStatus('Ready');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(`AFSK send failed: ${msg}`);
+      setError(`Audio send failed: ${msg}`);
       setAfskStatus(`Error: ${msg}`);
-      LogService.getInstance().addEntry('error', `AFSK send failed: ${msg}`);
+      LogService.getInstance().addEntry('error', `Audio send failed: ${msg}`);
     }
   };
 
-  // AFSK: Receive onboarding data
+  // MFSK: Receive onboarding data
   const handleAfskReceive = async () => {
     try {
       setAfskRecording(true);
-      setAfskStatus('Recording AFSK tones (5s)...');
+      setAfskStatus('Recording MFSK tones (8s)...');
       setError(null);
       setSuccess(null);
       setAfskDecoded(null);
 
-      // Record for 5 seconds
-      const RECORDING_DURATION = 5000;
+      // Record for 8 seconds (MFSK is slower but more robust)
+      const RECORDING_DURATION = 8000;
       const samples = await tuiAudioService.recordRawPcm(RECORDING_DURATION);
 
       setAfskStatus(`Decoding ${samples.length} samples...`);
 
-      // Decode AFSK
-      const data = await decodeAfsk(samples, DEFAULT_CONFIG);
+      // Decode MFSK
+      const data = await decodeMfsk(samples, DEFAULT_CONFIG);
       setAfskDecoded(JSON.stringify(data, null, 2));
-      setSuccess('AFSK decoded successfully!');
+      setSuccess('Audio onboarding decoded successfully!');
       setAfskStatus('Ready');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(`AFSK receive failed: ${msg}`);
+      setError(`Audio receive failed: ${msg}`);
       setAfskStatus(`Error: ${msg}`);
-      LogService.getInstance().addEntry('error', `AFSK receive failed: ${msg}`);
+      LogService.getInstance().addEntry('error', `Audio receive failed: ${msg}`);
     } finally {
       setAfskRecording(false);
     }
@@ -420,8 +420,8 @@ export function AdminView({ onBack, currentProfile }: Props) {
         <Text dimColor>
           {mode === 'menu'
             ? familyRoomId
-              ? '[n] Set name  [i] Invite  [r] Refresh  [m] AFSK Test  [Esc] Back'
-              : '[n] Set name  [c] Create family  [m] AFSK Test  [Esc] Back'
+              ? '[n] Set name  [i] Invite  [r] Refresh  [m] Audio Test  [Esc] Back'
+              : '[n] Set name  [c] Create family  [m] Audio Test  [Esc] Back'
             : mode === 'invite'
               ? '[Enter] Invite  [Esc] Cancel'
               : mode === 'afsk'
@@ -430,7 +430,7 @@ export function AdminView({ onBack, currentProfile }: Props) {
         </Text>
       </Box>
 
-      {/* AFSK Test Mode */}
+      {/* Audio Onboarding Test Mode */}
       {mode === 'afsk' && (
         <Box
           marginTop={1}
@@ -440,15 +440,15 @@ export function AdminView({ onBack, currentProfile }: Props) {
         >
           <Box marginBottom={1}>
             <Text bold color={profile.color}>
-              AFSK Modem Test
+              Audio Onboarding Test
             </Text>
           </Box>
 
           <Box marginBottom={1} flexDirection="column">
-            <Text>Old-school credential transfer via audio tones</Text>
+            <Text>Robust credential transfer via multi-tone audio</Text>
             <Text dimColor>
-              Bell 202 | {DEFAULT_CONFIG.baudRate} baud | Mark:{' '}
-              {DEFAULT_CONFIG.markFreq}Hz | Space: {DEFAULT_CONFIG.spaceFreq}Hz
+              16-MFSK | {DEFAULT_CONFIG.numTones} tones | {DEFAULT_CONFIG.baseFrequency}-
+              {DEFAULT_CONFIG.baseFrequency + (DEFAULT_CONFIG.numTones - 1) * DEFAULT_CONFIG.frequencySpacing}Hz | RS(15,9) FEC
             </Text>
           </Box>
 
