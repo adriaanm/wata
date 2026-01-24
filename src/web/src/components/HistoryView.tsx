@@ -5,7 +5,7 @@
  * Shows a list of voice messages with playback controls.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 
 import type { VoiceMessage } from '@shared/services/MatrixService';
 import { useVoiceMessages } from '../hooks/useMatrix.js';
@@ -22,7 +22,6 @@ export function HistoryView({ contact, onBack }: HistoryViewProps) {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Resolve contact to room ID
   useEffect(() => {
@@ -71,11 +70,6 @@ export function HistoryView({ contact, onBack }: HistoryViewProps) {
     };
   }, [onBack]);
 
-  // Scroll to bottom when messages load
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
   return (
     <div className="history-view">
       {/* Header */}
@@ -108,14 +102,8 @@ export function HistoryView({ contact, onBack }: HistoryViewProps) {
         )}
 
         {!isLoading && !error && roomId && (
-          <MessageListContent
-            roomId={roomId}
-            contact={contact}
-            onMessagesLoaded={scrollToBottom}
-          />
+          <MessageListContent roomId={roomId} contact={contact} />
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Footer with keyboard hints */}
@@ -284,24 +272,24 @@ export function HistoryView({ contact, onBack }: HistoryViewProps) {
 interface MessageListContentProps {
   roomId: string;
   contact: Contact;
-  onMessagesLoaded: () => void;
 }
 
-function MessageListContent({
-  roomId,
-  contact,
-  onMessagesLoaded,
-}: MessageListContentProps) {
+function MessageListContent({ roomId, contact }: MessageListContentProps) {
   const messages = useVoiceMessages(roomId);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
-  const didScrollRef = useRef(false);
+
+  // Sort messages by timestamp descending (newest first)
+  const sortedMessages = useMemo(
+    () => [...messages].sort((a, b) => b.timestamp - a.timestamp),
+    [messages],
+  );
 
   // Mark messages as read when viewing history
   useEffect(() => {
     const markAsRead = async () => {
       if (messages.length === 0) return;
 
-      // Mark the last message as read
+      // Mark the most recent message as read (last in original order)
       const lastMessage = messages[messages.length - 1];
       try {
         await matrixService.markMessageAsPlayed(roomId, lastMessage.eventId);
@@ -312,15 +300,6 @@ function MessageListContent({
 
     markAsRead();
   }, [roomId, messages]);
-
-  // Scroll to bottom once when messages first load
-  useEffect(() => {
-    if (messages.length > 0 && !didScrollRef.current) {
-      didScrollRef.current = true;
-      // Small delay to ensure DOM is updated
-      setTimeout(onMessagesLoaded, 100);
-    }
-  }, [messages.length, onMessagesLoaded]);
 
   const handlePlay = useCallback((messageId: string) => {
     setPlayingMessageId(messageId);
@@ -344,7 +323,7 @@ function MessageListContent({
 
   return (
     <>
-      {messages.map((message: VoiceMessage) => (
+      {sortedMessages.map((message: VoiceMessage) => (
         <MessageItem
           key={message.eventId}
           message={message}
