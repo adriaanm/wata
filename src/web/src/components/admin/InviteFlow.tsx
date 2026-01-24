@@ -10,6 +10,9 @@ export function InviteFlow() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [roomLink, setRoomLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [familyRoomExists, setFamilyRoomExists] = useState<boolean | null>(
+    null,
+  );
 
   // Load room link on mount
   useEffect(() => {
@@ -20,9 +23,13 @@ export function InviteFlow() {
           // Create a matrix.to link
           const link = `https://matrix.to/#/${familyRoom.roomId}`;
           setRoomLink(link);
+          setFamilyRoomExists(true);
+        } else {
+          setFamilyRoomExists(false);
         }
       } catch (err) {
         console.error('Failed to get family room:', err);
+        setFamilyRoomExists(false);
       }
     };
     loadRoomLink();
@@ -87,67 +94,90 @@ export function InviteFlow() {
     <div className="invite-flow">
       <h2 className="section-title">Invite to Family</h2>
 
-      <div className="invite-form">
-        <label className="form-label" htmlFor="userId">
-          Enter Matrix ID:
-        </label>
-        <div className="input-row">
-          <input
-            id="userId"
-            type="text"
-            className="user-id-input"
-            placeholder="@username:matrix.org"
-            value={userId}
-            onChange={e => setUserId(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={status === 'sending'}
-          />
+      {/* Loading state */}
+      {familyRoomExists === null && (
+        <div className="loading">Checking family room...</div>
+      )}
+
+      {/* No family room - show helpful message */}
+      {familyRoomExists === false && (
+        <div className="no-family-room">
+          <p className="no-room-text">
+            No family room found. You need to create a family room first before
+            you can invite members.
+          </p>
+          <p className="no-room-hint">
+            Go to the Family tab to create a family room.
+          </p>
         </div>
+      )}
 
-        <button
-          className="invite-button"
-          onClick={handleInvite}
-          disabled={status === 'sending'}
-        >
-          {status === 'sending' ? 'Sending...' : 'Send Invite'}
-        </button>
+      {/* Family room exists - show invite form */}
+      {familyRoomExists === true && (
+        <>
+          <div className="invite-form">
+            <label className="form-label" htmlFor="userId">
+              Enter Matrix ID:
+            </label>
+            <div className="input-row">
+              <input
+                id="userId"
+                type="text"
+                className="user-id-input"
+                placeholder="@username:matrix.org"
+                value={userId}
+                onChange={e => setUserId(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={status === 'sending'}
+              />
+            </div>
 
-        {status === 'success' && (
-          <div className="status-message status-success">
-            Invite sent successfully!
+            <button
+              className="invite-button"
+              onClick={handleInvite}
+              disabled={status === 'sending'}
+            >
+              {status === 'sending' ? 'Sending...' : 'Send Invite'}
+            </button>
+
+            {status === 'success' && (
+              <div className="status-message status-success">
+                Invite sent successfully!
+              </div>
+            )}
+
+            {status === 'error' && errorMessage && (
+              <div className="status-message status-error">{errorMessage}</div>
+            )}
           </div>
-        )}
 
-        {status === 'error' && errorMessage && (
-          <div className="status-message status-error">{errorMessage}</div>
-        )}
-      </div>
+          <div className="divider">
+            <span>or</span>
+          </div>
 
-      <div className="divider">
-        <span>or</span>
-      </div>
-
-      <div className="share-section">
-        <label className="form-label">Share room link:</label>
-        <div className="link-row">
-          <input
-            type="text"
-            className="link-input"
-            value={roomLink || 'Loading...'}
-            readOnly
-          />
-          <button
-            className="copy-button"
-            onClick={handleCopyLink}
-            disabled={!roomLink}
-          >
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-        </div>
-        <p className="link-hint">
-          Anyone with this link can request to join your family room.
-        </p>
-      </div>
+          <div className="share-section">
+            <label className="form-label">Share room link:</label>
+            <div className="link-row">
+              <input
+                type="text"
+                className="link-input"
+                value={roomLink || 'Loading...'}
+                readOnly
+              />
+              <button
+                className="copy-button"
+                onClick={handleCopyLink}
+                disabled={!roomLink}
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <p className="link-hint">
+              Anyone with this link can request to join your family room.
+            </p>
+          </div>
+        </>
+      )}
 
       <style>{`
         .invite-flow {
@@ -313,6 +343,36 @@ export function InviteFlow() {
           font-size: var(--font-size-xs);
           color: var(--color-text-muted);
           margin: 0;
+        }
+
+        .loading {
+          color: var(--color-text-muted);
+          text-align: center;
+          padding: var(--spacing-xl);
+          font-size: var(--font-size-sm);
+        }
+
+        .no-family-room {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-md);
+          align-items: center;
+          text-align: center;
+          padding: var(--spacing-xl) 0;
+        }
+
+        .no-room-text {
+          color: var(--color-text-muted);
+          margin: 0;
+          font-size: var(--font-size-base);
+          line-height: 1.5;
+        }
+
+        .no-room-hint {
+          color: var(--color-accent);
+          margin: 0;
+          font-size: var(--font-size-sm);
+          font-weight: 500;
         }
       `}</style>
     </div>

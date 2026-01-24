@@ -4,9 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { matrixService } from '../../services/matrixService.js';
 
 export function FamilyManager() {
+  const [familyRoomId, setFamilyRoomId] = useState<string | null>(null);
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [showConfirmRemove, setShowConfirmRemove] = useState<string | null>(
     null,
@@ -14,24 +17,51 @@ export function FamilyManager() {
 
   const currentUserId = matrixService.getUserId();
 
-  const loadMembers = useCallback(async () => {
+  const loadFamilyState = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const familyMembers = await matrixService.getFamilyMembers(true);
-      setMembers(familyMembers);
+      const roomId = await matrixService.getFamilyRoomId();
+      setFamilyRoomId(roomId);
+      if (roomId) {
+        const familyMembers = await matrixService.getFamilyMembers(true);
+        setMembers(familyMembers);
+      } else {
+        setMembers([]);
+      }
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to load family members',
+        err instanceof Error ? err.message : 'Failed to load family state',
       );
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  const handleCreateFamilyRoom = useCallback(async () => {
+    try {
+      setIsCreating(true);
+      setError(null);
+      const roomId = await matrixService.createFamilyRoom();
+      setFamilyRoomId(roomId);
+      setSuccessMessage('Family room created successfully!');
+      // Load members after creation
+      const familyMembers = await matrixService.getFamilyMembers(true);
+      setMembers(familyMembers);
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to create family room',
+      );
+    } finally {
+      setIsCreating(false);
+    }
+  }, []);
+
   useEffect(() => {
-    loadMembers();
-  }, [loadMembers]);
+    loadFamilyState();
+  }, [loadFamilyState]);
 
   const handleRemoveMember = async (userId: string) => {
     try {
@@ -39,15 +69,15 @@ export function FamilyManager() {
       setError(null);
 
       const client = matrixService.getClient();
-      const familyRoomId = await matrixService.getFamilyRoomId();
+      const roomId = await matrixService.getFamilyRoomId();
 
-      if (!client || !familyRoomId) {
+      if (!client || !roomId) {
         throw new Error('Not connected to family room');
       }
 
-      await client.kick(familyRoomId, userId, 'Removed from family');
+      await client.kick(roomId, userId, 'Removed from family');
       setShowConfirmRemove(null);
-      await loadMembers();
+      await loadFamilyState();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove member');
     } finally {
@@ -69,63 +99,85 @@ export function FamilyManager() {
       <h2 className="section-title">Family Members ({members.length})</h2>
 
       {error && <div className="error-message">{error}</div>}
+      {successMessage && (
+        <div className="success-message">{successMessage}</div>
+      )}
 
-      <div className="member-list">
-        {members.map(member => (
-          <div key={member.userId} className="member-card">
-            <div className="member-avatar">
-              {member.avatarUrl ? (
-                <img src={member.avatarUrl} alt="" className="avatar-image" />
-              ) : (
-                <span className="avatar-placeholder">👤</span>
+      {/* No family room - show create button */}
+      {!isLoading && !familyRoomId && (
+        <div className="no-family-room">
+          <p className="no-room-text">
+            No family room found. Create one to get started!
+          </p>
+          <button
+            className="create-family-button"
+            onClick={handleCreateFamilyRoom}
+            disabled={isCreating}
+          >
+            {isCreating ? 'Creating...' : 'Create Family Room'}
+          </button>
+        </div>
+      )}
+
+      {/* Family room exists - show members */}
+      {familyRoomId && (
+        <div className="member-list">
+          {members.map(member => (
+            <div key={member.userId} className="member-card">
+              <div className="member-avatar">
+                {member.avatarUrl ? (
+                  <img src={member.avatarUrl} alt="" className="avatar-image" />
+                ) : (
+                  <span className="avatar-placeholder">👤</span>
+                )}
+              </div>
+              <div className="member-info">
+                <div className="member-name">
+                  {member.displayName}
+                  {member.userId === currentUserId && (
+                    <span className="you-badge">(you)</span>
+                  )}
+                </div>
+                <div className="member-id">{member.userId}</div>
+              </div>
+              {member.userId !== currentUserId && (
+                <div className="member-actions">
+                  {showConfirmRemove === member.userId ? (
+                    <div className="confirm-remove">
+                      <button
+                        className="confirm-yes"
+                        onClick={() => handleRemoveMember(member.userId)}
+                        disabled={removingUserId === member.userId}
+                      >
+                        {removingUserId === member.userId ? '...' : 'Remove'}
+                      </button>
+                      <button
+                        className="confirm-no"
+                        onClick={() => setShowConfirmRemove(null)}
+                        disabled={removingUserId === member.userId}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="options-button"
+                      onClick={() => setShowConfirmRemove(member.userId)}
+                      aria-label="Options"
+                    >
+                      ···
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-            <div className="member-info">
-              <div className="member-name">
-                {member.displayName}
-                {member.userId === currentUserId && (
-                  <span className="you-badge">(you)</span>
-                )}
-              </div>
-              <div className="member-id">{member.userId}</div>
-            </div>
-            {member.userId !== currentUserId && (
-              <div className="member-actions">
-                {showConfirmRemove === member.userId ? (
-                  <div className="confirm-remove">
-                    <button
-                      className="confirm-yes"
-                      onClick={() => handleRemoveMember(member.userId)}
-                      disabled={removingUserId === member.userId}
-                    >
-                      {removingUserId === member.userId ? '...' : 'Remove'}
-                    </button>
-                    <button
-                      className="confirm-no"
-                      onClick={() => setShowConfirmRemove(null)}
-                      disabled={removingUserId === member.userId}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="options-button"
-                    onClick={() => setShowConfirmRemove(member.userId)}
-                    aria-label="Options"
-                  >
-                    ···
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {members.length === 0 && !error && (
+      {familyRoomId && members.length === 0 && !error && (
         <div className="empty-state">
-          No family members found. Invite someone to get started!
+          No family members yet. Use the Invite tab to add someone!
         </div>
       )}
 
@@ -298,6 +350,51 @@ const familyManagerStyles = `
     text-align: center;
     color: var(--color-text-muted);
     padding: var(--spacing-xl);
+    font-size: var(--font-size-sm);
+  }
+
+  .no-family-room {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+    align-items: center;
+    text-align: center;
+    padding: var(--spacing-xl) 0;
+  }
+
+  .no-room-text {
+    color: var(--color-text-muted);
+    margin: 0;
+    font-size: var(--font-size-base);
+  }
+
+  .create-family-button {
+    padding: var(--spacing-md) var(--spacing-xl);
+    background-color: var(--color-accent);
+    border: none;
+    border-radius: 8px;
+    color: var(--color-background);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+  }
+
+  .create-family-button:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+
+  .create-family-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .success-message {
+    padding: var(--spacing-md);
+    background-color: rgba(51, 255, 51, 0.1);
+    border: 1px solid var(--color-success);
+    border-radius: 8px;
+    color: var(--color-success);
     font-size: var(--font-size-sm);
   }
 `;
