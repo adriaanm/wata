@@ -23,7 +23,7 @@ const EXAMPLE_ONBOARDING_DATA: OnboardingData = {
   room: '!family:matrix.org',
 };
 
-export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
+export function AudioCodeTestHarness({ onClose }: AudioCodeTestHarnessProps) {
   const [status, setStatus] = useState<string>('Ready');
   const [decodedData, setDecodedData] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -39,7 +39,7 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
   const specs = getModulationSpecs(DEFAULT_CONFIG);
 
   /**
-   * Send onboarding data via MFSK tones
+   * Send onboarding data via AudioCode tones
    * Uses Web Audio API directly (no Opus encoding)
    */
   const handleSendOnboarding = async () => {
@@ -47,7 +47,7 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
       setStatus('Encoding onboarding data...');
       setIsPlaying(true);
 
-      // Encode data to MFSK samples
+      // Encode data to AudioCode samples
       const samples = encodeOnboardingAudio(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
       const duration = samples.length / DEFAULT_CONFIG.sampleRate;
       setStatus(
@@ -87,7 +87,7 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
   };
 
   /**
-   * Receive onboarding data via MFSK tones
+   * Receive onboarding data via AudioCode tones
    * Records raw audio (no Opus) and decodes
    */
   const handleReceiveOnboarding = async () => {
@@ -129,7 +129,7 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
       const processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
       processorNodeRef.current = processor;
 
-      const RECORDING_DURATION = 8000; // 8 seconds max (longer for MFSK)
+      const RECORDING_DURATION = 8000; // 8 seconds max (longer for AudioCode)
       recordingStartRef.current = Date.now();
 
       processor.onaudioprocess = e => {
@@ -184,7 +184,7 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
 
       setStatus(`Decoding ${allSamples.length} samples...`);
 
-      // Decode MFSK
+      // Decode AudioCode
       const { decodeOnboardingAudio } = await import(
         '../services/OnboardingAudioService.js'
       );
@@ -214,11 +214,11 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
         </header>
 
         <main className="modal-body">
-          <div className="afsk-info">
-            <p className="afsk-description">
+          <div className="audiocode-info">
+            <p className="audiocode-description">
               Robust credential transfer via multi-tone audio ({specs.modulation})
             </p>
-            <div className="afsk-specs">
+            <div className="audiocode-specs">
               <span>Tones: {specs.tones}</span>
               <span>Freq: {specs.baseFreq}-{specs.maxFreq} Hz</span>
               <span>Rate: ~{specs.bitRate} bps</span>
@@ -226,54 +226,54 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             </div>
           </div>
 
-          <div className="afsk-actions">
+          <div className="audiocode-actions">
             <button
-              className="afsk-button afsk-button--send"
+              className="audiocode-button audiocode-button--send"
               onClick={handleSendOnboarding}
               disabled={isPlaying || isRecording}
             >
-              <span className="afsk-button-icon">
+              <span className="audiocode-button-icon">
                 {isPlaying ? '...' : 'TX'}
               </span>
-              <span className="afsk-button-text">
+              <span className="audiocode-button-text">
                 {isPlaying ? 'Playing...' : 'Send Onboarding'}
               </span>
             </button>
 
             <button
-              className="afsk-button afsk-button--receive"
+              className="audiocode-button audiocode-button--receive"
               onClick={
                 isRecording ? handleStopRecording : handleReceiveOnboarding
               }
               disabled={isPlaying || (isRecording && false)}
             >
-              <span className="afsk-button-icon">
+              <span className="audiocode-button-icon">
                 {isRecording ? 'STOP' : 'RX'}
               </span>
-              <span className="afsk-button-text">
+              <span className="audiocode-button-text">
                 {isRecording ? 'Stop Recording' : 'Receive Onboarding'}
               </span>
             </button>
           </div>
 
-          <div className="afsk-status">
-            <span className="afsk-status-label">Status:</span>
-            <span className="afsk-status-text">{status}</span>
+          <div className="audiocode-status">
+            <span className="audiocode-status-label">Status:</span>
+            <span className="audiocode-status-text">{status}</span>
           </div>
 
           {decodedData && (
-            <div className="afsk-result">
-              <div className="afsk-result-header">
+            <div className="audiocode-result">
+              <div className="audiocode-result-header">
                 <h3>Decoded Data:</h3>
-                <button className="afsk-clear-button" onClick={handleClear}>
+                <button className="audiocode-clear-button" onClick={handleClear}>
                   Clear
                 </button>
               </div>
-              <pre className="afsk-result-json">{decodedData}</pre>
+              <pre className="audiocode-result-json">{decodedData}</pre>
             </div>
           )}
 
-          <div className="afsk-example">
+          <div className="audiocode-example">
             <h4>Example Payload:</h4>
             <pre>{JSON.stringify(EXAMPLE_ONBOARDING_DATA, null, 2)}</pre>
           </div>
@@ -343,17 +343,17 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             gap: var(--spacing-md);
           }
 
-          .afsk-info {
+          .audiocode-info {
             text-align: center;
           }
 
-          .afsk-description {
+          .audiocode-description {
             color: var(--color-text-muted);
             font-size: var(--font-size-sm);
             margin: 0 0 var(--spacing-sm) 0;
           }
 
-          .afsk-specs {
+          .audiocode-specs {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
@@ -363,12 +363,12 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             font-family: monospace;
           }
 
-          .afsk-actions {
+          .audiocode-actions {
             display: flex;
             gap: var(--spacing-md);
           }
 
-          .afsk-button {
+          .audiocode-button {
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -383,41 +383,41 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             background-color: var(--color-surface);
           }
 
-          .afsk-button:disabled {
+          .audiocode-button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
           }
 
-          .afsk-button--send {
+          .audiocode-button--send {
             border-color: #10b981;
             color: #10b981;
           }
 
-          .afsk-button--send:not(:disabled):hover {
+          .audiocode-button--send:not(:disabled):hover {
             background-color: #10b981;
             color: white;
           }
 
-          .afsk-button--receive {
+          .audiocode-button--receive {
             border-color: #3b82f6;
             color: #3b82f6;
           }
 
-          .afsk-button--receive:not(:disabled):hover {
+          .audiocode-button--receive:not(:disabled):hover {
             background-color: #3b82f6;
             color: white;
           }
 
-          .afsk-button-icon {
+          .audiocode-button-icon {
             font-size: var(--font-size-2xl);
             font-weight: bold;
           }
 
-          .afsk-button-text {
+          .audiocode-button-text {
             font-weight: 600;
           }
 
-          .afsk-status {
+          .audiocode-status {
             padding: var(--spacing-md);
             background-color: var(--color-background);
             border-radius: 8px;
@@ -426,37 +426,37 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             font-size: var(--font-size-sm);
           }
 
-          .afsk-status-label {
+          .audiocode-status-label {
             font-weight: 600;
             color: var(--color-text-muted);
           }
 
-          .afsk-status-text {
+          .audiocode-status-text {
             color: var(--color-text);
             font-family: monospace;
           }
 
-          .afsk-result {
+          .audiocode-result {
             padding: var(--spacing-md);
             background-color: #064e3b;
             border-radius: 8px;
             border: 1px solid #10b981;
           }
 
-          .afsk-result-header {
+          .audiocode-result-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: var(--spacing-sm);
           }
 
-          .afsk-result-header h3 {
+          .audiocode-result-header h3 {
             margin: 0;
             font-size: var(--font-size-base);
             color: #10b981;
           }
 
-          .afsk-clear-button {
+          .audiocode-clear-button {
             background: none;
             border: none;
             color: #10b981;
@@ -464,11 +464,11 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             font-size: var(--font-size-sm);
           }
 
-          .afsk-clear-button:hover {
+          .audiocode-clear-button:hover {
             text-decoration: underline;
           }
 
-          .afsk-result-json {
+          .audiocode-result-json {
             margin: 0;
             padding: var(--spacing-sm);
             background-color: rgba(0, 0, 0, 0.3);
@@ -478,19 +478,19 @@ export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             color: #d1fae5;
           }
 
-          .afsk-example {
+          .audiocode-example {
             padding: var(--spacing-md);
             background-color: var(--color-background);
             border-radius: 8px;
           }
 
-          .afsk-example h4 {
+          .audiocode-example h4 {
             margin: 0 0 var(--spacing-sm) 0;
             font-size: var(--font-size-sm);
             color: var(--color-text-muted);
           }
 
-          .afsk-example pre {
+          .audiocode-example pre {
             margin: 0;
             padding: var(--spacing-sm);
             background-color: var(--color-surface-elevated);

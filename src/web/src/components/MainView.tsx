@@ -4,7 +4,7 @@ import { useContactSelection } from '../hooks/useContactSelection.js';
 import { usePtt } from '../hooks/usePtt.js';
 import type { Contact } from '../types.js';
 
-import { AfskTestHarness } from './AfskTestHarness.js';
+import { AudioCodeTestHarness } from './AudioCodeTestHarness.js';
 import { ContactCard } from './ContactCard.js';
 import { RecordingIndicator } from './RecordingIndicator.js';
 
@@ -15,7 +15,7 @@ interface MainViewProps {
 }
 
 export function MainView({ contacts }: MainViewProps) {
-  const [showAfskTest, setShowAfskTest] = useState(false);
+  const [showAudioCodeTest, setShowAudioCodeTest] = useState(false);
 
   const { selectedIndex, selectedContact, setSelectedIndex } =
     useContactSelection(contacts);
@@ -94,8 +94,8 @@ export function MainView({ contacts }: MainViewProps) {
 
   return (
     <>
-      {showAfskTest && (
-        <AfskTestHarness onClose={() => setShowAfskTest(false)} />
+      {showAudioCodeTest && (
+        <AudioCodeTestHarness onClose={() => setShowAudioCodeTest(false)} />
       )}
 
       {isRecording && recordingContact && (
@@ -115,7 +115,7 @@ export function MainView({ contacts }: MainViewProps) {
           <button
             className="admin-button"
             aria-label="Admin menu"
-            onClick={() => setShowAfskTest(true)}
+            onClick={() => setShowAudioCodeTest(true)}
           >
             <span>≡</span>
             <span className="admin-button-label">Admin</span>
