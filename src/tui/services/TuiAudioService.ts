@@ -288,7 +288,7 @@ export class TuiAudioService {
   }
 
   /**
-   * Play WAV file using afplay (for AFSK tones)
+   * Play WAV file using afplay (for AudioCode tones)
    * @param wavPath - Path to WAV file
    */
   async playWav(wavPath: string): Promise<void> {
@@ -321,7 +321,7 @@ export class TuiAudioService {
   }
 
   /**
-   * Record raw PCM audio (for AFSK decoding)
+   * Record raw PCM audio (for AudioCode decoding)
    * Records at 16kHz mono, returns Float32Array samples
    * @param durationMs - Recording duration in milliseconds
    * @returns Float32Array of audio samples

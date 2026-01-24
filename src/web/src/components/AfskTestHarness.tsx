@@ -11,7 +11,7 @@ import {
   type OnboardingData,
 } from '../services/OnboardingAudioService.js';
 
-interface AfskTestHarnessProps {
+interface AudioCodeTestHarnessProps {
   onClose: () => void;
 }
 
@@ -23,7 +23,7 @@ const EXAMPLE_ONBOARDING_DATA: OnboardingData = {
   room: '!family:matrix.org',
 };
 
-export function AfskTestHarness({ onClose }: AfskTestHarnessProps) {
+export function AfskTestHarness({ onClose }: AudioCodeTestHarnessProps) {
   const [status, setStatus] = useState<string>('Ready');
   const [decodedData, setDecodedData] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);

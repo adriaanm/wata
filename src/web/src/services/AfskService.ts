@@ -13,5 +13,5 @@ export {
   samplesToAudioBuffer as afskSamplesToAudioBuffer,
   audioBufferToSamples,
   DEFAULT_CONFIG,
-  type MfskConfig as AfskConfig,
+  type AudioCodeConfig as AfskConfig,
 } from './OnboardingAudioService.js';

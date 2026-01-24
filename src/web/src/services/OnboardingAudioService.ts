@@ -1,22 +1,21 @@
 /**
  * Onboarding Audio Service
  *
- * Handles audio-based credential transfer for device onboarding.
- * Uses MFSK (Multi-Frequency Shift Keying) modulation with Reed-Solomon
- * error correction for robust transmission in noisy acoustic environments.
+ * Handles audio-based credential transfer for device onboarding using AudioCode.
+ * AudioCode = "QR Code over Audio" - 16-MFSK modulation with Reed-Solomon error correction.
  *
  * Use case: Transfer homeserver URL, username, password, and room ID
  * from a phone/computer to a Zello PTT handheld that lacks a camera.
  */
 
 import {
-  encodeMfsk,
-  decodeMfsk,
+  encodeAudioCode,
+  decodeAudioCode,
   DEFAULT_CONFIG,
-  type MfskConfig,
-} from '@shared/lib/mfsk.js';
+  type AudioCodeConfig,
+} from '@shared/lib/audiocode.js';
 
-export { DEFAULT_CONFIG, type MfskConfig };
+export { DEFAULT_CONFIG, type AudioCodeConfig };
 
 /**
  * Onboarding payload structure
@@ -33,9 +32,9 @@ export interface OnboardingData {
  */
 export function encodeOnboardingAudio(
   data: OnboardingData,
-  config: MfskConfig = DEFAULT_CONFIG,
+  config: AudioCodeConfig = DEFAULT_CONFIG,
 ): Float32Array {
-  return encodeMfsk(data, config);
+  return encodeAudioCode(data, config);
 }
 
 /**
@@ -43,9 +42,9 @@ export function encodeOnboardingAudio(
  */
 export async function decodeOnboardingAudio(
   samples: Float32Array,
-  config: MfskConfig = DEFAULT_CONFIG,
+  config: AudioCodeConfig = DEFAULT_CONFIG,
 ): Promise<OnboardingData> {
-  const data = await decodeMfsk(samples, config);
+  const data = await decodeAudioCode(samples, config);
   // Validate structure
   if (
     typeof data !== 'object' ||
@@ -86,16 +85,16 @@ export function audioBufferToSamples(audioBuffer: AudioBuffer): Float32Array {
  */
 export function calculateDuration(
   data: OnboardingData,
-  config: MfskConfig = DEFAULT_CONFIG,
+  config: AudioCodeConfig = DEFAULT_CONFIG,
 ): number {
-  const samples = encodeMfsk(data, config);
+  const samples = encodeAudioCode(data, config);
   return samples.length / config.sampleRate;
 }
 
 /**
  * Get human-readable modulation specs
  */
-export function getModulationSpecs(config: MfskConfig = DEFAULT_CONFIG): {
+export function getModulationSpecs(config: AudioCodeConfig = DEFAULT_CONFIG): {
   modulation: string;
   tones: number;
   baseFreq: number;
@@ -108,16 +107,16 @@ export function getModulationSpecs(config: MfskConfig = DEFAULT_CONFIG): {
     config.baseFrequency + (config.numTones - 1) * config.frequencySpacing;
   const symbolRate = 1000 / config.symbolDuration;
   const bitsPerSymbol = Math.log2(config.numTones);
-  // Account for RS(15,9) overhead: 9/15 = 60% efficiency
-  const bitRate = symbolRate * bitsPerSymbol * (9 / 15);
+  // Account for 100% RS redundancy: 1/2 efficiency
+  const bitRate = symbolRate * bitsPerSymbol * 0.5;
 
   return {
-    modulation: `${config.numTones}-MFSK`,
+    modulation: `16-MFSK (AudioCode)`,
     tones: config.numTones,
     baseFreq: config.baseFrequency,
     maxFreq,
     symbolRate,
     bitRate: Math.round(bitRate),
-    errorCorrection: 'RS(15,9)',
+    errorCorrection: 'RS(100% redundancy)',
   };
 }

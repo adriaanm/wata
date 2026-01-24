@@ -11,9 +11,9 @@
  * 3. Then dynamically importing the rest of the app
  *
  * CLI arguments:
- *   --profile <name>   Start with the specified profile (e.g., alice, bob)
- *   --afsk-send        Encode and send MFSK onboarding tones
- *   --afsk-receive     Record and decode MFSK onboarding tones
+ *   --profile <name>     Start with the specified profile (e.g., alice, bob)
+ *   --send-credentials   Encode and send onboarding credentials via AudioCode
+ *   --receive-credentials Record and decode onboarding credentials via AudioCode
  */
 
 // Parse CLI arguments
@@ -21,8 +21,8 @@ const args = process.argv.slice(2);
 const profileIndex = args.indexOf('--profile');
 const initialProfile =
   profileIndex !== -1 && args[profileIndex + 1] ? args[profileIndex + 1] : null;
-const afskSend = args.includes('--afsk-send');
-const afskReceive = args.includes('--afsk-receive');
+const sendCredentials = args.includes('--send-credentials');
+const receiveCredentials = args.includes('--receive-credentials');
 
 // Enable alternate screen buffer (should disable scrollback)
 // Note: This works in most terminals but NOT in macOS Terminal.app
@@ -86,14 +86,14 @@ async function bootstrap() {
     process.exit(0);
   });
 
-  // Step 5: Check for AFSK CLI commands (skip TUI if specified)
-  if (afskSend || afskReceive) {
-    // Restore terminal for AFSK mode (no alternate screen buffer)
+  // Step 5: Check for AudioCode CLI commands (skip TUI if specified)
+  if (sendCredentials || receiveCredentials) {
+    // Restore terminal for AudioCode mode (no alternate screen buffer)
     restoreTerminal();
     // Uninstall LogService so console output goes directly to terminal
     _LogService.getInstance().uninstall();
 
-    await runAfskCommand(afskSend ? 'send' : 'receive');
+    await runCredentialsCommand(sendCredentials ? 'send' : 'receive');
     await cleanup();
     process.exit(0);
     return; // Unreachable but TypeScript needs it
@@ -115,9 +115,9 @@ async function bootstrap() {
  * Send mode: Encode data → Play tones → (Optionally wait for ACK)
  * Receive mode: Record → Decode → Play ACK tones
  */
-async function runAfskCommand(command: 'send' | 'receive') {
-  const { encodeMfsk, decodeMfsk, DEFAULT_CONFIG, getMfskDebugLog } =
-    await import('../shared/lib/mfsk.js');
+async function runCredentialsCommand(command: 'send' | 'receive') {
+  const { encodeAudioCode, decodeAudioCode, DEFAULT_CONFIG } =
+    await import('../shared/lib/audiocode.js');
   const { encodeWav, writeWavTempFile } = await import('../shared/lib/wav.js');
   const { tuiAudioService } = await import('./services/TuiAudioService.js');
   const { unlink } = await import('fs/promises');
@@ -140,9 +140,9 @@ async function runAfskCommand(command: 'send' | 'receive') {
   const PLAYBACK_DELAY = 500; // 500ms delay after playback
 
   if (command === 'send') {
-    console.log('\n=== AUDIO ONBOARDING SEND MODE (16-MFSK) ===');
+    console.log('\n=== AUDIO ONBOARDING SEND MODE (AudioCode) ===');
     console.log('[1/4] Encoding onboarding data...');
-    const samples = encodeMfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
+    const samples = encodeAudioCode(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
     const duration = samples.length / DEFAULT_CONFIG.sampleRate;
     console.log(
       `      Encoded ${samples.length} samples (${duration.toFixed(1)}s at ${DEFAULT_CONFIG.sampleRate}Hz)`,
@@ -155,7 +155,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
     const wavPath = await writeWavTempFile(wavBuffer);
     console.log(`      Temp file: ${wavPath}`);
 
-    console.log('\n[3/4] Playing MFSK tones...');
+    console.log('\n[3/4] Playing AudioCode tones...');
     console.log('      ▼ Start receiver now! ▼');
     await tuiAudioService.playWav(wavPath);
 
@@ -171,7 +171,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
     console.log('\n[4/4] Send complete! Receiver should acknowledge.');
     console.log('\n=== END ===\n');
   } else {
-    console.log('\n=== AUDIO ONBOARDING RECEIVE MODE (16-MFSK) ===');
+    console.log('\n=== AUDIO ONBOARDING RECEIVE MODE (AudioCode) ===');
     console.log(
       `[1/5] Starting ${RECORDING_DURATION / 1000}s recording window...`,
     );
@@ -188,14 +188,14 @@ async function runAfskCommand(command: 'send' | 'receive') {
     const samplesPerSymbol = Math.round(
       (DEFAULT_CONFIG.sampleRate * DEFAULT_CONFIG.symbolDuration) / 1000,
     );
-    console.log('\n[3/5] Decoding MFSK tones...');
+    console.log('\n[3/5] Decoding AudioCode tones...');
     console.log(`      Samples per symbol: ${samplesPerSymbol}`);
     console.log(
       `      Expected symbols: ~${Math.floor(samples.length / samplesPerSymbol)}`,
     );
 
     try {
-      const data = await decodeMfsk(samples, DEFAULT_CONFIG);
+      const data = await decodeAudioCode(samples, DEFAULT_CONFIG);
       console.log('\n[4/5] ✓ DECODE SUCCESSFUL!');
       console.log('\n      Received data:');
       console.log(
@@ -204,7 +204,7 @@ async function runAfskCommand(command: 'send' | 'receive') {
 
       // Send ACK back to sender
       console.log('\n[5/5] Sending ACK acknowledgment...');
-      const ackSamples = encodeMfsk(ACK_DATA, DEFAULT_CONFIG);
+      const ackSamples = encodeAudioCode(ACK_DATA, DEFAULT_CONFIG);
       const ackDuration = ackSamples.length / DEFAULT_CONFIG.sampleRate;
       const ackWav = encodeWav(ackSamples, DEFAULT_CONFIG.sampleRate);
       const ackPath = await writeWavTempFile(ackWav);
@@ -222,11 +222,6 @@ async function runAfskCommand(command: 'send' | 'receive') {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`\n[4/5] ✗ DECODE FAILED: ${msg}`);
-      console.error('\n      Debug info:');
-      const debugLogs = getMfskDebugLog();
-      for (const log of debugLogs) {
-        console.error(`      - ${log}`);
-      }
       console.error('\n      Possible issues:');
       console.error('      - Audio too quiet (move mic closer to speaker)');
       console.error('      - Background noise (use a quiet room)');

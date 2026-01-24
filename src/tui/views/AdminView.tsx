@@ -5,10 +5,10 @@ import TextInput from 'ink-text-input';
 import React, { useState, useEffect } from 'react';
 
 import {
-  encodeMfsk,
-  decodeMfsk,
+  encodeAudioCode,
+  decodeAudioCode,
   DEFAULT_CONFIG,
-} from '../../shared/lib/mfsk.js';
+} from '../../shared/lib/audiocode.js';
 import { encodeWav, writeWavTempFile } from '../../shared/lib/wav.js';
 import { matrixService } from '../App.js';
 import { LogService } from '../services/LogService.js';
@@ -26,7 +26,7 @@ interface Props {
   currentProfile: ProfileKey;
 }
 
-type AdminMode = 'menu' | 'invite' | 'set-name' | 'afsk';
+type AdminMode = 'menu' | 'invite' | 'set-name' | 'audiocode';
 
 export function AdminView({ onBack, currentProfile }: Props) {
   const profile = PROFILES[currentProfile];
@@ -40,10 +40,10 @@ export function AdminView({ onBack, currentProfile }: Props) {
   const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
   const [newDisplayName, setNewDisplayName] = useState('');
 
-  // AFSK state
-  const [afskStatus, setAfskStatus] = useState<string>('Ready');
-  const [afskDecoded, setAfskDecoded] = useState<string | null>(null);
-  const [afskRecording, setAfskRecording] = useState(false);
+  // AudioCode state
+  const [audioCodeStatus, setAudioCodeStatus] = useState<string>('Ready');
+  const [audioCodeDecoded, setAudioCodeDecoded] = useState<string | null>(null);
+  const [audioCodeRecording, setAudioCodeRecording] = useState(false);
 
   // Example onboarding data
   const EXAMPLE_ONBOARDING_DATA = {
@@ -77,18 +77,18 @@ export function AdminView({ onBack, currentProfile }: Props) {
     }
   };
 
-  // MFSK: Send onboarding data
-  const handleAfskSend = async () => {
+  // AudioCode: Send onboarding data
+  const handleAudioCodeSend = async () => {
     try {
-      setAfskStatus('Encoding onboarding data...');
+      setAudioCodeStatus('Encoding onboarding data...');
       setError(null);
       setSuccess(null);
 
-      // Encode data to MFSK samples
-      const samples = encodeMfsk(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
+      // Encode data to AudioCode samples
+      const samples = encodeAudioCode(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
       const duration = samples.length / DEFAULT_CONFIG.sampleRate;
-      setAfskStatus(
-        `Encoded ${duration.toFixed(1)}s of MFSK tones, playing...`,
+      setAudioCodeStatus(
+        `Encoded ${duration.toFixed(1)}s of AudioCode tones, playing...`,
       );
 
       // Convert to WAV and save to temp file
@@ -98,7 +98,7 @@ export function AdminView({ onBack, currentProfile }: Props) {
       // Play using afplay
       await tuiAudioService.playWav(wavPath);
 
-      setAfskStatus('Sent! Playing MFSK tones...');
+      setAudioCodeStatus('Sent! Playing AudioCode tones...');
       setSuccess('Audio onboarding transmission complete!');
 
       // Wait for playback to finish, then clean up
@@ -107,42 +107,42 @@ export function AdminView({ onBack, currentProfile }: Props) {
       );
       await unlink(wavPath).catch(() => {});
 
-      setAfskStatus('Ready');
+      setAudioCodeStatus('Ready');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`Audio send failed: ${msg}`);
-      setAfskStatus(`Error: ${msg}`);
+      setAudioCodeStatus(`Error: ${msg}`);
       LogService.getInstance().addEntry('error', `Audio send failed: ${msg}`);
     }
   };
 
-  // MFSK: Receive onboarding data
-  const handleAfskReceive = async () => {
+  // AudioCode: Receive onboarding data
+  const handleAudioCodeReceive = async () => {
     try {
-      setAfskRecording(true);
-      setAfskStatus('Recording MFSK tones (8s)...');
+      setAudioCodeRecording(true);
+      setAudioCodeStatus('Recording AudioCode tones (16s)...');
       setError(null);
       setSuccess(null);
-      setAfskDecoded(null);
+      setAudioCodeDecoded(null);
 
-      // Record for 8 seconds (MFSK is slower but more robust)
-      const RECORDING_DURATION = 8000;
+      // Record for 16 seconds (AudioCode with 100% RS redundancy)
+      const RECORDING_DURATION = 16000;
       const samples = await tuiAudioService.recordRawPcm(RECORDING_DURATION);
 
-      setAfskStatus(`Decoding ${samples.length} samples...`);
+      setAudioCodeStatus(`Decoding ${samples.length} samples...`);
 
-      // Decode MFSK
-      const data = await decodeMfsk(samples, DEFAULT_CONFIG);
-      setAfskDecoded(JSON.stringify(data, null, 2));
+      // Decode AudioCode
+      const data = await decodeAudioCode(samples, DEFAULT_CONFIG);
+      setAudioCodeDecoded(JSON.stringify(data, null, 2));
       setSuccess('Audio onboarding decoded successfully!');
-      setAfskStatus('Ready');
+      setAudioCodeStatus('Ready');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`Audio receive failed: ${msg}`);
-      setAfskStatus(`Error: ${msg}`);
+      setAudioCodeStatus(`Error: ${msg}`);
       LogService.getInstance().addEntry('error', `Audio receive failed: ${msg}`);
     } finally {
-      setAfskRecording(false);
+      setAudioCodeRecording(false);
     }
   };
 
@@ -235,17 +235,17 @@ export function AdminView({ onBack, currentProfile }: Props) {
 
   // Keyboard handling
   useInput((input, key) => {
-    if (mode === 'afsk') {
+    if (mode === 'audiocode') {
       if (key.escape) {
         setMode('menu');
-        setAfskStatus('Ready');
-        setAfskDecoded(null);
+        setAudioCodeStatus('Ready');
+        setAudioCodeDecoded(null);
       }
       if (input === 's') {
-        handleAfskSend();
+        handleAudioCodeSend();
       }
-      if (input === 'r' && !afskRecording) {
-        handleAfskReceive();
+      if (input === 'r' && !audioCodeRecording) {
+        handleAudioCodeReceive();
       }
       return;
     }
@@ -294,9 +294,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
     }
 
     if (input === 'm') {
-      setMode('afsk');
-      setAfskStatus('Ready');
-      setAfskDecoded(null);
+      setMode('audiocode');
+      setAudioCodeStatus('Ready');
+      setAudioCodeDecoded(null);
       setError(null);
       setSuccess(null);
     }
@@ -424,14 +424,14 @@ export function AdminView({ onBack, currentProfile }: Props) {
               : '[n] Set name  [c] Create family  [m] Audio Test  [Esc] Back'
             : mode === 'invite'
               ? '[Enter] Invite  [Esc] Cancel'
-              : mode === 'afsk'
+              : mode === 'audiocode'
                 ? '[s] Send  [r] Receive  [Esc] Back'
                 : '[Enter] Save  [Esc] Cancel'}
         </Text>
       </Box>
 
       {/* Audio Onboarding Test Mode */}
-      {mode === 'afsk' && (
+      {mode === 'audiocode' && (
         <Box
           marginTop={1}
           flexDirection="column"
@@ -440,7 +440,7 @@ export function AdminView({ onBack, currentProfile }: Props) {
         >
           <Box marginBottom={1}>
             <Text bold color={profile.color}>
-              Audio Onboarding Test
+              AudioCode Test (QR over Audio)
             </Text>
           </Box>
 
@@ -448,7 +448,7 @@ export function AdminView({ onBack, currentProfile }: Props) {
             <Text>Robust credential transfer via multi-tone audio</Text>
             <Text dimColor>
               16-MFSK | {DEFAULT_CONFIG.numTones} tones | {DEFAULT_CONFIG.baseFrequency}-
-              {DEFAULT_CONFIG.baseFrequency + (DEFAULT_CONFIG.numTones - 1) * DEFAULT_CONFIG.frequencySpacing}Hz | RS(15,9) FEC
+              {DEFAULT_CONFIG.baseFrequency + (DEFAULT_CONFIG.numTones - 1) * DEFAULT_CONFIG.frequencySpacing}Hz | 100% RS FEC
             </Text>
           </Box>
 
@@ -460,18 +460,18 @@ export function AdminView({ onBack, currentProfile }: Props) {
           <Box marginBottom={1}>
             <Text>Status: </Text>
             <Text
-              color={afskStatus === 'Ready' ? colors.playing : colors.textMuted}
+              color={audioCodeStatus === 'Ready' ? colors.playing : colors.textMuted}
             >
-              {afskStatus}
+              {audioCodeStatus}
             </Text>
           </Box>
 
-          {afskDecoded && (
+          {audioCodeDecoded && (
             <Box marginBottom={1} flexDirection="column">
               <Text bold color={colors.playing}>
                 Decoded Data:
               </Text>
-              <Text>{afskDecoded}</Text>
+              <Text>{audioCodeDecoded}</Text>
             </Box>
           )}
         </Box>
