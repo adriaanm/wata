@@ -203,44 +203,43 @@ web/src/
 ├── components/
 │   ├── MainView.tsx              # Contact list + PTT ✅
 │   ├── ContactCard.tsx           # Individual contact (PTT target) ✅
-│   ├── PttButton.tsx             # Desktop PTT button (inline in ContactCard)
 │   ├── RecordingIndicator.tsx    # Recording state banner ✅
 │   ├── LoginView.tsx             # Authentication form ✅
 │   ├── LoadingView.tsx           # Loading/auth state ✅
-│   ├── HistoryView.tsx           # Message playback (TODO)
-│   ├── MessageItem.tsx           # Voice message row (TODO)
+│   ├── AudioCodeTestHarness.tsx  # AudioCode testing UI ✅
+│   ├── HistoryView.tsx           # Message history screen (Phase 4)
+│   ├── MessageItem.tsx           # Voice message row (Phase 4)
 │   └── admin/
-│       ├── AdminDrawer.tsx       # Side drawer (desktop) (TODO)
-│       ├── AdminSheet.tsx        # Bottom sheet (mobile) (TODO)
-│       ├── FamilyManager.tsx     # Add/remove members (TODO)
-│       ├── InviteFlow.tsx        # QR code / link invite (TODO)
-│       └── SettingsPanel.tsx     # Config, profile, logs (TODO)
+│       ├── AdminDrawer.tsx       # Side drawer (desktop) (Phase 5)
+│       ├── AdminSheet.tsx        # Bottom sheet (mobile) (Phase 5)
+│       ├── FamilyManager.tsx     # Member list/removal (Phase 5)
+│       ├── InviteFlow.tsx        # QR code / link invite (Phase 5)
+│       ├── DeviceManager.tsx     # Device list/revocation (Phase 5)
+│       ├── SettingsPanel.tsx     # User config (Phase 5)
+│       └── LogsPanel.tsx         # Diagnostics (Phase 5)
 │
 ├── hooks/
-│   ├── usePtt.ts                 # PTT logic (keyboard + touch) ✅
-│   ├── useAudioRecorder.ts       # WebAudio API integration (stub)
-│   ├── useAudioPlayer.ts         # Web Audio API playback (TODO)
-│   ├── useContactSelection.ts    # Keyboard selection state ✅
-│   ├── useContactStatus.ts       # Unread/error tracking (TODO)
-│   ├── useMatrix.ts              # Matrix integration hooks ✅ (useAuth, useMatrixSync, useRooms)
-│   └── useContacts.ts            # Build contacts from Matrix data ✅
+│   ├── usePtt.ts                 # PTT orchestration ✅
+│   ├── useAudioRecorder.ts       # Recording state wrapper ✅
+│   ├── useAudioPlayer.ts         # Playback with progress/seek/volume ✅
+│   ├── useContactSelection.ts    # Keyboard navigation ✅
+│   ├── useMatrix.ts              # Matrix hooks (useAuth, useMatrixSync, useRooms) ✅
+│   └── useContacts.ts            # Build contacts from Matrix ✅
 │
 ├── services/
-│   ├── matrixService.ts          # Web-specific MatrixService singleton ✅
-│   ├── WebAudioService.ts        # AudioWorklet recording ✅ (stub)
-│   ├── OpusEncoder.ts            # WebAssembly Opus (TODO - Phase 3)
+│   ├── matrixService.ts          # Web MatrixService singleton ✅
+│   ├── WebAudioService.ts        # MediaRecorder + HTML Audio ✅
+│   ├── OnboardingAudioService.ts # AudioCode wrapper ✅
 │   ├── WebCredentialStorage.ts   # localStorage adapter ✅
-│   └── LogService.ts             # Web logging adapter ✅
+│   └── LogService.ts             # Web logging ✅
 │
 ├── styles/
 │   ├── variables.css             # Design tokens ✅
 │   ├── contact-card.css          # Contact card styles ✅
 │   └── animations.css            # Ripple, dimming transitions ✅
 │
-├── worklets/                     # AudioWorklet processors (TODO - Phase 3)
-│
 └── data/
-    └── mockData.ts               # Mock contacts for UI development ✅
+    └── mockData.ts               # Mock contacts for testing ✅
 ```
 
 ---
@@ -325,31 +324,118 @@ The shared code (`MatrixService.ts`, `matrix-auth.ts`) no longer imports platfor
 - `src/web/src/services/matrixService.ts` - Wire up web's LogService
 - `src/tui/App.tsx` - Wire up TUI's LogService
 
-### Phase 3: Audio Pipeline (TODO)
+### Phase 3: Audio Pipeline ✅ COMPLETE
 
-**Remaining:**
-- AudioWorklet processor (`worklets/ptt-processor.ts`)
-- Opus WebAssembly encoding
-- Ogg container muxing
-- Web Audio API playback
-- Real Microphone access via MediaRecorder
+**Completed:**
+- ✅ WebAudioService with MediaRecorder API (`services/WebAudioService.ts`)
+  - 16kHz mono recording with echo cancellation
+  - Browser-native Opus encoding (webm/opus or fallback)
+  - Voice-optimized audio constraints
+- ✅ useAudioRecorder hook - React wrapper for recording
+- ✅ useAudioPlayer hook - Full playback with progress/seek/volume
+- ✅ usePtt hook - Complete PTT flow with Matrix integration
+- ✅ Matrix voice message sending via `matrixService.sendVoiceMessage()`
 
-### Phase 4: History & Feedback (TODO)
+**Implementation Note:**
+We chose the simpler MediaRecorder approach over AudioWorklet + WASM Opus. Benefits:
+- No extra dependencies (no libopus.wasm)
+- Browser handles encoding natively
+- Works across Chrome/Firefox/Safari with graceful fallbacks
+- Easier to maintain
 
-**Remaining:**
-- HistoryView component for message playback
-- MessageItem component
-- Real unread/error indicators from Matrix
-- Message playback functionality
+The AudioWorklet approach is documented but not needed for v1.
+
+### Phase 4: History & Feedback (NEXT - In Progress)
+
+**Goal:** Allow users to view and play back voice message history for each contact.
+
+**Components to Build:**
+
+1. **HistoryView.tsx** - Message history screen
+   - Header with contact name and back button
+   - Scrollable list of voice messages
+   - Auto-scroll to newest on open
+   - Keyboard navigation (Enter from MainView opens, Esc goes back)
+
+2. **MessageItem.tsx** - Individual voice message row
+   - Sender avatar/name (for group)
+   - Timestamp
+   - Duration display
+   - Play/pause button
+   - Progress bar with seek
+   - Visual distinction for sent vs received
+   - "New" badge for unread messages
+
+3. **useVoiceMessages hook** - Fetch messages from Matrix
+   - Already exists in shared: `src/shared/hooks/useVoiceMessages.ts`
+   - Need to integrate with web audio player
+   - Handle MXC URL → HTTP URL conversion
+
+4. **Unread tracking** - Real unread counts
+   - Update `useContacts` to track actual unread counts
+   - Mark messages as read when HistoryView opens
+   - Badge on ContactCard for unread count
+
+**Implementation Plan:**
+
+```
+Step 1: Basic HistoryView shell
+- Create HistoryView component with navigation
+- Add route state to MainView (main vs history)
+- Wire up Enter key and back button
+
+Step 2: MessageItem with playback
+- Create MessageItem component
+- Integrate useAudioPlayer for playback
+- Display timestamp, duration, play/pause
+
+Step 3: Fetch real messages
+- Wire useVoiceMessages to HistoryView
+- Convert MXC URLs for playback
+- Handle loading/error states
+
+Step 4: Unread tracking
+- Add real unread count to useContacts
+- Mark as read on history view open
+- Show unread badges on ContactCard
+```
 
 ### Phase 5: Admin Interface (TODO)
 
-**Remaining:**
-- Admin drawer/sheet navigation
-- Family management UI
-- Member invite flow
-- Settings panel
-- Device onboarding
+**Goal:** Web-based family management and device setup.
+
+**Components to Build:**
+
+1. **Navigation Structure**
+   - AdminDrawer.tsx - Slide-in side panel (desktop)
+   - AdminSheet.tsx - Bottom sheet (mobile)
+   - Menu items: Family, Devices, Settings, Logs
+
+2. **FamilyManager.tsx** - Family room administration
+   - List current family members
+   - Remove member (kick from room)
+   - View member status (online/offline)
+
+3. **InviteFlow.tsx** - Add new family members
+   - Generate invite link or QR code
+   - Display AudioCode for device onboarding
+   - Show pending invites
+
+4. **DeviceManager.tsx** - Registered devices
+   - List devices per family member
+   - Revoke device access
+   - View device metadata
+
+5. **SettingsPanel.tsx** - Configuration
+   - User profile (display name, avatar)
+   - Audio settings (quality, beep on/off)
+   - Homeserver URL (advanced)
+   - Export/import config
+
+6. **LogsPanel.tsx** - Diagnostics
+   - Matrix sync status
+   - Recent errors
+   - Connection quality
 
 ---
 
@@ -359,34 +445,209 @@ The shared code (`MatrixService.ts`, `matrix-auth.ts`) no longer imports platfor
 - ✅ Set up Vite + React project
 - ✅ TypeScript configuration
 - ✅ WebCredentialStorage adapter
-- ⏸️ Basic Matrix connection (deferred - using mock)
 
 **Phase 2: Core UI** ✅ COMPLETE
 - ✅ ContactCard component (touch targets)
 - ✅ Selection state (keyboard navigation)
-- ✅ Touch and hold recording (UI only)
+- ✅ Touch and hold recording (UI)
 - ✅ Desktop PTT buttons
 - ✅ Recording animations (ripple, dimming)
 - ✅ Recording indicator banner
 
-**Phase 3: Audio Pipeline** (NEXT)
-- AudioWorklet processor
-- Opus WebAssembly integration
-- Ogg container muxing
-- Web Audio API playback
-- Matrix voice message sending
+**Phase 2.5: Auth & Matrix Integration** ✅ COMPLETE
+- ✅ LoginView component
+- ✅ Real Matrix connection with shared hooks
+- ✅ Session persistence
+- ✅ Logger injection pattern for shared code
 
-**Phase 4: History & Feedback**
+**Phase 3: Audio Pipeline** ✅ COMPLETE
+- ✅ WebAudioService with MediaRecorder
+- ✅ useAudioRecorder / useAudioPlayer hooks
+- ✅ usePtt hook with Matrix integration
+- ✅ Voice message send to Matrix
+
+**Phase 4: History & Feedback** (NEXT)
 - HistoryView component
-- Message playback
-- Real unread/error indicators from Matrix
-- Read receipts
+- MessageItem component
+- Message playback with progress/seek
+- Real unread counts from Matrix
+- Mark messages as read
 
 **Phase 5: Admin Interface**
-- Admin drawer/sheet
-- Family management
-- Device onboarding
-- Settings panel
+- AdminDrawer/AdminSheet navigation
+- FamilyManager (members, removal)
+- InviteFlow (links, QR, AudioCode)
+- DeviceManager
+- SettingsPanel
+- LogsPanel
+
+---
+
+## Next Steps: Phase 4 Implementation Details
+
+### Step 4.1: View Navigation State
+
+Add view switching between contacts list and message history.
+
+**Files to modify:**
+- `src/web/src/App.tsx` - Add view state management
+- `src/web/src/types.ts` - Add view state types
+
+**Implementation:**
+```typescript
+// types.ts
+type ViewState =
+  | { view: 'main' }
+  | { view: 'history'; contactId: string };
+
+// App.tsx - add view state
+const [viewState, setViewState] = useState<ViewState>({ view: 'main' });
+```
+
+### Step 4.2: HistoryView Component
+
+Create the message history screen.
+
+**File:** `src/web/src/components/HistoryView.tsx`
+
+**Props:**
+```typescript
+interface HistoryViewProps {
+  contact: Contact;
+  onBack: () => void;
+}
+```
+
+**Features:**
+- Header with back button and contact name
+- Message list (scrollable, newest at bottom)
+- Keyboard: Esc to go back
+- Empty state when no messages
+
+**Layout:**
+```
+┌─────────────────────────────────────────┐
+│  ← Back        Mom                      │  Header
+├─────────────────────────────────────────┤
+│                                         │
+│  [You] 10:30 AM                         │
+│  ────────────── 0:05 ▶                  │
+│                                         │
+│  [Mom] 10:32 AM               ● NEW     │
+│  ────────────── 0:12 ▶                  │
+│                                         │
+│  [You] 10:35 AM                         │
+│  ────────────── 0:08 ▶                  │
+│                                         │
+└─────────────────────────────────────────┘
+```
+
+### Step 4.3: MessageItem Component
+
+Individual message row with playback controls.
+
+**File:** `src/web/src/components/MessageItem.tsx`
+
+**Props:**
+```typescript
+interface MessageItemProps {
+  message: VoiceMessage;
+  isMine: boolean;
+  isUnread: boolean;
+  onPlay: () => void;
+  isPlaying: boolean;
+  progress: number; // 0-1
+  onSeek: (progress: number) => void;
+}
+```
+
+**Features:**
+- Sender info (avatar if group, "You" for own messages)
+- Timestamp display
+- Duration display
+- Play/pause button
+- Progress bar (clickable to seek)
+- "NEW" badge for unread
+- Different styling for sent vs received
+
+### Step 4.4: Voice Message Fetching
+
+Wire up shared useVoiceMessages hook.
+
+**Integration points:**
+- `src/shared/hooks/useVoiceMessages.ts` already exists
+- Need to convert MXC URLs to HTTP for web playback:
+  ```typescript
+  const httpUrl = matrixService.getClient()
+    .mxcUrlToHttp(message.mxcUrl, undefined, undefined, undefined, true);
+  ```
+
+**State management:**
+- Loading state while fetching
+- Error handling for failed loads
+- Auto-refresh on new messages (via Matrix sync)
+
+### Step 4.5: Unread Count Tracking
+
+Update useContacts to show real unread counts.
+
+**Modifications to `src/web/src/hooks/useContacts.ts`:**
+1. Subscribe to Matrix room timeline updates
+2. Track unread count per room
+3. Update badges when new messages arrive
+
+**Matrix SDK approach:**
+```typescript
+// Get unread count from room
+const room = matrixService.getClient().getRoom(roomId);
+const unreadCount = room?.getUnreadNotificationCount() ?? 0;
+```
+
+### Step 4.6: Mark as Read
+
+Mark messages as read when history view opens.
+
+**Implementation:**
+```typescript
+// When HistoryView opens
+useEffect(() => {
+  const markAsRead = async () => {
+    const client = matrixService.getClient();
+    const room = client.getRoom(roomId);
+    if (room) {
+      const timeline = room.getLiveTimeline();
+      const lastEvent = timeline.getEvents().at(-1);
+      if (lastEvent) {
+        await client.sendReadReceipt(lastEvent);
+      }
+    }
+  };
+  markAsRead();
+}, [roomId]);
+```
+
+### Estimated Effort
+
+| Step | Complexity | Dependencies |
+|------|------------|--------------|
+| 4.1 View Navigation | Low | None |
+| 4.2 HistoryView | Medium | 4.1 |
+| 4.3 MessageItem | Medium | useAudioPlayer |
+| 4.4 Voice Message Fetching | Medium | shared hooks |
+| 4.5 Unread Tracking | Medium | Matrix SDK |
+| 4.6 Mark as Read | Low | 4.5 |
+
+### Testing Checklist
+
+- [ ] Navigate to history via Enter key on selected contact
+- [ ] Navigate back via Esc or back button
+- [ ] Play voice messages
+- [ ] Progress bar updates during playback
+- [ ] Seek by clicking progress bar
+- [ ] Unread count shows on contact cards
+- [ ] Unread badges disappear after viewing history
+- [ ] New messages appear in history in real-time
+- [ ] Empty state when no messages
 
 ---
 
@@ -411,12 +672,14 @@ Current implementation stores credentials in plain text localStorage. For produc
 - Store encryption key securely (consider secure context requirements)
 - Implement proper session management
 
-### Audio Recording
+### Audio Recording ✅ RESOLVED
 
-Current `WebAudioService` uses MediaRecorder stub. Phase 3 will implement:
-- AudioWorklet for separate-thread recording
-- Opus WASM encoding for consistent cross-browser output
-- Ogg container muxing
+The WebAudioService now uses the native MediaRecorder API with browser Opus encoding. This works well across modern browsers and provides:
+- 16kHz mono recording with voice optimization
+- Native Opus encoding (Chrome/Firefox) or AAC fallback (Safari)
+- Echo cancellation, noise suppression, auto-gain
+
+The AudioWorklet + WASM Opus approach is documented but not necessary for v1.
 
 ---
 
@@ -433,11 +696,13 @@ pnpm web:preview         # Preview production build
 
 ## Running the Web UI
 
-The current implementation (Phases 1-2.5) has real Matrix integration:
+The current implementation (Phases 1-3) has full Matrix integration with voice messaging:
 
 ```bash
-cd src/web
-pnpm install
+# Terminal 1: Start Conduit server
+pnpm dev:server
+
+# Terminal 2: Start web dev server
 pnpm web
 ```
 
@@ -448,13 +713,17 @@ Navigate to http://localhost:3000
 - Subsequent visits: Auto-logs in via stored credentials
 - Requires a running Matrix server (e.g., local Conduit)
 
-**Try it out:**
-- **Desktop:** Use arrow keys to select contacts, hold Space to record
+**Voice Messaging (Working!):**
+- **Desktop:** Use arrow keys to select contacts, hold Space to record and send
 - **Desktop:** Hover over contacts to see PTT button, click and hold to record
 - **Mobile:** Tap and hold contact cards to record
 - Visual feedback shows recording state with ripple animation and dimmed contacts
+- Voice messages are sent to Matrix and can be received by other clients (Element, TUI)
 
-**Note:** Voice message recording currently uses a stub (Phase 3 will implement real audio).
+**Current Limitations:**
+- No message history view yet (Phase 4)
+- No playback of received messages yet (Phase 4)
+- Admin features not implemented (Phase 5)
 
 ---
 
