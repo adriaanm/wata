@@ -14,3 +14,8 @@ export interface RecordingStatus {
   duration: number;
   contactId: string | null;
 }
+
+// View navigation state
+export type ViewState =
+  | { view: 'main' }
+  | { view: 'history'; contact: Contact };

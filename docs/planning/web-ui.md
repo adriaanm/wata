@@ -207,8 +207,8 @@ web/src/
 │   ├── LoginView.tsx             # Authentication form ✅
 │   ├── LoadingView.tsx           # Loading/auth state ✅
 │   ├── AudioCodeTestHarness.tsx  # AudioCode testing UI ✅
-│   ├── HistoryView.tsx           # Message history screen (Phase 4)
-│   ├── MessageItem.tsx           # Voice message row (Phase 4)
+│   ├── HistoryView.tsx           # Message history screen ✅
+│   ├── MessageItem.tsx           # Voice message row ✅
 │   └── admin/
 │       ├── AdminDrawer.tsx       # Side drawer (desktop) (Phase 5)
 │       ├── AdminSheet.tsx        # Bottom sheet (mobile) (Phase 5)
@@ -345,60 +345,43 @@ We chose the simpler MediaRecorder approach over AudioWorklet + WASM Opus. Benef
 
 The AudioWorklet approach is documented but not needed for v1.
 
-### Phase 4: History & Feedback (NEXT - In Progress)
+### Phase 4: History & Feedback ✅ COMPLETE
 
-**Goal:** Allow users to view and play back voice message history for each contact.
+**Completed:**
+- ✅ HistoryView component (`components/HistoryView.tsx`)
+  - Header with back button and contact name
+  - Scrollable message list (newest at bottom)
+  - Auto-scroll to bottom when messages load
+  - Keyboard navigation (Enter from MainView opens, Esc goes back)
+  - Loading and error states
+  - Empty state when no messages
+- ✅ MessageItem component (`components/MessageItem.tsx`)
+  - Sender name (You vs contact name)
+  - Timestamp display
+  - Duration display (from message or playback)
+  - Play/pause button with progress bar
+  - Seek functionality (click on progress bar)
+  - Visual distinction for sent vs received (different colors, left border for received)
+- ✅ View navigation state in App.tsx
+  - ViewState type added to types.ts
+  - State switching between main and history views
+  - Contact passed to HistoryView for context
+- ✅ Real unread count tracking in useContacts
+  - Tracks DM room IDs per family member
+  - Gets unread count from Matrix SDK
+  - Subscribes to new voice messages
+  - Subscribes to read receipt updates
+- ✅ Mark messages as read when viewing history
+  - Sends read receipt for last message when HistoryView opens
+  - Unread counts refresh when receipts update
 
-**Components to Build:**
-
-1. **HistoryView.tsx** - Message history screen
-   - Header with contact name and back button
-   - Scrollable list of voice messages
-   - Auto-scroll to newest on open
-   - Keyboard navigation (Enter from MainView opens, Esc goes back)
-
-2. **MessageItem.tsx** - Individual voice message row
-   - Sender avatar/name (for group)
-   - Timestamp
-   - Duration display
-   - Play/pause button
-   - Progress bar with seek
-   - Visual distinction for sent vs received
-   - "New" badge for unread messages
-
-3. **useVoiceMessages hook** - Fetch messages from Matrix
-   - Already exists in shared: `src/shared/hooks/useVoiceMessages.ts`
-   - Need to integrate with web audio player
-   - Handle MXC URL → HTTP URL conversion
-
-4. **Unread tracking** - Real unread counts
-   - Update `useContacts` to track actual unread counts
-   - Mark messages as read when HistoryView opens
-   - Badge on ContactCard for unread count
-
-**Implementation Plan:**
-
-```
-Step 1: Basic HistoryView shell
-- Create HistoryView component with navigation
-- Add route state to MainView (main vs history)
-- Wire up Enter key and back button
-
-Step 2: MessageItem with playback
-- Create MessageItem component
-- Integrate useAudioPlayer for playback
-- Display timestamp, duration, play/pause
-
-Step 3: Fetch real messages
-- Wire useVoiceMessages to HistoryView
-- Convert MXC URLs for playback
-- Handle loading/error states
-
-Step 4: Unread tracking
-- Add real unread count to useContacts
-- Mark as read on history view open
-- Show unread badges on ContactCard
-```
+**Files Created/Modified:**
+- `src/web/src/types.ts` - Added ViewState type
+- `src/web/src/App.tsx` - Added view state management
+- `src/web/src/components/MainView.tsx` - Added onOpenHistory prop and Enter key handler
+- `src/web/src/components/HistoryView.tsx` - NEW: Message history screen
+- `src/web/src/components/MessageItem.tsx` - NEW: Individual message row with playback
+- `src/web/src/hooks/useContacts.ts` - Updated for real unread count tracking
 
 ### Phase 5: Admin Interface (TODO)
 
@@ -466,12 +449,12 @@ Step 4: Unread tracking
 - ✅ usePtt hook with Matrix integration
 - ✅ Voice message send to Matrix
 
-**Phase 4: History & Feedback** (NEXT)
-- HistoryView component
-- MessageItem component
-- Message playback with progress/seek
-- Real unread counts from Matrix
-- Mark messages as read
+**Phase 4: History & Feedback** ✅ COMPLETE
+- ✅ HistoryView component
+- ✅ MessageItem component
+- ✅ Message playback with progress/seek
+- ✅ Real unread counts from Matrix
+- ✅ Mark messages as read
 
 **Phase 5: Admin Interface**
 - AdminDrawer/AdminSheet navigation
@@ -480,174 +463,6 @@ Step 4: Unread tracking
 - DeviceManager
 - SettingsPanel
 - LogsPanel
-
----
-
-## Next Steps: Phase 4 Implementation Details
-
-### Step 4.1: View Navigation State
-
-Add view switching between contacts list and message history.
-
-**Files to modify:**
-- `src/web/src/App.tsx` - Add view state management
-- `src/web/src/types.ts` - Add view state types
-
-**Implementation:**
-```typescript
-// types.ts
-type ViewState =
-  | { view: 'main' }
-  | { view: 'history'; contactId: string };
-
-// App.tsx - add view state
-const [viewState, setViewState] = useState<ViewState>({ view: 'main' });
-```
-
-### Step 4.2: HistoryView Component
-
-Create the message history screen.
-
-**File:** `src/web/src/components/HistoryView.tsx`
-
-**Props:**
-```typescript
-interface HistoryViewProps {
-  contact: Contact;
-  onBack: () => void;
-}
-```
-
-**Features:**
-- Header with back button and contact name
-- Message list (scrollable, newest at bottom)
-- Keyboard: Esc to go back
-- Empty state when no messages
-
-**Layout:**
-```
-┌─────────────────────────────────────────┐
-│  ← Back        Mom                      │  Header
-├─────────────────────────────────────────┤
-│                                         │
-│  [You] 10:30 AM                         │
-│  ────────────── 0:05 ▶                  │
-│                                         │
-│  [Mom] 10:32 AM               ● NEW     │
-│  ────────────── 0:12 ▶                  │
-│                                         │
-│  [You] 10:35 AM                         │
-│  ────────────── 0:08 ▶                  │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-### Step 4.3: MessageItem Component
-
-Individual message row with playback controls.
-
-**File:** `src/web/src/components/MessageItem.tsx`
-
-**Props:**
-```typescript
-interface MessageItemProps {
-  message: VoiceMessage;
-  isMine: boolean;
-  isUnread: boolean;
-  onPlay: () => void;
-  isPlaying: boolean;
-  progress: number; // 0-1
-  onSeek: (progress: number) => void;
-}
-```
-
-**Features:**
-- Sender info (avatar if group, "You" for own messages)
-- Timestamp display
-- Duration display
-- Play/pause button
-- Progress bar (clickable to seek)
-- "NEW" badge for unread
-- Different styling for sent vs received
-
-### Step 4.4: Voice Message Fetching
-
-Wire up shared useVoiceMessages hook.
-
-**Integration points:**
-- `src/shared/hooks/useVoiceMessages.ts` already exists
-- Need to convert MXC URLs to HTTP for web playback:
-  ```typescript
-  const httpUrl = matrixService.getClient()
-    .mxcUrlToHttp(message.mxcUrl, undefined, undefined, undefined, true);
-  ```
-
-**State management:**
-- Loading state while fetching
-- Error handling for failed loads
-- Auto-refresh on new messages (via Matrix sync)
-
-### Step 4.5: Unread Count Tracking
-
-Update useContacts to show real unread counts.
-
-**Modifications to `src/web/src/hooks/useContacts.ts`:**
-1. Subscribe to Matrix room timeline updates
-2. Track unread count per room
-3. Update badges when new messages arrive
-
-**Matrix SDK approach:**
-```typescript
-// Get unread count from room
-const room = matrixService.getClient().getRoom(roomId);
-const unreadCount = room?.getUnreadNotificationCount() ?? 0;
-```
-
-### Step 4.6: Mark as Read
-
-Mark messages as read when history view opens.
-
-**Implementation:**
-```typescript
-// When HistoryView opens
-useEffect(() => {
-  const markAsRead = async () => {
-    const client = matrixService.getClient();
-    const room = client.getRoom(roomId);
-    if (room) {
-      const timeline = room.getLiveTimeline();
-      const lastEvent = timeline.getEvents().at(-1);
-      if (lastEvent) {
-        await client.sendReadReceipt(lastEvent);
-      }
-    }
-  };
-  markAsRead();
-}, [roomId]);
-```
-
-### Estimated Effort
-
-| Step | Complexity | Dependencies |
-|------|------------|--------------|
-| 4.1 View Navigation | Low | None |
-| 4.2 HistoryView | Medium | 4.1 |
-| 4.3 MessageItem | Medium | useAudioPlayer |
-| 4.4 Voice Message Fetching | Medium | shared hooks |
-| 4.5 Unread Tracking | Medium | Matrix SDK |
-| 4.6 Mark as Read | Low | 4.5 |
-
-### Testing Checklist
-
-- [ ] Navigate to history via Enter key on selected contact
-- [ ] Navigate back via Esc or back button
-- [ ] Play voice messages
-- [ ] Progress bar updates during playback
-- [ ] Seek by clicking progress bar
-- [ ] Unread count shows on contact cards
-- [ ] Unread badges disappear after viewing history
-- [ ] New messages appear in history in real-time
-- [ ] Empty state when no messages
 
 ---
 
@@ -696,7 +511,7 @@ pnpm web:preview         # Preview production build
 
 ## Running the Web UI
 
-The current implementation (Phases 1-3) has full Matrix integration with voice messaging:
+The current implementation (Phases 1-4) has full Matrix integration with voice messaging and history:
 
 ```bash
 # Terminal 1: Start Conduit server
@@ -720,9 +535,16 @@ Navigate to http://localhost:3000
 - Visual feedback shows recording state with ripple animation and dimmed contacts
 - Voice messages are sent to Matrix and can be received by other clients (Element, TUI)
 
+**Message History (Working!):**
+- **Desktop:** Press Enter on selected contact to view message history
+- **Desktop:** Press Esc to go back to contacts list
+- **Mobile:** Click back button in header to return
+- Play voice messages with progress bar and seek functionality
+- Visual distinction for sent vs received messages
+- Real unread count badges on contact cards
+- Messages marked as read when viewing history
+
 **Current Limitations:**
-- No message history view yet (Phase 4)
-- No playback of received messages yet (Phase 4)
 - Admin features not implemented (Phase 5)
 
 ---

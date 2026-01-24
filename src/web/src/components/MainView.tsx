@@ -12,9 +12,10 @@ import '../styles/animations.css';
 
 interface MainViewProps {
   contacts: Contact[];
+  onOpenHistory: (contact: Contact) => void;
 }
 
-export function MainView({ contacts }: MainViewProps) {
+export function MainView({ contacts, onOpenHistory }: MainViewProps) {
   const [showAudioCodeTest, setShowAudioCodeTest] = useState(false);
 
   const { selectedIndex, selectedContact, setSelectedIndex } =
@@ -43,13 +44,19 @@ export function MainView({ contacts }: MainViewProps) {
     },
   });
 
-  // Handle space bar PTT for selected contact
+  // Handle space bar PTT for selected contact and Enter key for history
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === ' ' && !isRecording && !isSending && selectedContact) {
         e.preventDefault();
         clearError(); // Clear any previous errors when starting new recording
         startRecording(selectedContact.id);
+      }
+
+      // Open history with Enter key
+      if (e.key === 'Enter' && selectedContact && !isRecording && !isSending) {
+        e.preventDefault();
+        onOpenHistory(selectedContact);
       }
     };
 
@@ -73,6 +80,7 @@ export function MainView({ contacts }: MainViewProps) {
     startRecording,
     stopRecording,
     clearError,
+    onOpenHistory,
   ]);
 
   const handleSelectContact = (index: number) => {
