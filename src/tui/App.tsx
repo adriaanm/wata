@@ -61,9 +61,10 @@ interface Navigation {
 
 interface AppProps {
   initialProfile?: ProfileKey | null;
+  debugMode?: boolean;
 }
 
-export function App({ initialProfile }: AppProps) {
+export function App({ initialProfile, debugMode = false }: AppProps) {
   const [navigation, setNavigation] = useState<Navigation>({
     screen: 'loading',
   });

@@ -14,6 +14,7 @@
  *   --profile <name>     Start with the specified profile (e.g., alice, bob)
  *   --send-credentials   Encode and send onboarding credentials via AudioCode
  *   --receive-credentials Record and decode onboarding credentials via AudioCode
+ *   --debug              Disable LogService and enable verbose console logging
  */
 
 // Parse CLI arguments
@@ -23,6 +24,10 @@ const initialProfile =
   profileIndex !== -1 && args[profileIndex + 1] ? args[profileIndex + 1] : null;
 const sendCredentials = args.includes('--send-credentials');
 const receiveCredentials = args.includes('--receive-credentials');
+const debugMode = args.includes('--debug');
+
+// Export debug mode for other modules to check
+export const isDebugMode = debugMode;
 
 // Enable alternate screen buffer (should disable scrollback)
 // Note: This works in most terminals but NOT in macOS Terminal.app
@@ -40,22 +45,28 @@ const restoreTerminal = () => {
 process.on('exit', restoreTerminal);
 
 async function bootstrap() {
-  // Step 1: Import and install LogService FIRST
-  // Note: LogService auto-installs on import, so we don't need to use the value
+  // Step 1: Import LogService (but skip installation in debug mode)
   const { LogService: _LogService } = await import('./services/LogService.js');
-  // Note: LogService auto-installs on import, but we can verify it's installed
-  console.log(
-    '[bootstrap] LogService installed, this message should be captured',
-  );
+
+  if (debugMode) {
+    // In debug mode, immediately uninstall LogService to get direct console output
+    _LogService.getInstance().uninstall();
+    console.log('[bootstrap] DEBUG MODE: LogService disabled, using direct console');
+  } else {
+    // Normal mode: verify LogService is installed
+    console.log(
+      '[bootstrap] LogService installed, this message should be captured',
+    );
+  }
   if (initialProfile) {
     console.log(`[bootstrap] Initial profile from CLI: ${initialProfile}`);
   }
 
-  // Step 2: Configure global matrix-js-sdk logger to redirect to LogService
-  // This must happen BEFORE any Matrix SDK code is imported
+  // Step 2: Configure global matrix-js-sdk logger
+  // In debug mode, use verbose console logging; otherwise redirect to LogService
   const { ensureGlobalMatrixLogger } =
     await import('./services/MatrixLogger.js');
-  await ensureGlobalMatrixLogger();
+  await ensureGlobalMatrixLogger(debugMode);
   console.log('[bootstrap] Global matrix-js-sdk logger configured');
 
   // Step 3: Initialize audio service
@@ -104,9 +115,9 @@ async function bootstrap() {
   const { render } = await import('ink');
   const { App } = await import('./App.js');
 
-  // Step 7: Render with initial profile
+  // Step 7: Render with initial profile (pass debug mode through)
   // Ink will now render to the alternate screen buffer (no scrollback)
-  render(React.createElement(App, { initialProfile }));
+  render(React.createElement(App, { initialProfile, debugMode }));
 }
 
 /**

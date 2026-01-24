@@ -177,6 +177,9 @@ importers:
       loglevel:
         specifier: ^1.9.1
         version: 1.9.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
 
   src/web:
     dependencies:
