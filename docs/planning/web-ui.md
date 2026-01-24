@@ -210,13 +210,11 @@ web/src/
 │   ├── HistoryView.tsx           # Message history screen ✅
 │   ├── MessageItem.tsx           # Voice message row ✅
 │   └── admin/
-│       ├── AdminDrawer.tsx       # Side drawer (desktop) (Phase 5)
-│       ├── AdminSheet.tsx        # Bottom sheet (mobile) (Phase 5)
-│       ├── FamilyManager.tsx     # Member list/removal (Phase 5)
-│       ├── InviteFlow.tsx        # QR code / link invite (Phase 5)
-│       ├── DeviceManager.tsx     # Device list/revocation (Phase 5)
-│       ├── SettingsPanel.tsx     # User config (Phase 5)
-│       └── LogsPanel.tsx         # Diagnostics (Phase 5)
+│       ├── AdminDrawer.tsx       # Side drawer with tab navigation ✅
+│       ├── FamilyManager.tsx     # Member list/removal ✅
+│       ├── InviteFlow.tsx        # Matrix ID / link invite ✅
+│       ├── SettingsPanel.tsx     # User profile + logout ✅
+│       └── LogsPanel.tsx         # Connection diagnostics ✅
 │
 ├── hooks/
 │   ├── usePtt.ts                 # PTT orchestration ✅
@@ -383,42 +381,277 @@ The AudioWorklet approach is documented but not needed for v1.
 - `src/web/src/components/MessageItem.tsx` - NEW: Individual message row with playback
 - `src/web/src/hooks/useContacts.ts` - Updated for real unread count tracking
 
-### Phase 5: Admin Interface (TODO)
+### Phase 5: Admin Interface ✅ COMPLETE
 
 **Goal:** Web-based family management and device setup.
 
-**Components to Build:**
+**Completed:**
+- ✅ AdminDrawer.tsx - Slide-in side panel with tab navigation
+- ✅ FamilyManager.tsx - View family members with removal functionality
+- ✅ InviteFlow.tsx - Invite by Matrix ID and share room link
+- ✅ SettingsPanel.tsx - Edit display name and logout
+- ✅ LogsPanel.tsx - Connection status and diagnostics
+- ✅ Updated ViewState type with 'admin' view
+- ✅ Integrated admin button in MainView header
+- ✅ Added log entry storage to LogService for diagnostics
 
-1. **Navigation Structure**
-   - AdminDrawer.tsx - Slide-in side panel (desktop)
-   - AdminSheet.tsx - Bottom sheet (mobile)
-   - Menu items: Family, Devices, Settings, Logs
+**Implementation Details:**
+- Admin drawer slides in from right on desktop, full-screen on mobile
+- Tab-based navigation between panels (Family, Invite, Settings, Logs)
+- Family members can be removed with confirmation dialog
+- Invite flow supports both Matrix ID input and shareable room link
+- Settings panel allows editing display name with save confirmation
+- Logs panel shows real-time sync state and recent log entries
 
-2. **FamilyManager.tsx** - Family room administration
-   - List current family members
-   - Remove member (kick from room)
-   - View member status (online/offline)
+**Files Created:**
+- `src/web/src/components/admin/AdminDrawer.tsx`
+- `src/web/src/components/admin/FamilyManager.tsx`
+- `src/web/src/components/admin/InviteFlow.tsx`
+- `src/web/src/components/admin/SettingsPanel.tsx`
+- `src/web/src/components/admin/LogsPanel.tsx`
+- `src/web/src/components/admin/index.ts`
 
-3. **InviteFlow.tsx** - Add new family members
-   - Generate invite link or QR code
-   - Display AudioCode for device onboarding
-   - Show pending invites
+**Files Modified:**
+- `src/web/src/types.ts` - Added AdminPanel type and admin view state
+- `src/web/src/App.tsx` - Added admin view handling
+- `src/web/src/components/MainView.tsx` - Added onOpenAdmin prop
+- `src/web/src/services/LogService.ts` - Added log entry storage
 
-4. **DeviceManager.tsx** - Registered devices
-   - List devices per family member
-   - Revoke device access
-   - View device metadata
+**Deferred to v1:**
+- DeviceManager.tsx (requires device tracking not yet in Matrix service)
+- AudioCode onboarding (AudioCode service exists but needs integration)
+- QR code generation (needs library)
+- Export/import configuration
+- Advanced homeserver settings
 
-5. **SettingsPanel.tsx** - Configuration
-   - User profile (display name, avatar)
-   - Audio settings (quality, beep on/off)
-   - Homeserver URL (advanced)
-   - Export/import config
+---
 
-6. **LogsPanel.tsx** - Diagnostics
-   - Matrix sync status
-   - Recent errors
-   - Connection quality
+#### 5.1 AdminDrawer.tsx - Navigation Structure
+
+**Purpose:** Slide-in side panel accessible from hamburger menu (≡).
+
+**Integration Points:**
+- Add `view: 'admin'` to `ViewState` type in `types.ts`
+- Add admin button to `MainView.tsx` header
+- Render `AdminDrawer` conditionally in `App.tsx`
+
+**UI Structure:**
+```
+┌─────────────────────────────────────────────────────────┐
+│  ← Admin                                        [×]    │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  👨‍👩‍👧‍👦  Family                                    │   │  ← Selected tab
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  ✉️   Invite                                     │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  ⚙️   Settings                                   │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  📋  Logs                                        │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+├─────────────────────────────────────────────────────────┤
+│  [Content area - renders selected panel]                │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Props:**
+```typescript
+interface AdminDrawerProps {
+  onClose: () => void;
+}
+```
+
+**State:**
+- `activePanel: 'family' | 'invite' | 'settings' | 'logs'`
+
+**Responsive Behavior:**
+- Desktop (≥768px): Side drawer, 400px width, slide in from right
+- Mobile (<768px): Full-screen overlay with back button
+
+---
+
+#### 5.2 FamilyManager.tsx - Family Administration
+
+**Purpose:** Display family members with options to manage them.
+
+**Matrix Service Methods:**
+- `matrixService.getFamilyMembers()` - Get list of family members
+- `matrixService.getFamilyRoom()` - Get room for kick operations
+- `matrixService.getClient().kick(roomId, userId, reason)` - Remove member
+
+**UI Structure:**
+```
+┌─────────────────────────────────────────────────────────┐
+│  Family Members (3)                                     │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  👤 Mom                                  [···]  │   │  ← Options menu
+│  │     @mom:matrix.org                              │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  👤 Dad                                  [···]  │   │
+│  │     @dad:matrix.org                              │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  👤 You                               (you)     │   │  ← Current user
+│  │     @kid:matrix.org                              │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Member Options Menu:**
+- Remove from family (with confirmation)
+- View message history (future)
+
+**Data Flow:**
+```typescript
+const [members, setMembers] = useState<FamilyMember[]>([]);
+const currentUserId = matrixService.getUserId();
+
+useEffect(() => {
+  matrixService.getFamilyMembers().then(setMembers);
+}, []);
+```
+
+---
+
+#### 5.3 InviteFlow.tsx - Add Family Members
+
+**Purpose:** Invite new users to the family room.
+
+**Matrix Service Methods:**
+- `matrixService.inviteToFamily(userId)` - Invite user by Matrix ID
+- `matrixService.getFamilyRoomId()` - Get family room ID for invite link
+
+**UI Structure:**
+```
+┌─────────────────────────────────────────────────────────┐
+│  Invite to Family                                       │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  Enter Matrix ID:                                       │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ @username:matrix.org                             │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │               Send Invite                        │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ─────────────────── or ────────────────────           │
+│                                                         │
+│  Share room link:                                       │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ https://matrix.to/#/#family:server   [Copy]     │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  Status: ✓ Invite sent to @mom:matrix.org              │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**State:**
+- `userId: string` - Input value
+- `status: 'idle' | 'sending' | 'success' | 'error'`
+- `errorMessage: string | null`
+
+---
+
+#### 5.4 SettingsPanel.tsx - User Settings
+
+**Purpose:** User profile and app configuration.
+
+**Matrix Service Methods:**
+- `matrixService.getDisplayName()` - Get current display name
+- `matrixService.setDisplayName(name)` - Update display name
+- `matrixService.getUserId()` - Get current user ID
+- `matrixService.logout()` - Logout and clear session
+
+**UI Structure:**
+```
+┌─────────────────────────────────────────────────────────┐
+│  Settings                                               │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  Profile                                                │
+│  ─────────────────────────────────────────────────────  │
+│                                                         │
+│  Display Name                                           │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Alice                                    [Save] │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  User ID                                                │
+│  @alice:matrix.org                                      │
+│                                                         │
+│  ─────────────────────────────────────────────────────  │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │               🚪 Log Out                         │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**State:**
+- `displayName: string`
+- `isSaving: boolean`
+- `saveStatus: 'idle' | 'success' | 'error'`
+
+---
+
+#### 5.5 LogsPanel.tsx - Diagnostics
+
+**Purpose:** Display connection status and diagnostic info.
+
+**Matrix Service Methods:**
+- `matrixService.getSyncState()` - Current sync state
+- `matrixService.onSyncStateChange(callback)` - Subscribe to changes
+- `matrixService.getUserId()` - Current user
+- `matrixService.getAccessToken()` - Check auth status
+
+**UI Structure:**
+```
+┌─────────────────────────────────────────────────────────┐
+│  Diagnostics                                            │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  Connection                                             │
+│  ─────────────────────────────────────────────────────  │
+│  Status:     ● Syncing                                  │
+│  User:       @alice:matrix.org                          │
+│  Server:     http://localhost:8008                      │
+│                                                         │
+│  Session                                                │
+│  ─────────────────────────────────────────────────────  │
+│  Logged in:  Yes                                        │
+│  Token:      ****_truncated                             │
+│                                                         │
+│  Family Room                                            │
+│  ─────────────────────────────────────────────────────  │
+│  Room ID:    !abc123:server                             │
+│  Members:    3                                          │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**State:**
+- `syncState: string`
+- `familyRoomId: string | null`
+- `memberCount: number`
 
 ---
 
@@ -456,13 +689,13 @@ The AudioWorklet approach is documented but not needed for v1.
 - ✅ Real unread counts from Matrix
 - ✅ Mark messages as read
 
-**Phase 5: Admin Interface**
-- AdminDrawer/AdminSheet navigation
-- FamilyManager (members, removal)
-- InviteFlow (links, QR, AudioCode)
-- DeviceManager
-- SettingsPanel
-- LogsPanel
+**Phase 5: Admin Interface** ✅ COMPLETE
+- ✅ AdminDrawer navigation with tabs
+- ✅ FamilyManager (view members, removal)
+- ✅ InviteFlow (Matrix ID invite, room link)
+- ✅ SettingsPanel (profile, logout)
+- ✅ LogsPanel (sync status, diagnostics)
+- *Deferred: DeviceManager, QR codes, AudioCode onboarding*
 
 ---
 
@@ -545,7 +778,9 @@ Navigate to http://localhost:3000
 - Messages marked as read when viewing history
 
 **Current Limitations:**
-- Admin features not implemented (Phase 5)
+- Device management not implemented (deferred to v1)
+- QR code invite generation not implemented (deferred to v1)
+- AudioCode onboarding not integrated (deferred to v1)
 
 ---
 

@@ -5,12 +5,13 @@
  * Shows a list of voice messages with playback controls.
  */
 
+import type { VoiceMessage } from '@shared/services/MatrixService';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 
-import type { VoiceMessage } from '@shared/services/MatrixService';
 import { useVoiceMessages } from '../hooks/useMatrix.js';
 import { matrixService } from '../services/matrixService.js';
 import type { Contact } from '../types.js';
+
 import { MessageItem } from './MessageItem.js';
 
 interface HistoryViewProps {

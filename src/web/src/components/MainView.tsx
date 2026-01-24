@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 
 import { useContactSelection } from '../hooks/useContactSelection.js';
 import { usePtt } from '../hooks/usePtt.js';
 import type { Contact } from '../types.js';
 
-import { AudioCodeTestHarness } from './AudioCodeTestHarness.js';
 import { ContactCard } from './ContactCard.js';
 import { RecordingIndicator } from './RecordingIndicator.js';
 
@@ -13,11 +12,14 @@ import '../styles/animations.css';
 interface MainViewProps {
   contacts: Contact[];
   onOpenHistory: (contact: Contact) => void;
+  onOpenAdmin: () => void;
 }
 
-export function MainView({ contacts, onOpenHistory }: MainViewProps) {
-  const [showAudioCodeTest, setShowAudioCodeTest] = useState(false);
-
+export function MainView({
+  contacts,
+  onOpenHistory,
+  onOpenAdmin,
+}: MainViewProps) {
   const { selectedIndex, selectedContact, setSelectedIndex } =
     useContactSelection(contacts);
 
@@ -102,10 +104,6 @@ export function MainView({ contacts, onOpenHistory }: MainViewProps) {
 
   return (
     <>
-      {showAudioCodeTest && (
-        <AudioCodeTestHarness onClose={() => setShowAudioCodeTest(false)} />
-      )}
-
       {isRecording && recordingContact && (
         <RecordingIndicator
           duration={recordingDuration}
@@ -123,7 +121,7 @@ export function MainView({ contacts, onOpenHistory }: MainViewProps) {
           <button
             className="admin-button"
             aria-label="Admin menu"
-            onClick={() => setShowAudioCodeTest(true)}
+            onClick={onOpenAdmin}
           >
             <span>≡</span>
             <span className="admin-button-label">Admin</span>

@@ -18,4 +18,8 @@ export interface RecordingStatus {
 // View navigation state
 export type ViewState =
   | { view: 'main' }
-  | { view: 'history'; contact: Contact };
+  | { view: 'history'; contact: Contact }
+  | { view: 'admin' };
+
+// Admin panel tabs
+export type AdminPanel = 'family' | 'invite' | 'settings' | 'logs';

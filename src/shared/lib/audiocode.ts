@@ -61,6 +61,7 @@
 /// <reference path="./reedsolomon.es.d.ts" />
 
 import { Buffer } from 'buffer';
+
 import { ReedSolomonES } from './rsWrapper.js';
 
 // ============================================================================
@@ -239,15 +240,21 @@ function deserializePayload(buffer: Buffer): unknown {
     let offset = 1;
 
     const homeserverLen = buffer[offset++];
-    const homeserver = buffer.subarray(offset, offset + homeserverLen).toString('utf-8');
+    const homeserver = buffer
+      .subarray(offset, offset + homeserverLen)
+      .toString('utf-8');
     offset += homeserverLen;
 
     const usernameLen = buffer[offset++];
-    const username = buffer.subarray(offset, offset + usernameLen).toString('utf-8');
+    const username = buffer
+      .subarray(offset, offset + usernameLen)
+      .toString('utf-8');
     offset += usernameLen;
 
     const passwordLen = buffer[offset++];
-    const password = buffer.subarray(offset, offset + passwordLen).toString('utf-8');
+    const password = buffer
+      .subarray(offset, offset + passwordLen)
+      .toString('utf-8');
     offset += passwordLen;
 
     const roomLen = buffer[offset++];
@@ -450,7 +457,10 @@ function findSyncOffset(
   let bestOffset = start;
   let bestScore = -1;
   const searchStep = Math.round(samplesPerSymbol / 4);
-  const maxSearch = Math.min(end - start, samplesPerSymbol * (PREAMBLE_SYMBOLS + 10));
+  const maxSearch = Math.min(
+    end - start,
+    samplesPerSymbol * (PREAMBLE_SYMBOLS + 10),
+  );
 
   for (let offset = 0; offset < maxSearch; offset += searchStep) {
     const testStart = start + offset;
@@ -562,7 +572,10 @@ function parseFrame(symbols: number[]): {
     throw new Error('AudioCode: Frame too short for payload');
   }
 
-  const encodedPayload = symbols.slice(payloadStart, payloadStart + encodedSymbols);
+  const encodedPayload = symbols.slice(
+    payloadStart,
+    payloadStart + encodedSymbols,
+  );
 
   return { dataLength, encodedPayload };
 }
@@ -645,9 +658,10 @@ export async function decodeAudioCode(
   try {
     decoded = rsDecode(encodedBytes, frame.dataLength);
   } catch {
-    throw new Error('AudioCode: Reed-Solomon decoding failed - too many errors');
+    throw new Error(
+      'AudioCode: Reed-Solomon decoding failed - too many errors',
+    );
   }
 
   return deserializePayload(Buffer.from(decoded));
 }
-

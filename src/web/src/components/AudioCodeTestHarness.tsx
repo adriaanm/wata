@@ -1,4 +1,3 @@
-/* eslint-disable */
 // Prototype audio onboarding test harness - lint checks disabled
 
 import { useState, useRef } from 'react';
@@ -48,11 +47,12 @@ export function AudioCodeTestHarness({ onClose }: AudioCodeTestHarnessProps) {
       setIsPlaying(true);
 
       // Encode data to AudioCode samples
-      const samples = encodeOnboardingAudio(EXAMPLE_ONBOARDING_DATA, DEFAULT_CONFIG);
-      const duration = samples.length / DEFAULT_CONFIG.sampleRate;
-      setStatus(
-        `Encoded ${samples.length} samples (${duration.toFixed(1)}s)`,
+      const samples = encodeOnboardingAudio(
+        EXAMPLE_ONBOARDING_DATA,
+        DEFAULT_CONFIG,
       );
+      const duration = samples.length / DEFAULT_CONFIG.sampleRate;
+      setStatus(`Encoded ${samples.length} samples (${duration.toFixed(1)}s)`);
 
       // Create audio buffer
       const audioBuffer = samplesToAudioBuffer(
@@ -71,7 +71,9 @@ export function AudioCodeTestHarness({ onClose }: AudioCodeTestHarnessProps) {
       source.connect(audioCtx.destination);
       source.start();
 
-      setStatus(`Playing ${specs.modulation} tones (${duration.toFixed(1)}s)...`);
+      setStatus(
+        `Playing ${specs.modulation} tones (${duration.toFixed(1)}s)...`,
+      );
 
       source.onended = () => {
         setIsPlaying(false);
@@ -145,7 +147,9 @@ export function AudioCodeTestHarness({ onClose }: AudioCodeTestHarnessProps) {
       analyser.connect(processor);
       processor.connect(audioCtx.destination); // Needed for script processor to run
 
-      setStatus(`Recording ${specs.modulation} tones... (8s max, or click Stop)`);
+      setStatus(
+        `Recording ${specs.modulation} tones... (8s max, or click Stop)`,
+      );
     } catch (error) {
       setStatus(
         `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -185,9 +189,8 @@ export function AudioCodeTestHarness({ onClose }: AudioCodeTestHarnessProps) {
       setStatus(`Decoding ${allSamples.length} samples...`);
 
       // Decode AudioCode
-      const { decodeOnboardingAudio } = await import(
-        '../services/OnboardingAudioService.js'
-      );
+      const { decodeOnboardingAudio } =
+        await import('../services/OnboardingAudioService.js');
       const data = await decodeOnboardingAudio(allSamples, DEFAULT_CONFIG);
       setDecodedData(JSON.stringify(data, null, 2));
       setStatus('Received! Decoding complete.');
@@ -216,11 +219,14 @@ export function AudioCodeTestHarness({ onClose }: AudioCodeTestHarnessProps) {
         <main className="modal-body">
           <div className="audiocode-info">
             <p className="audiocode-description">
-              Robust credential transfer via multi-tone audio ({specs.modulation})
+              Robust credential transfer via multi-tone audio (
+              {specs.modulation})
             </p>
             <div className="audiocode-specs">
               <span>Tones: {specs.tones}</span>
-              <span>Freq: {specs.baseFreq}-{specs.maxFreq} Hz</span>
+              <span>
+                Freq: {specs.baseFreq}-{specs.maxFreq} Hz
+              </span>
               <span>Rate: ~{specs.bitRate} bps</span>
               <span>FEC: {specs.errorCorrection}</span>
             </div>
@@ -265,7 +271,10 @@ export function AudioCodeTestHarness({ onClose }: AudioCodeTestHarnessProps) {
             <div className="audiocode-result">
               <div className="audiocode-result-header">
                 <h3>Decoded Data:</h3>
-                <button className="audiocode-clear-button" onClick={handleClear}>
+                <button
+                  className="audiocode-clear-button"
+                  onClick={handleClear}
+                >
                   Clear
                 </button>
               </div>

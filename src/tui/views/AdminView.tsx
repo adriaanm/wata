@@ -140,7 +140,10 @@ export function AdminView({ onBack, currentProfile }: Props) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`Audio receive failed: ${msg}`);
       setAudioCodeStatus(`Error: ${msg}`);
-      LogService.getInstance().addEntry('error', `Audio receive failed: ${msg}`);
+      LogService.getInstance().addEntry(
+        'error',
+        `Audio receive failed: ${msg}`,
+      );
     } finally {
       setAudioCodeRecording(false);
     }
@@ -447,8 +450,11 @@ export function AdminView({ onBack, currentProfile }: Props) {
           <Box marginBottom={1} flexDirection="column">
             <Text>Robust credential transfer via multi-tone audio</Text>
             <Text dimColor>
-              16-MFSK | {DEFAULT_CONFIG.numTones} tones | {DEFAULT_CONFIG.baseFrequency}-
-              {DEFAULT_CONFIG.baseFrequency + (DEFAULT_CONFIG.numTones - 1) * DEFAULT_CONFIG.frequencySpacing}Hz | 100% RS FEC
+              16-MFSK | {DEFAULT_CONFIG.numTones} tones |{' '}
+              {DEFAULT_CONFIG.baseFrequency}-
+              {DEFAULT_CONFIG.baseFrequency +
+                (DEFAULT_CONFIG.numTones - 1) * DEFAULT_CONFIG.frequencySpacing}
+              Hz | 100% RS FEC
             </Text>
           </Box>
 
@@ -460,7 +466,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
           <Box marginBottom={1}>
             <Text>Status: </Text>
             <Text
-              color={audioCodeStatus === 'Ready' ? colors.playing : colors.textMuted}
+              color={
+                audioCodeStatus === 'Ready' ? colors.playing : colors.textMuted
+              }
             >
               {audioCodeStatus}
             </Text>
