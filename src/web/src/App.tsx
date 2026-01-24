@@ -12,7 +12,7 @@ import './styles/variables.css';
 import './styles/animations.css';
 
 function App() {
-  const { isLoggedIn, isLoading } = useAuth();
+  const { isLoggedIn, isLoading, login, error: loginError } = useAuth();
   const contacts = useContacts();
   const [viewState, setViewState] = useState<ViewState>({ view: 'main' });
 
@@ -39,9 +39,9 @@ function App() {
   if (!isLoggedIn) {
     return (
       <LoginView
-        onLoginSuccess={() => {
-          /* Auth state change handles transition */
-        }}
+        login={login}
+        isLoading={isLoading}
+        error={loginError}
       />
     );
   }

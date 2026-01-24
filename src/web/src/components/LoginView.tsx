@@ -1,13 +1,12 @@
 import { FormEvent, useState } from 'react';
 
-import { useAuth } from '../hooks/useMatrix.js';
-
 interface LoginViewProps {
-  onLoginSuccess: () => void;
+  login: (username: string, password: string) => Promise<void>;
+  isLoading: boolean;
+  error: string | null;
 }
 
-export function LoginView({ onLoginSuccess }: LoginViewProps) {
-  const { login, isLoading, error } = useAuth();
+export function LoginView({ login, isLoading, error }: LoginViewProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -15,9 +14,9 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
     e.preventDefault();
     try {
       await login(username, password);
-      onLoginSuccess();
+      // State update in useAuth will trigger re-render in App
     } catch {
-      // Error shown via useAuth error state
+      // Error shown via error prop
     }
   };
 
