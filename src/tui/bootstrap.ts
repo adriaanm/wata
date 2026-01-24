@@ -11,6 +11,7 @@
  * 3. Then dynamically importing the rest of the app
  *
  * CLI arguments:
+ *   --help               Show this help message
  *   --profile <name>     Start with the specified profile (e.g., alice, bob)
  *   --send-credentials   Encode and send onboarding credentials via AudioCode
  *   --receive-credentials Record and decode onboarding credentials via AudioCode
@@ -19,12 +20,35 @@
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
+const showHelp = args.includes('--help');
 const profileIndex = args.indexOf('--profile');
 const initialProfile =
   profileIndex !== -1 && args[profileIndex + 1] ? args[profileIndex + 1] : null;
 const sendCredentials = args.includes('--send-credentials');
 const receiveCredentials = args.includes('--receive-credentials');
 const debugMode = args.includes('--debug');
+
+// Show help and exit
+if (showHelp) {
+  console.log('WATA - Voice Messaging TUI\n');
+  console.log('Usage: pnpm tui [options]\n');
+  console.log('Options:');
+  console.log('  --help               Show this help message');
+  console.log('  --profile <name>     Start with the specified profile (e.g., alice, bob)');
+  console.log('  --send-credentials   Encode and send onboarding credentials via AudioCode');
+  console.log('  --receive-credentials Record and decode onboarding credentials via AudioCode');
+  console.log('  --debug              Disable LogService and enable verbose console logging\n');
+  console.log('Profiles:');
+  console.log('  alice                Alice (default)');
+  console.log('  bob                  Bob');
+  console.log('  charlie              Charlie\n');
+  console.log('Examples:');
+  console.log('  pnpm tui                              Start with default profile (alice)');
+  console.log('  pnpm tui -- --profile bob             Start as bob');
+  console.log('  pnpm tui -- --debug                   Enable debug logging');
+  console.log('  pnpm tui -- --help                    Show this help\n');
+  process.exit(0);
+}
 
 // Export debug mode for other modules to check
 export const isDebugMode = debugMode;
