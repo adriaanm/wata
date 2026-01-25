@@ -111,14 +111,14 @@ export class WataClient {
       throw new Error('Already connected');
     }
 
+    // Discover family room and DM mappings BEFORE starting sync.
+    // This ensures handleTimelineEvent can correctly identify room types
+    // when processing events from initial sync.
+    await this.discoverFamilyRoom();
+    await this.loadDMRooms();
+
     // Start sync loop (includes initial sync)
     await this.syncEngine.start();
-
-    // Discover family room via #family alias
-    await this.discoverFamilyRoom();
-
-    // Load DM rooms from m.direct account data
-    await this.loadDMRooms();
 
     this.isConnected = true;
   }
@@ -387,6 +387,22 @@ export class WataClient {
     const room = this.syncEngine.getRoom(roomId);
     if (room) {
       room.timeline.push(optimisticEvent);
+
+      // Emit messageReceived for own messages too
+      // This ensures UI updates immediately when sending
+      const message = this.eventToVoiceMessage(optimisticEvent);
+      const isFamilyRoom = roomId === this.familyRoomId;
+      if (isFamilyRoom) {
+        const conversation = this.roomToConversation(room, 'family');
+        this.emit('messageReceived', message, conversation);
+      } else {
+        const contact = this.getContactForDMRoom(roomId);
+        if (contact) {
+          const conversation = this.roomToConversation(room, 'dm', contact);
+          this.emit('messageReceived', message, conversation);
+        }
+      }
+      return message;
     }
 
     return this.eventToVoiceMessage(optimisticEvent);
