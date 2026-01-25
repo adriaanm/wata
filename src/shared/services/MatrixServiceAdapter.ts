@@ -4,9 +4,21 @@
  * This adapter wraps WataClient to maintain the same public interface as MatrixService,
  * allowing existing code to use the new WataClient implementation without changes.
  *
+ * ⚠️ IMPORTANT: This is a THIN ADAPTER/FACADE.
+ * Any logic related to the Matrix protocol does NOT belong here.
+ * All such logic MUST be implemented in WataClient (src/shared/lib/wata-client/).
+ *
+ * This file should ONLY contain:
+ * - Type mapping between MatrixService and WataClient types
+ * - Callback/event bridging (delegation only)
+ * - Simple method forwarding to WataClient
+ *
+ * If you find yourself adding Matrix protocol logic here, STOP.
+ * Move it to WataClient instead.
+ *
  * Key responsibilities:
  * - Map MatrixService callbacks to WataClient event listeners
- * - Maintain roomId <-> Conversation mappings
+ * - Maintain roomId <-> Conversation mappings (for synchronous getDirectRooms/getVoiceMessages)
  * - Bridge domain types between MatrixService and WataClient
  * - Preserve MatrixService method signatures exactly
  */
