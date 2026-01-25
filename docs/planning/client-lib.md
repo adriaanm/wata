@@ -369,48 +369,87 @@ await client.disconnect();
 
 ## Matrix Client-Server API Endpoints Needed
 
-Based on the SDK usage analysis, we need these endpoints:
+Based on the SDK usage analysis, we need these endpoints.
 
-### Authentication
+### Authentication Mechanism
+
+All authenticated endpoints require the `Authorization` header:
+
+```
+Authorization: Bearer {access_token}
+```
+
+The `?access_token=` query parameter method is deprecated as of Matrix 1.11 and should not be used.
+
+### Endpoint Reference
+
+#### Authentication (No Auth Required)
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/_matrix/client/v3/login` | POST | Login with password |
-| `/_matrix/client/v3/logout` | POST | Invalidate access token |
+| `/_matrix/client/v3/login` | POST | Login with password, returns `access_token` |
 
-### Sync
+#### Authentication (Auth Required)
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/_matrix/client/v3/sync` | GET | Long-poll for events |
+| `/_matrix/client/v3/logout` | POST | Invalidate current access token |
 
-### Rooms
+#### Sync (Auth Required)
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/_matrix/client/v3/createRoom` | POST | Create room |
-| `/_matrix/client/v3/join/{roomIdOrAlias}` | POST | Join room |
-| `/_matrix/client/v3/rooms/{roomId}/invite` | POST | Invite user |
-| `/_matrix/client/v3/directory/room/{roomAlias}` | GET | Resolve alias |
+| `/_matrix/client/v3/sync` | GET | Long-poll for events, returns rooms/messages/state |
 
-### Messages
+#### Rooms (Auth Required)
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}` | PUT | Send message |
-| `/_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` | PUT | Delete message |
+| `/_matrix/client/v3/createRoom` | POST | Create room with options |
+| `/_matrix/client/v3/join/{roomIdOrAlias}` | POST | Join room by ID or alias |
+| `/_matrix/client/v3/rooms/{roomId}/invite` | POST | Invite user to room |
+| `/_matrix/client/v3/directory/room/{roomAlias}` | GET | Resolve alias to room ID |
+
+#### Messages (Auth Required)
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}` | PUT | Send message event |
+| `/_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}` | PUT | Redact (delete) event |
 | `/_matrix/client/v3/rooms/{roomId}/receipt/m.read/{eventId}` | POST | Send read receipt |
 
-### Media
+#### Media (Auth Required)
+
+Matrix 1.11 introduced authenticated media endpoints. There are two sets:
+
+| Endpoint | Auth | Notes |
+|----------|------|-------|
+| `/_matrix/media/v3/upload` | Required | Upload file, returns `mxc://` URL |
+| `/_matrix/media/v3/download/{serverName}/{mediaId}` | **No** | Legacy unauthenticated (deprecated) |
+| `/_matrix/client/v1/media/download/{serverName}/{mediaId}` | **Yes** | Authenticated download (use this) |
+| `/_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName}` | **Yes** | With filename hint |
+
+**Important:** Use the `/_matrix/client/v1/media/download/` endpoint for downloads. The `/_matrix/media/v3/download/` endpoint is unauthenticated and deprecated—servers are freezing unauthenticated media access (Matrix 1.11+).
+
+Our codebase already uses the authenticated endpoint (see `MatrixService.ts:530`).
+
+#### Profile & Account Data (Auth Required)
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/_matrix/media/v3/upload` | POST | Upload file |
-| `/_matrix/media/v3/download/{serverName}/{mediaId}` | GET | Download file |
+| `/_matrix/client/v3/profile/{userId}` | GET | Get display name and avatar |
+| `/_matrix/client/v3/profile/{userId}/displayname` | PUT | Set own display name |
+| `/_matrix/client/v3/user/{userId}/account_data/{type}` | GET | Get account data (e.g., `m.direct`) |
+| `/_matrix/client/v3/user/{userId}/account_data/{type}` | PUT | Set account data |
 
-### Profile & Account Data
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/_matrix/client/v3/profile/{userId}` | GET | Get profile |
-| `/_matrix/client/v3/profile/{userId}/displayname` | PUT | Set display name |
-| `/_matrix/client/v3/user/{userId}/account_data/{type}` | GET/PUT | Account data |
+### Summary
 
-**Total: ~15 endpoints** (vs full Matrix spec of 100+)
+| Category | Count | Auth |
+|----------|-------|------|
+| Login | 1 | No |
+| Logout | 1 | Yes |
+| Sync | 1 | Yes |
+| Rooms | 4 | Yes |
+| Messages | 3 | Yes |
+| Media | 2 | Yes (upload + download) |
+| Profile/Account | 4 | Yes |
+| **Total** | **16** | |
+
+This is ~16 endpoints vs 100+ in the full Matrix spec.
 
 ---
 
