@@ -43,4 +43,6 @@ export type {
   WataClientEvents,
   WataClientEventName,
   WataClientEventHandler,
+  // Logging
+  Logger,
 } from './types';

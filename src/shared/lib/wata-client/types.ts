@@ -171,3 +171,17 @@ export type WataClientEventName = keyof WataClientEvents;
  * Generic event handler (any event type)
  */
 export type WataClientEventHandler = WataClientEvents[WataClientEventName];
+
+// ============================================================================
+// Logging
+// ============================================================================
+
+/**
+ * Logger interface for WataClient
+ * Platform-agnostic - each platform provides its own implementation
+ */
+export interface Logger {
+  log(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}

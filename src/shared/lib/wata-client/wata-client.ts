@@ -21,7 +21,18 @@ import type {
   ConnectionState,
   WataClientEvents,
   WataClientEventName,
+  Logger,
 } from './types';
+
+// ============================================================================
+// No-op logger (default when no logger provided)
+// ============================================================================
+
+const noopLogger: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
 
 // ============================================================================
 // WataClient Implementation
@@ -35,9 +46,11 @@ export class WataClient {
   private dmRooms: Map<string, string> = new Map(); // contactUserId -> roomId
   private eventHandlers: Map<WataClientEventName, Set<Function>> = new Map();
   private isConnected = false;
+  private logger: Logger;
 
-  constructor(homeserverUrl: string) {
+  constructor(homeserverUrl: string, logger?: Logger) {
     this.api = new MatrixApi(homeserverUrl);
+    this.logger = logger ?? noopLogger;
   }
 
   // ==========================================================================
@@ -74,7 +87,7 @@ export class WataClient {
         try {
           (handler as any)(...args);
         } catch (error) {
-          console.error(`Error in ${event} handler:`, error);
+          this.logger.error(`[WataClient] Error in ${event} handler: ${error}`);
         }
       });
     }
@@ -88,11 +101,13 @@ export class WataClient {
    * Login with username and password
    */
   async login(username: string, password: string): Promise<void> {
+    this.logger.log(`[WataClient] Logging in as ${username}`);
     const response = await this.api.login(username, password, 'Wata Client');
     this.userId = response.user_id;
+    this.logger.log(`[WataClient] Login successful: ${this.userId}`);
 
     // Create sync engine and set user ID
-    this.syncEngine = new SyncEngine(this.api);
+    this.syncEngine = new SyncEngine(this.api, this.logger);
     this.syncEngine.setUserId(this.userId);
 
     // Wire up sync engine events
@@ -117,11 +132,14 @@ export class WataClient {
       throw new Error('Already connected');
     }
 
+    this.logger.log('[WataClient] Starting sync');
+
     // Start sync loop (includes initial sync)
     // Room state and account data will be populated during sync
     await this.syncEngine.start();
 
     this.isConnected = true;
+    this.logger.log('[WataClient] Connected and syncing');
   }
 
   /**
@@ -132,6 +150,7 @@ export class WataClient {
       return;
     }
 
+    this.logger.log('[WataClient] Disconnecting');
     await this.syncEngine.stop();
     this.isConnected = false;
     this.emit('connectionStateChanged', 'offline');
@@ -141,6 +160,7 @@ export class WataClient {
    * Logout and invalidate session
    */
   async logout(): Promise<void> {
+    this.logger.log('[WataClient] Logging out');
     if (this.isConnected) {
       await this.disconnect();
     }
@@ -152,6 +172,7 @@ export class WataClient {
     this.familyRoomId = null;
     this.dmRooms.clear();
     this.syncEngine.clear();
+    this.logger.log('[WataClient] Logged out');
   }
 
   /**

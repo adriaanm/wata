@@ -17,6 +17,7 @@ import type {
   LeftRoomSync,
   MatrixEvent,
 } from './matrix-api';
+import type { Logger } from './types';
 
 // ============================================================================
 // State Types
@@ -79,6 +80,13 @@ type SyncEngineEventHandler = SyncEngineEvents[SyncEngineEventName];
 // Sync Engine
 // ============================================================================
 
+// No-op logger (default when no logger provided)
+const noopLogger: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
+
 export class SyncEngine {
   private api: MatrixApi;
   private rooms: Map<string, RoomState> = new Map();
@@ -87,9 +95,11 @@ export class SyncEngine {
   private isRunning = false;
   private syncLoopPromise: Promise<void> | null = null;
   private eventHandlers: Map<SyncEngineEventName, Set<Function>> = new Map();
+  private logger: Logger;
 
-  constructor(api: MatrixApi) {
+  constructor(api: MatrixApi, logger?: Logger) {
     this.api = api;
+    this.logger = logger ?? noopLogger;
   }
 
   // ==========================================================================
@@ -126,7 +136,7 @@ export class SyncEngine {
         try {
           (handler as any)(...args);
         } catch (error) {
-          console.error(`Error in ${event} handler:`, error);
+          this.logger.error(`[SyncEngine] Error in ${event} handler: ${error}`);
         }
       });
     }
@@ -157,6 +167,7 @@ export class SyncEngine {
     }
 
     this.isRunning = true;
+    this.logger.log('[SyncEngine] Starting initial sync');
 
     // Perform initial sync with a short timeout to get started quickly
     try {
@@ -165,14 +176,18 @@ export class SyncEngine {
       });
       this.processSyncResponse(response);
       this.nextBatch = response.next_batch;
+      const roomCount = this.rooms.size;
+      this.logger.log(`[SyncEngine] Initial sync complete: ${roomCount} rooms`);
       this.emit('synced', response.next_batch);
     } catch (error) {
       // If initial sync fails, we'll retry in the background loop
+      this.logger.error(`[SyncEngine] Initial sync failed: ${error}`);
       const err = error instanceof Error ? error : new Error(String(error));
       this.emit('error', err);
     }
 
     // Start the background sync loop
+    this.logger.log('[SyncEngine] Starting background sync loop');
     this.syncLoopPromise = this.runSyncLoop();
   }
 
@@ -184,6 +199,7 @@ export class SyncEngine {
       return;
     }
 
+    this.logger.log('[SyncEngine] Stopping sync loop');
     this.isRunning = false;
 
     // Don't wait for syncLoopPromise - it will exit on its own when isRunning is false
@@ -221,6 +237,7 @@ export class SyncEngine {
       } catch (error) {
         // Emit error event
         const err = error instanceof Error ? error : new Error(String(error));
+        this.logger.error(`[SyncEngine] Sync error: ${err.message}`);
         this.emit('error', err);
 
         // Stop if we're no longer running

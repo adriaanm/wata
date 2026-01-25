@@ -6,7 +6,6 @@ import { createMatrixService } from '../shared/services/index.js';
 
 import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
 import { LogService } from './services/LogService.js';
-import { silentLogger } from './services/SilentLogger';
 import { PROFILES, type ProfileKey } from './types/profile';
 import { AdminView } from './views/AdminView';
 import { HistoryView } from './views/HistoryView';
@@ -24,19 +23,21 @@ const logError = (message: string): void => {
   LogService.getInstance().addEntry('error', message);
 };
 
-// Wire up TUI's LogService to the shared code
-setLogger({
+// Create a logger that routes to TUI's LogService
+const tuiLogger = {
   log: (message: string) => LogService.getInstance().addEntry('log', message),
   warn: (message: string) => LogService.getInstance().addEntry('warn', message),
-  error: (message: string) =>
-    LogService.getInstance().addEntry('error', message),
-});
+  error: (message: string) => LogService.getInstance().addEntry('error', message),
+};
 
-// Create TUI-specific MatrixService instance with keytar storage and silent logger
+// Wire up TUI's LogService to the shared MatrixServiceAdapter code
+setLogger(tuiLogger);
+
+// Create TUI-specific MatrixService instance with LogService-based logger
 const credentialStorage = new KeytarCredentialStorage();
 export const matrixService = createMatrixService({
   credentialStorage,
-  logger: silentLogger,
+  logger: tuiLogger,
 });
 
 type Screen =

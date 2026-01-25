@@ -143,9 +143,10 @@ class MatrixServiceAdapter {
     messages: VoiceMessage[];
   }> = new Map();
 
-  constructor(credentialStorage: CredentialStorage, _logger?: unknown) {
+  constructor(credentialStorage: CredentialStorage, externalLogger?: Logger) {
     this.credentialStorage = credentialStorage;
-    this.wataClient = new WataClient(HOMESERVER_URL);
+    // Pass the external logger to WataClient (falls back to no-op if not provided)
+    this.wataClient = new WataClient(HOMESERVER_URL, externalLogger);
     this.setupWataClientListeners();
   }
 
