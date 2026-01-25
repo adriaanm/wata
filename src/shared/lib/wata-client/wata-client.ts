@@ -357,10 +357,32 @@ export class WataClient {
       },
     });
 
-    // Wait for the event to appear in timeline
-    const event = await this.waitForEvent(roomId, sendResponse.event_id);
+    // Optimistically add the event to the timeline immediately
+    // This ensures sent messages are available right away without waiting for sync
+    const optimisticEvent: MatrixEvent = {
+      event_id: sendResponse.event_id,
+      room_id: roomId,
+      sender: this.userId!,
+      type: 'm.room.message',
+      content: {
+        msgtype: 'm.audio',
+        body: 'Voice message',
+        url: uploadResponse.content_uri,
+        info: {
+          duration: Math.round(duration * 1000),
+          mimetype: 'audio/mp4',
+        },
+      },
+      origin_server_ts: Date.now(),
+    };
 
-    return this.eventToVoiceMessage(event);
+    // Add to room timeline
+    const room = this.syncEngine.getRoom(roomId);
+    if (room) {
+      room.timeline.push(optimisticEvent);
+    }
+
+    return this.eventToVoiceMessage(optimisticEvent);
   }
 
   /**
@@ -459,6 +481,11 @@ export class WataClient {
     this.syncEngine.on('membershipChanged', (roomId, userId, membership) => {
       this.handleMembershipChanged(roomId, userId, membership);
     });
+
+    // Handle account data updates (m.direct, etc.)
+    this.syncEngine.on('accountDataUpdated', (type, content) => {
+      this.handleAccountDataUpdated(type, content);
+    });
   }
 
   /**
@@ -499,10 +526,75 @@ export class WataClient {
    * Get or create DM room with a contact
    */
   private async getOrCreateDMRoom(contactUserId: string): Promise<string> {
-    // Check if DM room already exists
+    // First, check if DM room already exists in m.direct
     const existingRoomId = this.dmRooms.get(contactUserId);
     if (existingRoomId) {
-      return existingRoomId;
+      // Verify we're still a member of this room
+      const room = this.syncEngine.getRoom(existingRoomId);
+      if (room && room.members.get(this.userId!)?.membership === 'join') {
+        // Verify the target user is also in the room
+        const targetMember = room.members.get(contactUserId);
+        if (targetMember && targetMember.membership === 'join') {
+          return existingRoomId;
+        }
+      }
+    }
+
+    // Second, check for existing rooms where this user invited us or we created (may not be in m.direct yet)
+    const rooms = this.syncEngine.getRooms();
+    for (const room of rooms) {
+      // Skip if not joined
+      if (room.members.get(this.userId!)?.membership !== 'join') {
+        continue;
+      }
+
+      // Check if this is a 2-person room (likely DM)
+      const joinedMembers = Array.from(room.members.values()).filter(
+        (m) => m.membership === 'join'
+      );
+      if (joinedMembers.length !== 2) {
+        continue;
+      }
+
+      // Check if this is a DM with the target user
+      const hasTargetUser = joinedMembers.some((m) => m.userId === contactUserId);
+      if (!hasTargetUser) {
+        continue;
+      }
+
+      // Check if this is a DM room (via is_direct flag in membership event or creation event)
+      let isDirectRoom = false;
+
+      // Check membership events for is_direct flag
+      for (const event of room.timeline) {
+        if (event.type === 'm.room.member' && event.state_key === this.userId) {
+          if (event.content?.is_direct === true) {
+            isDirectRoom = true;
+            break;
+          }
+        }
+      }
+
+      // If still unsure, check the room creation event for is_direct flag
+      if (!isDirectRoom) {
+        for (const event of room.timeline) {
+          if (event.type === 'm.room.create') {
+            if (event.content?.is_direct === true) {
+              isDirectRoom = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (isDirectRoom) {
+        // Found a DM room with this user that wasn't in m.direct
+        // Update m.direct and return this room
+        const roomId = room.roomId;
+        await this.updateDMRoomData(contactUserId, roomId);
+        this.dmRooms.set(contactUserId, roomId);
+        return roomId;
+      }
     }
 
     // Create new DM room
@@ -812,20 +904,74 @@ export class WataClient {
       try {
         await this.api.joinRoom(roomId);
 
-        // Check if this is a DM room and update m.direct
+        // After joining, check if this is a DM room and update m.direct
+        // We need to wait for the room to appear in sync
+        await this.waitForRoom(roomId, 3000);
+
         const room = this.syncEngine.getRoom(roomId);
         if (room) {
-          const inviterEvent = room.timeline.find(
-            (e) => e.type === 'm.room.member' && e.state_key === this.userId
+          // Check if this is a 2-person room (likely DM)
+          const joinedMembers = Array.from(room.members.values()).filter(
+            (m) => m.membership === 'join'
           );
-          if (inviterEvent?.content?.is_direct) {
-            const inviterId = inviterEvent.sender!;
-            await this.updateDMRoomData(inviterId, roomId);
-            this.dmRooms.set(inviterId, roomId);
+
+          if (joinedMembers.length === 2) {
+            // Find the other member
+            const otherMember = joinedMembers.find((m) => m.userId !== this.userId);
+            if (otherMember) {
+              // Check if this room was created as a DM (is_direct flag)
+              let isDirectRoom = false;
+
+              // Check membership events for is_direct flag
+              for (const event of room.timeline) {
+                if (event.type === 'm.room.member' && event.state_key === this.userId) {
+                  if (event.content?.is_direct === true) {
+                    isDirectRoom = true;
+                    break;
+                  }
+                }
+              }
+
+              // If still unsure, check the room creation event for is_direct flag
+              if (!isDirectRoom) {
+                for (const event of room.timeline) {
+                  if (event.type === 'm.room.create') {
+                    if (event.content?.is_direct === true) {
+                      isDirectRoom = true;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              // If it's a DM room, update m.direct
+              if (isDirectRoom) {
+                await this.updateDMRoomData(otherMember.userId, roomId);
+                this.dmRooms.set(otherMember.userId, roomId);
+              }
+            }
           }
         }
       } catch (error) {
         console.error(`Failed to auto-join room ${roomId}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Handle account data updates (m.direct, etc.)
+   */
+  private handleAccountDataUpdated(
+    type: string,
+    content: Record<string, any>
+  ): void {
+    if (type === 'm.direct') {
+      // Update local dmRooms map from m.direct account data
+      // m.direct format: { "@user:server": ["!roomId"] }
+      for (const [userId, roomIds] of Object.entries(content)) {
+        if (Array.isArray(roomIds) && roomIds.length > 0) {
+          this.dmRooms.set(userId, roomIds[0]);
+        }
       }
     }
   }

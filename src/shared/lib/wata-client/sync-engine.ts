@@ -64,6 +64,8 @@ export interface SyncEngineEvents {
   receiptUpdated: (roomId: string, eventId: string, userIds: Set<string>) => void;
   /** Emitted when a membership change occurs */
   membershipChanged: (roomId: string, userId: string, membership: string) => void;
+  /** Emitted when global account data is updated */
+  accountDataUpdated: (type: string, content: Record<string, any>) => void;
   /** Emitted when sync encounters an error */
   error: (error: Error) => void;
 }
@@ -246,8 +248,10 @@ export class SyncEngine {
   processSyncResponse(response: SyncResponse): void {
     // Process global account data
     if (response.account_data?.events) {
-      // Account data is handled per-room or globally
-      // For now, we don't track global account data
+      response.account_data.events.forEach((event) => {
+        // Emit account data updated event for global account data
+        this.emit('accountDataUpdated', event.type, event.content);
+      });
     }
 
     // Process rooms
