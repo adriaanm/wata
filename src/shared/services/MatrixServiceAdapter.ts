@@ -735,12 +735,10 @@ class MatrixServiceAdapter {
   }
 
   /**
-   * Get current access token
+   * Get current access token for authenticated media downloads
    */
   getAccessToken(): string | null {
-    // WataClient doesn't expose tokens - return null
-    // Admin operations that need direct MatrixClient should use MatrixService
-    return null;
+    return this.wataClient.getAccessToken();
   }
 
   // ==========================================================================

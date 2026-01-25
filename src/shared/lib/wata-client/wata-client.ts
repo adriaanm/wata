@@ -172,6 +172,13 @@ export class WataClient {
   }
 
   /**
+   * Get current access token for authenticated media downloads
+   */
+  getAccessToken(): string | null {
+    return this.api.getAccessToken();
+  }
+
+  /**
    * Get connection state
    */
   getConnectionState(): ConnectionState {
