@@ -880,19 +880,31 @@ export class WataClient {
   private handleTimelineEvent(roomId: string, event: MatrixEvent): void {
     // Handle voice messages
     if (this.isVoiceMessageEvent(event)) {
+      this.logger.log(`[WataClient] Voice message received in room ${roomId} from ${event.sender}`);
       const message = this.eventToVoiceMessage(event);
 
       const room = this.syncEngine.getRoom(roomId);
-      if (!room) return;
+      if (!room) {
+        this.logger.warn(`[WataClient] Room ${roomId} not found in sync state`);
+        return;
+      }
 
       // Determine conversation type by checking canonical alias
       let conversation: Conversation;
       if (this.isFamilyRoom(roomId)) {
+        this.logger.log(`[WataClient] Message is in family room`);
         conversation = this.roomToConversation(room, 'family');
       } else {
         // Find the contact for this DM
         const contact = this.getContactForDMRoom(roomId);
-        if (!contact) return;
+        if (!contact) {
+          this.logger.warn(`[WataClient] Could not find contact for DM room ${roomId}, dropping message`);
+          // Log room membership for debugging
+          const members = Array.from(room.members.entries());
+          this.logger.warn(`[WataClient] Room has ${members.length} members: ${members.map(([id, m]) => `${id}(${m.membership})`).join(', ')}`);
+          return;
+        }
+        this.logger.log(`[WataClient] Message is DM from ${contact.user.displayName}`);
         conversation = this.roomToConversation(room, 'dm', contact);
       }
 

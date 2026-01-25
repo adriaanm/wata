@@ -304,9 +304,11 @@ export class SyncEngine {
   private processJoinedRoom(roomId: string, roomData: JoinedRoomSync): void {
     // Get or create room state
     let room = this.rooms.get(roomId);
+    const isNewRoom = !room;
     if (!room) {
       room = this.createEmptyRoom(roomId);
       this.rooms.set(roomId, room);
+      this.logger.log(`[SyncEngine] New room discovered: ${roomId}`);
     }
 
     // Process state events (m.room.name, m.room.avatar, m.room.member, etc.)
@@ -318,6 +320,7 @@ export class SyncEngine {
 
     // Process timeline events (new messages)
     if (roomData.timeline?.events) {
+      this.logger.log(`[SyncEngine] Processing ${roomData.timeline.events.length} timeline events for room ${roomId}`);
       roomData.timeline.events.forEach((event) => {
         // Add to timeline
         room!.timeline.push(event);
@@ -325,6 +328,11 @@ export class SyncEngine {
         // Process state events in timeline
         if (event.state_key !== undefined) {
           this.processStateEvent(room!, event);
+        }
+
+        // Log message events
+        if (event.type === 'm.room.message') {
+          this.logger.log(`[SyncEngine] Message event: ${event.content?.msgtype} from ${event.sender}`);
         }
 
         // Emit timeline event
