@@ -601,13 +601,53 @@ class MatrixServiceAdapter {
 
   /**
    * Find contact for a room ID
+   * First checks cached mappings, then falls back to room membership lookup
    */
   private findContactForRoomId(roomId: string): Contact | null {
+    // First, try cached mapping
     for (const [userId, mappedRoomId] of this.roomIdByContactUserId.entries()) {
       if (mappedRoomId === roomId) {
         return this.contactByUserId.get(userId) || null;
       }
     }
+
+    // Fallback: Infer contact from room membership (for recipient-side DM rooms)
+    // A DM room has exactly 2 members: current user and the contact
+    const currentUser = this.wataClient.getCurrentUser();
+    if (!currentUser) {
+      return null;
+    }
+
+    // Get room state from sync engine
+    const room = this.wataClient['syncEngine'].getRoom(roomId);
+    if (!room) {
+      return null;
+    }
+
+    // Find the other member (not current user)
+    for (const [userId, member] of room.members.entries()) {
+      if (userId !== currentUser.id && member.membership === 'join') {
+        // Verify this is a DM room (2 joined members)
+        const joinCount = Array.from(room.members.values()).filter(
+          m => m.membership === 'join'
+        ).length;
+        if (joinCount === 2) {
+          // Create and cache the contact for future use
+          const contact: Contact = {
+            user: {
+              id: userId,
+              displayName: member.displayName,
+              avatarUrl: member.avatarUrl,
+            },
+          };
+          // Cache the mapping for future lookups
+          this.contactByUserId.set(userId, contact);
+          this.roomIdByContactUserId.set(userId, roomId);
+          return contact;
+        }
+      }
+    }
+
     return null;
   }
 
