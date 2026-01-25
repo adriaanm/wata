@@ -241,6 +241,27 @@ client.on(RoomMemberEvent.Membership, async (event, member) => {
 
 This ensures both parties recognize the room as a DM and prevents duplicate room creation. The membership handler auto-joins all invites in this trusted environment.
 
+### The Race Condition Reality
+
+**Note:** Even with the `m.direct` update logic above, duplicate DM rooms can still occur due to timing:
+
+```
+Alice creates DM → invites Bob → updates her m.direct
+Bob calls getOrCreateDmRoom(alice) BEFORE invite arrives via sync
+Bob's m.direct is empty → creates NEW room
+Result: Two separate DM rooms exist
+```
+
+This is a **known Matrix protocol limitation** - `m.direct` is client-side data with no server-side enforcement. Even Element Web has this issue (see [matrix-js-sdk #2672](https://github.com/matrix-org/matrix-js-sdk/issues/2672)).
+
+**Our mitigation:**
+1. Auto-join all DM invites (reduces window for duplicates)
+2. Scan for existing 2-person `is_direct` rooms before creating
+3. Post-sync cleanup of `m.direct` entries
+4. Tests use `waitForRoom()` to ensure invite propagation
+
+For the walkie-talkie use case, occasional duplicate DMs are acceptable - users can use the family room broadcast if a 1:1 DM has issues. See [client-lib.md](./planning/client-lib.md#dm-room-idempotency-a-known-matrix-protocol-limitation) for detailed analysis.
+
 ## Future Considerations
 
 ### Public Matrix Server Hosting

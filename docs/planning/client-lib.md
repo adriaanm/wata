@@ -465,6 +465,98 @@ This is ~16 endpoints vs 100+ in the full Matrix spec.
 
 ---
 
+## DM Room Idempotency: A Known Matrix Protocol Limitation
+
+### The Problem
+
+The `getOrCreateDmRoom()` pattern has a fundamental race condition:
+
+```
+Timeline: Alice creates DM → invites Bob → updates her m.direct
+          Bob immediately calls getOrCreateDmRoom(alice)
+          Bob's m.direct is empty → creates NEW room
+          Result: Two separate DM rooms between the same users
+```
+
+This occurs because:
+1. `m.direct` is **per-user account data** - not server-enforced
+2. Invite propagation via `/sync` has latency (up to long-poll timeout)
+3. Both users can independently create rooms before seeing the other's invite
+
+### Why Matrix Can't Fix This
+
+| Feature | Status | Reason |
+|---------|--------|--------|
+| Server-side `m.direct` | ❌ Not available | `m.direct` is client-side account data only |
+| Atomic `getOrCreateDM` endpoint | ❌ Not in spec | No Matrix API for this |
+| Deterministic DM room IDs | ❌ Not supported | Room IDs are server-generated random strings |
+| Room aliases for DMs | ⚠️ Possible but inadvisable | Privacy + exposure + doesn't prevent race |
+
+### How Other Clients Handle This
+
+**Element Web / matrix-js-sdk:**
+- Accepts the race condition as a known limitation
+- Uses auto-join + post-sync deduplication
+- Manual user resolution if duplicates occur
+
+**Source:** [matrix-js-sdk #2672](https://github.com/matrix-org/matrix-js-sdk/issues/2672) - "Automatically add to account_data 'm.direct'"
+
+> "Manual management is impossible for servers that configure auto-joining on invites. Without `m.direct` update, it's impossible to tell which rooms are DM rooms."
+
+### Our Mitigation Strategy
+
+Our implementation follows Matrix best practices:
+
+1. **Auto-join all DM invites** - `MatrixService.ts:943-954` and `wata-client.ts:847-903`
+2. **Update `m.direct` on join** - Detect `is_direct` flag in membership event
+3. **Scan for candidate DMs** - Check 2-person rooms with `is_direct` flag before creating
+4. **Post-sync cleanup** - `syncDirectRoomsFromMembership()` fixes stale `m.direct` entries
+
+**Code locations:**
+- `MatrixService.ts:683-776` - `getOrCreateDmRoom()` with fallback scanning
+- `MatrixService.ts:448-503` - Auto-join handler
+- `MatrixService.ts:807-879` - Post-sync `m.direct` repair
+- `wata-client.ts:526-622` - Enhanced DM discovery with multiple fallback checks
+
+### Test Implications
+
+Integration tests must account for this race condition:
+
+```typescript
+// ❌ This test relies on timing luck
+const aliceRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+const bobRoomId = await bobService.getOrCreateDmRoom('@alice:localhost');
+expect(aliceRoomId).toBe(bobRoomId); // May fail if sync is too fast/slow
+
+// ✅ This test is deterministic
+const aliceRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+await bobService.waitForRoom(aliceRoomId); // Wait for invite to propagate
+const bobRoomId = await bobService.getOrCreateDmRoom('@alice:localhost');
+expect(aliceRoomId).toBe(bobRoomId); // Now deterministic
+```
+
+See: `test/integration/matrix.test.ts:328-389` for the fixed test approach.
+
+### Recommendations for Wata
+
+| Option | Approach | Trade-off |
+|--------|----------|-----------|
+| **Accept limitation** | Document that rare duplicates can occur | Honest, but may confuse users |
+| **Family room only** | Skip 1:1 DMs, use broadcast for everything | Simpler, but less private |
+| **Post-facto merge** | Detect duplicates, leave older room | Complex, may lose messages |
+| **User-facing fix** | Add "Fix duplicate chats" button | User-controlled cleanup |
+
+For v1, **accept the limitation** and document it. Duplicate DMs are rare in practice (require concurrent creation within the sync window), and the family room broadcast works perfectly as a fallback.
+
+### References
+
+- [Matrix Spec: Account Data](https://spec.matrix.org/latest/client-server-api/#account-data)
+- [matrix-js-sdk #2672](https://github.com/matrix-org/matrix-js-sdk/issues/2672)
+- [matrix-js-sdk #720](https://github.com/matrix-org/matrix-js-sdk/issues/720)
+- [Synapse #9804](https://github.com/matrix-org/synapse/issues/9804) - Room invite race condition
+
+---
+
 ## Next Steps
 
 1. [x] Review and approve API design
