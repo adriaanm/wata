@@ -100,7 +100,13 @@ export class WataClient {
   }
 
   /**
-   * Start real-time sync and discover family room
+   * Start real-time sync
+   *
+   * Room identification now uses on-demand lookups:
+   * - Family room: detected by canonical alias (#family:server)
+   * - DM rooms: detected by m.direct account data or 2-member room inference
+   *
+   * No pre-loading required - sync populates room state and account data.
    */
   async connect(): Promise<void> {
     if (!this.userId) {
@@ -111,13 +117,8 @@ export class WataClient {
       throw new Error('Already connected');
     }
 
-    // Discover family room and DM mappings BEFORE starting sync.
-    // This ensures handleTimelineEvent can correctly identify room types
-    // when processing events from initial sync.
-    await this.discoverFamilyRoom();
-    await this.loadDMRooms();
-
     // Start sync loop (includes initial sync)
+    // Room state and account data will be populated during sync
     await this.syncEngine.start();
 
     this.isConnected = true;
@@ -197,14 +198,54 @@ export class WataClient {
   // ==========================================================================
 
   /**
+   * Find the family room by scanning rooms for the #family alias.
+   * Updates familyRoomId cache if found.
+   */
+  private findFamilyRoom(): RoomState | null {
+    // Check cache first
+    if (this.familyRoomId) {
+      const room = this.syncEngine.getRoom(this.familyRoomId);
+      if (room) {
+        return room;
+      }
+      // Cache is stale, clear it
+      this.familyRoomId = null;
+    }
+
+    // Scan rooms for #family alias
+    const server = this.userId?.split(':')[1];
+    if (!server) return null;
+
+    const familyAlias = `#family:${server}`;
+    for (const room of this.syncEngine.getRooms()) {
+      if (room.canonicalAlias === familyAlias) {
+        // Update cache
+        this.familyRoomId = room.roomId;
+        return room;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if a room is the family room (by canonical alias)
+   */
+  private isFamilyRoom(roomId: string): boolean {
+    const room = this.syncEngine.getRoom(roomId);
+    if (!room) return false;
+
+    const server = this.userId?.split(':')[1];
+    if (!server) return false;
+
+    return room.canonicalAlias === `#family:${server}`;
+  }
+
+  /**
    * Get the family (null if not in a family)
    */
   getFamily(): Family | null {
-    if (!this.familyRoomId) {
-      return null;
-    }
-
-    const room = this.syncEngine.getRoom(this.familyRoomId);
+    const room = this.findFamilyRoom();
     if (!room) {
       return null;
     }
@@ -252,11 +293,12 @@ export class WataClient {
    * Invite user to family room
    */
   async inviteToFamily(userId: string): Promise<void> {
-    if (!this.familyRoomId) {
+    const familyRoom = this.findFamilyRoom();
+    if (!familyRoom) {
       throw new Error('Not in a family - create or join a family first');
     }
 
-    await this.api.inviteToRoom(this.familyRoomId, { user_id: userId });
+    await this.api.inviteToRoom(familyRoom.roomId, { user_id: userId });
   }
 
   // ==========================================================================
@@ -281,11 +323,7 @@ export class WataClient {
    * Get family broadcast conversation
    */
   getFamilyConversation(): Conversation | null {
-    if (!this.familyRoomId) {
-      return null;
-    }
-
-    const room = this.syncEngine.getRoom(this.familyRoomId);
+    const room = this.findFamilyRoom();
     if (!room) {
       return null;
     }
@@ -345,10 +383,11 @@ export class WataClient {
     // Determine target room
     let roomId: string;
     if (target === 'family') {
-      if (!this.familyRoomId) {
+      const familyRoom = this.findFamilyRoom();
+      if (!familyRoom) {
         throw new Error('Not in a family');
       }
-      roomId = this.familyRoomId;
+      roomId = familyRoom.roomId;
     } else {
       roomId = await this.getOrCreateDMRoom(target.user.id);
     }
@@ -391,8 +430,7 @@ export class WataClient {
       // Emit messageReceived for own messages too
       // This ensures UI updates immediately when sending
       const message = this.eventToVoiceMessage(optimisticEvent);
-      const isFamilyRoom = roomId === this.familyRoomId;
-      if (isFamilyRoom) {
+      if (this.isFamilyRoom(roomId)) {
         const conversation = this.roomToConversation(room, 'family');
         this.emit('messageReceived', message, conversation);
       } else {
@@ -509,40 +547,6 @@ export class WataClient {
     this.syncEngine.on('accountDataUpdated', (type, content) => {
       this.handleAccountDataUpdated(type, content);
     });
-  }
-
-  /**
-   * Discover family room via #family alias
-   */
-  private async discoverFamilyRoom(): Promise<void> {
-    try {
-      const server = this.userId!.split(':')[1]; // Extract server from @user:server
-      const alias = `#family:${server}`;
-      const response = await this.api.getRoomIdForAlias(alias);
-      this.familyRoomId = response.room_id;
-    } catch (error) {
-      // Family room doesn't exist yet - that's OK
-      this.familyRoomId = null;
-    }
-  }
-
-  /**
-   * Load DM rooms from m.direct account data
-   */
-  private async loadDMRooms(): Promise<void> {
-    try {
-      const directData = await this.api.getAccountData(this.userId!, 'm.direct');
-
-      // m.direct format: { "@user:server": ["!roomId"] }
-      for (const [userId, roomIds] of Object.entries(directData)) {
-        if (Array.isArray(roomIds) && roomIds.length > 0) {
-          this.dmRooms.set(userId, roomIds[0]);
-        }
-      }
-    } catch (error) {
-      // No m.direct data yet - that's OK
-      this.dmRooms.clear();
-    }
   }
 
   /**
@@ -857,14 +861,12 @@ export class WataClient {
     if (this.isVoiceMessageEvent(event)) {
       const message = this.eventToVoiceMessage(event);
 
-      // Determine conversation type
-      const isFamilyRoom = roomId === this.familyRoomId;
       const room = this.syncEngine.getRoom(roomId);
-
       if (!room) return;
 
+      // Determine conversation type by checking canonical alias
       let conversation: Conversation;
-      if (isFamilyRoom) {
+      if (this.isFamilyRoom(roomId)) {
         conversation = this.roomToConversation(room, 'family');
       } else {
         // Find the contact for this DM
@@ -887,7 +889,7 @@ export class WataClient {
    */
   private handleRoomUpdated(roomId: string, room: RoomState): void {
     // If family room updated, emit family/contacts events
-    if (roomId === this.familyRoomId) {
+    if (this.isFamilyRoom(roomId)) {
       const family = this.getFamily();
       if (family) {
         this.emit('familyUpdated', family);

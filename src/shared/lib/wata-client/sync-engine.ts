@@ -39,6 +39,8 @@ export interface RoomState {
   roomId: string;
   name: string;
   avatarUrl: string | null;
+  /** Canonical alias for the room (e.g., #family:server) */
+  canonicalAlias: string | null;
   /** Map of userId -> member info */
   members: Map<string, MemberInfo>;
   /** Timeline events (chronological order, oldest to newest) */
@@ -413,6 +415,10 @@ export class SyncEngine {
         room.avatarUrl = event.content.url || null;
         break;
 
+      case 'm.room.canonical_alias':
+        room.canonicalAlias = event.content.alias || null;
+        break;
+
       case 'm.room.member':
         if (event.state_key) {
           const userId = event.state_key;
@@ -431,8 +437,6 @@ export class SyncEngine {
           this.emit('membershipChanged', room.roomId, userId, membership);
         }
         break;
-
-      // Add other state events as needed
     }
   }
 
@@ -481,6 +485,7 @@ export class SyncEngine {
       roomId,
       name: '',
       avatarUrl: null,
+      canonicalAlias: null,
       members: new Map(),
       timeline: [],
       accountData: new Map(),
