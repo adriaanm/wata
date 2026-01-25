@@ -2,6 +2,7 @@ import { Box, useInput, useStdout } from 'ink';
 import React, { useState, useEffect } from 'react';
 
 import { MatrixService, setLogger } from '../shared/services/MatrixService.js';
+import { createMatrixService } from '../shared/services/index.js';
 
 import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
 import { LogService } from './services/LogService.js';
@@ -33,7 +34,10 @@ setLogger({
 
 // Create TUI-specific MatrixService instance with keytar storage and silent logger
 const credentialStorage = new KeytarCredentialStorage();
-export const matrixService = new MatrixService(credentialStorage, silentLogger);
+export const matrixService = createMatrixService({
+  credentialStorage,
+  logger: silentLogger,
+});
 
 type Screen =
   | 'loading'

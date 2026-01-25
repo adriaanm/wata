@@ -46,6 +46,9 @@ export class SilentLogger {
   // Silenced - info is too chatty for TUI
   info(): void {}
 
+  // Silenced - log is too chatty for TUI
+  log(): void {}
+
   // Capture warnings to LogService
   warn(...args: unknown[]): void {
     this.addToLogService('warn', ...args);

@@ -3,7 +3,8 @@
  * Uses WebCredentialStorage for browser credential management.
  */
 
-import { MatrixService, setLogger } from '@shared/services/MatrixService';
+import { createMatrixService } from '@shared/services';
+import { setLogger } from '@shared/services/MatrixService';
 
 import { LogService } from './LogService';
 import { webCredentialStorage } from './WebCredentialStorage';
@@ -17,4 +18,6 @@ setLogger({
 });
 
 // Create the singleton instance with web-specific credential storage
-export const matrixService = new MatrixService(webCredentialStorage);
+export const matrixService = createMatrixService({
+  credentialStorage: webCredentialStorage,
+});
