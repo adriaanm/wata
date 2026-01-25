@@ -414,19 +414,10 @@ The `?access_token=` query parameter method is deprecated as of Matrix 1.11 and 
 | `/_matrix/client/v3/rooms/{roomId}/receipt/m.read/{eventId}` | POST | Send read receipt |
 
 #### Media (Auth Required)
-
-Matrix 1.11 introduced authenticated media endpoints. There are two sets:
-
-| Endpoint | Auth | Notes |
-|----------|------|-------|
-| `/_matrix/media/v3/upload` | Required | Upload file, returns `mxc://` URL |
-| `/_matrix/media/v3/download/{serverName}/{mediaId}` | **No** | Legacy unauthenticated (deprecated) |
-| `/_matrix/client/v1/media/download/{serverName}/{mediaId}` | **Yes** | Authenticated download (use this) |
-| `/_matrix/client/v1/media/download/{serverName}/{mediaId}/{fileName}` | **Yes** | With filename hint |
-
-**Important:** Use the `/_matrix/client/v1/media/download/` endpoint for downloads. The `/_matrix/media/v3/download/` endpoint is unauthenticated and deprecated—servers are freezing unauthenticated media access (Matrix 1.11+).
-
-Our codebase already uses the authenticated endpoint (see `MatrixService.ts:530`).
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/_matrix/media/v3/upload` | POST | Upload file, returns `mxc://` URL |
+| `/_matrix/client/v1/media/download/{serverName}/{mediaId}` | GET | Download file by MXC URL components |
 
 #### Profile & Account Data (Auth Required)
 | Endpoint | Method | Purpose |
