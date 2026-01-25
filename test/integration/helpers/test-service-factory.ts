@@ -2,24 +2,22 @@
  * Test Service Factory
  *
  * Factory function for creating test instances of MatrixService or MatrixServiceAdapter.
- * This allows tests to be run against either implementation by setting the USE_WATA_CLIENT
- * environment variable.
+ * This uses the same MATRIX_CONFIG.implementation setting as production code.
  *
  * Usage:
  *   const service = createTestService(homeserverUrl, credentialStorage);
  *   await service.login(username, password);
  *
  * Environment variables:
- *   USE_WATA_CLIENT=true - Use MatrixServiceAdapter (WataClient implementation)
- *   USE_WATA_CLIENT=false or unset - Use MatrixService (matrix-js-sdk implementation)
+ *   WATA_MATRIX_IMPL=wata-client - Use MatrixServiceAdapter (WataClient, default)
+ *   WATA_MATRIX_IMPL=matrix-js-sdk - Use MatrixService (matrix-js-sdk fallback)
  */
 
+import { MATRIX_CONFIG } from '@shared/config/matrix';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';
-import { MatrixService, setHomeserverUrl as setMatrixServiceHomeserverUrl } from '@shared/services/MatrixService';
-import { MatrixServiceAdapter, setHomeserverUrl as setAdapterHomeserverUrl } from '@shared/services/MatrixServiceAdapter';
-
-// Environment variable to toggle between implementations
-const USE_WATA_CLIENT = process.env.USE_WATA_CLIENT === 'true';
+import { createMatrixService } from '@shared/services';
+import { setHomeserverUrl as setAdapterHomeserverUrl } from '@shared/services/MatrixServiceAdapter';
+import { setHomeserverUrl as setMatrixServiceHomeserverUrl } from '@shared/services/MatrixService';
 
 /**
  * Create a test service instance
@@ -32,17 +30,12 @@ export function createTestService(
   homeserver: string,
   credentialStorage: CredentialStorage
 ): MatrixService | MatrixServiceAdapter {
-  if (USE_WATA_CLIENT) {
-    // Use WataClient implementation via adapter
-    const adapter = new MatrixServiceAdapter(credentialStorage);
-    setAdapterHomeserverUrl(homeserver);
-    return adapter;
-  } else {
-    // Use original matrix-js-sdk implementation
-    const service = new MatrixService(credentialStorage);
-    setMatrixServiceHomeserverUrl(homeserver);
-    return service;
-  }
+  // Set the homeserver URL for both implementations
+  setAdapterHomeserverUrl(homeserver);
+  setMatrixServiceHomeserverUrl(homeserver);
+
+  // Use the production factory
+  return createMatrixService({ credentialStorage });
 }
 
 /**
@@ -102,7 +95,7 @@ export function createTestCredentialStorage(): CredentialStorage {
  * @returns true if using WataClient via MatrixServiceAdapter
  */
 export function isUsingWataClient(): boolean {
-  return USE_WATA_CLIENT;
+  return MATRIX_CONFIG.implementation === 'wata-client';
 }
 
 /**
@@ -113,5 +106,5 @@ export function isUsingWataClient(): boolean {
  * @returns 'WataClient' or 'matrix-js-sdk'
  */
 export function getImplementationName(): string {
-  return USE_WATA_CLIENT ? 'WataClient' : 'matrix-js-sdk';
+  return MATRIX_CONFIG.implementation === 'wata-client' ? 'WataClient' : 'matrix-js-sdk';
 }

@@ -674,7 +674,7 @@ export class WataClient {
   private eventToVoiceMessage(event: MatrixEvent): VoiceMessage {
     const sender = this.getUserFromEvent(event);
     const content = event.content;
-    const audioUrl = content.url || '';
+    const audioUrl = this.mxcToHttp(content.url || '');
     const duration = (content.info?.duration || 0) / 1000; // Convert ms to seconds
     const timestamp = new Date(event.origin_server_ts || 0);
 
@@ -980,7 +980,7 @@ export class WataClient {
    * Get contact for a DM room
    */
   private getContactForDMRoom(roomId: string): Contact | null {
-    // Find the contact user ID for this room
+    // First, try to find from m.direct account data mapping
     for (const [userId, mappedRoomId] of this.dmRooms.entries()) {
       if (mappedRoomId === roomId) {
         const room = this.syncEngine.getRoom(roomId);
@@ -996,6 +996,32 @@ export class WataClient {
         }
       }
     }
+
+    // Fallback: If m.direct doesn't have the mapping (recipient-side issue),
+    // infer the contact from room membership.
+    // A DM room has exactly 2 members: the current user and the contact.
+    const room = this.syncEngine.getRoom(roomId);
+    if (room) {
+      for (const [userId, member] of room.members.entries()) {
+        // Skip current user and any invited/left users
+        if (userId !== this.userId && member.membership === 'join') {
+          // Verify this is a DM room by checking member count
+          const joinCount = Array.from(room.members.values()).filter(
+            m => m.membership === 'join'
+          ).length;
+          if (joinCount === 2) {
+            return {
+              user: {
+                id: userId,
+                displayName: member.displayName,
+                avatarUrl: member.avatarUrl,
+              },
+            };
+          }
+        }
+      }
+    }
+
     return null;
   }
 }
