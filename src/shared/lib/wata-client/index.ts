@@ -23,7 +23,7 @@
  */
 
 // Main client class
-export { WataClient } from './wata-client.js';
+export { WataClient } from './wata-client';
 
 // Domain types
 export type {
@@ -43,4 +43,4 @@ export type {
   WataClientEvents,
   WataClientEventName,
   WataClientEventHandler,
-} from './types.js';
+} from './types';

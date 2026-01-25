@@ -1237,20 +1237,40 @@ class MatrixService {
     if (!this.client) throw new Error('Not logged in');
 
     return new Promise((resolve, reject) => {
+      let resolved = false;
       const timeout = setTimeout(() => {
-        reject(new Error(`Sync timeout after ${timeoutMs}ms`));
+        if (!resolved) {
+          reject(new Error(`Sync timeout after ${timeoutMs}ms`));
+        }
       }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        unsubscribe();
+      };
 
       const onSync = (state: string) => {
         if (state === 'PREPARED' || state === 'SYNCING') {
-          clearTimeout(timeout);
-          const unsubscribe = this.onSyncStateChange(onSync);
-          unsubscribe();
-          resolve();
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            resolve();
+          }
         }
       };
 
-      this.onSyncStateChange(onSync);
+      // Subscribe first to avoid race condition
+      const unsubscribe = this.onSyncStateChange(onSync);
+
+      // Check if already synced after subscribing
+      const currentState = this.currentSyncState;
+      if (currentState === 'PREPARED' || currentState === 'SYNCING') {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve();
+        }
+      }
     });
   }
 

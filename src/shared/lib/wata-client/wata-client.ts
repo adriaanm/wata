@@ -8,10 +8,10 @@
  * See docs/planning/client-lib.md for design rationale.
  */
 
-import { MatrixApi } from './matrix-api.js';
-import { SyncEngine } from './sync-engine.js';
-import type { RoomState, MemberInfo } from './sync-engine.js';
-import type { MatrixEvent } from './matrix-api.js';
+import { MatrixApi } from './matrix-api';
+import { SyncEngine } from './sync-engine';
+import type { RoomState, MemberInfo } from './sync-engine';
+import type { MatrixEvent } from './matrix-api';
 import type {
   User,
   Contact,
@@ -21,7 +21,7 @@ import type {
   ConnectionState,
   WataClientEvents,
   WataClientEventName,
-} from './types.js';
+} from './types';
 
 // ============================================================================
 // WataClient Implementation

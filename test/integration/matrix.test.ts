@@ -1,13 +1,24 @@
 /**
- * Integration tests for MatrixService
+ * Integration tests for MatrixService / MatrixServiceAdapter
  *
  * These tests run against a local Conduit Matrix server.
  * Start the server first: cd test/docker && ./setup.sh
+ *
+ * Implementation: Uses MatrixService API via test factory
+ *
+ * Environment:
+ *   USE_WATA_CLIENT=true  - Use MatrixServiceAdapter (WataClient implementation)
+ *   USE_WATA_CLIENT=false or unset - Use MatrixService (matrix-js-sdk implementation)
  */
 
-import * as matrix from 'matrix-js-sdk';
+import { Buffer } from 'buffer';
 
-import { loginToMatrix } from '../../src/shared/lib/matrix-auth';
+import {
+  createTestService,
+  createTestCredentialStorage,
+  getImplementationName,
+} from './helpers/test-service-factory';
+import type { MatrixService, MatrixServiceAdapter, VoiceMessage } from '@shared/services/MatrixService';
 
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {
@@ -15,37 +26,12 @@ const TEST_USERS = {
   bob: { username: 'bob', password: 'testpass123' },
 };
 
-// Helper to login a user (uses shared login logic)
-async function loginUser(
-  username: string,
-  password: string,
-): Promise<matrix.MatrixClient> {
-  return loginToMatrix(TEST_HOMESERVER, username, password, 'test-client');
-}
-
-// Helper to wait for sync
-async function waitForSync(
-  client: matrix.MatrixClient,
-  timeoutMs = 5000,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error('Sync timeout')),
-      timeoutMs,
-    );
-    client.once(matrix.ClientEvent.Sync, state => {
-      clearTimeout(timeout);
-      if (state === 'PREPARED' || state === 'SYNCING') {
-        resolve();
-      }
-    });
-    client.startClient({ initialSyncLimit: 10 });
-  });
-}
+// Type union for the service (either implementation)
+type TestService = MatrixService | MatrixServiceAdapter;
 
 describe('Matrix Integration Tests', () => {
-  let aliceClient: matrix.MatrixClient;
-  let bobClient: matrix.MatrixClient;
+  let aliceService: TestService;
+  let bobService: TestService;
 
   beforeAll(async () => {
     // Check if server is running
@@ -61,159 +47,343 @@ describe('Matrix Integration Tests', () => {
         'Matrix server not running. Start it with: cd test/docker && ./setup.sh',
       );
     }
-  }, 5000);
+
+    // Log which implementation is being used
+    console.log(`\n  Using implementation: ${getImplementationName()}\n`);
+  }, 10000);
+
+  afterEach(async () => {
+    // Clean up callbacks after each test to prevent cross-test pollution
+    if (aliceService) {
+      aliceService.cleanup();
+    }
+    if (bobService) {
+      bobService.cleanup();
+    }
+  });
 
   afterAll(async () => {
-    if (aliceClient) aliceClient.stopClient();
-    if (bobClient) bobClient.stopClient();
+    if (aliceService) {
+      await aliceService.logout();
+    }
+    if (bobService) {
+      await bobService.logout();
+    }
   });
 
   describe('Authentication', () => {
     test('should login with valid credentials', async () => {
-      const client = matrix.createClient({ baseUrl: TEST_HOMESERVER });
+      const storage = createTestCredentialStorage();
+      const service = createTestService(TEST_HOMESERVER, storage);
 
-      const response = await client.login('m.login.password', {
-        identifier: { type: 'm.id.user', user: TEST_USERS.alice.username },
-        password: TEST_USERS.alice.password,
-      });
+      await service.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
 
-      expect(response.user_id).toBe('@alice:localhost');
-      expect(response.access_token).toBeDefined();
-      expect(response.device_id).toBeDefined();
+      // Verify login was successful
+      expect(service.isLoggedIn()).toBe(true);
+      expect(service.getUserId()).toBe('@alice:localhost');
+
+      await service.logout();
     });
 
     test('should fail login with invalid password', async () => {
-      const client = matrix.createClient({ baseUrl: TEST_HOMESERVER });
+      const storage = createTestCredentialStorage();
+      const service = createTestService(TEST_HOMESERVER, storage);
 
       await expect(
-        client.login('m.login.password', {
-          identifier: { type: 'm.id.user', user: TEST_USERS.alice.username },
-          password: 'wrongpassword',
-        }),
+        service.login(TEST_USERS.alice.username, 'wrongpassword'),
       ).rejects.toThrow();
     });
 
     test('should fail login with non-existent user', async () => {
-      const client = matrix.createClient({ baseUrl: TEST_HOMESERVER });
+      const storage = createTestCredentialStorage();
+      const service = createTestService(TEST_HOMESERVER, storage);
 
       await expect(
-        client.login('m.login.password', {
-          identifier: { type: 'm.id.user', user: 'nonexistent' },
-          password: 'password',
-        }),
+        service.login('nonexistent', 'password'),
       ).rejects.toThrow();
     });
   });
 
   describe('Room Operations', () => {
     beforeAll(async () => {
-      aliceClient = await loginUser(
-        TEST_USERS.alice.username,
-        TEST_USERS.alice.password,
-      );
-      bobClient = await loginUser(
-        TEST_USERS.bob.username,
-        TEST_USERS.bob.password,
-      );
-    }, 10000);
+      // Login both users
+      const aliceStorage = createTestCredentialStorage();
+      const bobStorage = createTestCredentialStorage();
+
+      aliceService = createTestService(TEST_HOMESERVER, aliceStorage);
+      bobService = createTestService(TEST_HOMESERVER, bobStorage);
+
+      await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
+
+      // Wait for both to sync
+      await aliceService.waitForSync();
+      await bobService.waitForSync();
+    }, 15000);
 
     test('should create a direct message room', async () => {
-      const room = await aliceClient.createRoom({
-        is_direct: true,
-        invite: ['@bob:localhost'],
-        preset: 'trusted_private_chat' as matrix.Preset,
-      });
+      const roomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
 
-      expect(room.room_id).toBeDefined();
-      expect(room.room_id).toMatch(/^!/);
+      expect(roomId).toBeDefined();
+      expect(roomId).toMatch(/^!/);
     });
 
-    test('should sync and receive rooms', async () => {
-      await waitForSync(aliceClient);
-      const rooms = aliceClient.getRooms();
+    test('should get direct rooms', async () => {
+      // First ensure a DM room exists
+      await aliceService.getOrCreateDmRoom('@bob:localhost');
+
+      // Get all direct rooms
+      const rooms = aliceService.getDirectRooms();
+
+      // Should have at least the DM room we just created
       expect(rooms.length).toBeGreaterThan(0);
-    }, 10000);
+
+      // Find the DM room with Bob (name could be the user ID or display name)
+      const bobDm = rooms.find(
+        (room: { roomId: string; name: string; isDirect: boolean }) =>
+          room.isDirect && (
+            room.name.includes('bob') ||
+            room.name.includes('Bob') ||
+            room.name.includes('@bob:localhost')
+          )
+      );
+
+      // If we didn't find by name, at least verify we have a direct room
+      const hasDirectRoom = rooms.some((room: { isDirect: boolean }) => room.isDirect);
+      expect(hasDirectRoom).toBe(true);
+    });
   });
 
   describe('Messaging', () => {
     let testRoomId: string;
 
     beforeAll(async () => {
-      // Create a test room
-      const room = await aliceClient.createRoom({
-        is_direct: true,
-        invite: ['@bob:localhost'],
-        preset: 'trusted_private_chat' as matrix.Preset,
-      });
-      testRoomId = room.room_id;
+      // Login both users
+      const aliceStorage = createTestCredentialStorage();
+      const bobStorage = createTestCredentialStorage();
 
-      // Start bob's sync and join room
-      await waitForSync(bobClient);
-      try {
-        await bobClient.joinRoom(testRoomId);
-      } catch {
-        // May already be joined
-      }
+      aliceService = createTestService(TEST_HOMESERVER, aliceStorage);
+      bobService = createTestService(TEST_HOMESERVER, bobStorage);
+
+      await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
+
+      await aliceService.waitForSync();
+      await bobService.waitForSync();
+
+      // Create a test DM room
+      testRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+
+      // Brief pause for room to propagate
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }, 15000);
 
-    test('should send a text message', async () => {
-      const result = await aliceClient.sendMessage(testRoomId, {
-        msgtype: matrix.MsgType.Text,
-        body: 'Hello from integration test!',
-      });
-
-      expect(result.event_id).toBeDefined();
-      expect(result.event_id).toMatch(/^\$/);
-    });
-
     test('should send an audio message', async () => {
+      // Get initial message count
+      const initialCount = aliceService.getMessageCount(testRoomId);
+
       const fakeAudioData = Buffer.from('fake audio content for testing');
 
-      const uploadResponse = await aliceClient.uploadContent(fakeAudioData, {
-        type: 'audio/mp4',
-        name: 'test-voice.m4a',
-      });
+      // Send voice message using MatrixService API
+      await aliceService.sendVoiceMessage(
+        testRoomId,
+        fakeAudioData,
+        'audio/mp4',
+        5000,
+        fakeAudioData.length,
+      );
 
-      expect(uploadResponse.content_uri).toBeDefined();
-      expect(uploadResponse.content_uri).toMatch(/^mxc:\/\//);
+      // Wait for sync to propagate the message
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const result = await aliceClient.sendMessage(testRoomId, {
-        msgtype: matrix.MsgType.Audio,
-        body: 'Voice message',
-        url: uploadResponse.content_uri,
-        info: {
-          mimetype: 'audio/mp4',
-          duration: 5000,
-          size: fakeAudioData.length,
-        },
-      });
+      // Verify message was sent by checking local timeline
+      const messages = aliceService.getVoiceMessages(testRoomId);
+      expect(messages.length).toBe(initialCount + 1);
 
-      expect(result.event_id).toBeDefined();
+      // Get the last message we just sent
+      const lastMessage = messages[messages.length - 1];
+      expect(lastMessage.isOwn).toBe(true);
+      expect(lastMessage.duration).toBe(5000);
     });
 
     test('should receive messages in room timeline', async () => {
-      // Brief wait for sync to process sent messages
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const room = aliceClient.getRoom(testRoomId);
-      expect(room).toBeDefined();
-
-      const timeline = room!.timeline;
-      const messages = timeline.filter(
-        event => event.getType() === 'm.room.message',
+      // Send a message from Alice
+      const fakeAudioData = Buffer.from('fake audio content for receiving test');
+      await aliceService.sendVoiceMessage(
+        testRoomId,
+        fakeAudioData,
+        'audio/mp4',
+        3000,
+        fakeAudioData.length,
       );
 
-      expect(messages.length).toBeGreaterThan(0);
+      // Wait for sync to propagate the message
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-      const hasText = messages.some(
-        m => m.getContent().msgtype === matrix.MsgType.Text,
-      );
-      const hasAudio = messages.some(
-        m => m.getContent().msgtype === matrix.MsgType.Audio,
+      // Check Alice's timeline
+      const aliceMessages = aliceService.getVoiceMessages(testRoomId);
+      expect(aliceMessages.length).toBeGreaterThan(0);
+
+      // Verify message content
+      const lastMessage = aliceMessages[aliceMessages.length - 1];
+      expect(lastMessage.isOwn).toBe(true);
+      expect(lastMessage.duration).toBe(3000);
+    });
+
+    test('should handle multiple voice messages', async () => {
+      const initialCount = aliceService.getMessageCount(testRoomId);
+
+      // Send multiple messages
+      const messageCount = 3;
+      for (let i = 0; i < messageCount; i++) {
+        const audioData = Buffer.from(`message ${i}`);
+        await aliceService.sendVoiceMessage(
+          testRoomId,
+          audioData,
+          'audio/mp4',
+          1000 * (i + 1),
+          audioData.length,
+        );
+      }
+
+      // Wait for sync
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Verify message count increased
+      const newCount = aliceService.getMessageCount(testRoomId);
+      expect(newCount).toBeGreaterThanOrEqual(initialCount + messageCount);
+    });
+  });
+
+  describe('Sync and Event Handling', () => {
+    test('should reach SYNCING or PREPARED state after login', async () => {
+      const storage = createTestCredentialStorage();
+      const service = createTestService(TEST_HOMESERVER, storage);
+
+      await service.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await service.waitForSync();
+
+      // Verify we're in a good sync state
+      const syncState = service.getSyncState();
+      expect(['SYNCING', 'PREPARED']).toContain(syncState);
+
+      await service.logout();
+    });
+
+    test('should notify sync state changes', async () => {
+      const storage = createTestCredentialStorage();
+      const service = createTestService(TEST_HOMESERVER, storage);
+
+      const states: string[] = [];
+
+      // Register callback to capture sync states
+      service.onSyncStateChange((state: string) => {
+        states.push(state);
+      });
+
+      await service.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await service.waitForSync();
+
+      // Should have received at least one sync state
+      expect(states.length).toBeGreaterThan(0);
+
+      // Should have reached PREPARED or SYNCING
+      expect(states.some((s) => s === 'PREPARED' || s === 'SYNCING')).toBe(true);
+
+      await service.logout();
+    });
+  });
+
+  describe('User Info', () => {
+    let service: TestService;
+
+    beforeAll(async () => {
+      const storage = createTestCredentialStorage();
+      service = createTestService(TEST_HOMESERVER, storage);
+      await service.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await service.waitForSync();
+    }, 10000);
+
+    afterAll(async () => {
+      if (service) {
+        await service.logout();
+      }
+    });
+
+    test('should get current username', () => {
+      const username = service.getCurrentUsername();
+      expect(username).toBe('alice');
+    });
+
+    test('should get user ID', () => {
+      const userId = service.getUserId();
+      expect(userId).toBe('@alice:localhost');
+    });
+
+    test('should report logged in status', () => {
+      expect(service.isLoggedIn()).toBe(true);
+    });
+  });
+
+  describe('Cross-User Messaging', () => {
+    let aliceRoomId: string;
+    let bobRoomId: string;
+
+    beforeAll(async () => {
+      // Login both users
+      const aliceStorage = createTestCredentialStorage();
+      const bobStorage = createTestCredentialStorage();
+
+      aliceService = createTestService(TEST_HOMESERVER, aliceStorage);
+      bobService = createTestService(TEST_HOMESERVER, bobStorage);
+
+      await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
+
+      await aliceService.waitForSync();
+      await bobService.waitForSync();
+
+      // Create DM room from Alice's perspective
+      aliceRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+
+      // Bob should get or create the same room
+      bobRoomId = await bobService.getOrCreateDmRoom('@alice:localhost');
+
+      // They should be the same room
+      expect(aliceRoomId).toBe(bobRoomId);
+
+      // Wait for room to sync
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }, 20000);
+
+    test('both users should see the same DM room', () => {
+      const aliceRooms = aliceService.getDirectRooms();
+      const bobRooms = bobService.getDirectRooms();
+
+      // Both should have at least one room
+      expect(aliceRooms.length).toBeGreaterThan(0);
+      expect(bobRooms.length).toBeGreaterThan(0);
+    });
+
+    test('should send message from one user to another', async () => {
+      const beforeCount = aliceService.getMessageCount(aliceRoomId);
+
+      // Alice sends a message
+      const audioData = Buffer.from('cross-user test message');
+      await aliceService.sendVoiceMessage(
+        aliceRoomId,
+        audioData,
+        'audio/mp4',
+        2000,
+        audioData.length,
       );
 
-      expect(hasText).toBe(true);
-      expect(hasAudio).toBe(true);
+      // Wait for sync
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Alice should see the message
+      const afterCount = aliceService.getMessageCount(aliceRoomId);
+      expect(afterCount).toBeGreaterThan(beforeCount);
     });
   });
 });

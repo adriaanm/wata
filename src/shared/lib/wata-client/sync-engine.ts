@@ -16,7 +16,7 @@ import type {
   InvitedRoomSync,
   LeftRoomSync,
   MatrixEvent,
-} from './matrix-api.js';
+} from './matrix-api';
 
 // ============================================================================
 // State Types
