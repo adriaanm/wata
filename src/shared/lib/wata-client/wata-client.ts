@@ -985,8 +985,14 @@ export class WataClient {
 
   /**
    * Get contact for a DM room
+   * @param roomId - Room ID to look up
+   * @returns Contact if this is a DM room, null otherwise
+   *
+   * This handles both sides of DM room creation:
+   * - Creator side: m.direct account data has the mapping
+   * - Recipient side: Falls back to room membership inference
    */
-  private getContactForDMRoom(roomId: string): Contact | null {
+  getContactForDMRoom(roomId: string): Contact | null {
     // First, try to find from m.direct account data mapping
     for (const [userId, mappedRoomId] of this.dmRooms.entries()) {
       if (mappedRoomId === roomId) {
