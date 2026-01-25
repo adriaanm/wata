@@ -467,9 +467,201 @@ This is ~16 endpoints vs 100+ in the full Matrix spec.
 
 ## Next Steps
 
-1. [ ] Review and approve API design
-2. [ ] Prototype HTTP client with login + sync
+1. [x] Review and approve API design
+2. [x] Prototype HTTP client with login + sync
 3. [ ] Test against Conduit to validate endpoint behavior
-4. [ ] Implement minimal sync engine
-5. [ ] Build domain layer on top
+4. [x] Implement minimal sync engine
+5. [x] Build domain layer on top
 6. [ ] Migrate MatrixService to use new client
+
+---
+
+## Test Migration Plan
+
+The current integration tests (`test/integration/matrix.test.ts`) use `matrix-js-sdk` directly. To validate the new WataClient, we need to migrate these tests to use MatrixService, then swap in MatrixServiceAdapter.
+
+### Current Test Structure
+
+```typescript
+// Current: Uses matrix-js-sdk directly
+import * as matrix from 'matrix-js-sdk';
+
+const client = matrix.createClient({ baseUrl: TEST_HOMESERVER });
+await client.login('m.login.password', { ... });
+await client.createRoom({ ... });
+await client.sendMessage(roomId, { ... });
+```
+
+### Target Test Structure
+
+```typescript
+// Target: Uses MatrixService (can swap implementation)
+import { MatrixService } from '@shared/services/MatrixService';
+// OR: import { MatrixServiceAdapter as MatrixService } from '@shared/services/MatrixServiceAdapter';
+
+const service = new MatrixService();
+service.setHomeserverUrl(TEST_HOMESERVER);
+await service.login(username, password);
+await service.getOrCreateDmRoom(userId);
+await service.sendVoiceMessage(roomId, buffer, 'audio/mp4', 5000, buffer.length);
+```
+
+### Migration Steps
+
+#### Step 1: Create test factory function
+
+Add to `test/integration/helpers/`:
+
+```typescript
+// test-service-factory.ts
+import { MatrixService } from '@shared/services/MatrixService';
+// Toggle this import to switch implementations:
+// import { MatrixServiceAdapter as MatrixService } from '@shared/services/MatrixServiceAdapter';
+
+export function createTestService(homeserver: string): MatrixService {
+  const service = new MatrixService();
+  service.setHomeserverUrl(homeserver);
+  return service;
+}
+```
+
+#### Step 2: Map SDK calls to MatrixService methods
+
+| Current (matrix-js-sdk) | Target (MatrixService) |
+|------------------------|------------------------|
+| `matrix.createClient({ baseUrl })` | `createTestService(baseUrl)` |
+| `client.login('m.login.password', {...})` | `service.login(username, password)` |
+| `client.startClient()` + wait for sync | `service.login()` (handles sync internally) |
+| `client.stopClient()` | `service.logout()` |
+| `client.createRoom({ is_direct, invite })` | `service.getOrCreateDmRoom(userId)` |
+| `client.joinRoom(roomId)` | `service.joinRoom(roomId)` |
+| `client.getRooms()` | `service.getDirectRooms()` |
+| `client.getRoom(roomId)` | Access via `getDirectRooms().find(...)` |
+| `client.uploadContent(buffer, opts)` | Handled internally by `sendVoiceMessage` |
+| `client.sendMessage(roomId, content)` | `service.sendVoiceMessage(roomId, ...)` |
+| `room.timeline` | `service.getVoiceMessages(roomId)` |
+
+#### Step 3: Rewrite test cases
+
+**Authentication tests:**
+```typescript
+describe('Authentication', () => {
+  test('should login with valid credentials', async () => {
+    const service = createTestService(TEST_HOMESERVER);
+    await service.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+
+    expect(service.isLoggedIn()).toBe(true);
+    expect(service.getUserId()).toBe('@alice:localhost');
+  });
+
+  test('should fail login with invalid password', async () => {
+    const service = createTestService(TEST_HOMESERVER);
+    await expect(
+      service.login(TEST_USERS.alice.username, 'wrongpassword')
+    ).rejects.toThrow();
+  });
+});
+```
+
+**Room tests:**
+```typescript
+describe('Room Operations', () => {
+  let aliceService: MatrixService;
+
+  beforeAll(async () => {
+    aliceService = createTestService(TEST_HOMESERVER);
+    await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+  });
+
+  test('should create a DM room', async () => {
+    const roomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+    expect(roomId).toMatch(/^!/);
+  });
+
+  test('should list rooms after sync', async () => {
+    const rooms = aliceService.getDirectRooms();
+    expect(rooms.length).toBeGreaterThan(0);
+  });
+});
+```
+
+**Messaging tests:**
+```typescript
+describe('Messaging', () => {
+  let aliceService: MatrixService;
+  let testRoomId: string;
+
+  beforeAll(async () => {
+    aliceService = createTestService(TEST_HOMESERVER);
+    await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+    testRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
+  });
+
+  test('should send a voice message', async () => {
+    const fakeAudio = Buffer.from('fake audio');
+    await aliceService.sendVoiceMessage(
+      testRoomId,
+      fakeAudio,
+      'audio/mp4',
+      5000,
+      fakeAudio.length
+    );
+
+    // Wait for sync
+    await new Promise(r => setTimeout(r, 500));
+
+    const messages = aliceService.getVoiceMessages(testRoomId);
+    expect(messages.length).toBeGreaterThan(0);
+  });
+});
+```
+
+#### Step 4: Add adapter toggle
+
+In `test/integration/helpers/test-service-factory.ts`:
+
+```typescript
+const USE_WATA_CLIENT = process.env.USE_WATA_CLIENT === 'true';
+
+export function createTestService(homeserver: string) {
+  if (USE_WATA_CLIENT) {
+    const { MatrixServiceAdapter } = require('@shared/services/MatrixServiceAdapter');
+    const service = new MatrixServiceAdapter();
+    service.setHomeserverUrl(homeserver);
+    return service;
+  } else {
+    const { MatrixService } = require('@shared/services/MatrixService');
+    const service = new MatrixService();
+    service.setHomeserverUrl(homeserver);
+    return service;
+  }
+}
+```
+
+#### Step 5: Run tests with both implementations
+
+```bash
+# Test with original MatrixService (baseline)
+pnpm test:integration
+
+# Test with WataClient via adapter
+USE_WATA_CLIENT=true pnpm test:integration
+```
+
+### Tests to Skip Initially
+
+Some tests may not be supported by WataClient initially:
+
+| Test | Reason | Action |
+|------|--------|--------|
+| Text message send | WataClient only supports audio | Skip or adapt |
+| Direct SDK access | `getClient()` returns null in adapter | Skip |
+| Room timeline access | Different API shape | Adapt to use `getVoiceMessages()` |
+
+### Success Criteria
+
+1. All tests pass with original MatrixService
+2. Authentication tests pass with MatrixServiceAdapter
+3. Room creation tests pass with MatrixServiceAdapter
+4. Voice message send/receive tests pass with MatrixServiceAdapter
+5. No regressions when switching between implementations
