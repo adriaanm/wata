@@ -123,6 +123,14 @@ class MatrixServiceAdapter {
   private roomIdByContactUserId: Map<string, string> = new Map();
   private familyRoomId: string | null = null;
 
+  // Cache for DM conversations to support synchronous getDirectRooms() and getVoiceMessages()
+  // Maps roomId -> conversation data (contact, messages, etc.)
+  private dmConversationCache: Map<string, {
+    contact: Contact;
+    roomId: string;
+    messages: VoiceMessage[];
+  }> = new Map();
+
   constructor(credentialStorage: CredentialStorage, _logger?: unknown) {
     this.credentialStorage = credentialStorage;
     this.wataClient = new WataClient(HOMESERVER_URL);
@@ -162,6 +170,28 @@ class MatrixServiceAdapter {
       const roomId = conversation.id;
       const matrixMessage = this.wataToMatrixMessage(message);
       this.messageCallbacks.forEach((cb) => cb(roomId, matrixMessage));
+
+      // Cache DM conversations for synchronous getDirectRooms() and getVoiceMessages() access
+      if (conversation.type === 'dm' && conversation.contact) {
+        // Get existing cache or create new
+        const existing = this.dmConversationCache.get(conversation.id);
+        const messages = existing ? existing.messages : [];
+        // Add the new message if not already present
+        const messageIndex = messages.findIndex((m) => m.eventId === matrixMessage.eventId);
+        if (messageIndex === -1) {
+          messages.push(matrixMessage);
+        }
+
+        this.dmConversationCache.set(conversation.id, {
+          contact: conversation.contact,
+          roomId: conversation.id,
+          messages,
+        });
+        // Also update the user ID -> room ID mapping
+        this.roomIdByContactUserId.set(conversation.contact.user.id, conversation.id);
+        this.contactByUserId.set(conversation.contact.user.id, conversation.contact);
+      }
+
       this.notifyRoomUpdate();
     });
 
@@ -272,10 +302,23 @@ class MatrixServiceAdapter {
       });
     }
 
-    // Note: We can't easily get DM conversations without async calls
-    // This is a limitation of adapting the async WataClient to the sync MatrixService API
-    // For now, we only return the family room
-    // Full DM support would require refactoring to async
+    // Add DM rooms from cache
+    // We iterate through cached DM conversations and convert them to MatrixRoom format
+    for (const [roomId, cacheData] of this.dmConversationCache.entries()) {
+      const { contact } = cacheData;
+
+      // Try to get actual conversation data from WataClient
+      // Note: This is a sync call that may not have all messages yet
+      // But we can at least return the basic room info
+      rooms.push({
+        roomId,
+        name: contact.user.displayName,
+        avatarUrl: contact.user.avatarUrl,
+        lastMessage: null, // We'd need async getConversation to get messages
+        lastMessageTime: null,
+        isDirect: true,
+      });
+    }
 
     return rooms;
   }
@@ -361,6 +404,7 @@ class MatrixServiceAdapter {
     this.contactByUserId.clear();
     this.roomIdByContactUserId.clear();
     this.familyRoomId = null;
+    this.dmConversationCache.clear();
   }
 
   /**
@@ -436,6 +480,15 @@ class MatrixServiceAdapter {
     // Get or create conversation
     const conversation = await this.wataClient.getConversation(contact);
     this.roomIdByContactUserId.set(userId, conversation.id);
+
+    // Cache the conversation for synchronous access
+    // Convert all messages to MatrixService format
+    const messages = conversation.messages.map((m) => this.wataToMatrixMessage(m));
+    this.dmConversationCache.set(conversation.id, {
+      contact,
+      roomId: conversation.id,
+      messages,
+    });
 
     return conversation.id;
   }
@@ -595,8 +648,12 @@ class MatrixServiceAdapter {
       return convo?.messages.map((m) => this.wataToMatrixMessage(m)) || [];
     }
 
-    // For DM rooms, we'd need to get the conversation
-    // This is a limitation - we can't easily sync this without async
+    // For DM rooms, use the cached conversation data
+    const cached = this.dmConversationCache.get(roomId);
+    if (cached) {
+      return cached.messages;
+    }
+
     return [];
   }
 
