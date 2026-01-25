@@ -111,11 +111,8 @@ export class WataClient {
       throw new Error('Already connected');
     }
 
-    // Start sync loop
+    // Start sync loop (includes initial sync)
     await this.syncEngine.start();
-
-    // Wait for initial sync to complete
-    await this.waitForInitialSync();
 
     // Discover family room via #family alias
     await this.discoverFamilyRoom();
@@ -461,19 +458,6 @@ export class WataClient {
     // Handle membership changes
     this.syncEngine.on('membershipChanged', (roomId, userId, membership) => {
       this.handleMembershipChanged(roomId, userId, membership);
-    });
-  }
-
-  /**
-   * Wait for initial sync to complete
-   */
-  private async waitForInitialSync(): Promise<void> {
-    return new Promise((resolve) => {
-      const handler = () => {
-        this.syncEngine.off('synced', handler);
-        resolve();
-      };
-      this.syncEngine.on('synced', handler);
     });
   }
 

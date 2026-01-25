@@ -141,6 +141,7 @@ export class SyncEngine {
 
   /**
    * Start the sync loop
+   * Performs an initial sync before starting the background loop
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -152,6 +153,22 @@ export class SyncEngine {
     }
 
     this.isRunning = true;
+
+    // Perform initial sync with a short timeout to get started quickly
+    try {
+      const response = await this.api.sync({
+        timeout: 5000, // 5 second timeout for initial sync
+      });
+      this.processSyncResponse(response);
+      this.nextBatch = response.next_batch;
+      this.emit('synced', response.next_batch);
+    } catch (error) {
+      // If initial sync fails, we'll retry in the background loop
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.emit('error', err);
+    }
+
+    // Start the background sync loop
     this.syncLoopPromise = this.runSyncLoop();
   }
 
@@ -165,11 +182,10 @@ export class SyncEngine {
 
     this.isRunning = false;
 
-    // Wait for the current sync cycle to complete
-    if (this.syncLoopPromise) {
-      await this.syncLoopPromise;
-      this.syncLoopPromise = null;
-    }
+    // Don't wait for syncLoopPromise - it will exit on its own when isRunning is false
+    // The sync loop checks isRunning at the start of each iteration
+    // and will exit after the current long-poll times out or completes
+    this.syncLoopPromise = null;
   }
 
   /**
