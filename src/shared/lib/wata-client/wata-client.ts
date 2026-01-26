@@ -1010,13 +1010,15 @@ export class WataClient {
     // Handle voice messages
     if (this.isVoiceMessageEvent(event)) {
       this.logger.log(`[WataClient] Voice message received in room ${roomId} from ${event.sender}`);
-      const message = this.eventToVoiceMessage(event);
 
       const room = this.syncEngine.getRoom(roomId);
       if (!room) {
         this.logger.warn(`[WataClient] Room ${roomId} not found in sync state`);
         return;
       }
+
+      // Pass room to eventToVoiceMessage for playedBy data
+      const message = this.eventToVoiceMessage(event, room);
 
       // Determine conversation type by checking canonical alias
       let conversation: Conversation;

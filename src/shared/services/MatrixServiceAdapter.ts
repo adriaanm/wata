@@ -132,7 +132,9 @@ class MatrixServiceAdapter {
 
   // Mappings to bridge between WataClient and MatrixService
   private contactByUserId: Map<string, Contact> = new Map();
-  /** contactUserId -> Set of roomIds (may be multiple due to race conditions) */
+  /** contactUserId -> PRIMARY roomId (deterministically selected, one per contact) */
+  private primaryRoomIdByContactUserId: Map<string, string> = new Map();
+  /** contactUserId -> Set of ALL roomIds (may be multiple due to race conditions) */
   private roomIdsByContactUserId: Map<string, Set<string>> = new Map();
   private familyRoomId: string | null = null;
 
@@ -184,7 +186,16 @@ class MatrixServiceAdapter {
       // Update DM room -> contact mapping for getDirectRooms()
       if (conversation.type === 'dm' && conversation.contact) {
         const contactId = conversation.contact.user.id;
-        // Add to the set of room IDs for this contact
+
+        // Track the PRIMARY room for this contact
+        // The conversation.id from WataClient is the PRIMARY room (deterministically selected)
+        const existingPrimary = this.primaryRoomIdByContactUserId.get(contactId);
+        if (existingPrimary && existingPrimary !== conversation.id) {
+          log(`[MatrixServiceAdapter] Contact ${contactId}: primary room changed from ${existingPrimary.slice(-12)} to ${conversation.id.slice(-12)}`);
+        }
+        this.primaryRoomIdByContactUserId.set(contactId, conversation.id);
+
+        // Add to the set of ALL room IDs for this contact
         if (!this.roomIdsByContactUserId.has(contactId)) {
           this.roomIdsByContactUserId.set(contactId, new Set());
         }
@@ -260,8 +271,7 @@ class MatrixServiceAdapter {
 
   /**
    * Convert WataClient data to MatrixService MatrixRoom format
-   * Deduplicates DM rooms by contact - picks the primary room deterministically
-   * (uses room ID lexicographic ordering as proxy for creation timestamp ordering)
+   * Returns the PRIMARY room for each contact (deterministically selected by WataClient)
    */
   getDirectRooms(): MatrixRoom[] {
     const rooms: MatrixRoom[] = [];
@@ -280,43 +290,21 @@ class MatrixServiceAdapter {
       });
     }
 
-    // Deduplicate DM rooms by contact
-    // Multiple rooms may exist with the same contact due to race conditions
-    // We pick the primary room deterministically (lexicographically smallest room ID)
-    // This matches the deterministic selection in WataClient (oldest by creation timestamp)
-    const contactRooms = new Map<string, { roomId: string; contact: Contact; messageCount: number }>();
-    const duplicateContacts = new Map<string, string[]>(); // contactId -> [roomIds]
+    // Add PRIMARY DM rooms only
+    // primaryRoomIdByContactUserId tracks the primary room for each contact
+    // as determined by WataClient's deterministic selection (oldest by creation timestamp)
+    for (const [contactId, primaryRoomId] of this.primaryRoomIdByContactUserId.entries()) {
+      const contact = this.contactByUserId.get(contactId);
+      if (!contact) {
+        continue;
+      }
 
-    for (const [roomId, contact] of this.dmRoomContacts.entries()) {
-      const contactId = contact.user.id;
-      const convo = this.wataClient.getConversationByRoomId(roomId);
+      const convo = this.wataClient.getConversationByRoomId(primaryRoomId);
       const messageCount = convo?.messages.length ?? 0;
 
-      // Track all rooms for each contact to detect duplicates
-      const roomsForContact = duplicateContacts.get(contactId) || [];
-      roomsForContact.push(roomId);
-      duplicateContacts.set(contactId, roomsForContact);
-
-      const existing = contactRooms.get(contactId);
-      // Deterministic selection: prefer room with more messages, tiebreak by lexicographic room ID
-      if (!existing || messageCount > existing.messageCount || (messageCount === existing.messageCount && roomId < existing.roomId)) {
-        contactRooms.set(contactId, { roomId, contact, messageCount });
-      }
-    }
-
-    // Warn about duplicate DM rooms and log selection
-    for (const [contactId, roomIds] of duplicateContacts.entries()) {
-      if (roomIds.length > 1) {
-        const selected = contactRooms.get(contactId);
-        logWarn(`[MatrixServiceAdapter] Multiple DM rooms with ${contactId}. Selected: ${selected?.roomId} (primary of ${roomIds.length} rooms)`);
-      }
-    }
-
-    // Add deduplicated DM rooms
-    for (const { roomId, contact, messageCount } of contactRooms.values()) {
-      log(`[MatrixServiceAdapter] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`);
+      log(`[MatrixServiceAdapter] getDirectRooms: DM with ${contactId} -> primary room ${primaryRoomId} (${messageCount} msgs)`);
       rooms.push({
-        roomId,
+        roomId: primaryRoomId,
         name: contact.user.displayName,
         avatarUrl: contact.user.avatarUrl,
         lastMessage: null,
@@ -408,6 +396,7 @@ class MatrixServiceAdapter {
     this.currentUsername = null;
     this.currentPassword = null;
     this.contactByUserId.clear();
+    this.primaryRoomIdByContactUserId.clear();
     this.roomIdsByContactUserId.clear();
     this.familyRoomId = null;
     this.dmRoomContacts.clear();
@@ -486,7 +475,11 @@ class MatrixServiceAdapter {
     // Get or create conversation
     const conversation = await this.wataClient.getConversation(contact);
 
-    // Add to the set of room IDs for this contact (may be multiple due to races)
+    // Track the PRIMARY room for this contact
+    // WataClient.getConversation() returns the primary room (deterministically selected)
+    this.primaryRoomIdByContactUserId.set(userId, conversation.id);
+
+    // Add to the set of ALL room IDs for this contact (may be multiple due to races)
     if (!this.roomIdsByContactUserId.has(userId)) {
       this.roomIdsByContactUserId.set(userId, new Set());
     }
