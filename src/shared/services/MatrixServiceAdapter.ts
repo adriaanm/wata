@@ -182,9 +182,14 @@ class MatrixServiceAdapter {
 
       // Update DM room -> contact mapping for getDirectRooms()
       if (conversation.type === 'dm' && conversation.contact) {
+        const contactId = conversation.contact.user.id;
+        const existingRoom = this.roomIdByContactUserId.get(contactId);
+        if (existingRoom && existingRoom !== conversation.id) {
+          log(`[MatrixServiceAdapter] Contact ${contactId} now has multiple rooms: ${existingRoom} and ${conversation.id}`);
+        }
         this.dmRoomContacts.set(conversation.id, conversation.contact);
-        this.roomIdByContactUserId.set(conversation.contact.user.id, conversation.id);
-        this.contactByUserId.set(conversation.contact.user.id, conversation.contact);
+        this.roomIdByContactUserId.set(contactId, conversation.id);
+        this.contactByUserId.set(contactId, conversation.contact);
       }
 
       this.notifyRoomUpdate();
@@ -288,15 +293,17 @@ class MatrixServiceAdapter {
       }
     }
 
-    // Warn about duplicate DM rooms
+    // Warn about duplicate DM rooms and log selection
     for (const [contactId, roomIds] of duplicateContacts.entries()) {
       if (roomIds.length > 1) {
-        logWarn(`[MatrixServiceAdapter] Multiple DM rooms detected with ${contactId}: ${roomIds.join(', ')}`);
+        const selected = contactRooms.get(contactId);
+        logWarn(`[MatrixServiceAdapter] Multiple DM rooms with ${contactId}: ${roomIds.join(', ')}. Selected: ${selected?.roomId} (${selected?.messageCount} msgs)`);
       }
     }
 
     // Add deduplicated DM rooms
-    for (const { roomId, contact } of contactRooms.values()) {
+    for (const { roomId, contact, messageCount } of contactRooms.values()) {
+      log(`[MatrixServiceAdapter] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`);
       rooms.push({
         roomId,
         name: contact.user.displayName,
@@ -307,6 +314,7 @@ class MatrixServiceAdapter {
       });
     }
 
+    log(`[MatrixServiceAdapter] getDirectRooms returning ${rooms.length} rooms`);
     return rooms;
   }
 
