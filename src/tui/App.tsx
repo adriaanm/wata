@@ -98,6 +98,29 @@ export function App({ initialProfile, debugMode = false }: AppProps) {
   }, [stdout]);
 
   useEffect(() => {
+    // Listen for sync state changes
+    // Note: ERROR state is transient and handled by Matrix SDK auto-retry + token refresh
+    // We don't show ERROR to users - it will recover automatically
+    const unsubscribe = matrixService.onSyncStateChange(state => {
+      setSyncState(state);
+      if (state === 'PREPARED' || state === 'SYNCING') {
+        // Only navigate to main if we're still on the loading screen
+        setNavigation(prev =>
+          prev.screen === 'loading' ? { screen: 'main' } : prev,
+        );
+      }
+      // Clear error when syncing recovers
+      if (state === 'PREPARED' || state === 'SYNCING') {
+        setError(null);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const initAuth = async () => {
       try {
         // Try to restore session for current profile
@@ -106,27 +129,6 @@ export function App({ initialProfile, debugMode = false }: AppProps) {
           // Fall back to auto-login with current profile
           await matrixService.autoLogin(currentProfile);
         }
-
-        // Listen for sync state changes
-        // Note: ERROR state is transient and handled by Matrix SDK auto-retry + token refresh
-        // We don't show ERROR to users - it will recover automatically
-        const unsubscribe = matrixService.onSyncStateChange(state => {
-          setSyncState(state);
-          if (state === 'PREPARED' || state === 'SYNCING') {
-            // Only navigate to main if we're still on the loading screen
-            setNavigation(prev =>
-              prev.screen === 'loading' ? { screen: 'main' } : prev,
-            );
-          }
-          // Clear error when syncing recovers
-          if (state === 'PREPARED' || state === 'SYNCING') {
-            setError(null);
-          }
-        });
-
-        return () => {
-          unsubscribe();
-        };
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
