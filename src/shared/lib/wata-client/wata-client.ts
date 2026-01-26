@@ -491,55 +491,18 @@ export class WataClient {
       },
     });
 
-    // Optimistically add the event to the timeline immediately
-    // This ensures sent messages are available right away without waiting for sync
-    const optimisticEvent: MatrixEvent = {
-      event_id: sendResponse.event_id,
-      room_id: roomId,
-      sender: this.userId!,
-      type: 'm.room.message',
-      content: {
-        msgtype: 'm.audio',
-        body: 'Voice message',
-        url: uploadResponse.content_uri,
-        info: {
-          duration: Math.round(duration * 1000),
-          mimetype: 'audio/mp4',
-          size: audio.byteLength,
-        },
-      },
-      origin_server_ts: Date.now(),
+    // Return a VoiceMessage with known values
+    // The actual event will arrive via sync and trigger messageReceived
+    const currentUser = this.getCurrentUser()!;
+    return {
+      id: sendResponse.event_id,
+      sender: currentUser,
+      audioUrl: uploadResponse.content_uri,
+      duration,
+      timestamp: new Date(),
+      isPlayed: false,
+      playedBy: [],
     };
-
-    // Add to room timeline
-    const room = this.syncEngine.getRoom(roomId);
-    if (room) {
-      // Skip if event already exists in timeline (shouldn't happen for optimistic events, but be safe)
-      const exists = room.timeline.some(e => e.event_id === optimisticEvent.event_id);
-      if (exists) {
-        this.logger.warn(`[WataClient] Optimistic event ${optimisticEvent.event_id?.slice(-12)} already in timeline, skipping`);
-      } else {
-        room.timeline.push(optimisticEvent);
-      }
-
-      // Emit messageReceived for own messages too
-      // This ensures UI updates immediately when sending
-      const message = this.eventToVoiceMessage(optimisticEvent, room);
-      if (this.isFamilyRoom(roomId)) {
-        const conversation = this.roomToConversation(room, 'family');
-        this.emit('messageReceived', message, conversation);
-      } else {
-        const contact = this.getContactForDMRoom(roomId);
-        if (contact) {
-          const conversation = this.roomToConversation(room, 'dm', contact);
-          this.emit('messageReceived', message, conversation);
-        }
-      }
-      return message;
-    }
-
-    // Room not found, create message without room context (won't have receipt data)
-    return this.eventToVoiceMessage(optimisticEvent);
   }
 
   /**

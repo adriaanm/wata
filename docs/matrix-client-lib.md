@@ -410,9 +410,9 @@ The `getOrCreateDMRoom()` method uses a deterministic selection function (oldest
 
 The client automatically joins DM invites (trusted family environment). After joining, it checks if the room is a DM room (via `is_direct` flag) and updates `m.direct` account data accordingly.
 
-### Optimistic Message Updates
+### Async-First Design
 
-When sending voice messages, the client immediately adds the message to the local timeline (optimistic update) and emits a `messageReceived` event for the sender, ensuring immediate UI feedback without waiting for sync.
+WataClient embraces asynchronous behavior rather than patching around it. When sending messages, the client returns immediately after the server accepts the request. The actual message arrives via the sync loop and triggers `messageReceived` like any other incoming message. This keeps the implementation simple with a single source of truth (sync) rather than managing optimistic updates and duplicate detection.
 
 ### MXC URL Conversion
 
