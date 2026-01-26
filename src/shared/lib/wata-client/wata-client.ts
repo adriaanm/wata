@@ -396,25 +396,31 @@ export class WataClient {
     for (const contact of contacts) {
       const roomIds = this.dmRoomIds.get(contact.user.id);
       if (roomIds && roomIds.size > 0) {
-        // Find the best room (most messages) among all DM rooms with this contact
-        let bestRoom: RoomState | null = null;
-        let bestMessageCount = -1;
+        // Select the primary room deterministically (oldest by creation timestamp)
+        // This ensures consistency with getOrCreateDMRoom selection
+        let primaryRoom: RoomState | null = null;
+        let primaryCreationTs = Infinity;
 
         for (const roomId of roomIds) {
           const room = this.syncEngine.getRoom(roomId);
           if (room) {
-            const messageCount = room.timeline.filter(
-              (e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio'
-            ).length;
-            if (messageCount > bestMessageCount) {
-              bestRoom = room;
-              bestMessageCount = messageCount;
+            // Find creation timestamp from timeline
+            let creationTs = Infinity;
+            for (const event of room.timeline) {
+              if (event.type === 'm.room.create') {
+                creationTs = event.origin_server_ts || 0;
+                break;
+              }
+            }
+            if (creationTs < primaryCreationTs) {
+              primaryRoom = room;
+              primaryCreationTs = creationTs;
             }
           }
         }
 
-        if (bestRoom) {
-          const convo = this.roomToConversation(bestRoom, 'dm', contact);
+        if (primaryRoom) {
+          const convo = this.roomToConversation(primaryRoom, 'dm', contact);
           if (convo.unplayedCount > 0) {
             conversations.push(convo);
           }
@@ -642,13 +648,14 @@ export class WataClient {
    * Get or create DM room with a contact
    *
    * When multiple DM rooms exist with the same contact (due to race conditions),
-   * this method picks the one with the most messages and updates m.direct to point to it.
+   * this method uses a deterministic selection function (oldest by creation timestamp)
+   * to ensure both users pick the same room.
    */
   private async getOrCreateDMRoom(contactUserId: string): Promise<string> {
     this.logger.log(`[WataClient] getOrCreateDMRoom for ${contactUserId}`);
 
     // Find ALL candidate DM rooms with this contact
-    const candidateRooms: { roomId: string; messageCount: number }[] = [];
+    const candidateRooms: { roomId: string; creationTs: number; messageCount: number }[] = [];
     const rooms = this.syncEngine.getRooms();
 
     for (const room of rooms) {
@@ -672,59 +679,59 @@ export class WataClient {
 
       // Check if this is a DM room (via is_direct flag)
       let isDirectRoom = false;
+      let creationTs = 0;
 
-      // Check membership events for is_direct flag
+      // Check timeline for is_direct flag and creation timestamp
       for (const event of room.timeline) {
+        if (event.type === 'm.room.create') {
+          // Store creation timestamp
+          creationTs = event.origin_server_ts || 0;
+          if (event.content?.is_direct === true) {
+            isDirectRoom = true;
+          }
+        }
         if (event.type === 'm.room.member' && event.state_key === this.userId) {
           if (event.content?.is_direct === true) {
             isDirectRoom = true;
-            break;
-          }
-        }
-      }
-
-      // If still unsure, check the room creation event
-      if (!isDirectRoom) {
-        for (const event of room.timeline) {
-          if (event.type === 'm.room.create') {
-            if (event.content?.is_direct === true) {
-              isDirectRoom = true;
-              break;
-            }
           }
         }
       }
 
       if (isDirectRoom) {
-        // Count voice messages in this room
         const messageCount = room.timeline.filter(
           (e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio'
         ).length;
-        candidateRooms.push({ roomId: room.roomId, messageCount });
-        this.logger.log(`[WataClient] Found candidate DM room ${room.roomId} with ${messageCount} messages`);
+        candidateRooms.push({ roomId: room.roomId, creationTs, messageCount });
+        this.logger.log(`[WataClient] Found candidate DM room ${room.roomId} (created: ${new Date(creationTs).toISOString()}, ${messageCount} msgs)`);
       }
     }
 
-    // If we found candidate rooms, pick the one with the most messages
+    // If we found candidate rooms, pick deterministically by creation timestamp
     if (candidateRooms.length > 0) {
-      // Warn if multiple DM rooms exist with the same contact
       if (candidateRooms.length > 1) {
-        const roomList = candidateRooms.map(r => `${r.roomId} (${r.messageCount} msgs)`).join(', ');
-        this.logger.warn(`[WataClient] Multiple DM rooms detected with ${contactUserId}: ${roomList}. This may indicate a race condition or duplicate room creation.`);
+        const roomList = candidateRooms.map(r => `${r.roomId.slice(-12)} (${new Date(r.creationTs).toISOString().slice(0,10)}, ${r.messageCount} msgs)`).join(', ');
+        this.logger.warn(`[WataClient] Multiple DM rooms detected with ${contactUserId}: ${roomList}. Selecting oldest room deterministically.`);
       }
 
-      // Sort by message count descending
-      candidateRooms.sort((a, b) => b.messageCount - a.messageCount);
-      const bestRoom = candidateRooms[0];
+      // Sort by creation timestamp ascending (oldest first), then by room ID as tiebreaker
+      // This ensures both users pick the same room deterministically
+      candidateRooms.sort((a, b) => {
+        if (a.creationTs !== b.creationTs) {
+          return a.creationTs - b.creationTs; // Oldest first
+        }
+        return a.roomId.localeCompare(b.roomId); // Tiebreak by room ID
+      });
 
-      this.logger.log(`[WataClient] Selected DM room ${bestRoom.roomId} (${bestRoom.messageCount} messages, ${candidateRooms.length} candidates)`);
+      const primaryRoom = candidateRooms[0];
+      this.logger.log(`[WataClient] Selected primary DM room ${primaryRoom.roomId} (created: ${new Date(primaryRoom.creationTs).toISOString()}, ${primaryRoom.messageCount} msgs, ${candidateRooms.length} candidates)`);
 
-      // Update m.direct to point to the best room
-      await this.updateDMRoomData(contactUserId, bestRoom.roomId);
-
-      // Store all candidate room IDs in local map, with the best room first
+      // Store all candidate room IDs in local map
       this.dmRoomIds.set(contactUserId, new Set(candidateRooms.map(r => r.roomId)));
-      return bestRoom.roomId;
+
+      // Update m.direct to point to the primary room only
+      await this.updateDMRoomData(contactUserId, primaryRoom.roomId);
+
+      return primaryRoom.roomId;
     }
 
     // Check if we have any existing DM rooms for this contact

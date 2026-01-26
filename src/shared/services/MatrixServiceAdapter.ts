@@ -260,7 +260,8 @@ class MatrixServiceAdapter {
 
   /**
    * Convert WataClient data to MatrixService MatrixRoom format
-   * Deduplicates DM rooms by contact - picks the room with the most messages
+   * Deduplicates DM rooms by contact - picks the primary room deterministically
+   * (uses room ID lexicographic ordering as proxy for creation timestamp ordering)
    */
   getDirectRooms(): MatrixRoom[] {
     const rooms: MatrixRoom[] = [];
@@ -281,7 +282,8 @@ class MatrixServiceAdapter {
 
     // Deduplicate DM rooms by contact
     // Multiple rooms may exist with the same contact due to race conditions
-    // We pick the room with the most messages for each contact
+    // We pick the primary room deterministically (lexicographically smallest room ID)
+    // This matches the deterministic selection in WataClient (oldest by creation timestamp)
     const contactRooms = new Map<string, { roomId: string; contact: Contact; messageCount: number }>();
     const duplicateContacts = new Map<string, string[]>(); // contactId -> [roomIds]
 
@@ -296,7 +298,8 @@ class MatrixServiceAdapter {
       duplicateContacts.set(contactId, roomsForContact);
 
       const existing = contactRooms.get(contactId);
-      if (!existing || messageCount > existing.messageCount) {
+      // Deterministic selection: prefer room with more messages, tiebreak by lexicographic room ID
+      if (!existing || messageCount > existing.messageCount || (messageCount === existing.messageCount && roomId < existing.roomId)) {
         contactRooms.set(contactId, { roomId, contact, messageCount });
       }
     }
@@ -305,7 +308,7 @@ class MatrixServiceAdapter {
     for (const [contactId, roomIds] of duplicateContacts.entries()) {
       if (roomIds.length > 1) {
         const selected = contactRooms.get(contactId);
-        logWarn(`[MatrixServiceAdapter] Multiple DM rooms with ${contactId}: ${roomIds.join(', ')}. Selected: ${selected?.roomId} (${selected?.messageCount} msgs)`);
+        logWarn(`[MatrixServiceAdapter] Multiple DM rooms with ${contactId}. Selected: ${selected?.roomId} (primary of ${roomIds.length} rooms)`);
       }
     }
 
