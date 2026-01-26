@@ -132,7 +132,8 @@ class MatrixServiceAdapter {
 
   // Mappings to bridge between WataClient and MatrixService
   private contactByUserId: Map<string, Contact> = new Map();
-  private roomIdByContactUserId: Map<string, string> = new Map();
+  /** contactUserId -> Set of roomIds (may be multiple due to race conditions) */
+  private roomIdsByContactUserId: Map<string, Set<string>> = new Map();
   private familyRoomId: string | null = null;
 
   // Cache for DM room -> contact mappings (for getDirectRooms())
@@ -183,12 +184,19 @@ class MatrixServiceAdapter {
       // Update DM room -> contact mapping for getDirectRooms()
       if (conversation.type === 'dm' && conversation.contact) {
         const contactId = conversation.contact.user.id;
-        const existingRoom = this.roomIdByContactUserId.get(contactId);
-        if (existingRoom && existingRoom !== conversation.id) {
-          log(`[MatrixServiceAdapter] Contact ${contactId} now has multiple rooms: ${existingRoom} and ${conversation.id}`);
+        // Add to the set of room IDs for this contact
+        if (!this.roomIdsByContactUserId.has(contactId)) {
+          this.roomIdsByContactUserId.set(contactId, new Set());
+        }
+        const roomIds = this.roomIdsByContactUserId.get(contactId)!;
+        if (!roomIds.has(conversation.id)) {
+          if (roomIds.size > 0) {
+            const existing = Array.from(roomIds).join(', ');
+            log(`[MatrixServiceAdapter] Contact ${contactId} now has multiple rooms: ${existing}, ${conversation.id}`);
+          }
+          roomIds.add(conversation.id);
         }
         this.dmRoomContacts.set(conversation.id, conversation.contact);
-        this.roomIdByContactUserId.set(contactId, conversation.id);
         this.contactByUserId.set(contactId, conversation.contact);
       }
 
@@ -397,7 +405,7 @@ class MatrixServiceAdapter {
     this.currentUsername = null;
     this.currentPassword = null;
     this.contactByUserId.clear();
-    this.roomIdByContactUserId.clear();
+    this.roomIdsByContactUserId.clear();
     this.familyRoomId = null;
     this.dmRoomContacts.clear();
   }
@@ -474,7 +482,12 @@ class MatrixServiceAdapter {
 
     // Get or create conversation
     const conversation = await this.wataClient.getConversation(contact);
-    this.roomIdByContactUserId.set(userId, conversation.id);
+
+    // Add to the set of room IDs for this contact (may be multiple due to races)
+    if (!this.roomIdsByContactUserId.has(userId)) {
+      this.roomIdsByContactUserId.set(userId, new Set());
+    }
+    this.roomIdsByContactUserId.get(userId)!.add(conversation.id);
 
     // Update room -> contact mapping for getDirectRooms()
     this.dmRoomContacts.set(conversation.id, contact);
@@ -547,9 +560,9 @@ class MatrixServiceAdapter {
       return this.wataClient.getFamily() !== null;
     }
 
-    // Check if it's a DM room
-    for (const [, mappedRoomId] of this.roomIdByContactUserId.entries()) {
-      if (mappedRoomId === roomId) {
+    // Check if it's a DM room (may have multiple room IDs per contact)
+    for (const [, roomIdSet] of this.roomIdsByContactUserId.entries()) {
+      if (roomIdSet.has(roomId)) {
         return true;
       }
     }

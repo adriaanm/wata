@@ -43,7 +43,8 @@ export class WataClient {
   private syncEngine!: SyncEngine;
   private userId: string | null = null;
   private familyRoomId: string | null = null;
-  private dmRooms: Map<string, string> = new Map(); // contactUserId -> roomId
+  /** contactUserId -> Set of roomIds (may be multiple due to race conditions) */
+  private dmRoomIds: Map<string, Set<string>> = new Map();
   private eventHandlers: Map<WataClientEventName, Set<Function>> = new Map();
   private isConnected = false;
   private logger: Logger;
@@ -170,7 +171,7 @@ export class WataClient {
     // Clear state
     this.userId = null;
     this.familyRoomId = null;
-    this.dmRooms.clear();
+    this.dmRoomIds.clear();
     this.syncEngine.clear();
     this.logger.log('[WataClient] Logged out');
   }
@@ -393,11 +394,27 @@ export class WataClient {
     // Check DM conversations
     const contacts = this.getContacts();
     for (const contact of contacts) {
-      const roomId = this.dmRooms.get(contact.user.id);
-      if (roomId) {
-        const room = this.syncEngine.getRoom(roomId);
-        if (room) {
-          const convo = this.roomToConversation(room, 'dm', contact);
+      const roomIds = this.dmRoomIds.get(contact.user.id);
+      if (roomIds && roomIds.size > 0) {
+        // Find the best room (most messages) among all DM rooms with this contact
+        let bestRoom: RoomState | null = null;
+        let bestMessageCount = -1;
+
+        for (const roomId of roomIds) {
+          const room = this.syncEngine.getRoom(roomId);
+          if (room) {
+            const messageCount = room.timeline.filter(
+              (e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio'
+            ).length;
+            if (messageCount > bestMessageCount) {
+              bestRoom = room;
+              bestMessageCount = messageCount;
+            }
+          }
+        }
+
+        if (bestRoom) {
+          const convo = this.roomToConversation(bestRoom, 'dm', contact);
           if (convo.unplayedCount > 0) {
             conversations.push(convo);
           }
@@ -704,19 +721,24 @@ export class WataClient {
 
       // Update m.direct to point to the best room
       await this.updateDMRoomData(contactUserId, bestRoom.roomId);
-      this.dmRooms.set(contactUserId, bestRoom.roomId);
+
+      // Store all candidate room IDs in local map, with the best room first
+      this.dmRoomIds.set(contactUserId, new Set(candidateRooms.map(r => r.roomId)));
       return bestRoom.roomId;
     }
 
-    // Check if m.direct has a room that we didn't find (user may have left)
-    const existingRoomId = this.dmRooms.get(contactUserId);
-    if (existingRoomId) {
-      const room = this.syncEngine.getRoom(existingRoomId);
-      if (room && room.members.get(this.userId!)?.membership === 'join') {
-        const targetMember = room.members.get(contactUserId);
-        if (targetMember && targetMember.membership === 'join') {
-          this.logger.log(`[WataClient] Using m.direct room ${existingRoomId}`);
-          return existingRoomId;
+    // Check if we have any existing DM rooms for this contact
+    const existingRoomIds = this.dmRoomIds.get(contactUserId);
+    if (existingRoomIds && existingRoomIds.size > 0) {
+      // Try each existing room to find one where both users are still joined
+      for (const roomId of existingRoomIds) {
+        const room = this.syncEngine.getRoom(roomId);
+        if (room && room.members.get(this.userId!)?.membership === 'join') {
+          const targetMember = room.members.get(contactUserId);
+          if (targetMember && targetMember.membership === 'join') {
+            this.logger.log(`[WataClient] Using existing DM room ${roomId}`);
+            return roomId;
+          }
         }
       }
     }
@@ -734,8 +756,11 @@ export class WataClient {
     // Update m.direct account data
     await this.updateDMRoomData(contactUserId, roomId);
 
-    // Store in local map
-    this.dmRooms.set(contactUserId, roomId);
+    // Add to local map (may have other room IDs from previous race conditions)
+    if (!this.dmRoomIds.has(contactUserId)) {
+      this.dmRoomIds.set(contactUserId, new Set());
+    }
+    this.dmRoomIds.get(contactUserId)!.add(roomId);
 
     return roomId;
   }
@@ -1111,7 +1136,11 @@ export class WataClient {
               // If it's a DM room, update m.direct
               if (isDirectRoom) {
                 await this.updateDMRoomData(otherMember.userId, roomId);
-                this.dmRooms.set(otherMember.userId, roomId);
+                // Add to local map (preserves any existing room IDs from races)
+                if (!this.dmRoomIds.has(otherMember.userId)) {
+                  this.dmRoomIds.set(otherMember.userId, new Set());
+                }
+                this.dmRoomIds.get(otherMember.userId)!.add(roomId);
               }
             }
           }
@@ -1130,11 +1159,12 @@ export class WataClient {
     content: Record<string, any>
   ): void {
     if (type === 'm.direct') {
-      // Update local dmRooms map from m.direct account data
-      // m.direct format: { "@user:server": ["!roomId"] }
+      // Update local dmRoomIds map from m.direct account data
+      // m.direct format: { "@user:server": ["!roomId1", "!roomId2", ...] }
       for (const [userId, roomIds] of Object.entries(content)) {
         if (Array.isArray(roomIds) && roomIds.length > 0) {
-          this.dmRooms.set(userId, roomIds[0]);
+          // Store all room IDs (may be multiple due to race conditions)
+          this.dmRoomIds.set(userId, new Set(roomIds));
         }
       }
     }
@@ -1151,8 +1181,9 @@ export class WataClient {
    */
   getContactForDMRoom(roomId: string): Contact | null {
     // First, try to find from m.direct account data mapping
-    for (const [userId, mappedRoomId] of this.dmRooms.entries()) {
-      if (mappedRoomId === roomId) {
+    // dmRoomIds stores Set<roomId> for each contactUserId
+    for (const [userId, roomIdSet] of this.dmRoomIds.entries()) {
+      if (roomIdSet.has(roomId)) {
         const room = this.syncEngine.getRoom(roomId);
         const member = room?.members.get(userId);
         if (member) {

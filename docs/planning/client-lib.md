@@ -548,6 +548,63 @@ See: `test/integration/matrix.test.ts:328-389` for the fixed test approach.
 
 For v1, **accept the limitation** and document it. Duplicate DMs are rare in practice (require concurrent creation within the sync window), and the family room broadcast works perfectly as a fallback.
 
+### Roadmap: Two-Phase Commit Protocol for DM Room Deduplication
+
+**Problem:** Current code has multiple vulnerable patterns where room IDs are checked for equality:
+
+| Pattern | Location | Vulnerability |
+|---------|----------|---------------|
+| `dmRooms.get(contactUserId)` | `wata-client.ts:396, 712, 1137` | Returns single roomId, but multiple may exist |
+| `familyRoomId` cache | `wata-client.ts:227-244` | Assumes single family room ID |
+| `roomIdByContactUserId` mapping | `MatrixServiceAdapter.ts:135` | 1:1 map, no duplicate handling |
+| `m.direct` handling | `wata-client.ts:1137` | Uses `roomIds[0]` without consolidation |
+| Auto-join updates | `wata-client.ts:1114` | Sets roomId without checking for duplicates |
+
+**Current Mitigation (Partial):**
+- `getOrCreateDMRoom()` scans for ALL candidate DM rooms and picks the one with the most messages
+- This only runs when explicitly called, not during auto-join or `m.direct` handling
+- Other code paths don't benefit from this consolidation logic
+
+**Proposed Solution: Two-Phase Commit Protocol**
+
+A robust solution that allows both users to deterministically agree on which DM room is the primary one:
+
+1. **Phase 1: Discovery** - Both parties exchange a list of their existing DM room IDs with each other
+2. **Phase 2: Consensus** - Apply a deterministic selection function (e.g., lexicographic comparison of room IDs, message count, or creation timestamp) to agree on the primary room
+3. **Phase 3: Cleanup** - Both users leave/abandon the non-primary rooms
+
+**Implementation sketch:**
+
+```typescript
+// Send via m.room.message with msgtype: "m.wata.dm_discovery"
+interface DmDiscoveryMessage {
+  type: 'dm_discovery';
+  rooms: string[];  // List of DM room IDs with this user
+}
+
+// Deterministic selection function
+function selectPrimaryRoom(ourRooms: string[], theirRooms: string[]): string {
+  const allRooms = [...new Set([...ourRooms, ...theirRooms])];
+  // Pick the room with the most messages, tie-break by lexicographic room ID
+  const sorted = allRooms
+    .map(id => ({ id, count: getMessageCount(id) }))
+    .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+  return sorted[0].id;
+}
+```
+
+**Benefits:**
+- Eliminates race conditions entirely
+- Works even when both users create rooms simultaneously
+- Self-healing: duplicates are automatically resolved on next contact
+
+**Challenges:**
+- Requires custom message type (interop with other Matrix clients may be weird)
+- Requires both users to run Wata client
+- Network partition scenarios need careful handling
+
+**Status:** Design exploration. Not planned for v1.
+
 ### References
 
 - [Matrix Spec: Account Data](https://spec.matrix.org/latest/client-server-api/#account-data)
