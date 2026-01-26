@@ -476,7 +476,7 @@ export class WataClient {
 
       // Emit messageReceived for own messages too
       // This ensures UI updates immediately when sending
-      const message = this.eventToVoiceMessage(optimisticEvent);
+      const message = this.eventToVoiceMessage(optimisticEvent, room);
       if (this.isFamilyRoom(roomId)) {
         const conversation = this.roomToConversation(room, 'family');
         this.emit('messageReceived', message, conversation);
@@ -490,6 +490,7 @@ export class WataClient {
       return message;
     }
 
+    // Room not found, create message without room context (won't have receipt data)
     return this.eventToVoiceMessage(optimisticEvent);
   }
 
@@ -527,7 +528,7 @@ export class WataClient {
     if (roomState) {
       const event = roomState.timeline.find((e) => e.event_id === eventId);
       if (event && this.isVoiceMessageEvent(event)) {
-        const message = this.eventToVoiceMessage(event);
+        const message = this.eventToVoiceMessage(event, roomState);
         const updatedMessage = { ...message, isPlayed: true };
         if (!message.playedBy.includes(this.userId!)) {
           updatedMessage.playedBy = [...message.playedBy, this.userId!];
@@ -775,9 +776,10 @@ export class WataClient {
     contact?: Contact
   ): Conversation {
     // Get voice messages from timeline
+    // Pass room to eventToVoiceMessage since events don't have room_id set
     const messages = room.timeline
       .filter((event) => this.isVoiceMessageEvent(event))
-      .map((event) => this.eventToVoiceMessage(event));
+      .map((event) => this.eventToVoiceMessage(event, room));
 
     // Count unplayed messages
     const unplayedCount = messages.filter((msg) => !msg.isPlayed).length;
@@ -793,16 +795,18 @@ export class WataClient {
 
   /**
    * Convert MatrixEvent to VoiceMessage
+   * @param event - The Matrix event
+   * @param room - The room containing this event (events don't have room_id set)
    */
-  private eventToVoiceMessage(event: MatrixEvent): VoiceMessage {
-    const sender = this.getUserFromEvent(event);
+  private eventToVoiceMessage(event: MatrixEvent, room?: RoomState): VoiceMessage {
+    const sender = this.getUserFromEvent(event, room);
     const content = event.content;
     const audioUrl = this.mxcToHttp(content.url || '');
     const duration = (content.info?.duration || 0) / 1000; // Convert ms to seconds
     const timestamp = new Date(event.origin_server_ts || 0);
 
     // Check if current user has played this message
-    const playedBy = this.getPlayedByForEvent(event);
+    const playedBy = this.getPlayedByForEvent(event, room);
     const isPlayed = playedBy.includes(this.userId!);
 
     return {
@@ -818,13 +822,15 @@ export class WataClient {
 
   /**
    * Get User object from event sender
+   * @param event - The Matrix event
+   * @param room - The room containing this event (optional, will lookup from event.room_id if not provided)
    */
-  private getUserFromEvent(event: MatrixEvent): User {
+  private getUserFromEvent(event: MatrixEvent, room?: RoomState): User {
     const userId = event.sender!;
 
-    // Try to get display name from room membership
-    const room = this.syncEngine.getRoom(event.room_id!);
-    const member = room?.members.get(userId);
+    // Use provided room or try to look up from event.room_id
+    const roomState = room || (event.room_id ? this.syncEngine.getRoom(event.room_id) : undefined);
+    const member = roomState?.members.get(userId);
 
     return {
       id: userId,
@@ -835,22 +841,19 @@ export class WataClient {
 
   /**
    * Get list of user IDs who have played a message
+   * @param event - The Matrix event
+   * @param room - The room containing this event (optional, will lookup from event.room_id if not provided)
    */
-  private getPlayedByForEvent(event: MatrixEvent): string[] {
-    const room = this.syncEngine.getRoom(event.room_id!);
-    if (!room) {
-      this.logger.warn(`[WataClient] getPlayedByForEvent: room ${event.room_id} not found`);
+  private getPlayedByForEvent(event: MatrixEvent, room?: RoomState): string[] {
+    // Use provided room or try to look up from event.room_id
+    const roomState = room || (event.room_id ? this.syncEngine.getRoom(event.room_id) : undefined);
+    if (!roomState) {
+      this.logger.warn(`[WataClient] getPlayedByForEvent: no room available for event ${event.event_id}`);
       return [];
     }
 
     const eventId = event.event_id!;
-    const receipts = room.readReceipts.get(eventId);
-
-    // Debug logging for receipt lookup
-    if (room.readReceipts.size > 0) {
-      const allReceiptKeys = Array.from(room.readReceipts.keys());
-      this.logger.log(`[WataClient] getPlayedByForEvent: looking for ${eventId}, room has ${room.readReceipts.size} receipts: ${allReceiptKeys.map(k => k.slice(-12)).join(', ')}`);
-    }
+    const receipts = roomState.readReceipts.get(eventId);
 
     return receipts ? Array.from(receipts) : [];
   }
