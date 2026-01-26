@@ -353,6 +353,32 @@ export class WataClient {
   }
 
   /**
+   * Get conversation by room ID (synchronous, for existing rooms only)
+   * Returns null if room not found. Does not create rooms.
+   */
+  getConversationByRoomId(roomId: string): Conversation | null {
+    const room = this.syncEngine.getRoom(roomId);
+    if (!room) {
+      return null;
+    }
+
+    // Check if this is the family room
+    if (this.isFamilyRoom(roomId)) {
+      return this.roomToConversation(room, 'family');
+    }
+
+    // Otherwise, treat as DM and find the contact
+    const contact = this.getContactForDMRoom(roomId);
+    if (!contact) {
+      // Room exists but we can't determine the contact
+      // This shouldn't happen for valid DM rooms
+      return null;
+    }
+
+    return this.roomToConversation(room, 'dm', contact);
+  }
+
+  /**
    * Get all conversations with unplayed messages
    */
   getUnplayedConversations(): Conversation[] {
@@ -939,12 +965,26 @@ export class WataClient {
     eventId: string,
     userIds: Set<string>
   ): void {
+    this.logger.log(`[WataClient] Receipt update for event ${eventId} in room ${roomId}, users: ${Array.from(userIds).join(', ')}`);
+
     const room = this.syncEngine.getRoom(roomId);
-    if (!room) return;
+    if (!room) {
+      this.logger.warn(`[WataClient] Room ${roomId} not found for receipt update`);
+      return;
+    }
 
     const event = room.timeline.find((e) => e.event_id === eventId);
-    if (!event || !this.isVoiceMessageEvent(event)) return;
+    if (!event) {
+      this.logger.warn(`[WataClient] Event ${eventId} not found in room timeline`);
+      return;
+    }
 
+    if (!this.isVoiceMessageEvent(event)) {
+      // Not a voice message, ignore silently
+      return;
+    }
+
+    this.logger.log(`[WataClient] Emitting messagePlayed for ${eventId}`);
     const message = this.eventToVoiceMessage(event);
     this.emit('messagePlayed', message);
   }

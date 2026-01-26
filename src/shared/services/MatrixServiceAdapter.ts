@@ -210,9 +210,13 @@ class MatrixServiceAdapter {
 
     // Message played (receipt update)
     this.wataClient.on('messagePlayed', (message) => {
+      log(`[MatrixServiceAdapter] messagePlayed event for message ${message.id}`);
       const room = this.findRoomForMessage(message);
       if (room) {
+        log(`[MatrixServiceAdapter] Found room ${room.id}, notifying ${this.receiptCallbacks.length} callbacks`);
         this.receiptCallbacks.forEach((cb) => cb(room.id));
+      } else {
+        logWarn(`[MatrixServiceAdapter] Could not find room for message ${message.id}`);
       }
     });
 
@@ -268,19 +272,16 @@ class MatrixServiceAdapter {
       return familyConvo;
     }
 
-    // Check DM conversations
-    const contacts = this.wataClient.getContacts();
-    for (const contact of contacts) {
-      // Note: This is inefficient but matches the async pattern
-      // In practice, we'd cache conversations
-      try {
-        // We can't call async here, so we skip DM lookups
-        // This is a known limitation - receipt callbacks may not fire for DMs
-        logWarn(
-          '[MatrixServiceAdapter] Cannot find DM room for receipt update (async required)'
-        );
-      } catch (error) {
-        // Ignore
+    // Check DM conversations via cache
+    for (const [roomId, cacheData] of this.dmConversationCache.entries()) {
+      if (cacheData.messages.some((m) => m.eventId === message.id)) {
+        return {
+          id: roomId,
+          type: 'dm',
+          contact: cacheData.contact,
+          messages: [],
+          unplayedCount: 0,
+        };
       }
     }
 
@@ -649,18 +650,14 @@ class MatrixServiceAdapter {
 
   /**
    * Get voice messages for a room
+   * Always fetches fresh data from WataClient to ensure readBy status is current
    */
   getVoiceMessages(roomId: string): VoiceMessage[] {
-    // Get conversation for room
-    if (roomId === this.familyRoomId) {
-      const convo = this.wataClient.getFamilyConversation();
-      return convo?.messages.map((m) => this.wataToMatrixMessage(m)) || [];
-    }
-
-    // For DM rooms, use the cached conversation data
-    const cached = this.dmConversationCache.get(roomId);
-    if (cached) {
-      return cached.messages;
+    // Use the synchronous getConversationByRoomId to get fresh data
+    // This ensures readBy/playedBy reflects the latest receipt updates
+    const convo = this.wataClient.getConversationByRoomId(roomId);
+    if (convo) {
+      return convo.messages.map((m) => this.wataToMatrixMessage(m));
     }
 
     return [];
