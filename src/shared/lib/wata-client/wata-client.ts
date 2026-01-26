@@ -839,10 +839,19 @@ export class WataClient {
   private getPlayedByForEvent(event: MatrixEvent): string[] {
     const room = this.syncEngine.getRoom(event.room_id!);
     if (!room) {
+      this.logger.warn(`[WataClient] getPlayedByForEvent: room ${event.room_id} not found`);
       return [];
     }
 
-    const receipts = room.readReceipts.get(event.event_id!);
+    const eventId = event.event_id!;
+    const receipts = room.readReceipts.get(eventId);
+
+    // Debug logging for receipt lookup
+    if (room.readReceipts.size > 0) {
+      const allReceiptKeys = Array.from(room.readReceipts.keys());
+      this.logger.log(`[WataClient] getPlayedByForEvent: looking for ${eventId}, room has ${room.readReceipts.size} receipts: ${allReceiptKeys.map(k => k.slice(-12)).join(', ')}`);
+    }
+
     return receipts ? Array.from(receipts) : [];
   }
 
@@ -1021,6 +1030,11 @@ export class WataClient {
       this.logger.warn(`[WataClient] Room ${roomId} not found for receipt update`);
       return;
     }
+
+    // Verify the receipt is stored in room.readReceipts
+    const storedReceipts = room.readReceipts.get(eventId);
+    this.logger.log(`[WataClient] Room readReceipts for ${eventId.slice(-12)}: ${storedReceipts ? Array.from(storedReceipts).join(', ') : 'NONE'}`);
+    this.logger.log(`[WataClient] Room has ${room.readReceipts.size} total receipt entries`);
 
     const event = room.timeline.find((e) => e.event_id === eventId);
     if (!event) {
