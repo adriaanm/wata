@@ -398,23 +398,27 @@ export class WataClient {
       if (roomIds && roomIds.size > 0) {
         // Select the primary room deterministically (oldest by creation timestamp)
         // This ensures consistency with getOrCreateDMRoom selection
+        // Skip rooms without valid creation timestamps
         let primaryRoom: RoomState | null = null;
-        let primaryCreationTs = Infinity;
+        let primaryCreationTs: number | null = null;
 
         for (const roomId of roomIds) {
           const room = this.syncEngine.getRoom(roomId);
           if (room) {
             // Find creation timestamp from timeline
-            let creationTs = Infinity;
+            let creationTs: number | null = null;
             for (const event of room.timeline) {
               if (event.type === 'm.room.create') {
-                creationTs = event.origin_server_ts || 0;
+                creationTs = event.origin_server_ts ?? null;
                 break;
               }
             }
-            if (creationTs < primaryCreationTs) {
-              primaryRoom = room;
-              primaryCreationTs = creationTs;
+            // Only consider rooms with valid timestamps (> 0)
+            if (creationTs !== null && creationTs > 0) {
+              if (primaryCreationTs === null || creationTs < primaryCreationTs) {
+                primaryRoom = room;
+                primaryCreationTs = creationTs;
+              }
             }
           }
         }
@@ -650,6 +654,8 @@ export class WataClient {
    * When multiple DM rooms exist with the same contact (due to race conditions),
    * this method uses a deterministic selection function (oldest by creation timestamp)
    * to ensure both users pick the same room.
+   *
+   * Rooms without a valid creation timestamp are excluded from consideration.
    */
   private async getOrCreateDMRoom(contactUserId: string): Promise<string> {
     this.logger.log(`[WataClient] getOrCreateDMRoom for ${contactUserId}`);
@@ -679,13 +685,13 @@ export class WataClient {
 
       // Check if this is a DM room (via is_direct flag)
       let isDirectRoom = false;
-      let creationTs = 0;
+      let creationTs: number | null = null;
 
       // Check timeline for is_direct flag and creation timestamp
       for (const event of room.timeline) {
         if (event.type === 'm.room.create') {
-          // Store creation timestamp
-          creationTs = event.origin_server_ts || 0;
+          // Store creation timestamp (null if not available)
+          creationTs = event.origin_server_ts ?? null;
           if (event.content?.is_direct === true) {
             isDirectRoom = true;
           }
@@ -697,12 +703,16 @@ export class WataClient {
         }
       }
 
-      if (isDirectRoom) {
+      // Only include rooms with valid creation timestamps
+      // Exclude rooms with creationTs === 0 (1970-01-01) or null
+      if (isDirectRoom && creationTs !== null && creationTs > 0) {
         const messageCount = room.timeline.filter(
           (e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio'
         ).length;
         candidateRooms.push({ roomId: room.roomId, creationTs, messageCount });
         this.logger.log(`[WataClient] Found candidate DM room ${room.roomId} (created: ${new Date(creationTs).toISOString()}, ${messageCount} msgs)`);
+      } else if (isDirectRoom) {
+        this.logger.log(`[WataClient] Skipping DM room ${room.roomId} (no valid creation timestamp)`);
       }
     }
 
