@@ -622,31 +622,24 @@ export class WataClient {
 
   /**
    * Get or create DM room with a contact
+   *
+   * When multiple DM rooms exist with the same contact (due to race conditions),
+   * this method picks the one with the most messages and updates m.direct to point to it.
    */
   private async getOrCreateDMRoom(contactUserId: string): Promise<string> {
-    // First, check if DM room already exists in m.direct
-    const existingRoomId = this.dmRooms.get(contactUserId);
-    if (existingRoomId) {
-      // Verify we're still a member of this room
-      const room = this.syncEngine.getRoom(existingRoomId);
-      if (room && room.members.get(this.userId!)?.membership === 'join') {
-        // Verify the target user is also in the room
-        const targetMember = room.members.get(contactUserId);
-        if (targetMember && targetMember.membership === 'join') {
-          return existingRoomId;
-        }
-      }
-    }
+    this.logger.log(`[WataClient] getOrCreateDMRoom for ${contactUserId}`);
 
-    // Second, check for existing rooms where this user invited us or we created (may not be in m.direct yet)
+    // Find ALL candidate DM rooms with this contact
+    const candidateRooms: { roomId: string; messageCount: number }[] = [];
     const rooms = this.syncEngine.getRooms();
+
     for (const room of rooms) {
       // Skip if not joined
       if (room.members.get(this.userId!)?.membership !== 'join') {
         continue;
       }
 
-      // Check if this is a 2-person room (likely DM)
+      // Check if this is a 2-person room with the target user
       const joinedMembers = Array.from(room.members.values()).filter(
         (m) => m.membership === 'join'
       );
@@ -654,13 +647,12 @@ export class WataClient {
         continue;
       }
 
-      // Check if this is a DM with the target user
       const hasTargetUser = joinedMembers.some((m) => m.userId === contactUserId);
       if (!hasTargetUser) {
         continue;
       }
 
-      // Check if this is a DM room (via is_direct flag in membership event or creation event)
+      // Check if this is a DM room (via is_direct flag)
       let isDirectRoom = false;
 
       // Check membership events for is_direct flag
@@ -673,7 +665,7 @@ export class WataClient {
         }
       }
 
-      // If still unsure, check the room creation event for is_direct flag
+      // If still unsure, check the room creation event
       if (!isDirectRoom) {
         for (const event of room.timeline) {
           if (event.type === 'm.room.create') {
@@ -686,12 +678,39 @@ export class WataClient {
       }
 
       if (isDirectRoom) {
-        // Found a DM room with this user that wasn't in m.direct
-        // Update m.direct and return this room
-        const roomId = room.roomId;
-        await this.updateDMRoomData(contactUserId, roomId);
-        this.dmRooms.set(contactUserId, roomId);
-        return roomId;
+        // Count voice messages in this room
+        const messageCount = room.timeline.filter(
+          (e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio'
+        ).length;
+        candidateRooms.push({ roomId: room.roomId, messageCount });
+        this.logger.log(`[WataClient] Found candidate DM room ${room.roomId} with ${messageCount} messages`);
+      }
+    }
+
+    // If we found candidate rooms, pick the one with the most messages
+    if (candidateRooms.length > 0) {
+      // Sort by message count descending
+      candidateRooms.sort((a, b) => b.messageCount - a.messageCount);
+      const bestRoom = candidateRooms[0];
+
+      this.logger.log(`[WataClient] Selected DM room ${bestRoom.roomId} (${bestRoom.messageCount} messages, ${candidateRooms.length} candidates)`);
+
+      // Update m.direct to point to the best room
+      await this.updateDMRoomData(contactUserId, bestRoom.roomId);
+      this.dmRooms.set(contactUserId, bestRoom.roomId);
+      return bestRoom.roomId;
+    }
+
+    // Check if m.direct has a room that we didn't find (user may have left)
+    const existingRoomId = this.dmRooms.get(contactUserId);
+    if (existingRoomId) {
+      const room = this.syncEngine.getRoom(existingRoomId);
+      if (room && room.members.get(this.userId!)?.membership === 'join') {
+        const targetMember = room.members.get(contactUserId);
+        if (targetMember && targetMember.membership === 'join') {
+          this.logger.log(`[WataClient] Using m.direct room ${existingRoomId}`);
+          return existingRoomId;
+        }
       }
     }
 

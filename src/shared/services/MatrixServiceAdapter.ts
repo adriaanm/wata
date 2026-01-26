@@ -247,6 +247,7 @@ class MatrixServiceAdapter {
 
   /**
    * Convert WataClient data to MatrixService MatrixRoom format
+   * Deduplicates DM rooms by contact - picks the room with the most messages
    */
   getDirectRooms(): MatrixRoom[] {
     const rooms: MatrixRoom[] = [];
@@ -265,10 +266,24 @@ class MatrixServiceAdapter {
       });
     }
 
-    // Add DM rooms from cache
-    // We iterate through cached DM conversations and convert them to MatrixRoom format
-    // Add DM rooms from the room -> contact mapping
+    // Deduplicate DM rooms by contact
+    // Multiple rooms may exist with the same contact due to race conditions
+    // We pick the room with the most messages for each contact
+    const contactRooms = new Map<string, { roomId: string; contact: Contact; messageCount: number }>();
+
     for (const [roomId, contact] of this.dmRoomContacts.entries()) {
+      const contactId = contact.user.id;
+      const convo = this.wataClient.getConversationByRoomId(roomId);
+      const messageCount = convo?.messages.length ?? 0;
+
+      const existing = contactRooms.get(contactId);
+      if (!existing || messageCount > existing.messageCount) {
+        contactRooms.set(contactId, { roomId, contact, messageCount });
+      }
+    }
+
+    // Add deduplicated DM rooms
+    for (const { roomId, contact } of contactRooms.values()) {
       rooms.push({
         roomId,
         name: contact.user.displayName,
