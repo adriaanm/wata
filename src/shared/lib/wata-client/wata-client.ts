@@ -499,7 +499,13 @@ export class WataClient {
     // Add to room timeline
     const room = this.syncEngine.getRoom(roomId);
     if (room) {
-      room.timeline.push(optimisticEvent);
+      // Skip if event already exists in timeline (shouldn't happen for optimistic events, but be safe)
+      const exists = room.timeline.some(e => e.event_id === optimisticEvent.event_id);
+      if (exists) {
+        this.logger.warn(`[WataClient] Optimistic event ${optimisticEvent.event_id?.slice(-12)} already in timeline, skipping`);
+      } else {
+        room.timeline.push(optimisticEvent);
+      }
 
       // Emit messageReceived for own messages too
       // This ensures UI updates immediately when sending

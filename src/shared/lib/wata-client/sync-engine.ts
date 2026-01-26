@@ -322,6 +322,13 @@ export class SyncEngine {
     if (roomData.timeline?.events) {
       this.logger.log(`[SyncEngine] Processing ${roomData.timeline.events.length} timeline events for room ${roomId}`);
       roomData.timeline.events.forEach((event) => {
+        // Skip if event already exists in timeline (prevent duplicates from incremental syncs)
+        const exists = room!.timeline.some(e => e.event_id === event.event_id);
+        if (exists) {
+          this.logger.log(`[SyncEngine] Skipping duplicate event ${event.event_id?.slice(-12)}`);
+          return;
+        }
+
         // Add to timeline
         room!.timeline.push(event);
 
@@ -413,6 +420,12 @@ export class SyncEngine {
     // Process timeline events
     if (roomData.timeline?.events) {
       roomData.timeline.events.forEach((event) => {
+        // Skip if event already exists in timeline (prevent duplicates from incremental syncs)
+        const exists = room!.timeline.some(e => e.event_id === event.event_id);
+        if (exists) {
+          return;
+        }
+
         room!.timeline.push(event);
 
         if (event.state_key !== undefined) {
