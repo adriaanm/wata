@@ -689,6 +689,12 @@ export class WataClient {
 
     // If we found candidate rooms, pick the one with the most messages
     if (candidateRooms.length > 0) {
+      // Warn if multiple DM rooms exist with the same contact
+      if (candidateRooms.length > 1) {
+        const roomList = candidateRooms.map(r => `${r.roomId} (${r.messageCount} msgs)`).join(', ');
+        this.logger.warn(`[WataClient] Multiple DM rooms detected with ${contactUserId}: ${roomList}. This may indicate a race condition or duplicate room creation.`);
+      }
+
       // Sort by message count descending
       candidateRooms.sort((a, b) => b.messageCount - a.messageCount);
       const bestRoom = candidateRooms[0];

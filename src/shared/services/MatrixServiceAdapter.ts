@@ -270,15 +270,28 @@ class MatrixServiceAdapter {
     // Multiple rooms may exist with the same contact due to race conditions
     // We pick the room with the most messages for each contact
     const contactRooms = new Map<string, { roomId: string; contact: Contact; messageCount: number }>();
+    const duplicateContacts = new Map<string, string[]>(); // contactId -> [roomIds]
 
     for (const [roomId, contact] of this.dmRoomContacts.entries()) {
       const contactId = contact.user.id;
       const convo = this.wataClient.getConversationByRoomId(roomId);
       const messageCount = convo?.messages.length ?? 0;
 
+      // Track all rooms for each contact to detect duplicates
+      const roomsForContact = duplicateContacts.get(contactId) || [];
+      roomsForContact.push(roomId);
+      duplicateContacts.set(contactId, roomsForContact);
+
       const existing = contactRooms.get(contactId);
       if (!existing || messageCount > existing.messageCount) {
         contactRooms.set(contactId, { roomId, contact, messageCount });
+      }
+    }
+
+    // Warn about duplicate DM rooms
+    for (const [contactId, roomIds] of duplicateContacts.entries()) {
+      if (roomIds.length > 1) {
+        logWarn(`[MatrixServiceAdapter] Multiple DM rooms detected with ${contactId}: ${roomIds.join(', ')}`);
       }
     }
 
