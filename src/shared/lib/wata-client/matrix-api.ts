@@ -29,12 +29,20 @@ export interface LoginResponse {
   user_id: string;
   access_token: string;
   device_id: string;
-  home_server: string;
+  home_server?: string;
+  refresh_token?: string;
+  expires_in_ms?: number;
   well_known?: {
     'm.homeserver'?: {
       base_url: string;
     };
   };
+}
+
+export interface WhoamiResponse {
+  user_id: string;
+  device_id?: string;
+  is_guest?: boolean;
 }
 
 export interface LogoutRequest {
@@ -73,8 +81,18 @@ export interface SyncResponse {
   };
 }
 
+export interface RoomSummary {
+  'm.heroes'?: string[];
+  'm.joined_member_count'?: number;
+  'm.invited_member_count'?: number;
+}
+
 export interface JoinedRoomSync {
+  summary?: RoomSummary;
   state?: {
+    events: MatrixEvent[];
+  };
+  state_after?: {
     events: MatrixEvent[];
   };
   timeline?: {
@@ -131,6 +149,8 @@ export interface StrippedStateEvent {
   state_key: string;
   content: Record<string, any>;
   sender: string;
+  event_id?: string;
+  origin_server_ts?: number;
 }
 
 // --- Rooms ---
@@ -235,6 +255,7 @@ export interface UploadResponse {
 export interface ProfileResponse {
   avatar_url?: string;
   displayname?: string;
+  'm.tz'?: string;
 }
 
 export interface SetDisplayNameRequest {
@@ -419,6 +440,16 @@ export class MatrixApi {
 
     // Clear access token
     this.accessToken = null;
+  }
+
+  /**
+   * Get information about the owner of an access token
+   */
+  async whoami(): Promise<WhoamiResponse> {
+    return this.request<WhoamiResponse>(
+      'GET',
+      '/_matrix/client/v3/account/whoami'
+    );
   }
 
   /**
@@ -657,6 +688,21 @@ export class MatrixApi {
   }
 
   /**
+   * Set avatar URL for current user
+   */
+  async setAvatarUrl(userId: string, avatarUrl: string): Promise<void> {
+    await this.request<SetDisplayNameResponse>(
+      'PUT',
+      `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
+      {
+        body: {
+          avatar_url: avatarUrl,
+        },
+      }
+    );
+  }
+
+  /**
    * Get account data for current user
    */
   async getAccountData(
@@ -680,6 +726,38 @@ export class MatrixApi {
     await this.request<SetAccountDataResponse>(
       'PUT',
       `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
+      {
+        body: content,
+      }
+    );
+  }
+
+  /**
+   * Get room-specific account data for current user
+   */
+  async getRoomAccountData(
+    userId: string,
+    roomId: string,
+    type: string
+  ): Promise<AccountDataResponse> {
+    return this.request<AccountDataResponse>(
+      'GET',
+      `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(type)}`
+    );
+  }
+
+  /**
+   * Set room-specific account data for current user
+   */
+  async setRoomAccountData(
+    userId: string,
+    roomId: string,
+    type: string,
+    content: Record<string, any>
+  ): Promise<void> {
+    await this.request<SetAccountDataResponse>(
+      'PUT',
+      `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(type)}`,
       {
         body: content,
       }

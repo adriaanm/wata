@@ -195,6 +195,19 @@ export class WataClient {
   }
 
   /**
+   * Verify the current user by calling whoami API
+   * Returns the user ID if authenticated, null otherwise
+   */
+  async whoami(): Promise<string | null> {
+    try {
+      const response = await this.api.whoami();
+      return response.user_id;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Get current access token for authenticated media downloads
    */
   getAccessToken(): string | null {
@@ -474,6 +487,7 @@ export class WataClient {
       info: {
         duration: Math.round(duration * 1000), // Matrix uses milliseconds
         mimetype: 'audio/mp4',
+        size: audio.byteLength,
       },
     });
 
@@ -491,6 +505,7 @@ export class WataClient {
         info: {
           duration: Math.round(duration * 1000),
           mimetype: 'audio/mp4',
+          size: audio.byteLength,
         },
       },
       origin_server_ts: Date.now(),
@@ -609,6 +624,17 @@ export class WataClient {
     }
 
     await this.api.setDisplayName(this.userId, name);
+  }
+
+  /**
+   * Update current user's avatar URL
+   */
+  async setAvatarUrl(avatarUrl: string): Promise<void> {
+    if (!this.userId) {
+      throw new Error('Not logged in');
+    }
+
+    await this.api.setAvatarUrl(this.userId, avatarUrl);
   }
 
   // ==========================================================================

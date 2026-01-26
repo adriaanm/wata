@@ -16,6 +16,7 @@ import type {
   InvitedRoomSync,
   LeftRoomSync,
   MatrixEvent,
+  RoomSummary,
 } from './matrix-api';
 import type { Logger } from './types';
 
@@ -30,7 +31,7 @@ export interface MemberInfo {
   userId: string;
   displayName: string;
   avatarUrl: string | null;
-  membership: 'join' | 'invite' | 'leave' | 'ban';
+  membership: 'join' | 'invite' | 'leave' | 'ban' | 'knock';
 }
 
 /**
@@ -42,6 +43,13 @@ export interface RoomState {
   avatarUrl: string | null;
   /** Canonical alias for the room (e.g., #family:server) */
   canonicalAlias: string | null;
+  /** Room summary (heroes, member counts) */
+  summary?: RoomSummary;
+  /** Unread notification counts */
+  unreadNotifications?: {
+    highlight_count: number;
+    notification_count: number;
+  };
   /** Map of userId -> member info */
   members: Map<string, MemberInfo>;
   /** Timeline events (chronological order, oldest to newest) */
@@ -316,6 +324,23 @@ export class SyncEngine {
       roomData.state.events.forEach((event) => {
         this.processStateEvent(room!, event);
       });
+    }
+
+    // Process state_after events (state changes between since and end of timeline)
+    if (roomData.state_after?.events) {
+      roomData.state_after.events.forEach((event) => {
+        this.processStateEvent(room!, event);
+      });
+    }
+
+    // Capture room summary
+    if (roomData.summary) {
+      room.summary = roomData.summary;
+    }
+
+    // Capture unread notifications
+    if (roomData.unread_notifications) {
+      room.unreadNotifications = roomData.unread_notifications;
     }
 
     // Process timeline events (new messages)

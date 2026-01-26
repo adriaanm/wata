@@ -18,6 +18,7 @@ See also: [Matrix Client-Server API for Wata](wata-matrix-spec.md) for the under
 - [Matrix Protocol Mapping](#matrix-protocol-mapping)
 - [Implementation Notes](#implementation-notes)
 - [Planning & Design](#planning--design)
+- [Roadmap](#roadmap)
 
 ## Quick Start
 
@@ -337,6 +338,25 @@ Update current user's display name. See [PUT /profile/{userId}/{keyName}](wata-m
 await client.setDisplayName('Alice');
 ```
 
+#### `setAvatarUrl(avatarUrl: string): Promise<void>`
+
+Update current user's avatar URL. The avatar URL must be an MXC URI. See [PUT /profile/{userId}/{keyName}](wata-matrix-spec.md#put-profileuseridkeyname).
+
+```typescript
+await client.setAvatarUrl('mxc://example.com/abc123');
+```
+
+#### `whoami(): Promise<string | null>`
+
+Verify the current user by calling the whoami API. Returns the user ID if authenticated, null otherwise. See [GET /account/whoami](wata-matrix-spec.md#get-accountwhoami).
+
+```typescript
+const userId = await client.whoami();
+if (userId) {
+  console.log('Authenticated as:', userId);
+}
+```
+
 ### Event Handling
 
 #### `on<K extends WataClientEventName>(event: K, handler: WataClientEvents[K]): void`
@@ -413,9 +433,9 @@ WataClient is implemented as a custom Matrix client library that replaces `matri
 - Messaging (send voice messages, redaction)
 - Receipts (read receipts for played status)
 - Media repository (upload/download)
-- Profile (display name)
-- Account data (m.direct management)
-- Synchronization (/sync polling loop)
+- Profile (display name, avatar URL)
+- Account data (global and room-specific)
+- Synchronization (/sync polling loop with full state tracking)
 
 ### Domain Model Mapping
 
@@ -439,7 +459,7 @@ WataClient is implemented as a custom Matrix client library that replaces `matri
 | Messages | [PUT /rooms/{roomId}/send/{eventType}/{txnId}](wata-matrix-spec.md#put-roomsroomidsendeventtypetxnid), [PUT /rooms/{roomId}/redact/{eventId}/{txnId}](wata-matrix-spec.md#put-roomsroomidredacteventidtxnid) |
 | Receipts | [POST /rooms/{roomId}/receipt/{receiptType}/{eventId}](wata-matrix-spec.md#post-roomsroomidreceiptreceipttypeeventid) |
 | Media | [POST /media/v3/upload](wata-matrix-spec.md#post-mediav3upload), [GET /media/v1/download/{serverName}/{mediaId}](wata-matrix-spec.md#get-mediav1downloadservernamemediaid) |
-| Profile | [GET /profile/{userId}](wata-matrix-spec.md#get-profileuserid), [PUT /profile/{userId}/displayname](wata-matrix-spec.md#put-profileuseridkeyname) |
+| Profile | [GET /profile/{userId}](wata-matrix-spec.md#get-profileuserid), [PUT /profile/{userId}/displayname](wata-matrix-spec.md#put-profileuseridkeyname), [PUT /profile/{userId}/avatar_url](wata-matrix-spec.md#put-profileuseridkeyname) |
 | Account Data | [GET /user/{userId}/account_data/{type}](wata-matrix-spec.md#get-useruseridaccount_datatype), [PUT /user/{userId}/account_data/{type}](wata-matrix-spec.md#put-useruseridaccount_datatype) |
 
 ### DM Room Idempotency Notes
@@ -483,3 +503,79 @@ For v1, **accept the limitation** and document it. Duplicate DMs are rare in pra
 
 - [Matrix Spec: Account Data](https://spec.matrix.org/latest/client-server-api/#account-data)
 - [matrix-js-sdk #2672](https://github.com/matrix-org/matrix-js-sdk/issues/2672) - "Automatically add to account_data 'm.direct'"
+
+---
+
+## Roadmap
+
+This section tracks Matrix spec features that are not yet implemented in WataClient but may be useful for future enhancements.
+
+### Missing Matrix API Endpoints
+
+The following endpoints from the Matrix spec are not yet implemented:
+
+| Category | Endpoint | Description | Priority |
+|----------|----------|-------------|----------|
+| Authentication | GET /login | Get supported login types | Low |
+| Sync | use_state_after param | Query param to request state_after in sync (v1.16) | Low |
+| Rooms | POST /rooms/{roomId}/leave | Leave a room | Low |
+| Rooms | POST /rooms/{roomId}/kick | Kick a user from a room | Low |
+| Rooms | POST /rooms/{roomId}/ban | Ban a user from a room | Low |
+| Rooms | POST /rooms/{roomId}/unban | Unban a user from a room | Low |
+| Rooms | PUT /rooms/{roomId}/state/{eventType}/{stateKey} | Send a state event | Medium |
+| Rooms | GET /rooms/{roomId}/state | Get all state events for a room | Medium |
+| Rooms | GET /rooms/{roomId}/state/{eventType}/{stateKey} | Get a specific state event | Medium |
+| Rooms | GET /rooms/{roomId}/members | Get membership list for a room | Low |
+| Rooms | GET /joined_rooms | List rooms the user is joined to | Low |
+| Messages | GET /rooms/{roomId}/messages | Get message history (backfill) | Medium |
+| Messages | GET /rooms/{roomId}/context/{eventId} | Get events around an event | Low |
+| Profile | GET /profile/{userId}/{keyName} | Get a specific profile field | Low |
+| Presence | GET /presence/{userId}/status | Get user presence | Future |
+| Presence | PUT /presence/{userId}/status | Set own presence | Future |
+| Filtering | POST /user/{userId}/filter | Create a filter for sync | Low |
+| Typing | POST /rooms/{roomId}/typing | Send typing notification | Future |
+| Media | download params | timeout_ms, allow_redirect query params | Low |
+| Receipts | receipt type param | Support m.read.private and m.fully_read in sendReadReceipt | Low |
+
+### Missing Matrix Event Types
+
+The following event types from the spec are not yet handled:
+
+| Event Type | Description | Priority |
+|------------|-------------|----------|
+| m.room.topic | Room topic | Low |
+| m.room.power_levels | Power levels for actions | Medium |
+| m.room.join_rules | Join rules for the room | Low |
+| m.room.history_visibility | History visibility settings | Low |
+| m.typing | Typing notifications (ephemeral) | Future |
+| m.presence | Presence updates | Future |
+| m.receipt.private | Private read receipts (v1.4) | Low |
+
+### Missing Features
+
+| Feature | Description | Priority |
+|---------|-------------|----------|
+| Message pagination | Ability to fetch older messages (backfill) | Medium |
+| Room directory | Browse public rooms | Low |
+| Room search | Search for rooms by name/alias | Low |
+| User search | Search for users by ID/display name | Low |
+| Disambiguated display names | Handle duplicate display names per spec algorithm | Low |
+| Room display name algorithm | Implement full room name calculation with heroes | Low |
+| E2E encryption | Olm/Megolm support for encrypted messages | Deferred to v2 |
+| Push notifications | FCM/APNS push notification support | v1 |
+
+### Notes
+
+- **Federation out of scope**: Wata targets single-homeserver deployments. Federation features (e.g., `via` parameter on `/join`, `allow_remote` on media download) are not implemented and not planned.
+
+- **use_state_after parameter**: This is a v1.16 query parameter that controls whether `state_after` is returned in sync responses. The current implementation processes `state_after` data if returned by the server, but does not support explicitly requesting it via the query parameter. In practice, servers may return it regardless.
+
+- **Media download parameters**: Optional query parameters `timeout_ms` (default 20000) and `allow_redirect` (default false) are not currently supported. Default behavior is sufficient for Wata's use case.
+
+- **Receipt types**: The current implementation only supports `m.read` receipts. The spec also defines `m.read.private` (v1.4, private read receipts) and `m.fully_read` (read marker). For Wata's "played" semantics, public `m.read` receipts are the correct choice.
+
+- **Message pagination**: The current sync implementation maintains a full timeline in memory. For rooms with long histories, implementing proper pagination with `/messages` backfill would be more efficient.
+
+- **Disambiguated display names**: The current implementation uses the `displayname` from `m.room.member` events. The spec recommends disambiguating duplicate display names with the user ID (e.g., "Alice (@alice:server.com)").
+
+- **Room display name algorithm**: The current implementation uses `m.room.name` or falls back to the room ID. The spec recommends using `m.heroes` from the room summary for calculating names.
