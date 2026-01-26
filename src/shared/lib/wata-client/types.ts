@@ -143,8 +143,9 @@ export type MessageDeletedHandler = (
 
 /**
  * Handler for message played status update
+ * Includes roomId to avoid needing to search for the room
  */
-export type MessagePlayedHandler = (message: VoiceMessage) => void;
+export type MessagePlayedHandler = (message: VoiceMessage, roomId: string) => void;
 
 // ============================================================================
 // Event Map

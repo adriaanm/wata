@@ -135,13 +135,9 @@ class MatrixServiceAdapter {
   private roomIdByContactUserId: Map<string, string> = new Map();
   private familyRoomId: string | null = null;
 
-  // Cache for DM conversations to support synchronous getDirectRooms() and getVoiceMessages()
-  // Maps roomId -> conversation data (contact, messages, etc.)
-  private dmConversationCache: Map<string, {
-    contact: Contact;
-    roomId: string;
-    messages: VoiceMessage[];
-  }> = new Map();
+  // Cache for DM room -> contact mappings (for getDirectRooms())
+  // Messages are fetched fresh from WataClient via getConversationByRoomId()
+  private dmRoomContacts: Map<string, Contact> = new Map();
 
   constructor(credentialStorage: CredentialStorage, externalLogger?: Logger) {
     this.credentialStorage = credentialStorage;
@@ -184,23 +180,9 @@ class MatrixServiceAdapter {
       const matrixMessage = this.wataToMatrixMessage(message);
       this.messageCallbacks.forEach((cb) => cb(roomId, matrixMessage));
 
-      // Cache DM conversations for synchronous getDirectRooms() and getVoiceMessages() access
+      // Update DM room -> contact mapping for getDirectRooms()
       if (conversation.type === 'dm' && conversation.contact) {
-        // Get existing cache or create new
-        const existing = this.dmConversationCache.get(conversation.id);
-        const messages = existing ? existing.messages : [];
-        // Add the new message if not already present
-        const messageIndex = messages.findIndex((m) => m.eventId === matrixMessage.eventId);
-        if (messageIndex === -1) {
-          messages.push(matrixMessage);
-        }
-
-        this.dmConversationCache.set(conversation.id, {
-          contact: conversation.contact,
-          roomId: conversation.id,
-          messages,
-        });
-        // Also update the user ID -> room ID mapping
+        this.dmRoomContacts.set(conversation.id, conversation.contact);
         this.roomIdByContactUserId.set(conversation.contact.user.id, conversation.id);
         this.contactByUserId.set(conversation.contact.user.id, conversation.contact);
       }
@@ -209,15 +191,11 @@ class MatrixServiceAdapter {
     });
 
     // Message played (receipt update)
-    this.wataClient.on('messagePlayed', (message) => {
-      log(`[MatrixServiceAdapter] messagePlayed event for message ${message.id}`);
-      const room = this.findRoomForMessage(message);
-      if (room) {
-        log(`[MatrixServiceAdapter] Found room ${room.id}, notifying ${this.receiptCallbacks.length} callbacks`);
-        this.receiptCallbacks.forEach((cb) => cb(room.id));
-      } else {
-        logWarn(`[MatrixServiceAdapter] Could not find room for message ${message.id}`);
-      }
+    // roomId is now passed directly from WataClient, no need to search
+    this.wataClient.on('messagePlayed', (message, roomId) => {
+      log(`[MatrixServiceAdapter] messagePlayed event for message ${message.id} in room ${roomId}`);
+      log(`[MatrixServiceAdapter] Notifying ${this.receiptCallbacks.length} callbacks`);
+      this.receiptCallbacks.forEach((cb) => cb(roomId));
     });
 
     // Family/contacts updated
@@ -260,35 +238,6 @@ class MatrixServiceAdapter {
   }
 
   /**
-   * Find room for a message
-   */
-  private findRoomForMessage(message: WataVoiceMessage): Conversation | null {
-    // Check family conversation
-    const familyConvo = this.wataClient.getFamilyConversation();
-    if (
-      familyConvo &&
-      familyConvo.messages.some((m) => m.id === message.id)
-    ) {
-      return familyConvo;
-    }
-
-    // Check DM conversations via cache
-    for (const [roomId, cacheData] of this.dmConversationCache.entries()) {
-      if (cacheData.messages.some((m) => m.eventId === message.id)) {
-        return {
-          id: roomId,
-          type: 'dm',
-          contact: cacheData.contact,
-          messages: [],
-          unplayedCount: 0,
-        };
-      }
-    }
-
-    return null;
-  }
-
-  /**
    * Notify room update callbacks
    */
   private notifyRoomUpdate(): void {
@@ -318,17 +267,13 @@ class MatrixServiceAdapter {
 
     // Add DM rooms from cache
     // We iterate through cached DM conversations and convert them to MatrixRoom format
-    for (const [roomId, cacheData] of this.dmConversationCache.entries()) {
-      const { contact } = cacheData;
-
-      // Try to get actual conversation data from WataClient
-      // Note: This is a sync call that may not have all messages yet
-      // But we can at least return the basic room info
+    // Add DM rooms from the room -> contact mapping
+    for (const [roomId, contact] of this.dmRoomContacts.entries()) {
       rooms.push({
         roomId,
         name: contact.user.displayName,
         avatarUrl: contact.user.avatarUrl,
-        lastMessage: null, // We'd need async getConversation to get messages
+        lastMessage: null,
         lastMessageTime: null,
         isDirect: true,
       });
@@ -418,7 +363,7 @@ class MatrixServiceAdapter {
     this.contactByUserId.clear();
     this.roomIdByContactUserId.clear();
     this.familyRoomId = null;
-    this.dmConversationCache.clear();
+    this.dmRoomContacts.clear();
   }
 
   /**
@@ -495,14 +440,8 @@ class MatrixServiceAdapter {
     const conversation = await this.wataClient.getConversation(contact);
     this.roomIdByContactUserId.set(userId, conversation.id);
 
-    // Cache the conversation for synchronous access
-    // Convert all messages to MatrixService format
-    const messages = conversation.messages.map((m) => this.wataToMatrixMessage(m));
-    this.dmConversationCache.set(conversation.id, {
-      contact,
-      roomId: conversation.id,
-      messages,
-    });
+    // Update room -> contact mapping for getDirectRooms()
+    this.dmRoomContacts.set(conversation.id, contact);
 
     return conversation.id;
   }
@@ -667,20 +606,8 @@ class MatrixServiceAdapter {
    * Mark message as played
    */
   async markMessageAsPlayed(roomId: string, eventId: string): Promise<void> {
-    // Find the message
-    const messages = this.getVoiceMessages(roomId);
-    const matrixMessage = messages.find((m) => m.eventId === eventId);
-
-    if (!matrixMessage) {
-      throw new Error(`Message ${eventId} not found in room ${roomId}`);
-    }
-
-    // Convert back to WataClient format for markAsPlayed
-    // This is inefficient, but maintains compatibility
-    // We'd need to store message mappings for better performance
-    logWarn(
-      '[MatrixServiceAdapter] markMessageAsPlayed() - inefficient implementation'
-    );
+    log(`[MatrixServiceAdapter] markMessageAsPlayed: room=${roomId}, event=${eventId}`);
+    await this.wataClient.markAsPlayedById(roomId, eventId);
   }
 
   /**

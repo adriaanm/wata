@@ -510,7 +510,31 @@ export class WataClient {
     if (!message.playedBy.includes(this.userId!)) {
       updatedMessage.playedBy = [...message.playedBy, this.userId!];
     }
-    this.emit('messagePlayed', updatedMessage);
+    this.emit('messagePlayed', updatedMessage, room.roomId);
+  }
+
+  /**
+   * Mark message as played by room and event ID
+   * Simpler interface for adapter compatibility - doesn't require full VoiceMessage object
+   */
+  async markAsPlayedById(roomId: string, eventId: string): Promise<void> {
+    this.logger.log(`[WataClient] markAsPlayedById: room=${roomId}, event=${eventId}`);
+
+    await this.api.sendReadReceipt(roomId, eventId);
+
+    // Find the event and emit messagePlayed if found
+    const roomState = this.syncEngine.getRoom(roomId);
+    if (roomState) {
+      const event = roomState.timeline.find((e) => e.event_id === eventId);
+      if (event && this.isVoiceMessageEvent(event)) {
+        const message = this.eventToVoiceMessage(event);
+        const updatedMessage = { ...message, isPlayed: true };
+        if (!message.playedBy.includes(this.userId!)) {
+          updatedMessage.playedBy = [...message.playedBy, this.userId!];
+        }
+        this.emit('messagePlayed', updatedMessage, roomId);
+      }
+    }
   }
 
   /**
@@ -984,9 +1008,9 @@ export class WataClient {
       return;
     }
 
-    this.logger.log(`[WataClient] Emitting messagePlayed for ${eventId}`);
+    this.logger.log(`[WataClient] Emitting messagePlayed for ${eventId} in room ${roomId}`);
     const message = this.eventToVoiceMessage(event);
-    this.emit('messagePlayed', message);
+    this.emit('messagePlayed', message, roomId);
   }
 
   /**
