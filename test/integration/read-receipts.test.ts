@@ -8,6 +8,7 @@
 import {
   createTestService,
   createTestCredentialStorage,
+  getImplementationName,
 } from './helpers/test-service-factory';
 import { createFakeAudioBuffer } from './helpers';
 
@@ -35,6 +36,9 @@ describe('Read Receipts (WataClient)', () => {
         'Matrix server not running. Start it with: pnpm dev:server',
       );
     }
+
+    // Log which implementation is being used
+    console.log(`\n  Using implementation: ${getImplementationName()}\n`);
   }, 10000);
 
   beforeEach(async () => {

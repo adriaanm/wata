@@ -72,50 +72,131 @@ export class TestClient {
 
   /**
    * Wait for initial sync to complete
+   *
+   * Logs sync state changes and checks if already synced.
    */
   async waitForSync(timeoutMs = 30000): Promise<void> {
     if (!this.service) throw new Error('Not logged in');
 
     console.log(`[TestClient:${this.username}] Waiting for sync...`);
 
-    // Use MatrixService's waitForSync method
-    await this.service.waitForSync(timeoutMs);
+    // Check if already synced
+    const currentState = this.service.getSyncState();
+    if (currentState === 'PREPARED' || currentState === 'SYNCING') {
+      const rooms = this.service.getDirectRooms();
+      console.log(
+        `[TestClient:${this.username}] Already synced (${rooms.length} rooms)`,
+      );
+      return;
+    }
 
-    const rooms = this.service.getDirectRooms();
-    console.log(
-      `[TestClient:${this.username}] Sync complete (${rooms.length} rooms)`,
-    );
+    // Log sync state changes for debugging
+    const unsubscribe = this.service.onSyncStateChange((state) => {
+      console.log(`[TestClient:${this.username}] Sync state: ${state}`);
+    });
+
+    try {
+      // Use MatrixService's waitForSync method
+      await this.service.waitForSync(timeoutMs);
+
+      const rooms = this.service.getDirectRooms();
+      console.log(
+        `[TestClient:${this.username}] Sync complete (${rooms.length} rooms)`,
+      );
+    } finally {
+      unsubscribe();
+    }
   }
 
   /**
    * Wait for a specific room to appear in the client's room list
    *
-   * Uses polling with retries to handle Conduit's eventual consistency.
+   * Combines room update events with exponential backoff polling to handle
+   * Conduit's eventual consistency and timing issues.
    */
   async waitForRoom(roomId: string, timeoutMs = 15000): Promise<void> {
     if (!this.service) throw new Error('Not logged in');
 
     console.log(`[TestClient:${this.username}] Waiting for room ${roomId}...`);
 
-    const startTime = Date.now();
-    const pollInterval = 100;
-
-    while (Date.now() - startTime < timeoutMs) {
-      const rooms = this.service.getDirectRooms();
-      if (rooms.some(r => r.roomId === roomId)) {
-        console.log(`[TestClient:${this.username}] Room found`);
-        return;
-      }
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    // Check if room already exists
+    const existingRooms = this.service.getDirectRooms();
+    if (existingRooms.some(r => r.roomId === roomId)) {
+      console.log(`[TestClient:${this.username}] Room already available`);
+      return;
     }
 
-    throw new Error(`Room ${roomId} not found after ${timeoutMs}ms`);
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      let checkCount = 0;
+      let resolved = false;
+
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          cleanup();
+          reject(new Error(`Room ${roomId} not found after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        unsubscribe();
+      };
+
+      const checkRoom = () => {
+        const rooms = this.service!.getDirectRooms();
+        if (rooms.some(r => r.roomId === roomId)) {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            console.log(
+              `[TestClient:${this.username}] Room found (after ${checkCount} checks)`,
+            );
+            resolve();
+          }
+          return true;
+        }
+        return false;
+      };
+
+      // Listen for room update events
+      const unsubscribe = this.service!.onRoomUpdate(() => {
+        checkRoom();
+      });
+
+      // Poll with exponential backoff as fallback (in case events are missed)
+      let pollDelay = 100;
+      const maxPollDelay = 2000;
+
+      const poll = () => {
+        if (resolved) return;
+
+        checkCount++;
+        if (!checkRoom()) {
+          // Exponential backoff up to max delay
+          pollDelay = Math.min(pollDelay * 1.2, maxPollDelay);
+          if (checkCount % 10 === 0) {
+            console.log(
+              `[TestClient:${this.username}] Still waiting for room... (${checkCount} checks)`,
+            );
+          }
+          // Continue polling if not timed out
+          if (Date.now() - startTime < timeoutMs) {
+            setTimeout(poll, pollDelay);
+          }
+        }
+      };
+
+      // Start polling
+      poll();
+    });
   }
 
   /**
    * Wait for a voice message matching the filter
    *
-   * Checks existing messages first, then waits for new ones.
+   * Checks existing messages first, then waits for new ones via events.
+   * Includes polling fallback in case events are missed.
    */
   async waitForMessage(
     roomId: string,
@@ -130,39 +211,71 @@ export class TestClient {
     );
 
     return new Promise((resolve, reject) => {
+      let resolved = false;
+
       const timeout = setTimeout(() => {
-        unsubscribe();
-        reject(
-          new Error(
-            `Message not received in room ${roomId} after ${timeoutMs}ms`,
-          ),
-        );
+        if (!resolved) {
+          cleanup();
+          reject(
+            new Error(
+              `Message not received in room ${roomId} after ${timeoutMs}ms`,
+            ),
+          );
+        }
       }, timeoutMs);
 
-      const resolveWithMessage = (msg: VoiceMessage) => {
+      const cleanup = () => {
         clearTimeout(timeout);
         unsubscribe();
-        console.log(`[TestClient:${this.username}] Message received`);
-        resolve(msg);
       };
 
-      // Check existing messages first
-      const existing = this.getVoiceMessages(roomId).find(msg =>
-        this.matchesFilter(msg, filter),
-      );
-      if (existing) {
-        resolveWithMessage(existing);
+      const resolveWithMessage = (msg: VoiceMessage) => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          console.log(`[TestClient:${this.username}] Message received`);
+          resolve(msg);
+        }
+      };
+
+      const checkExisting = () => {
+        const existing = this.getVoiceMessages(roomId).find(msg =>
+          this.matchesFilter(msg, filter),
+        );
+        if (existing) {
+          resolveWithMessage(existing);
+          return true;
+        }
+        return false;
+      };
+
+      // Initial check
+      if (checkExisting()) {
         return;
       }
 
       // Listen for new messages
-      const unsubscribe = this.service.onNewVoiceMessage(
+      const unsubscribe = this.service!.onNewVoiceMessage(
         (msgRoomId: string, message: VoiceMessage) => {
           if (msgRoomId === roomId && this.matchesFilter(message, filter)) {
             resolveWithMessage(message);
           }
         },
       );
+
+      // Poll periodically as fallback (handles missed events)
+      let pollCount = 0;
+      const pollInterval = setInterval(() => {
+        if (!resolved) {
+          pollCount++;
+          if (pollCount % 5 === 0) {
+            console.log(
+              `[TestClient:${this.username}] Still waiting for message... (${pollCount} checks)`,
+            );
+          }
+          checkExisting();
+        }
+      }, 1000);
     });
   }
 

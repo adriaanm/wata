@@ -108,3 +108,12 @@ export function isUsingWataClient(): boolean {
 export function getImplementationName(): string {
   return MATRIX_CONFIG.implementation === 'wata-client' ? 'WataClient' : 'matrix-js-sdk';
 }
+
+/**
+ * Get the raw implementation value from MATRIX_CONFIG
+ *
+ * @returns 'wata-client' or 'matrix-js-sdk'
+ */
+export function getImplementation(): string {
+  return MATRIX_CONFIG.implementation;
+}
