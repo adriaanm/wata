@@ -126,6 +126,9 @@ export class TestClient {
       return;
     }
 
+    // Capture service reference to avoid accessing this.service after cleanup
+    const service = this.service;
+
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
       let checkCount = 0;
@@ -144,7 +147,7 @@ export class TestClient {
       };
 
       const checkRoom = () => {
-        const rooms = this.service!.getDirectRooms();
+        const rooms = service.getDirectRooms();
         if (rooms.some(r => r.roomId === roomId)) {
           if (!resolved) {
             resolved = true;
@@ -160,7 +163,7 @@ export class TestClient {
       };
 
       // Listen for room update events
-      const unsubscribe = this.service!.onRoomUpdate(() => {
+      const unsubscribe = service.onRoomUpdate(() => {
         checkRoom();
       });
 
@@ -212,6 +215,8 @@ export class TestClient {
 
     return new Promise((resolve, reject) => {
       let resolved = false;
+      let unsubscribe: () => void; // Declare before cleanup uses it
+      let pollInterval: ReturnType<typeof setInterval>; // Declare before cleanup uses it
 
       const timeout = setTimeout(() => {
         if (!resolved) {
@@ -226,6 +231,7 @@ export class TestClient {
 
       const cleanup = () => {
         clearTimeout(timeout);
+        clearInterval(pollInterval);
         unsubscribe();
       };
 
@@ -255,7 +261,7 @@ export class TestClient {
       }
 
       // Listen for new messages
-      const unsubscribe = this.service!.onNewVoiceMessage(
+      unsubscribe = this.service!.onNewVoiceMessage(
         (msgRoomId: string, message: VoiceMessage) => {
           if (msgRoomId === roomId && this.matchesFilter(message, filter)) {
             resolveWithMessage(message);
@@ -265,7 +271,7 @@ export class TestClient {
 
       // Poll periodically as fallback (handles missed events)
       let pollCount = 0;
-      const pollInterval = setInterval(() => {
+      pollInterval = setInterval(() => {
         if (!resolved) {
           pollCount++;
           if (pollCount % 5 === 0) {
