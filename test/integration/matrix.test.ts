@@ -16,6 +16,27 @@ import {
 } from './helpers/test-service-factory';
 import type { MatrixService, MatrixServiceAdapter, VoiceMessage } from '@shared/services/MatrixService';
 
+/**
+ * Poll until a condition is true, with exponential backoff.
+ */
+async function waitForCondition(
+  description: string,
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 15000,
+  pollMs = 200,
+): Promise<void> {
+  const startTime = Date.now();
+  let delay = pollMs;
+
+  while (Date.now() - startTime < timeoutMs) {
+    if (await condition()) return;
+    await new Promise(resolve => setTimeout(resolve, delay));
+    delay = Math.min(delay * 1.3, 2000);
+  }
+
+  throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
+}
+
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {
   alice: { username: 'alice', password: 'testpass123' },
@@ -170,8 +191,11 @@ describe('Matrix Integration Tests', () => {
       // Create a test DM room
       testRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
 
-      // Brief pause for room to propagate
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for room to propagate
+      await waitForCondition(
+        'test room visible to alice',
+        () => aliceService.isRoomMember(testRoomId),
+      );
     }, 15000);
 
     test('should send an audio message', async () => {
@@ -189,8 +213,11 @@ describe('Matrix Integration Tests', () => {
         fakeAudioData.length,
       );
 
-      // Wait for sync to propagate the message
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for message to appear in timeline
+      await waitForCondition(
+        'message appears in alice timeline',
+        () => aliceService.getMessageCount(testRoomId) > initialCount,
+      );
 
       // Verify message was sent by checking local timeline
       const messages = aliceService.getVoiceMessages(testRoomId);
@@ -213,8 +240,11 @@ describe('Matrix Integration Tests', () => {
         fakeAudioData.length,
       );
 
-      // Wait for sync to propagate the message
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for message to appear
+      await waitForCondition(
+        'message in alice timeline',
+        () => aliceService.getVoiceMessages(testRoomId).length > 0,
+      );
 
       // Check Alice's timeline
       const aliceMessages = aliceService.getVoiceMessages(testRoomId);
@@ -242,8 +272,11 @@ describe('Matrix Integration Tests', () => {
         );
       }
 
-      // Wait for sync
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for all messages to appear
+      await waitForCondition(
+        `${messageCount} messages sent`,
+        () => aliceService.getMessageCount(testRoomId) >= initialCount + messageCount,
+      );
 
       // Verify message count increased
       const newCount = aliceService.getMessageCount(testRoomId);
@@ -447,8 +480,11 @@ describe('Matrix Integration Tests', () => {
         audioData.length,
       );
 
-      // Wait for sync
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for message to appear
+      await waitForCondition(
+        'cross-user message appears',
+        () => aliceService.getMessageCount(roomId) > beforeCount,
+      );
 
       // Alice should see the message
       const afterCount = aliceService.getMessageCount(roomId);

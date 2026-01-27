@@ -240,6 +240,32 @@ export class TestOrchestrator {
   }
 
   /**
+   * Wait for a condition to become true via a client
+   */
+  async waitForCondition(
+    username: string,
+    description: string,
+    condition: () => boolean,
+    timeoutMs = 15000,
+  ): Promise<void> {
+    const client = this.getClient(username);
+    return client.waitForCondition(description, condition, timeoutMs);
+  }
+
+  /**
+   * Wait for at least N voice messages in a room for a specific client
+   */
+  async waitForMessageCount(
+    username: string,
+    roomId: string,
+    minCount: number,
+    timeoutMs = 20000,
+  ): Promise<VoiceMessage[]> {
+    const client = this.getClient(username);
+    return client.waitForMessageCount(roomId, minCount, timeoutMs);
+  }
+
+  /**
    * Cleanup all clients
    */
   async cleanup(): Promise<void> {

@@ -16,8 +16,27 @@ import {
 
 import { createFakeAudioBuffer } from './helpers/audio-helpers';
 
-// Detect if running in CI for timing adjustments
-const isCI = process.env.CI === 'true';
+/**
+ * Poll until a condition is true, with exponential backoff.
+ * Replaces fixed setTimeout delays for deterministic tests.
+ */
+async function waitForCondition(
+  description: string,
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 15000,
+  pollMs = 200,
+): Promise<void> {
+  const startTime = Date.now();
+  let delay = pollMs;
+
+  while (Date.now() - startTime < timeoutMs) {
+    if (await condition()) return;
+    await new Promise(resolve => setTimeout(resolve, delay));
+    delay = Math.min(delay * 1.3, 2000);
+  }
+
+  throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
+}
 
 // Simple in-memory credential storage for testing
 class TestCredentialStorage {
@@ -58,8 +77,11 @@ async function ensureFamilyRoomMembership(
       // Join the existing room
       console.log('[Test] Family room exists, joining...');
       await service.joinRoom(existingRoomId);
-      // Wait for sync to propagate
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait until we're a member
+      await waitForCondition(
+        'joined family room',
+        () => service.isRoomMember(existingRoomId),
+      );
     }
     return existingRoomId;
   }
@@ -136,7 +158,10 @@ describe('Family Room', () => {
       expect(roomId).toMatch(/^!/);
 
       // Wait for room to be synced
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await waitForCondition(
+        'family room visible',
+        async () => !!(await aliceService.getFamilyRoom()),
+      );
 
       // Verify we can get the family room back
       const familyRoom = await aliceService.getFamilyRoom();
@@ -241,8 +266,11 @@ describe('Family Room', () => {
         // May already be a member
       }
 
-      // Wait for sync
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait until bob sees the family room
+      await waitForCondition(
+        'bob sees family room',
+        async () => !!(await bobService.getFamilyRoom()),
+      );
 
       // Then: bob is a member of family room (can get it)
       const bobFamilyRoom = await bobService.getFamilyRoom();
@@ -279,25 +307,20 @@ describe('Family Room', () => {
         // May already be a member
       }
 
-      // Wait for sync to propagate membership events
-      // Note: We don't call waitForSync again as it can timeout if already synced
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      // When: alice calls getFamilyMembers
-      const members = await aliceService.getFamilyMembers();
+      // Wait until alice sees bob as a family member
+      let members: Awaited<ReturnType<typeof aliceService.getFamilyMembers>> = [];
+      await waitForCondition(
+        'alice sees bob in family members',
+        async () => {
+          members = await aliceService.getFamilyMembers();
+          return members.some(m => m.userId === '@bob:localhost');
+        },
+        15000,
+      );
 
       // Then: returns bob (excludes self)
       console.log('[Test] Family members:', members);
-      // Note: Due to sync timing, this may not always show bob immediately
-      // The test verifies the mechanism works
-      if (members.length > 0) {
-        expect(members.some(m => m.userId === '@bob:localhost')).toBe(true);
-      } else {
-        console.log(
-          '[Test] Warning: members array is empty - sync may not have propagated yet',
-        );
-        // This is a known limitation - not a test failure
-      }
+      expect(members.some(m => m.userId === '@bob:localhost')).toBe(true);
     }, 60000);
   });
 
@@ -318,39 +341,37 @@ describe('Family Room', () => {
       expect(roomId).toMatch(/^!/);
     }, 30000);
 
-    // Test for idempotency: calling getOrCreateDmRoom twice should return the same room
-    // Uses longer wait on CI due to slower m.direct account data propagation
-    // DISABLED on CI: m.direct account data doesn't sync reliably even with long waits
-    const testSkippedOnCI = isCI ? test.skip : test;
-    testSkippedOnCI(
-      'should return existing DM room on second call',
-      async () => {
-        // Given: alice and bob have existing DM (from previous call in same session)
-        await aliceService.login(
-          TEST_USERS.alice.username,
-          TEST_USERS.alice.password,
-        );
-        await aliceService.waitForSync();
+    test('should return existing DM room on second call', async () => {
+      // Given: alice and bob have existing DM (from previous call in same session)
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
+      await aliceService.waitForSync();
 
-        // Create first DM room
-        const firstRoomId =
+      // Create first DM room
+      const firstRoomId =
+        await aliceService.getOrCreateDmRoom('@bob:localhost');
+      expect(firstRoomId).toBeTruthy();
+
+      // Retry second call until it converges on the same room as the first.
+      // m.direct account data may take time to propagate.
+      const maxWaitTime = 30000;
+      const startTime = Date.now();
+      let secondRoomId: string | undefined;
+      let delay = 500;
+
+      while (Date.now() - startTime < maxWaitTime) {
+        secondRoomId =
           await aliceService.getOrCreateDmRoom('@bob:localhost');
-        expect(firstRoomId).toBeTruthy();
+        if (secondRoomId === firstRoomId) break;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 1.5, 3000);
+      }
 
-        // Wait for account data to sync (use longer wait on CI)
-        // CI can be significantly slower for account data propagation
-        const syncWaitMs = isCI ? 10000 : 2000;
-        await new Promise(resolve => setTimeout(resolve, syncWaitMs));
-
-        // When: alice calls getOrCreateDmRoom('@bob:localhost') again
-        const secondRoomId =
-          await aliceService.getOrCreateDmRoom('@bob:localhost');
-
-        // Then: returns existing room ID
-        expect(secondRoomId).toBe(firstRoomId);
-      },
-      35000,
-    );
+      // Then: returns existing room ID
+      expect(secondRoomId).toBe(firstRoomId);
+    }, 45000);
   });
 
   describe('sendVoiceMessage to family room', () => {
@@ -387,8 +408,11 @@ describe('Family Room', () => {
         // May already be a member
       }
 
-      // Wait for sync to propagate - don't call waitForSync again as it may timeout
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait until bob sees the family room
+      await waitForCondition(
+        'bob sees family room',
+        async () => !!(await bobService.getFamilyRoom()),
+      );
 
       // When: alice sends a voice message to the family room
       const audioBuffer = createFakeAudioBuffer(5000, { prefix: 'FAMILY_MSG' });
@@ -408,8 +432,11 @@ describe('Family Room', () => {
       );
       console.log('[Test] Voice message sent successfully');
 
-      // Wait for the message to sync to bob
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for bob to receive the message
+      await waitForCondition(
+        'bob receives voice message in family room',
+        () => bobService.getVoiceMessages(familyRoomId).length > 0,
+      );
 
       // Then: bob should receive the message in the family room
       const bobFamilyRoom = await bobService.getFamilyRoom();
@@ -458,8 +485,11 @@ describe('Family Room', () => {
       await bobService.joinRoom(dmRoomId);
       console.log('[Test] Bob joined DM room');
 
-      // Wait for bob to fully join
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for bob to be a member
+      await waitForCondition(
+        'bob joined DM room',
+        () => bobService.isRoomMember(dmRoomId),
+      );
 
       // Now alice sends a voice message
       const audioBuffer = createFakeAudioBuffer(4000, { prefix: 'DM_MSG' });
@@ -474,8 +504,11 @@ describe('Family Room', () => {
       );
       console.log('[Test] Voice message sent successfully');
 
-      // Wait for the message to sync to bob
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for bob to receive the message
+      await waitForCondition(
+        'bob receives voice message in DM',
+        () => bobService.getVoiceMessages(dmRoomId).length > 0,
+      );
 
       // Then: bob should receive the message in the DM room
       const bobMessages = bobService.getVoiceMessages(dmRoomId);
@@ -508,7 +541,10 @@ describe('Family Room', () => {
       // Create DM room and have bob join
       const dmRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
       await bobService.joinRoom(dmRoomId);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await waitForCondition(
+        'bob joined DM room',
+        () => bobService.isRoomMember(dmRoomId),
+      );
 
       // Alice sends a message
       const audio1 = createFakeAudioBuffer(3000, { prefix: 'ALICE_DM' });
@@ -520,8 +556,11 @@ describe('Family Room', () => {
         audio1.length,
       );
 
-      // Wait for sync
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for alice's message to appear locally
+      await waitForCondition(
+        'alice message appears',
+        () => aliceService.getVoiceMessages(dmRoomId).length >= 1,
+      );
 
       // Bob sends a reply
       const audio2 = createFakeAudioBuffer(4000, { prefix: 'BOB_DM' });
@@ -533,8 +572,17 @@ describe('Family Room', () => {
         audio2.length,
       );
 
-      // Wait for sync
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for both users to see both messages
+      await waitForCondition(
+        'alice sees 2 messages',
+        () => aliceService.getVoiceMessages(dmRoomId).length >= 2,
+        20000,
+      );
+      await waitForCondition(
+        'bob sees 2 messages',
+        () => bobService.getVoiceMessages(dmRoomId).length >= 2,
+        20000,
+      );
 
       // When: alice gets messages from the DM room (simulating viewing history)
       const aliceMessages = aliceService.getVoiceMessages(dmRoomId);
@@ -591,8 +639,11 @@ describe('Family Room', () => {
       console.log('[Test] Bob joining DM room...');
       await bobService.joinRoom(dmRoomId);
 
-      // Wait for sync and m.direct update
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait until bob recognizes the room as a direct room
+      await waitForCondition(
+        'bob sees DM room in direct rooms',
+        () => bobService.getDirectRooms().some(r => r.roomId === dmRoomId),
+      );
 
       // Then: Bob should recognize the room as a DM
       const bobRooms = bobService.getDirectRooms();
@@ -704,8 +755,15 @@ describe('Family Onboarding Flow (E2E)', () => {
       console.log('[E2E] Bob may already be a member');
     }
 
-    // Wait for sync to propagate
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait until both can access the family room
+    await waitForCondition(
+      'both see family room',
+      async () => {
+        const a = await aliceService.getFamilyRoom();
+        const b = await bobService.getFamilyRoom();
+        return !!(a && b);
+      },
+    );
 
     // 4. Verify both can access the family room
     const aliceFamilyRoom = await aliceService.getFamilyRoom();

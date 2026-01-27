@@ -532,6 +532,47 @@ export class TestClient {
     }
   }
 
+  /**
+   * Wait for a condition to become true, polling with exponential backoff.
+   * Use this instead of fixed setTimeout delays to make tests deterministic.
+   */
+  async waitForCondition(
+    description: string,
+    condition: () => boolean,
+    timeoutMs = 15000,
+    pollMs = 200,
+  ): Promise<void> {
+    const startTime = Date.now();
+    let delay = pollMs;
+
+    while (Date.now() - startTime < timeoutMs) {
+      if (condition()) return;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.3, 2000);
+    }
+
+    throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
+  }
+
+  /**
+   * Wait for at least N voice messages to appear in a room
+   */
+  async waitForMessageCount(
+    roomId: string,
+    minCount: number,
+    timeoutMs = 20000,
+  ): Promise<VoiceMessage[]> {
+    if (!this.service) throw new Error('Not logged in');
+
+    await this.waitForCondition(
+      `${minCount} messages in room ${roomId}`,
+      () => this.getVoiceMessages(roomId).length >= minCount,
+      timeoutMs,
+    );
+
+    return this.getVoiceMessages(roomId);
+  }
+
   // Private helpers
 
   private matchesFilter(message: VoiceMessage, filter: MessageFilter): boolean {

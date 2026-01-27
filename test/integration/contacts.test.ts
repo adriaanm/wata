@@ -120,14 +120,19 @@ describe('Contact List', () => {
       AudioDurations.SHORT,
     );
 
-    // Wait for message to sync (use longer wait on CI)
-    const syncWaitMs = isCI ? 5000 : 2000;
-    await new Promise(resolve => setTimeout(resolve, syncWaitMs));
-
-    // Check room list shows last message
+    // Wait for bob to see the last message
     const bobClient = orchestrator.getClient('bob');
-    const rooms = bobClient?.getDirectRooms();
+    await orchestrator.waitForCondition(
+      'bob',
+      'bob sees last message in room',
+      () => {
+        const rooms = bobClient.getDirectRooms();
+        const room = rooms.find(r => r.roomId === roomId);
+        return !!(room?.lastMessageTime && room.lastMessageTime > 0);
+      },
+    );
 
+    const rooms = bobClient?.getDirectRooms();
     const ourRoom = rooms?.find(r => r.roomId === roomId);
     expect(ourRoom?.lastMessage).toBeDefined();
     expect(ourRoom?.lastMessageTime).toBeDefined();
@@ -199,11 +204,13 @@ describe('Contact List', () => {
     // Alice creates a room and invites Bob
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Wait for sync (use longer wait on CI)
-    const syncWaitMs = isCI ? 5000 : 2000;
-    await new Promise(resolve => setTimeout(resolve, syncWaitMs));
+    // Wait for bob to see the new room
+    await orchestrator.waitForCondition(
+      'bob',
+      'bob sees new DM room',
+      () => bobClient?.getDirectRooms().some(r => r.roomId === roomId) ?? false,
+    );
 
-    // Bob should see the new room
     const updatedRooms = bobClient?.getDirectRooms() || [];
     expect(updatedRooms.length).toBeGreaterThanOrEqual(initialCount);
 
@@ -224,11 +231,15 @@ describe('Contact List', () => {
     // Create room but don't send any messages
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Wait for sync
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Wait for room to appear in alice's list
+    const aliceClient = orchestrator.getClient('alice');
+    await orchestrator.waitForCondition(
+      'alice',
+      'room appears in alice list',
+      () => aliceClient.getDirectRooms().some(r => r.roomId === roomId),
+    );
 
     // Check room appears in list even without messages
-    const aliceClient = orchestrator.getClient('alice');
     const rooms = aliceClient?.getDirectRooms();
 
     const ourRoom = rooms?.find(r => r.roomId === roomId);

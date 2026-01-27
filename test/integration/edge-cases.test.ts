@@ -210,10 +210,9 @@ describe('Edge Cases and Error Handling', () => {
 
       const eventIds = await Promise.all(sends);
 
-      // Wait for all messages
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Wait for bob to receive all messages
+      await orchestrator.waitForMessageCount('bob', roomId, 5);
 
-      // Bob should receive all messages
       const bobClient = orchestrator.getClient('bob');
       const messages = bobClient?.getVoiceMessages(roomId) || [];
 
@@ -252,11 +251,11 @@ describe('Edge Cases and Error Handling', () => {
         eventIds.push(eventId);
       }
 
-      // Wait for sync
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      // Wait for both to receive at least half the messages
+      await orchestrator.waitForMessageCount('alice', roomId, 3);
+      await orchestrator.waitForMessageCount('bob', roomId, 3);
 
       // Both should see most messages (use pagination to fetch all)
-      // Concurrent alternating sends can have sync race conditions
       const aliceMessages = await orchestrator.getAllVoiceMessages(
         'alice',
         roomId,
@@ -317,8 +316,6 @@ describe('Edge Cases and Error Handling', () => {
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
 
-      // Wait for room to fully sync before sending
-      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Send exactly one message
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);
@@ -365,8 +362,17 @@ describe('Edge Cases and Error Handling', () => {
         AudioDurations.SHORT,
       );
 
-      // Wait longer for message to sync
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      // Wait for both users to see the message
+      await orchestrator.waitForCondition(
+        'alice',
+        'alice sees message',
+        () => orchestrator.getVoiceMessages('alice', roomId).some(m => m.eventId === eventId),
+      );
+      await orchestrator.waitForCondition(
+        'bob',
+        'bob sees message',
+        () => orchestrator.getVoiceMessages('bob', roomId).some(m => m.eventId === eventId),
+      );
 
       // Alice should see isOwn = true (use pagination to ensure message is fetched)
       const aliceMessages = await orchestrator.getAllVoiceMessages(
@@ -403,8 +409,6 @@ describe('Edge Cases and Error Handling', () => {
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
 
-      // Wait for room to fully sync before sending
-      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);
       const eventId = await orchestrator.sendVoiceMessage(
@@ -440,8 +444,6 @@ describe('Edge Cases and Error Handling', () => {
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
 
-      // Wait for room to fully sync before sending
-      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);
       const eventId = await orchestrator.sendVoiceMessage(
@@ -478,8 +480,6 @@ describe('Edge Cases and Error Handling', () => {
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
 
-      // Wait for room to fully sync before sending
-      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const beforeSend = Date.now();
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);

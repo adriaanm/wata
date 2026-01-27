@@ -75,8 +75,8 @@ describe('Message Ordering', () => {
       eventIds.push(eventId);
     }
 
-    // Wait for all messages to sync
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for bob to receive all 10 messages
+    await orchestrator.waitForMessageCount('bob', roomId, 10);
 
     // Verify bob received all messages in order (use pagination to fetch all)
     const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
@@ -118,8 +118,8 @@ describe('Message Ordering', () => {
       eventIds.push(eventId);
     }
 
-    // Wait for all messages to sync
-    await new Promise(resolve => setTimeout(resolve, 8000));
+    // Wait for bob to receive all 20 messages
+    await orchestrator.waitForMessageCount('bob', roomId, 20, 30000);
 
     // Verify message ordering (use pagination to fetch all)
     const messages = await orchestrator.getAllVoiceMessages('bob', roomId, 50);
@@ -170,8 +170,9 @@ describe('Message Ordering', () => {
 
     await Promise.all(sends);
 
-    // Wait for all messages to sync
-    await new Promise(resolve => setTimeout(resolve, 8000));
+    // Wait for both to receive at least 8 messages
+    await orchestrator.waitForMessageCount('alice', roomId, 8);
+    await orchestrator.waitForMessageCount('bob', roomId, 8);
 
     // Both clients should see the same ordering (use pagination to fetch all)
     const aliceMessages = await orchestrator.getAllVoiceMessages(
@@ -240,11 +241,11 @@ describe('Message Ordering', () => {
 
     await Promise.all([...aliceSends, ...bobSends]);
 
-    // Wait for sync (longer for concurrent sends)
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    // Wait for both to receive at least half the messages
+    await orchestrator.waitForMessageCount('alice', roomId, 5, 20000);
+    await orchestrator.waitForMessageCount('bob', roomId, 5, 20000);
 
     // Both clients should see most messages (use pagination to fetch all)
-    // Note: Concurrent sends from multiple clients can have sync race conditions
     const aliceMessages = await orchestrator.getAllVoiceMessages(
       'alice',
       roomId,
@@ -289,8 +290,8 @@ describe('Message Ordering', () => {
       eventIds.push(eventId);
     }
 
-    // Wait for sync
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for bob to receive all 15 messages
+    await orchestrator.waitForMessageCount('bob', roomId, 15, 20000);
 
     // Verify all event IDs are unique
     const uniqueEventIds = new Set(eventIds);

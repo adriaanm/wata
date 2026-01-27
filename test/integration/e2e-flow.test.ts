@@ -240,9 +240,6 @@ describe('End-to-End Voice Chat Flow', () => {
     // Create room with both users
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Wait for room to sync
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
     // Alice sends messages after Bob has joined
     const audioBuffers = createAudioBuffers(3, AudioDurations.SHORT);
     const eventIds: string[] = [];
@@ -258,8 +255,8 @@ describe('End-to-End Voice Chat Flow', () => {
       eventIds.push(eventId);
     }
 
-    // Wait for messages to sync
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait for bob to receive all messages
+    await orchestrator.waitForMessageCount('bob', roomId, 3);
 
     // Bob should see alice's messages (use pagination to fetch all)
     const bobMessages = await orchestrator.getAllVoiceMessages(
@@ -341,9 +338,12 @@ describe('End-to-End Voice Chat Flow', () => {
       AudioDurations.SHORT,
     );
 
-    // Alice should see the message immediately (or very quickly)
-    // Give it a moment for the echo
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Wait for the message to appear in alice's timeline
+    await orchestrator.waitForCondition(
+      'alice',
+      'alice sees own message',
+      () => (aliceClient?.getVoiceMessages(roomId) || []).some(m => m.eventId === eventId),
+    );
 
     const messages = aliceClient?.getVoiceMessages(roomId) || [];
     const sentMessage = messages.find(m => m.eventId === eventId);
