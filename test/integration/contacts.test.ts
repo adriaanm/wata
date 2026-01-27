@@ -120,7 +120,7 @@ describe('Contact List', () => {
       AudioDurations.SHORT,
     );
 
-    // Wait for bob to see the last message
+    // Wait for bob to see the last message (WataClient sync can take up to 30s)
     const bobClient = orchestrator.getClient('bob');
     await orchestrator.waitForCondition(
       'bob',
@@ -130,6 +130,7 @@ describe('Contact List', () => {
         const room = rooms.find(r => r.roomId === roomId);
         return !!(room?.lastMessageTime && room.lastMessageTime > 0);
       },
+      30000,
     );
 
     const rooms = bobClient?.getDirectRooms();
@@ -204,11 +205,12 @@ describe('Contact List', () => {
     // Alice creates a room and invites Bob
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
-    // Wait for bob to see the new room
+    // Wait for bob to see the new room (WataClient sync can take up to 30s)
     await orchestrator.waitForCondition(
       'bob',
       'bob sees new DM room',
       () => bobClient?.getDirectRooms().some(r => r.roomId === roomId) ?? false,
+      30000,
     );
 
     const updatedRooms = bobClient?.getDirectRooms() || [];

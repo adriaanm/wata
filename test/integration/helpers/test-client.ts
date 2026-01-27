@@ -119,9 +119,9 @@ export class TestClient {
 
     console.log(`[TestClient:${this.username}] Waiting for room ${roomId}...`);
 
-    // Check if room already exists
+    // Check if room already exists (in direct rooms list or as a member)
     const existingRooms = this.service.getDirectRooms();
-    if (existingRooms.some(r => r.roomId === roomId)) {
+    if (existingRooms.some(r => r.roomId === roomId) || this.service.isRoomMember(roomId)) {
       console.log(`[TestClient:${this.username}] Room already available`);
       return;
     }
@@ -148,7 +148,7 @@ export class TestClient {
 
       const checkRoom = () => {
         const rooms = service.getDirectRooms();
-        if (rooms.some(r => r.roomId === roomId)) {
+        if (rooms.some(r => r.roomId === roomId) || service.isRoomMember(roomId)) {
           if (!resolved) {
             resolved = true;
             cleanup();
@@ -215,8 +215,8 @@ export class TestClient {
 
     return new Promise((resolve, reject) => {
       let resolved = false;
-      let unsubscribe: () => void; // Declare before cleanup uses it
-      let pollInterval: ReturnType<typeof setInterval>; // Declare before cleanup uses it
+      let unsubscribe: (() => void) | undefined; // Declare before cleanup uses it
+      let pollInterval: ReturnType<typeof setInterval> | undefined; // Declare before cleanup uses it
 
       const timeout = setTimeout(() => {
         if (!resolved) {
@@ -231,8 +231,8 @@ export class TestClient {
 
       const cleanup = () => {
         clearTimeout(timeout);
-        clearInterval(pollInterval);
-        unsubscribe();
+        if (pollInterval) clearInterval(pollInterval);
+        if (unsubscribe) unsubscribe();
       };
 
       const resolveWithMessage = (msg: VoiceMessage) => {
