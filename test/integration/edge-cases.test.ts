@@ -181,6 +181,10 @@ describe('Edge Cases and Error Handling', () => {
   });
 
   describe('Rapid Message Sending', () => {
+    // TODO: Poorly implemented — waitForMessageCount waits for any 5 messages in the
+    // room, but the room may already have messages from prior tests (getOrCreate reuse).
+    // Then checking all 5 new eventIds fails because old messages padded the count.
+    // Fix: wait for the specific event IDs to appear, not just a message count.
     test('send 5 messages with no delay', async () => {
       await orchestrator.createClient(
         TEST_USERS.alice.username,
@@ -274,6 +278,9 @@ describe('Edge Cases and Error Handling', () => {
   });
 
   describe('Room Edge Cases', () => {
+    // TODO: Condition need not hold — getOrCreateDmRoom reuses existing DM rooms
+    // between alice and bob from prior tests/runs, so the room will have messages.
+    // Fix: use a dedicated third user, or create the room directly (not via getOrCreate).
     test('empty room (no messages)', async () => {
       await orchestrator.createClient(
         TEST_USERS.alice.username,
@@ -468,6 +475,8 @@ describe('Edge Cases and Error Handling', () => {
       expect(() => new URL(received.audioUrl)).not.toThrow();
     }, 45000);
 
+    // TODO: Valid test, flaky — 20s timeout insufficient under server load late in
+    // the suite. May resolve once test isolation is fixed (fewer accumulated rooms).
     test('timestamp is reasonable (within last minute)', async () => {
       await orchestrator.createClient(
         TEST_USERS.alice.username,

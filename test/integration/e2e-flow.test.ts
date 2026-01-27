@@ -159,7 +159,9 @@ describe('End-to-End Voice Chat Flow', () => {
 
     expect(aliceMessages.length).toBeGreaterThanOrEqual(2);
 
-    // Verify message order
+    // TODO: Valid test, flaky — eventId from sendVoiceMessage may be a local echo ID
+    // that matrix-js-sdk replaces with the server-assigned ID during sync. Fix: use
+    // verifyMessageReceived (which polls) to find messages, or match by sender+timestamp.
     const aliceMsg = aliceMessages.find(m => m.eventId === aliceEventId);
     const bobMsg = aliceMessages.find(m => m.eventId === bobEventId);
 

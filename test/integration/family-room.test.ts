@@ -514,7 +514,9 @@ describe('Family Room', () => {
       const bobMessages = bobService.getVoiceMessages(dmRoomId);
       console.log('[Test] Bob received messages in DM:', bobMessages.length);
 
-      // Verify bob received the message
+      // TODO: Poorly implemented — takes bobMessages[last] which may be from a prior
+      // test because getOrCreateDmRoom reuses existing rooms. Fix: find the message
+      // by matching on sender + expected duration, or use the eventId from sendVoiceMessage.
       expect(bobMessages.length).toBeGreaterThan(0);
       const lastMessage = bobMessages[bobMessages.length - 1];
       expect(lastMessage.sender).toBe('@alice:localhost');

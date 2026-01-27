@@ -172,6 +172,10 @@ describe('Read Receipts (WataClient)', () => {
     console.log(`[Test] Updated message readBy: ${JSON.stringify(updatedMessage?.readBy)}`);
 
     expect(updatedMessage).toBeDefined();
+    // TODO: Condition need not hold when running with matrix-js-sdk — this test is
+    // WataClient-specific (readBy requires WataClient's receipt tracking). The describe
+    // block is named "Read Receipts (WataClient)" but the test is not actually skipped
+    // when running against matrix-js-sdk. Fix: skip when !isUsingWataClient().
     expect(updatedMessage!.readBy).toContain('@bob:localhost');
   }, 90000);
 

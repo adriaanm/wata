@@ -298,6 +298,10 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
 
       // Verify the audio URL is valid
       expect(receivedMessage.audioUrl).toMatch(/^http/);
+      // TODO: Poorly implemented — VoiceMessage interface does not have an mxcUrl field.
+      // Neither MatrixService nor MatrixServiceAdapter populates it. Fix: either add
+      // mxcUrl to the VoiceMessage interface and populate it, or derive the MXC URL
+      // from audioUrl (which encodes the MXC path as an HTTP download URL).
       expect(receivedMessage.mxcUrl).toMatch(/^mxc:/);
 
       // Download the audio using authenticated request
@@ -341,7 +345,7 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
         15000,
       );
 
-      // Verify Alice can download Bob's audio using authenticated request
+      // TODO: Poorly implemented — same mxcUrl issue as "bob can download" test above.
       const aliceClient = orchestrator.getClient('alice');
       const { buffer: downloadedBuffer } = await aliceClient.downloadMedia(
         receivedMessage.mxcUrl!,
