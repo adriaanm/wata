@@ -5,10 +5,6 @@
  * Start the server first: cd test/docker && ./setup.sh
  *
  * Implementation: Uses MatrixService API via test factory
- *
- * Environment:
- *   USE_WATA_CLIENT=true  - Use MatrixServiceAdapter (WataClient implementation)
- *   USE_WATA_CLIENT=false or unset - Use MatrixService (matrix-js-sdk implementation)
  */
 
 import { Buffer } from 'buffer';

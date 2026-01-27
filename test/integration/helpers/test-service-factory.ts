@@ -15,7 +15,7 @@
 
 import { MATRIX_CONFIG } from '@shared/config/matrix';
 import type { CredentialStorage } from '@shared/services/CredentialStorage';
-import { createMatrixService } from '@shared/services';
+import { createMatrixService, type MatrixService, type MatrixServiceAdapter } from '@shared/services';
 import { setHomeserverUrl as setAdapterHomeserverUrl } from '@shared/services/MatrixServiceAdapter';
 import { setHomeserverUrl as setMatrixServiceHomeserverUrl } from '@shared/services/MatrixService';
 
