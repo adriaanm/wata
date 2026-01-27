@@ -11,6 +11,7 @@
     "web:preview": "pnpm --filter @wata/web preview",
     "dev:forward": "./scripts/setup-adb-forward.sh",
     "dev:ip": "node scripts/get-local-ip.js",
+    "wata-server": "exec tsx src/server/index.ts",
     "dev:server": "cd test/docker && ./setup.sh",
     "dev:deploy": "./scripts/dev-deploy.sh",
     "dev:deploy:quick": "./scripts/dev-deploy.sh no",
