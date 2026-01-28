@@ -134,11 +134,7 @@ describe('Message Ordering', () => {
     }
   }, 90000);
 
-  // NOTE: This test is currently failing due to a bug where messages sent by Bob
-  // are not appearing in Alice's timeline. The single-sender tests (Alice sends)
-  // work correctly, but bidirectional communication has a sync issue.
-  // TODO: Fix the underlying sync bug in WataClient or MatrixServiceAdapter
-  test.skip('alternating senders maintain order', async () => {
+  test('alternating senders maintain order', async () => {
     await orchestrator.createClient(
       TEST_USERS.alice.username,
       TEST_USERS.alice.password,
@@ -189,17 +185,6 @@ describe('Message Ordering', () => {
       bobEventIds.add(eventId);
     }
 
-    // Trigger alice to sync before checking for bob's messages
-    // This is a workaround for potential sync race conditions
-    const aliceClient = orchestrator.getClient('alice');
-    await aliceClient.waitForSync(10000);
-
-    // Debug: Check what messages alice has before waiting
-    const aliceMessagesBefore = await orchestrator.getAllVoiceMessages('alice', roomId, 100);
-    const aliceOwnMsgs = aliceMessagesBefore.filter(m => m.isOwn).length;
-    const aliceBobMsgs = aliceMessagesBefore.filter(m => !m.isOwn).length;
-    console.log(`[Test] Alice has ${aliceMessagesBefore.length} messages (${aliceOwnMsgs} own, ${aliceBobMsgs} from bob) before waiting`);
-
     // Wait for alice to receive bob's messages
     await orchestrator.waitForEventIds('alice', roomId, new Set(bobEventIds), 30000);
 
@@ -232,8 +217,7 @@ describe('Message Ordering', () => {
     expect(outOfOrderCount).toBeLessThanOrEqual(2);
   }, 70000);
 
-  // NOTE: Same sync bug as alternating senders - Bob's messages don't reach Alice
-  test.skip('concurrent sends from both users', async () => {
+  test('concurrent sends from both users', async () => {
     await orchestrator.createClient(
       TEST_USERS.alice.username,
       TEST_USERS.alice.password,

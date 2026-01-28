@@ -508,6 +508,57 @@ export class WataClient {
   }
 
   /**
+   * Send voice message to a specific room ID
+   *
+   * This is a lower-level method that sends directly to a specific room,
+   * bypassing the getOrCreateDMRoom lookup. Use this when you already know
+   * the exact room ID you want to send to.
+   *
+   * @param roomId - The exact room ID to send the message to
+   * @param audio - Audio data as ArrayBuffer
+   * @param duration - Duration in seconds
+   * @returns VoiceMessage with event ID and metadata
+   */
+  async sendVoiceMessageToRoom(
+    roomId: string,
+    audio: ArrayBuffer,
+    duration: number
+  ): Promise<VoiceMessage> {
+    // Upload audio to media repo
+    const uploadResponse = await this.api.uploadMedia(
+      audio,
+      'audio/mp4',
+      `voice-${Date.now()}.m4a`
+    );
+
+    // Send m.audio event to the specified room
+    const sendResponse = await this.api.sendMessage(roomId, 'm.room.message', {
+      msgtype: 'm.audio',
+      body: 'Voice message',
+      url: uploadResponse.content_uri,
+      info: {
+        duration: Math.round(duration * 1000), // Matrix uses milliseconds
+        mimetype: 'audio/mp4',
+        size: audio.byteLength,
+      },
+    });
+
+    // Return a VoiceMessage with known values
+    const currentUser = this.getCurrentUser()!;
+    const mxcUrl = uploadResponse.content_uri;
+    return {
+      id: sendResponse.event_id,
+      sender: currentUser,
+      audioUrl: this.mxcToHttp(mxcUrl),
+      mxcUrl,
+      duration,
+      timestamp: new Date(),
+      isPlayed: false,
+      playedBy: [],
+    };
+  }
+
+  /**
    * Mark message as played
    */
   async markAsPlayed(message: VoiceMessage): Promise<void> {

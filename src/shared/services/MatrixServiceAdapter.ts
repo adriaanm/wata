@@ -591,10 +591,12 @@ class MatrixServiceAdapter {
     // Convert milliseconds to seconds (WataClient expects seconds)
     const durationSeconds = duration / 1000;
 
-    // Send message and get event ID
+    // Send message to the specific room ID
+    // Use sendVoiceMessageToRoom to ensure message goes to the exact room specified,
+    // not a deterministically-selected room from getOrCreateDMRoom
     const sentMessage: WataVoiceMessage = roomId === this.familyRoomId
       ? await this.wataClient.sendVoiceMessage('family', arrayBuffer, durationSeconds)
-      : await this.wataClient.sendVoiceMessage(this.findContactForRoomId(roomId)!, arrayBuffer, durationSeconds);
+      : await this.wataClient.sendVoiceMessageToRoom(roomId, arrayBuffer, durationSeconds);
 
     return sentMessage.id; // WataClient uses 'id' for event ID
   }

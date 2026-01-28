@@ -219,9 +219,7 @@ describe('Edge Cases and Error Handling', () => {
       }
     }, 50000);
 
-    // NOTE: This test fails due to a sync bug where Bob's messages don't reach Alice's timeline
-    // TODO: Fix the underlying sync issue
-    test.skip('alternating rapid sends (alice and bob)', async () => {
+    test('alternating rapid sends (alice and bob)', async () => {
       await orchestrator.createClient(
         TEST_USERS.alice.username,
         TEST_USERS.alice.password,
