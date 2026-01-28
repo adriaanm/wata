@@ -454,6 +454,18 @@ export class WataClient {
 
   /**
    * Send voice message to contact or family
+   *
+   * WARNING: For DM targets, this method calls getOrCreateDMRoom() which
+   * deterministically selects a room if multiple DM rooms exist with the
+   * same contact. This means the message may be sent to a different room
+   * than expected if the caller has a specific roomId in mind.
+   *
+   * If you need to send to a specific roomId, use sendVoiceMessageToRoom()
+   * instead.
+   *
+   * TODO: Decouple DM room creation from message sending. Consider adding
+   * a method that takes a roomId directly and validates membership, or
+   * refactor to avoid the getOrCreateDMRoom lookup entirely.
    */
   async sendVoiceMessage(
     target: Contact | 'family',
