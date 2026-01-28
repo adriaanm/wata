@@ -88,7 +88,10 @@ export interface VoiceMessage {
   sender: string;
   senderName: string;
   timestamp: number;
+  /** HTTP download URL for playback */
   audioUrl: string;
+  /** Original MXC URL from the Matrix event (for downloadMedia API) */
+  mxcUrl: string;
   duration: number;
   isOwn: boolean;
   /** For outgoing messages: list of user IDs who have read/played this message */
@@ -565,6 +568,7 @@ class MatrixService {
       senderName: this.client?.getUser(sender)?.displayName || sender,
       timestamp: event.getTs(),
       audioUrl,
+      mxcUrl,
       duration: content.info?.duration || 0,
       isOwn,
       readBy,

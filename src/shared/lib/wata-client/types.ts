@@ -80,8 +80,10 @@ export interface VoiceMessage {
   id: string;
   /** Message sender */
   sender: User;
-  /** Audio URL (MXC URL or HTTP URL) */
+  /** HTTP download URL for playback */
   audioUrl: string;
+  /** Original MXC URL from the Matrix event (for downloadMedia API) */
+  mxcUrl: string;
   /** Duration in seconds */
   duration: number;
   /** Message timestamp */

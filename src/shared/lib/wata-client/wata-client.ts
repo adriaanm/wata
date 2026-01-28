@@ -838,7 +838,8 @@ export class WataClient {
   private eventToVoiceMessage(event: MatrixEvent, room?: RoomState): VoiceMessage {
     const sender = this.getUserFromEvent(event, room);
     const content = event.content;
-    const audioUrl = this.mxcToHttp(content.url || '');
+    const mxcUrl = content.url || '';
+    const audioUrl = this.mxcToHttp(mxcUrl);
     const duration = (content.info?.duration || 0) / 1000; // Convert ms to seconds
     const timestamp = new Date(event.origin_server_ts || 0);
 
@@ -850,6 +851,7 @@ export class WataClient {
       id: event.event_id!,
       sender,
       audioUrl,
+      mxcUrl,
       duration,
       timestamp,
       isPlayed,

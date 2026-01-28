@@ -24,10 +24,8 @@ export interface MessageFilter {
   maxDuration?: number;
 }
 
-// Extended VoiceMessage interface for tests that includes MXC URL
-export interface VoiceMessage extends BaseVoiceMessage {
-  mxcUrl?: string;
-}
+// Use the production VoiceMessage type (which now includes mxcUrl)
+export type VoiceMessage = BaseVoiceMessage;
 
 // Type union for the service (could be MatrixService or MatrixServiceAdapter)
 type MatrixServiceLike = ReturnType<typeof createTestService>;
@@ -381,6 +379,8 @@ export class TestClient {
 
   /**
    * Get all voice messages from a room
+   *
+   * Returns VoiceMessages with mxcUrl populated by the production service.
    */
   getVoiceMessages(roomId: string): VoiceMessage[] {
     if (!this.service) return [];
