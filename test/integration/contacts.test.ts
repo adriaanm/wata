@@ -220,9 +220,6 @@ describe('Contact List', () => {
     expect(newRoom).toBeDefined();
   }, 35000);
 
-  // TODO: Condition need not hold — getOrCreateDmRoom reuses existing DM rooms
-  // between alice and bob from prior tests/runs, so the room will have messages.
-  // Fix: use a dedicated third user, or create the room directly (not via getOrCreate).
   test('should handle rooms with no messages', async () => {
     await orchestrator.createClient(
       TEST_USERS.alice.username,
@@ -233,7 +230,7 @@ describe('Contact List', () => {
       TEST_USERS.bob.password,
     );
 
-    // Create room but don't send any messages
+    // Create a fresh room (this always creates a new room, doesn't reuse)
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
     // Wait for room to appear in alice's list
@@ -249,6 +246,7 @@ describe('Contact List', () => {
 
     const ourRoom = rooms?.find(r => r.roomId === roomId);
     expect(ourRoom).toBeDefined();
+    // Note: A newly created room should have no last message
     expect(ourRoom?.lastMessage).toBeNull();
     expect(ourRoom?.lastMessageTime).toBeNull();
   }, 30000);

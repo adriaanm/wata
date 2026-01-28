@@ -153,21 +153,19 @@ describe('End-to-End Voice Chat Flow', () => {
 
     expect(bobReply.sender).toBe('@bob:localhost');
 
-    // Verify conversation history
-    const aliceClient = orchestrator.getClient('alice');
-    const aliceMessages = aliceClient?.getVoiceMessages(roomId) || [];
-
-    expect(aliceMessages.length).toBeGreaterThanOrEqual(2);
-
-    // TODO: Valid test, flaky — eventId from sendVoiceMessage may be a local echo ID
-    // that matrix-js-sdk replaces with the server-assigned ID during sync. Fix: use
-    // verifyMessageReceived (which polls) to find messages, or match by sender+timestamp.
-    const aliceMsg = aliceMessages.find(m => m.eventId === aliceEventId);
-    const bobMsg = aliceMessages.find(m => m.eventId === bobEventId);
+    // Verify conversation history - use verifyMessageReceived which polls for the messages
+    // This handles the case where sendVoiceMessage may return a local echo ID that gets
+    // replaced with the server-assigned ID during sync
+    const aliceMsg = await orchestrator.verifyMessageReceived('alice', roomId, {
+      eventId: aliceEventId,
+    }, 15000);
+    const bobMsg = await orchestrator.verifyMessageReceived('alice', roomId, {
+      eventId: bobEventId,
+    }, 15000);
 
     expect(aliceMsg).toBeDefined();
     expect(bobMsg).toBeDefined();
-    expect(bobMsg!.timestamp).toBeGreaterThanOrEqual(aliceMsg!.timestamp);
+    expect(bobMsg.timestamp).toBeGreaterThanOrEqual(aliceMsg.timestamp);
   }, 60000);
 
   test('multi-turn conversation: 5 messages back and forth', async () => {
@@ -244,7 +242,7 @@ describe('End-to-End Voice Chat Flow', () => {
 
     // Alice sends messages after Bob has joined
     const audioBuffers = createAudioBuffers(3, AudioDurations.SHORT);
-    const eventIds: string[] = [];
+    const expectedEventIds = new Set<string>();
 
     for (const buffer of audioBuffers) {
       const eventId = await orchestrator.sendVoiceMessage(
@@ -254,11 +252,11 @@ describe('End-to-End Voice Chat Flow', () => {
         'audio/mp4',
         AudioDurations.SHORT,
       );
-      eventIds.push(eventId);
+      expectedEventIds.add(eventId);
     }
 
-    // Wait for bob to receive all messages
-    await orchestrator.waitForMessageCount('bob', roomId, 3);
+    // Wait for bob to receive all messages by event ID
+    await orchestrator.waitForEventIds('bob', roomId, expectedEventIds);
 
     // Bob should see alice's messages (use pagination to fetch all)
     const bobMessages = await orchestrator.getAllVoiceMessages(
@@ -270,7 +268,7 @@ describe('End-to-End Voice Chat Flow', () => {
     expect(bobMessages.length).toBeGreaterThanOrEqual(3);
 
     // Verify bob sees the same event IDs
-    for (const eventId of eventIds) {
+    for (const eventId of expectedEventIds) {
       expect(bobMessages.some(m => m.eventId === eventId)).toBe(true);
     }
   }, 60000);

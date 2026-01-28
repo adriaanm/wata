@@ -266,6 +266,74 @@ export class TestOrchestrator {
   }
 
   /**
+   * Wait for all specified event IDs to be received by a user
+   *
+   * @param username - The user who should receive the messages
+   * @param roomId - The room to check
+   * @param eventIds - Set of event IDs to wait for
+   * @param timeoutMs - Maximum time to wait in milliseconds
+   */
+  async waitForEventIds(
+    username: string,
+    roomId: string,
+    eventIds: Set<string>,
+    timeoutMs = 30000,
+  ): Promise<void> {
+    const startTime = Date.now();
+    const client = this.getClient(username);
+    const initialCount = eventIds.size;
+    console.log(
+      `[TestOrchestrator] Waiting for ${initialCount} events for ${username} in ${roomId}`,
+    );
+
+    // Paginate once at the start to ensure we're not missing messages
+    await this.paginateTimeline(username, roomId, 100);
+
+    while (Date.now() - startTime < timeoutMs && eventIds.size > 0) {
+      // Use getAllVoiceMessages to ensure we paginate
+      const messages = await this.getAllVoiceMessages(username, roomId, 100);
+      const foundIds = new Set<string>();
+
+      for (const msg of messages) {
+        if (eventIds.has(msg.eventId)) {
+          foundIds.add(msg.eventId);
+        }
+      }
+
+      // Remove found IDs from the expected set
+      for (const id of foundIds) {
+        eventIds.delete(id);
+      }
+
+      if (foundIds.size > 0) {
+        console.log(
+          `[TestOrchestrator] ${username} received ${foundIds.size} more events, ${eventIds.size} remaining`,
+        );
+      }
+
+      if (eventIds.size > 0) {
+        // Wait a bit before checking again
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+
+    if (eventIds.size > 0) {
+      const messages = await this.getAllVoiceMessages(username, roomId, 100);
+      const actualEventIds = new Set(messages.map(m => m.eventId));
+      throw new Error(
+        `Timed out waiting for ${eventIds.size} events after ${timeoutMs}ms. ` +
+          `Missing: ${Array.from(eventIds).join(', ')}. ` +
+          `Client has ${messages.length} messages. ` +
+          `IDs in timeline: ${Array.from(actualEventIds).slice(0, 5).join(', ')}...`,
+      );
+    }
+
+    console.log(
+      `[TestOrchestrator] ${username} received all ${initialCount} events`,
+    );
+  }
+
+  /**
    * Cleanup all clients
    */
   async cleanup(): Promise<void> {

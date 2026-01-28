@@ -132,7 +132,7 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
 
       // Send 5 messages
       const audioBuffers = createAudioBuffers(5, 2000);
-      const eventIds: string[] = [];
+      const expectedEventIds = new Set<string>();
 
       for (const buffer of audioBuffers) {
         const eventId = await orchestrator.sendVoiceMessage(
@@ -142,11 +142,11 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
           'audio/mp4',
           2000,
         );
-        eventIds.push(eventId);
+        expectedEventIds.add(eventId);
       }
 
-      // Wait a bit for all messages to sync
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for bob to receive all 5 messages by event ID
+      await orchestrator.waitForEventIds('bob', roomId, expectedEventIds);
 
       // Verify all messages received
       const bobMessages = orchestrator.getVoiceMessages('bob', roomId);
