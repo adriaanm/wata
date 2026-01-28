@@ -579,7 +579,7 @@ class MatrixServiceAdapter {
     _mimeType: string,
     duration: number,
     _size: number
-  ): Promise<void> {
+  ): Promise<string> {
     log(`[MatrixServiceAdapter] Sending voice message to ${roomId}`);
 
     // Convert Buffer to ArrayBuffer
@@ -591,17 +591,12 @@ class MatrixServiceAdapter {
     // Convert milliseconds to seconds (WataClient expects seconds)
     const durationSeconds = duration / 1000;
 
-    // Determine target (family or contact)
-    if (roomId === this.familyRoomId) {
-      await this.wataClient.sendVoiceMessage('family', arrayBuffer, durationSeconds);
-    } else {
-      // Find contact for this room
-      const contact = this.findContactForRoomId(roomId);
-      if (!contact) {
-        throw new Error(`Contact not found for room ${roomId}`);
-      }
-      await this.wataClient.sendVoiceMessage(contact, arrayBuffer, durationSeconds);
-    }
+    // Send message and get event ID
+    const sentMessage: WataVoiceMessage = roomId === this.familyRoomId
+      ? await this.wataClient.sendVoiceMessage('family', arrayBuffer, durationSeconds)
+      : await this.wataClient.sendVoiceMessage(this.findContactForRoomId(roomId)!, arrayBuffer, durationSeconds);
+
+    return sentMessage.id; // WataClient uses 'id' for event ID
   }
 
   /**

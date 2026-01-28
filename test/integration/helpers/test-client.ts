@@ -345,11 +345,8 @@ export class TestClient {
       `[TestClient:${this.username}] Sending voice message to room ${roomId}...`,
     );
 
-    // Track message count before sending
-    const beforeCount = this.service.getMessageCount(roomId);
-
-    // Send through MatrixService
-    await this.service.sendVoiceMessage(
+    // Send through MatrixService and get the event ID directly
+    const eventId = await this.service.sendVoiceMessage(
       roomId,
       audioBuffer,
       mimeType,
@@ -357,24 +354,11 @@ export class TestClient {
       audioBuffer.length,
     );
 
-    // Wait for the message to appear in timeline
-    // The eventId is the hash we generate for tracking
-    const startTime = Date.now();
-    const timeoutMs = 10000;
+    console.log(
+      `[TestClient:${this.username}] Voice message sent: ${eventId}`,
+    );
 
-    while (Date.now() - startTime < timeoutMs) {
-      const messages = this.service.getVoiceMessages(roomId);
-      if (messages.length > beforeCount) {
-        const newMessage = messages[messages.length - 1];
-        console.log(
-          `[TestClient:${this.username}] Voice message sent: ${newMessage.eventId}`,
-        );
-        return newMessage.eventId;
-      }
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-
-    throw new Error('Voice message not found in timeline after sending');
+    return eventId;
   }
 
   /**

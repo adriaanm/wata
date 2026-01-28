@@ -1023,7 +1023,7 @@ class MatrixService {
     mimeType: string,
     duration: number,
     size: number,
-  ): Promise<void> {
+  ): Promise<string> {
     if (!this.client) throw new Error('Not logged in');
 
     // Upload audio buffer to Matrix
@@ -1063,8 +1063,8 @@ class MatrixService {
       );
     }
 
-    // Send the message
-    await this.client.sendMessage(roomId, {
+    // Send the message and get the event ID
+    const response = await this.client.sendMessage(roomId, {
       msgtype: MsgType.Audio,
       body: 'Voice message',
       url: uploadResponse.content_uri,
@@ -1074,6 +1074,8 @@ class MatrixService {
         size: size,
       },
     });
+
+    return response.event_id;
   }
 
   /**
