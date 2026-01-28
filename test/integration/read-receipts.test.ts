@@ -2,7 +2,11 @@
  * Read Receipt Tests
  *
  * Tests for read receipt flow: Alice sends message, Bob plays it, Alice sees readBy update.
- * These tests specifically target the WataClient/MatrixServiceAdapter implementation.
+ *
+ * NOTE: These tests work with both WataClient (MatrixServiceAdapter) and matrix-js-sdk
+ * (MatrixService) implementations. After the receipt callback fires, we wait for a sync
+ * to complete before checking readBy. This ensures matrix-js-sdk has fully processed the
+ * receipt and updated its internal state (getUsersReadUpTo) before we query it.
  */
 
 import {
@@ -18,7 +22,7 @@ const TEST_USERS = {
   bob: { username: 'bob', password: 'testpass123' },
 };
 
-describe('Read Receipts (WataClient)', () => {
+describe('Read Receipts', () => {
   let aliceService: ReturnType<typeof createTestService>;
   let bobService: ReturnType<typeof createTestService>;
 
@@ -162,6 +166,13 @@ describe('Read Receipts (WataClient)', () => {
 
     console.log(`[Test] Receipt received: ${receiptReceived}`);
 
+    // Wait for a sync to complete to ensure matrix-js-sdk has fully processed the receipt
+    // and updated its internal state (getUsersReadUpTo) before we query it.
+    // WataClient (MatrixServiceAdapter) doesn't need this as getVoiceMessages() always
+    // fetches fresh data, but it doesn't hurt to wait for sync anyway.
+    await aliceService.waitForSync(10000);
+    console.log('[Test] Sync complete after receipt');
+
     // Step 8: Verify Alice's message now shows Bob in readBy
     console.log('[Test] Step 8: Verify Alice sees Bob in readBy');
     aliceMessages = aliceService.getVoiceMessages(roomId);
@@ -172,10 +183,6 @@ describe('Read Receipts (WataClient)', () => {
     console.log(`[Test] Updated message readBy: ${JSON.stringify(updatedMessage?.readBy)}`);
 
     expect(updatedMessage).toBeDefined();
-    // TODO: Condition need not hold when running with matrix-js-sdk — this test is
-    // WataClient-specific (readBy requires WataClient's receipt tracking). The describe
-    // block is named "Read Receipts (WataClient)" but the test is not actually skipped
-    // when running against matrix-js-sdk. Fix: skip when !isUsingWataClient().
     expect(updatedMessage!.readBy).toContain('@bob:localhost');
   }, 90000);
 

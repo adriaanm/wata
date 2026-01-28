@@ -494,10 +494,12 @@ export class WataClient {
     // Return a VoiceMessage with known values
     // The actual event will arrive via sync and trigger messageReceived
     const currentUser = this.getCurrentUser()!;
+    const mxcUrl = uploadResponse.content_uri;
     return {
       id: sendResponse.event_id,
       sender: currentUser,
-      audioUrl: uploadResponse.content_uri,
+      audioUrl: this.mxcToHttp(mxcUrl),
+      mxcUrl,
       duration,
       timestamp: new Date(),
       isPlayed: false,

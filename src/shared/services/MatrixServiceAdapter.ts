@@ -258,7 +258,8 @@ class MatrixServiceAdapter {
       senderName: message.sender.displayName,
       timestamp: message.timestamp.getTime(),
       audioUrl: message.audioUrl,
-      duration: message.duration,
+      mxcUrl: message.mxcUrl,
+      duration: message.duration * 1000, // Convert WataClient seconds to MatrixService milliseconds
       isOwn: message.sender.id === userId,
       readBy: message.playedBy.filter((id) => id !== message.sender.id),
     };
@@ -587,16 +588,19 @@ class MatrixServiceAdapter {
       audioBuffer.byteOffset + audioBuffer.byteLength
     ) as ArrayBuffer;
 
+    // Convert milliseconds to seconds (WataClient expects seconds)
+    const durationSeconds = duration / 1000;
+
     // Determine target (family or contact)
     if (roomId === this.familyRoomId) {
-      await this.wataClient.sendVoiceMessage('family', arrayBuffer, duration);
+      await this.wataClient.sendVoiceMessage('family', arrayBuffer, durationSeconds);
     } else {
       // Find contact for this room
       const contact = this.findContactForRoomId(roomId);
       if (!contact) {
         throw new Error(`Contact not found for room ${roomId}`);
       }
-      await this.wataClient.sendVoiceMessage(contact, arrayBuffer, duration);
+      await this.wataClient.sendVoiceMessage(contact, arrayBuffer, durationSeconds);
     }
   }
 

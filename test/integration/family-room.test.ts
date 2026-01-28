@@ -4,15 +4,19 @@
  * Tests for family room functionality: creation, invitation, member retrieval,
  * and DM room creation on-demand.
  *
+ * NOTE: These tests work with both WataClient (MatrixServiceAdapter) and
+ * matrix-js-sdk (MatrixService) implementations via the test factory.
+ *
  * Note: These tests are designed to work with a persistent Conduit server where
  * the family room may already exist from previous test runs.
  */
 
 import {
-  MatrixService,
-  setHomeserverUrl,
-  setFamilyAliasPrefix,
-} from '../../src/shared/services/MatrixService';
+  createTestService,
+  createTestCredentialStorage,
+} from './helpers/test-service-factory';
+import { setHomeserverUrl, setFamilyAliasPrefix } from '../../src/shared/services/MatrixService';
+import { setHomeserverUrl as setAdapterHomeserverUrl, setFamilyAliasPrefix as setAdapterFamilyAliasPrefix } from '../../src/shared/services/MatrixServiceAdapter';
 
 import { createFakeAudioBuffer } from './helpers/audio-helpers';
 
@@ -38,23 +42,6 @@ async function waitForCondition(
   throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
 }
 
-// Simple in-memory credential storage for testing
-class TestCredentialStorage {
-  private sessions = new Map<string, object>();
-
-  async storeSession(username: string, credentials: object): Promise<void> {
-    this.sessions.set(username, credentials);
-  }
-
-  async retrieveSession(username: string): Promise<object | null> {
-    return this.sessions.get(username) || null;
-  }
-
-  async clear(): Promise<void> {
-    this.sessions.clear();
-  }
-}
-
 const TEST_HOMESERVER = 'http://localhost:8008';
 const TEST_USERS = {
   alice: { username: 'alice', password: 'testpass123' },
@@ -64,9 +51,11 @@ const TEST_USERS = {
 /**
  * Helper to ensure the family room exists and the user is a member.
  * Creates the room if it doesn't exist, or joins it if it does.
+ *
+ * Note: Works with both MatrixService and MatrixServiceAdapter via duck typing.
  */
 async function ensureFamilyRoomMembership(
-  service: MatrixService,
+  service: any, // MatrixService | MatrixServiceAdapter
 ): Promise<string> {
   // First check if the family room exists via alias
   const existingRoomId = await service.getFamilyRoomIdFromAlias();
@@ -92,10 +81,8 @@ async function ensureFamilyRoomMembership(
 }
 
 describe('Family Room', () => {
-  let aliceService: MatrixService;
-  let bobService: MatrixService;
-  let aliceCredentials: TestCredentialStorage;
-  let bobCredentials: TestCredentialStorage;
+  let aliceService: ReturnType<typeof createTestService>;
+  let bobService: ReturnType<typeof createTestService>;
 
   beforeAll(async () => {
     // Check if server is running
@@ -112,18 +99,18 @@ describe('Family Room', () => {
       );
     }
 
-    // Set homeserver URL for MatrixService
+    // Set homeserver URL for both implementations (factory chooses which to use)
     setHomeserverUrl(TEST_HOMESERVER);
+    setAdapterHomeserverUrl(TEST_HOMESERVER);
 
     // Use a separate family room for tests to avoid interfering with manual testing
     setFamilyAliasPrefix('family-test');
+    setAdapterFamilyAliasPrefix('family-test');
   }, 10000);
 
   beforeEach(async () => {
-    aliceCredentials = new TestCredentialStorage();
-    bobCredentials = new TestCredentialStorage();
-    aliceService = new MatrixService(aliceCredentials);
-    bobService = new MatrixService(bobCredentials);
+    aliceService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
+    bobService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
   }, 5000);
 
   afterEach(async () => {
@@ -492,35 +479,50 @@ describe('Family Room', () => {
       );
 
       // Now alice sends a voice message
-      const audioBuffer = createFakeAudioBuffer(4000, { prefix: 'DM_MSG' });
+      const expectedDuration = 4000;
+      const audioBuffer = createFakeAudioBuffer(expectedDuration, { prefix: 'DM_MSG' });
       console.log('[Test] Sending voice message to DM room...');
 
+      const beforeSendTimestamp = Date.now();
       await aliceService.sendVoiceMessage(
         dmRoomId,
         audioBuffer,
         'audio/mp4',
-        4000,
+        expectedDuration,
         audioBuffer.length,
       );
       console.log('[Test] Voice message sent successfully');
 
-      // Wait for bob to receive the message
+      // Wait for bob to receive the message - match by sender + expected duration
+      // This is robust to room reuse since we match specific message characteristics
       await waitForCondition(
         'bob receives voice message in DM',
-        () => bobService.getVoiceMessages(dmRoomId).length > 0,
+        () => {
+          const messages = bobService.getVoiceMessages(dmRoomId);
+          // Find the most recent message from Alice with expected duration
+          // sent after our timestamp
+          return messages.some(m =>
+            m.sender === '@alice:localhost' &&
+            Math.abs(m.duration - expectedDuration) < 500 &&
+            m.timestamp >= beforeSendTimestamp
+          );
+        },
       );
 
       // Then: bob should receive the message in the DM room
       const bobMessages = bobService.getVoiceMessages(dmRoomId);
       console.log('[Test] Bob received messages in DM:', bobMessages.length);
 
-      // TODO: Poorly implemented — takes bobMessages[last] which may be from a prior
-      // test because getOrCreateDmRoom reuses existing rooms. Fix: find the message
-      // by matching on sender + expected duration, or use the eventId from sendVoiceMessage.
-      expect(bobMessages.length).toBeGreaterThan(0);
-      const lastMessage = bobMessages[bobMessages.length - 1];
-      expect(lastMessage.sender).toBe('@alice:localhost');
-      expect(lastMessage.duration).toBeCloseTo(4000, -2);
+      // Find the specific message we just sent (by sender + duration + timestamp)
+      const sentMessage = bobMessages.find(m =>
+        m.sender === '@alice:localhost' &&
+        Math.abs(m.duration - expectedDuration) < 500 &&
+        m.timestamp >= beforeSendTimestamp
+      );
+
+      expect(sentMessage).toBeDefined();
+      expect(sentMessage?.sender).toBe('@alice:localhost');
+      expect(sentMessage?.duration).toBeCloseTo(expectedDuration, -2);
       console.log('[Test] DM message received successfully');
     }, 60000);
 
@@ -705,10 +707,8 @@ describe('Family Onboarding Flow (E2E)', () => {
   }, 10000);
 
   beforeEach(async () => {
-    aliceCredentials = new TestCredentialStorage();
-    bobCredentials = new TestCredentialStorage();
-    aliceService = new MatrixService(aliceCredentials);
-    bobService = new MatrixService(bobCredentials);
+    aliceService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
+    bobService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
   }, 5000);
 
   afterEach(async () => {
