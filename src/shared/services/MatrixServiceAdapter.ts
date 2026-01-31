@@ -294,27 +294,50 @@ class MatrixServiceAdapter {
       });
     }
 
-    // Add PRIMARY DM rooms only
-    // primaryRoomIdByContactUserId tracks the primary room for each contact
-    // as determined by WataClient's deterministic selection (oldest by creation timestamp)
-    for (const [contactId, primaryRoomId] of this.primaryRoomIdByContactUserId.entries()) {
-      const contact = this.contactByUserId.get(contactId);
-      if (!contact) {
+    // Collect all unique room IDs from both sources
+    const allRoomIds = new Set<string>();
+
+    // Add primary rooms
+    for (const roomId of this.primaryRoomIdByContactUserId.values()) {
+      allRoomIds.add(roomId);
+    }
+
+    // Add all rooms from roomIdsByContactUserId
+    for (const roomIdSet of this.roomIdsByContactUserId.values()) {
+      for (const roomId of roomIdSet) {
+        allRoomIds.add(roomId);
+      }
+    }
+
+    // Build rooms list by querying WataClient for each room
+    // This ensures we get fresh contact info even for rooms that were just joined
+    for (const roomId of allRoomIds) {
+      // Check if this is the family room (already added)
+      if (this.familyRoomId === roomId) {
         continue;
       }
 
-      const convo = this.wataClient.getConversationByRoomId(primaryRoomId);
-      const messageCount = convo?.messages.length ?? 0;
+      // Try to get the contact for this DM room
+      const contact = this.wataClient.getContactForDMRoom(roomId);
 
-      log(`[MatrixServiceAdapter] getDirectRooms: DM with ${contactId} -> primary room ${primaryRoomId} (${messageCount} msgs)`);
-      rooms.push({
-        roomId: primaryRoomId,
-        name: contact.user.displayName,
-        avatarUrl: contact.user.avatarUrl,
-        lastMessage: null,
-        lastMessageTime: null,
-        isDirect: true,
-      });
+      if (contact) {
+        const convo = this.wataClient.getConversationByRoomId(roomId);
+        const messageCount = convo?.messages.length ?? 0;
+
+        log(`[MatrixServiceAdapter] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`);
+        rooms.push({
+          roomId,
+          name: contact.user.displayName,
+          avatarUrl: contact.user.avatarUrl,
+          lastMessage: null,
+          lastMessageTime: null,
+          isDirect: true,
+        });
+      } else {
+        // If getContactForDMRoom returns null, this might not be a DM room
+        // or we don't have enough info yet. Skip it.
+        log(`[MatrixServiceAdapter] getDirectRooms: Skipping room ${roomId} (no contact found)`);
+      }
     }
 
     log(`[MatrixServiceAdapter] getDirectRooms returning ${rooms.length} rooms`);
