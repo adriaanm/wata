@@ -8,6 +8,7 @@
  * See docs/planning/client-lib.md for design rationale.
  */
 
+import { DMRoomService } from './dm-room-service';
 import { MatrixApi } from './matrix-api';
 import { SyncEngine } from './sync-engine';
 import type { RoomState, MemberInfo } from './sync-engine';
@@ -41,10 +42,9 @@ const noopLogger: Logger = {
 export class WataClient {
   private api: MatrixApi;
   private syncEngine!: SyncEngine;
+  private dmRoomService!: DMRoomService;
   private userId: string | null = null;
   private familyRoomId: string | null = null;
-  /** contactUserId -> Set of roomIds (may be multiple due to race conditions) */
-  private dmRoomIds: Map<string, Set<string>> = new Map();
   private eventHandlers: Map<WataClientEventName, Set<Function>> = new Map();
   private isConnected = false;
   private logger: Logger;
@@ -111,6 +111,14 @@ export class WataClient {
     this.syncEngine = new SyncEngine(this.api, this.logger);
     this.syncEngine.setUserId(this.userId);
 
+    // Create DM room service
+    this.dmRoomService = new DMRoomService(
+      this.api,
+      this.syncEngine,
+      this.userId,
+      this.logger
+    );
+
     // Wire up sync engine events
     this.setupSyncEngineListeners();
   }
@@ -171,7 +179,7 @@ export class WataClient {
     // Clear state
     this.userId = null;
     this.familyRoomId = null;
-    this.dmRoomIds.clear();
+    this.dmRoomService?.clear();
     this.syncEngine.clear();
     this.logger.log('[WataClient] Logged out');
   }
@@ -404,40 +412,14 @@ export class WataClient {
       conversations.push(familyConvo);
     }
 
-    // Check DM conversations
+    // Check DM conversations using DMRoomService
     const contacts = this.getContacts();
     for (const contact of contacts) {
-      const roomIds = this.dmRoomIds.get(contact.user.id);
-      if (roomIds && roomIds.size > 0) {
-        // Select the primary room deterministically (oldest by creation timestamp)
-        // This ensures consistency with getOrCreateDMRoom selection
-        // Skip rooms without valid creation timestamps
-        let primaryRoom: RoomState | null = null;
-        let primaryCreationTs: number | null = null;
-
-        for (const roomId of roomIds) {
-          const room = this.syncEngine.getRoom(roomId);
-          if (room) {
-            // Find creation timestamp from timeline
-            let creationTs: number | null = null;
-            for (const event of room.timeline) {
-              if (event.type === 'm.room.create') {
-                creationTs = event.origin_server_ts ?? null;
-                break;
-              }
-            }
-            // Only consider rooms with valid timestamps (> 0)
-            if (creationTs !== null && creationTs > 0) {
-              if (primaryCreationTs === null || creationTs < primaryCreationTs) {
-                primaryRoom = room;
-                primaryCreationTs = creationTs;
-              }
-            }
-          }
-        }
-
-        if (primaryRoom) {
-          const convo = this.roomToConversation(primaryRoom, 'dm', contact);
+      const primaryRoomId = this.dmRoomService.getDMRoomId(contact.user.id);
+      if (primaryRoomId) {
+        const room = this.syncEngine.getRoom(primaryRoomId);
+        if (room) {
+          const convo = this.roomToConversation(room, 'dm', contact);
           if (convo.unplayedCount > 0) {
             conversations.push(convo);
           }
@@ -709,164 +691,11 @@ export class WataClient {
   }
 
   /**
-   * Get or create DM room with a contact
-   *
-   * When multiple DM rooms exist with the same contact (due to race conditions),
-   * this method uses a deterministic selection function (oldest by creation timestamp)
-   * to ensure both users pick the same room.
-   *
-   * Rooms without a valid creation timestamp are excluded from consideration.
+   * Get or create DM room with a contact.
+   * Delegates to DMRoomService for all DM room management.
    */
   private async getOrCreateDMRoom(contactUserId: string): Promise<string> {
-    this.logger.log(`[WataClient] getOrCreateDMRoom for ${contactUserId}`);
-
-    // Find ALL candidate DM rooms with this contact
-    const candidateRooms: { roomId: string; creationTs: number; messageCount: number }[] = [];
-    const rooms = this.syncEngine.getRooms();
-
-    for (const room of rooms) {
-      // Skip if not joined
-      if (room.members.get(this.userId!)?.membership !== 'join') {
-        continue;
-      }
-
-      // Check if this is a 2-person room with the target user
-      const joinedMembers = Array.from(room.members.values()).filter(
-        (m) => m.membership === 'join'
-      );
-      if (joinedMembers.length !== 2) {
-        continue;
-      }
-
-      const hasTargetUser = joinedMembers.some((m) => m.userId === contactUserId);
-      if (!hasTargetUser) {
-        continue;
-      }
-
-      // Check if this is a DM room (via is_direct flag)
-      let isDirectRoom = false;
-      let creationTs: number | null = null;
-
-      // Check timeline for is_direct flag and creation timestamp
-      for (const event of room.timeline) {
-        if (event.type === 'm.room.create') {
-          // Store creation timestamp (null if not available)
-          creationTs = event.origin_server_ts ?? null;
-          if (event.content?.is_direct === true) {
-            isDirectRoom = true;
-          }
-        }
-        if (event.type === 'm.room.member' && event.state_key === this.userId) {
-          if (event.content?.is_direct === true) {
-            isDirectRoom = true;
-          }
-        }
-      }
-
-      // Only include rooms with valid creation timestamps
-      // Exclude rooms with creationTs === 0 (1970-01-01) or null
-      if (isDirectRoom && creationTs !== null && creationTs > 0) {
-        const messageCount = room.timeline.filter(
-          (e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio'
-        ).length;
-        candidateRooms.push({ roomId: room.roomId, creationTs, messageCount });
-        this.logger.log(`[WataClient] Found candidate DM room ${room.roomId} (created: ${new Date(creationTs).toISOString()}, ${messageCount} msgs)`);
-      } else if (isDirectRoom) {
-        this.logger.log(`[WataClient] Skipping DM room ${room.roomId} (no valid creation timestamp)`);
-      }
-    }
-
-    // If we found candidate rooms, pick deterministically by creation timestamp
-    if (candidateRooms.length > 0) {
-      if (candidateRooms.length > 1) {
-        const roomList = candidateRooms.map(r => `${r.roomId.slice(-12)} (${new Date(r.creationTs).toISOString().slice(0,10)}, ${r.messageCount} msgs)`).join(', ');
-        this.logger.warn(`[WataClient] Multiple DM rooms detected with ${contactUserId}: ${roomList}. Selecting oldest room deterministically.`);
-      }
-
-      // Sort by creation timestamp ascending (oldest first), then by room ID as tiebreaker
-      // This ensures both users pick the same room deterministically
-      candidateRooms.sort((a, b) => {
-        if (a.creationTs !== b.creationTs) {
-          return a.creationTs - b.creationTs; // Oldest first
-        }
-        return a.roomId.localeCompare(b.roomId); // Tiebreak by room ID
-      });
-
-      const primaryRoom = candidateRooms[0];
-      this.logger.log(`[WataClient] Selected primary DM room ${primaryRoom.roomId} (created: ${new Date(primaryRoom.creationTs).toISOString()}, ${primaryRoom.messageCount} msgs, ${candidateRooms.length} candidates)`);
-
-      // Store all candidate room IDs in local map
-      this.dmRoomIds.set(contactUserId, new Set(candidateRooms.map(r => r.roomId)));
-
-      // Update m.direct to point to the primary room only
-      await this.updateDMRoomData(contactUserId, primaryRoom.roomId);
-
-      return primaryRoom.roomId;
-    }
-
-    // Check if we have any existing DM rooms for this contact
-    const existingRoomIds = this.dmRoomIds.get(contactUserId);
-    if (existingRoomIds && existingRoomIds.size > 0) {
-      // Try each existing room to find one where both users are still joined
-      for (const roomId of existingRoomIds) {
-        const room = this.syncEngine.getRoom(roomId);
-        if (room && room.members.get(this.userId!)?.membership === 'join') {
-          const targetMember = room.members.get(contactUserId);
-          if (targetMember && targetMember.membership === 'join') {
-            this.logger.log(`[WataClient] Using existing DM room ${roomId}`);
-            return roomId;
-          }
-        }
-      }
-    }
-
-    // Create new DM room
-    const response = await this.api.createRoom({
-      is_direct: true,
-      invite: [contactUserId],
-      preset: 'trusted_private_chat',
-      visibility: 'private',
-    });
-
-    const roomId = response.room_id;
-
-    // Update m.direct account data
-    await this.updateDMRoomData(contactUserId, roomId);
-
-    // Add to local map (may have other room IDs from previous race conditions)
-    if (!this.dmRoomIds.has(contactUserId)) {
-      this.dmRoomIds.set(contactUserId, new Set());
-    }
-    this.dmRoomIds.get(contactUserId)!.add(roomId);
-
-    return roomId;
-  }
-
-  /**
-   * Update m.direct account data with new DM room
-   */
-  private async updateDMRoomData(
-    contactUserId: string,
-    roomId: string
-  ): Promise<void> {
-    // Get current m.direct data
-    let directData: Record<string, string[]> = {};
-    try {
-      directData = await this.api.getAccountData(this.userId!, 'm.direct');
-    } catch {
-      // No existing data
-    }
-
-    // Add new DM room
-    if (!directData[contactUserId]) {
-      directData[contactUserId] = [];
-    }
-    if (!directData[contactUserId].includes(roomId)) {
-      directData[contactUserId].push(roomId);
-    }
-
-    // Save updated data
-    await this.api.setAccountData(this.userId!, 'm.direct', directData);
+    return this.dmRoomService.ensureDMRoom(contactUserId);
   }
 
   /**
@@ -1174,60 +1003,12 @@ export class WataClient {
       try {
         await this.api.joinRoom(roomId);
 
-        // After joining, check if this is a DM room and update m.direct
-        // We need to wait for the room to appear in sync
+        // After joining, refresh DM room service from sync state
+        // This will detect and track new DM rooms
         await this.waitForRoom(roomId, 3000);
-
-        const room = this.syncEngine.getRoom(roomId);
-        if (room) {
-          // Check if this is a 2-person room (likely DM)
-          const joinedMembers = Array.from(room.members.values()).filter(
-            (m) => m.membership === 'join'
-          );
-
-          if (joinedMembers.length === 2) {
-            // Find the other member
-            const otherMember = joinedMembers.find((m) => m.userId !== this.userId);
-            if (otherMember) {
-              // Check if this room was created as a DM (is_direct flag)
-              let isDirectRoom = false;
-
-              // Check membership events for is_direct flag
-              for (const event of room.timeline) {
-                if (event.type === 'm.room.member' && event.state_key === this.userId) {
-                  if (event.content?.is_direct === true) {
-                    isDirectRoom = true;
-                    break;
-                  }
-                }
-              }
-
-              // If still unsure, check the room creation event for is_direct flag
-              if (!isDirectRoom) {
-                for (const event of room.timeline) {
-                  if (event.type === 'm.room.create') {
-                    if (event.content?.is_direct === true) {
-                      isDirectRoom = true;
-                      break;
-                    }
-                  }
-                }
-              }
-
-              // If it's a DM room, update m.direct
-              if (isDirectRoom) {
-                await this.updateDMRoomData(otherMember.userId, roomId);
-                // Add to local map (preserves any existing room IDs from races)
-                if (!this.dmRoomIds.has(otherMember.userId)) {
-                  this.dmRoomIds.set(otherMember.userId, new Set());
-                }
-                this.dmRoomIds.get(otherMember.userId)!.add(roomId);
-              }
-            }
-          }
-        }
+        this.dmRoomService.refreshFromSync();
       } catch (error) {
-        console.error(`Failed to auto-join room ${roomId}:`, error);
+        this.logger.error(`Failed to auto-join room ${roomId}: ${error}`);
       }
     }
   }
@@ -1240,70 +1021,39 @@ export class WataClient {
     content: Record<string, any>
   ): void {
     if (type === 'm.direct') {
-      // Update local dmRoomIds map from m.direct account data
-      // m.direct format: { "@user:server": ["!roomId1", "!roomId2", ...] }
-      for (const [userId, roomIds] of Object.entries(content)) {
-        if (Array.isArray(roomIds) && roomIds.length > 0) {
-          // Store all room IDs (may be multiple due to race conditions)
-          this.dmRoomIds.set(userId, new Set(roomIds));
-        }
-      }
+      // Delegate m.direct handling to DMRoomService
+      this.dmRoomService.handleMDirectUpdate(content as Record<string, string[]>);
     }
   }
 
   /**
-   * Get contact for a DM room
-   * @param roomId - Room ID to look up
-   * @returns Contact if this is a DM room, null otherwise
-   *
-   * This handles both sides of DM room creation:
-   * - Creator side: m.direct account data has the mapping
-   * - Recipient side: Falls back to room membership inference
+   * Get contact for a DM room.
+   * Delegates to DMRoomService.
    */
   getContactForDMRoom(roomId: string): Contact | null {
-    // First, try to find from m.direct account data mapping
-    // dmRoomIds stores Set<roomId> for each contactUserId
-    for (const [userId, roomIdSet] of this.dmRoomIds.entries()) {
-      if (roomIdSet.has(roomId)) {
-        const room = this.syncEngine.getRoom(roomId);
-        const member = room?.members.get(userId);
-        if (member) {
-          return {
-            user: {
-              id: userId,
-              displayName: member.displayName,
-              avatarUrl: member.avatarUrl,
-            },
-          };
-        }
-      }
-    }
+    return this.dmRoomService.getContactForRoom(roomId);
+  }
 
-    // Fallback: If m.direct doesn't have the mapping (recipient-side issue),
-    // infer the contact from room membership.
-    // A DM room has exactly 2 members: the current user and the contact.
-    const room = this.syncEngine.getRoom(roomId);
-    if (room) {
-      for (const [userId, member] of room.members.entries()) {
-        // Skip current user and any invited/left users
-        if (userId !== this.userId && member.membership === 'join') {
-          // Verify this is a DM room by checking member count
-          const joinCount = Array.from(room.members.values()).filter(
-            m => m.membership === 'join'
-          ).length;
-          if (joinCount === 2) {
-            return {
-              user: {
-                id: userId,
-                displayName: member.displayName,
-                avatarUrl: member.avatarUrl,
-              },
-            };
-          }
-        }
-      }
-    }
+  /**
+   * Check if a room is a known DM room.
+   */
+  isDMRoom(roomId: string): boolean {
+    return this.dmRoomService.isDMRoom(roomId);
+  }
 
-    return null;
+  /**
+   * Get the primary DM room ID for a contact (synchronous lookup).
+   * Returns null if no DM room exists in cache.
+   */
+  getDMRoomId(contactUserId: string): string | null {
+    return this.dmRoomService.getDMRoomId(contactUserId);
+  }
+
+  /**
+   * Get all known DM room IDs for a contact.
+   * Useful for message consolidation across duplicate rooms.
+   */
+  getAllDMRoomIds(contactUserId: string): string[] {
+    return this.dmRoomService.getAllDMRoomIds(contactUserId);
   }
 }
