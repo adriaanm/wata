@@ -78,14 +78,14 @@ fi
 # Clean up if requested
 if $CLEAN; then
   echo "Cleaning up existing containers and volumes..."
-  docker compose down -v 2>/dev/null || true
+  docker-compose down -v 2>/dev/null || true
   echo "Clean complete."
   echo ""
 fi
 
 # Start Conduit
 echo "Starting Conduit Matrix server..."
-docker compose up -d
+docker-compose up -d
 
 # Wait for server to be healthy
 echo "Waiting for Conduit to be ready..."
@@ -95,7 +95,7 @@ for i in {1..30}; do
     break
   fi
   if [ "$i" -eq 30 ]; then
-    echo "ERROR: Conduit failed to start. Check logs with: docker compose logs"
+    echo "ERROR: Conduit failed to start. Check logs with: docker-compose logs"
     exit 1
   fi
   echo "  Waiting... ($i/30)"
@@ -136,5 +136,5 @@ echo "  - @bob:localhost / testpass123"
 echo ""
 echo "Commands:"
 echo "  Run tests:  npm run test:integration"
-echo "  Stop:       cd test/docker && docker compose down"
-echo "  Clean:      cd test/docker && docker compose down -v"
+echo "  Stop:       cd test/docker && docker-compose down"
+echo "  Clean:      cd test/docker && docker-compose down -v"

@@ -12,7 +12,7 @@
  * Tests pass in isolation but fail when run after other test suites.
  *
  * TODO: Re-enable after fixing test isolation - options include:
- * 1. Add `docker compose down -v` between test runs to reset Conduit state
+ * 1. Add `docker-compose down -v` between test runs to reset Conduit state
  * 2. Improve test cleanup to properly reset Matrix client state
  * 3. Increase wait times or add better synchronization for eventual consistency
  */

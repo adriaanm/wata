@@ -143,7 +143,7 @@ pnpm test:integration:setup
 pnpm test:integration
 
 # Stop the server
-cd test/docker && docker compose down
+cd test/docker && docker-compose down
 ```
 
 ## Status

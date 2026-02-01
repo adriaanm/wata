@@ -78,10 +78,10 @@ pnpm dev:ip
 **Server not responding:**
 ```bash
 # Check server status
-cd test/docker && docker compose ps
+cd test/docker && docker-compose ps
 
 # Restart server
-docker compose restart
+docker-compose restart
 ```
 
 ## That's It!

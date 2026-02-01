@@ -62,7 +62,7 @@ jobs:
 
       - name: Start Conduit
         run: |
-          docker compose -f test/docker/docker-compose.yml up -d
+          docker-compose -f test/docker/docker-compose.yml up -d
           # Wait for healthy
           for i in {1..60}; do
             if curl -s http://localhost:8008/_matrix/client/versions > /dev/null 2>&1; then
@@ -87,4 +87,4 @@ jobs:
 
       - name: Stop Conduit
         if: always()
-        run: docker compose -f test/docker/docker-compose.yml down
+        run: docker-compose -f test/docker/docker-compose.yml down
