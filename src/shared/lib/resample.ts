@@ -74,7 +74,7 @@ const noopLogger: Logger = {
  * @example
  * ```ts
  * // Resample from CD quality to Opus-friendly rate
- * const cdQuality = new Float32Array([/* 44100 Hz samples */]);
+ * const cdQuality = new Float32Array([0.1, 0.2, 0.3]); // 44100 Hz samples
  * const opusReady = resample(cdQuality, 44100, 16000);
  * ```
  */

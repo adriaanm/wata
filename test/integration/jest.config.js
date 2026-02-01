@@ -3,8 +3,8 @@ module.exports = {
   preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
   rootDir: '../../',
-  testMatch: ['<rootDir>/test/integration/**/*.test.ts'],
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+  testMatch: ['<rootDir>/test/integration/**/*.test.ts', '<rootDir>/src/shared/**/*.test.ts'],
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node', 'mjs'],
   extensionsToTreatAsEsm: ['.ts'],
   transform: {
     '^.+\\.tsx?$': [

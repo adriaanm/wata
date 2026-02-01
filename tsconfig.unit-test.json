@@ -1,7 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"],
+    "target": "ES2022",
+    "module": "commonjs",
+    "types": ["jest", "node"],
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/shared/*"],
@@ -12,13 +16,6 @@
   "files": [
     "src/shared/lib/reedsolomon.es.d.ts"
   ],
-  "include": [
-    "src/shared/**/*.ts",
-    "src/shared/**/*.tsx",
-    "src/rn/**/*.ts",
-    "src/rn/**/*.tsx",
-    "src/tui/**/*.ts",
-    "src/tui/**/*.tsx"
-  ],
-  "exclude": ["**/node_modules", "src/web", "**/__tests__"]
+  "include": ["src/**/__tests__/**/*.ts"],
+  "exclude": ["node_modules"]
 }
