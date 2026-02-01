@@ -5,14 +5,11 @@
   "type": "module",
   "dependencies": {
     "@wata/shared": "workspace:*",
-    "@discordjs/opus": "^0.10.0",
-    "@evan/opus": "^1.0.3",
     "@picovoice/pvrecorder-node": "^1.2.8",
     "ink": "^6.6.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "keytar": "^7.9.0",
-    "libopus-node": "^0.0.4",
     "loglevel": "^1.9.1",
     "react": "^19.0.0"
   }

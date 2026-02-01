@@ -187,14 +187,33 @@ export function encodeOggOpus(
   let offset = 0;
 
   while (offset < resampledPcm.length) {
-    const frameSize = Math.min(OPUS_FRAME_SIZE, resampledPcm.length - offset);
-    const frame = resampledPcm.subarray(offset, offset + frameSize);
+    const remaining = resampledPcm.length - offset;
+
+    // @evan/opus requires exactly OPUS_FRAME_SIZE samples per frame
+    // For partial frames, pad with zeros
+    let frame: Float32Array;
+    if (remaining >= OPUS_FRAME_SIZE) {
+      frame = resampledPcm.subarray(offset, offset + OPUS_FRAME_SIZE);
+    } else {
+      // Pad partial frame with zeros
+      frame = new Float32Array(OPUS_FRAME_SIZE);
+      frame.set(resampledPcm.subarray(offset), 0);
+      logger?.log(`encodeOggOpus: padded partial frame (${remaining} → ${OPUS_FRAME_SIZE} samples)`);
+    }
 
     // Encode frame
     const packet = encoder.encode(frame);
-    packets.push({ data: packet, samples: frameSize });
+    packets.push({ data: packet, samples: Math.min(remaining, OPUS_FRAME_SIZE) });
 
-    offset += frameSize;
+    offset += OPUS_FRAME_SIZE;
+  }
+
+  // If we had no audio data, create one silent frame
+  if (packets.length === 0) {
+    logger?.log('encodeOggOpus: no audio data, creating silent frame');
+    const silentFrame = new Float32Array(OPUS_FRAME_SIZE);
+    const packet = encoder.encode(silentFrame);
+    packets.push({ data: packet, samples: 0 });
   }
 
   logger?.log(`encodeOggOpus: encoded ${packets.length} Opus packets`);
