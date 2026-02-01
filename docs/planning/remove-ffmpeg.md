@@ -49,10 +49,16 @@ Make wata self-contained by replacing FFmpeg with pure JS/WASM audio handling us
 1. **Design API**
    ```typescript
    // src/shared/lib/audio-codec.ts
+   import type { Logger } from '@shared/lib/wata-client/types.js';
 
    interface EncodeOptions {
      sampleRate: number;  // Input sample rate (will resample to 16kHz if needed)
      channels?: 1;        // Only mono supported
+     logger?: Logger;     // Optional logger (reuse shared Logger interface)
+   }
+
+   interface DecodeOptions {
+     logger?: Logger;     // Optional logger
    }
 
    interface DecodeResult {
@@ -65,7 +71,7 @@ Make wata self-contained by replacing FFmpeg with pure JS/WASM audio handling us
    function encodeOggOpus(pcm: Int16Array | Float32Array, options: EncodeOptions): Buffer;
 
    // Decoding: always outputs 16kHz
-   function decodeOggOpus(ogg: Buffer): DecodeResult;
+   function decodeOggOpus(ogg: Buffer, options?: DecodeOptions): DecodeResult;
    ```
 
 2. **Extract Ogg implementation**
@@ -277,8 +283,9 @@ After refactor:
 - Lines ~466-636: `OggOpusMuxer` class
 
 **Note**: The code currently uses `LogService` for warnings. When extracting:
-- Remove LogService dependency
-- Either use console.warn or accept an optional logger parameter
+- Accept an optional `Logger` parameter (reuse the existing interface from `@shared/lib/wata-client/types.ts`)
+- Use a no-op logger by default (same pattern as `WataClient`, `SyncEngine`, `DMRoomService`)
+- This keeps the shared lib platform-agnostic while allowing each platform to provide its own logging implementation
 
 **Steps**:
 1. Extract Ogg mux/demux from Phase 1 into `src/shared/lib/ogg.ts`
