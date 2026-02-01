@@ -9,8 +9,8 @@ Make wata self-contained by replacing FFmpeg with pure JS/WASM audio handling us
 - **Codec library**: `@evan/opus` - the only JS/WASM Opus lib with native 16kHz support
 - **Platforms**: TUI (Node.js), Web (browser), Android/iOS (React Native)
 
-## Current State
-- **TUI**: Uses FFmpeg for PCM→Ogg Opus encoding and Ogg→WAV decoding
+## Current State (After Phase 1)
+- **TUI**: ✅ Uses @evan/opus + inline Ogg mux/demux (FFmpeg removed)
 - **Web**: Uses browser MediaRecorder (no FFmpeg) - sample rate not guaranteed
 - **Android/iOS**: Uses react-native-audio-recorder-player with AAC (no FFmpeg) - no sample rate control
 
@@ -22,39 +22,27 @@ Make wata self-contained by replacing FFmpeg with pure JS/WASM audio handling us
 
 ---
 
-## Phase 1: Switch TUI to @evan/opus
+## Phase 1: Switch TUI to @evan/opus ✅ COMPLETE
 
-**Objective**: Replace FFmpeg calls in `PvRecorderAudioService.ts` with `@evan/opus` + inline Ogg handling.
+**Status**: Done. Committed as `0a88324`.
 
-### Tasks
+**What was implemented** in `src/tui/services/PvRecorderAudioService.ts`:
+- `OggDemuxer` class (lines ~49-265) - extracts Opus packets from Ogg container
+- `OggOpusMuxer` class (lines ~477-636) - creates valid Ogg Opus files
+- `oggCrc32()` function with Ogg's polynomial (0x04C11DB7)
+- `createOggPage()`, `createOpusHead()`, `createOpusTags()` helper functions
+- Encoding uses `@evan/opus` Encoder + OggOpusMuxer
+- Decoding uses OggDemuxer + `@evan/opus` Decoder + encodeWav
 
-1. **Replace encoding** (`encodeToOggOpus` method at line 292)
-   - Use `@evan/opus` Encoder (already in package.json)
-   - Implement minimal Ogg muxer inline (can be extracted later)
-   - Required Ogg structures: OggS pages, OpusHead, OpusTags
-
-2. **Replace decoding** (`startPlayback` method at line 426)
-   - Implement Ogg demuxer to extract Opus packets
-   - Use `@evan/opus` Decoder
-   - Output PCM, write as WAV for `afplay`
-
-3. **Test**
-   - Record voice message, verify Ogg output plays in Element
-   - Receive Ogg message from Element, verify playback works
-   - Verify round-trip: TUI → Matrix → TUI
-
-### Files to Modify
-- `src/tui/services/PvRecorderAudioService.ts`
-
-### Success Criteria
-- `pnpm tui` works without FFmpeg installed
-- Audio messages interoperate with Element (Matrix client)
+**Tested**: TUI audio recording and playback works without FFmpeg.
 
 ---
 
-## Phase 2: Extract Shared Audio Library
+## Phase 2: Extract Shared Audio Library ⏳ IN PROGRESS
 
 **Objective**: Move Opus/Ogg handling into `@wata/shared` for cross-platform use.
+
+**Status**: Not started. The Ogg/Opus code is currently inline in `PvRecorderAudioService.ts` and needs to be extracted.
 
 ### Tasks
 
@@ -220,15 +208,24 @@ const audioSet = {
 ### @evan/opus API
 
 ```typescript
-import { Encoder, Decoder } from '@evan/opus/lib.mjs';
+import { Encoder, Decoder } from '@evan/opus';
 
-// Encoding
-const encoder = new Encoder(16000, 1); // 16kHz, mono
+// Encoding (uses options object, not positional args)
+const encoder = new Encoder({
+  sample_rate: 16000,
+  channels: 1,
+  application: 'voip',
+});
 const opusPacket: Uint8Array = encoder.encode(pcmBuffer);
 
 // Decoding
-const decoder = new Decoder(16000, 1);
-const pcm: Int16Array = decoder.decode(opusPacket);
+const decoder = new Decoder({
+  sample_rate: 16000,
+  channels: 1,
+});
+const pcm: Uint8Array = decoder.decode(opusPacket);
+// Note: decode returns Uint8Array, convert to Int16Array:
+// new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2)
 ```
 
 ### Audio Parameters (Fixed)
@@ -270,6 +267,20 @@ After refactor:
 4. Test: record in TUI, verify plays in Element; receive from Element, verify plays in TUI
 
 ### Phase 2 Subagent Instructions
+
+**Source code to extract** from `src/tui/services/PvRecorderAudioService.ts`:
+- Lines ~14-28: OggPage interface and format documentation
+- Lines ~30-265: `OggDemuxer` class
+- Lines ~271-304: `OGG_CRC32_TABLE` and `oggCrc32()` function
+- Lines ~306-387: `createOggPage()` function
+- Lines ~389-464: `createOpusHead()` and `createOpusTags()` functions
+- Lines ~466-636: `OggOpusMuxer` class
+
+**Note**: The code currently uses `LogService` for warnings. When extracting:
+- Remove LogService dependency
+- Either use console.warn or accept an optional logger parameter
+
+**Steps**:
 1. Extract Ogg mux/demux from Phase 1 into `src/shared/lib/ogg.ts`
 2. Create `src/shared/lib/resample.ts` for any-rate → 16kHz conversion
 3. Create `src/shared/lib/opus.ts` wrapper around `@evan/opus`
@@ -278,7 +289,8 @@ After refactor:
    - `decodeOggOpus()` always outputs 16kHz
 5. Add unit tests for ogg, resample, and audio-codec
 6. Move `@evan/opus` dependency to `src/shared/package.json`
-7. Verify imports work from TUI, Web, and RN workspaces
+7. Update `PvRecorderAudioService.ts` to import from `@shared/lib/ogg.js` etc.
+8. Verify imports work from TUI, Web, and RN workspaces
 
 ### Phase 3 Subagent Instructions
 1. Investigate actual sample rates on Web and Android (see Investigation section)
