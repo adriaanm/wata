@@ -9,8 +9,8 @@ Make wata self-contained by replacing FFmpeg with pure JS/WASM audio handling us
 - **Codec library**: `@evan/opus` - the only JS/WASM Opus lib with native 16kHz support
 - **Platforms**: TUI (Node.js), Web (browser), Android/iOS (React Native)
 
-## Current State (After Phase 1)
-- **TUI**: ✅ Uses @evan/opus + inline Ogg mux/demux (FFmpeg removed)
+## Current State (After Phase 2)
+- **TUI**: ✅ Uses shared @wata/shared audio library (Ogg Opus at 16kHz)
 - **Web**: Uses browser MediaRecorder (no FFmpeg) - sample rate not guaranteed
 - **Android/iOS**: Uses react-native-audio-recorder-player with AAC (no FFmpeg) - no sample rate control
 
@@ -38,11 +38,24 @@ Make wata self-contained by replacing FFmpeg with pure JS/WASM audio handling us
 
 ---
 
-## Phase 2: Extract Shared Audio Library ⏳ IN PROGRESS
+## Phase 2: Extract Shared Audio Library ✅ COMPLETE
 
-**Objective**: Move Opus/Ogg handling into `@wata/shared` for cross-platform use.
+**Status**: Done. Committed as `d14e3f8`, `acb9cab`, `59ebd89`.
 
-**Status**: Not started. The Ogg/Opus code is currently inline in `PvRecorderAudioService.ts` and needs to be extracted.
+**What was implemented**:
+- `src/shared/lib/ogg.ts` - Ogg container muxer/demuxer with Logger interface
+- `src/shared/lib/opus.ts` - Opus encoder/decoder wrapper
+- `src/shared/lib/resample.ts` - Audio resampling (any rate → 16kHz)
+- `src/shared/lib/audio-codec.ts` - High-level encodeOggOpus/decodeOggOpus API
+- Comprehensive unit tests: ogg.test.ts (57 tests), resample.test.ts (25 tests), audio-codec.test.ts (70 tests)
+- TUI refactored to use shared library (removed ~627 lines of inline code)
+- Removed unused dependencies: @discordjs/opus, @evan/opus, libopus-node from TUI
+
+**Files created/modified**:
+- New: `src/shared/lib/ogg.ts`, `src/shared/lib/opus.ts`, `src/shared/lib/resample.ts`, `src/shared/lib/audio-codec.ts`
+- New: `src/shared/lib/__tests__/ogg.test.ts`, `resample.test.ts`, `audio-codec.test.ts`
+- Modified: `src/tui/services/PvRecorderAudioService.ts` (now uses shared lib)
+- Modified: `src/tui/package.json` (removed unused Opus deps)
 
 ### Tasks
 
