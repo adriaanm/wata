@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@evan/opus": "^1.0.3",
     "buffer": "^6.0.3",
     "matrix-js-sdk": "^40.0.0"
   }
