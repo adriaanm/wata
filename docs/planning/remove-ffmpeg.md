@@ -150,58 +150,74 @@ const audioSet = {
 
 ---
 
-## Phase 3: Refactor Platforms to Use Shared Lib
+## Phase 3: Android Ogg Opus Support
 
-**Objective**: All platforms use `@wata/shared` audio codec with consistent 16kHz Ogg Opus.
+**Objective**: Android records and sends Ogg Opus (like TUI), while Web keeps native MediaRecorder.
 
-### Current Platform Issues
+### Platform Status
 
-| Platform | Recording | Problem |
-|----------|-----------|---------|
-| TUI | PvRecorder 16kHz | ✅ None - already 16kHz |
-| Web | MediaRecorder | ⚠️ `sampleRate: 16000` is a hint, browsers may ignore |
-| Android | react-native-audio-recorder-player | ❌ Uses AAC at device default (~44.1kHz) |
+| Platform | Recording | Encoding | Status |
+|----------|-----------|----------|--------|
+| TUI | PvRecorder 16kHz | Shared lib (@evan/opus) | ✅ Complete |
+| Web | MediaRecorder | Native browser Opus | ✅ Keep as-is |
+| Android | react-native-audio-recorder-player | AAC | ❌ Needs work |
+
+### Design Decisions
+
+1. **TUI**: Already uses shared lib at 16kHz. No changes needed.
+
+2. **Web**: Keep native MediaRecorder Opus encoding.
+   - Browsers output webm/ogg opus at their native rate (typically 48kHz)
+   - No need for WASM - browser's Opus encoder is battle-tested
+   - Smaller bundle size
+   - Playback works everywhere (HTML5 Audio handles Opus natively)
+
+3. **Android**: Replace `react-native-audio-recorder-player` with `react-native-audio-pcm-stream`
+   - Current library only supports AAC, not Opus
+   - `react-native-audio-pcm-stream` provides raw PCM at configurable sample rate
+   - Configure for 16kHz mono to match TUI
+   - Encode with shared lib (`encodeOggOpus`)
+   - Playback: Android MediaPlayer supports Ogg Opus natively (API 21+)
 
 ### Tasks
 
-1. **Refactor TUI**
-   - Replace inline Ogg/Opus code with shared lib imports
-   - Verify functionality preserved
+1. **Add react-native-audio-pcm-stream dependency**
+   ```bash
+   pnpm add react-native-audio-pcm-stream --filter @wata/rn
+   cd ios && pod install  # if iOS support needed later
+   ```
 
-2. **Refactor Web**
-   - Use AudioWorklet to capture raw PCM at known rate
-   - Resample to 16kHz if needed (or accept browser rate)
-   - Use shared lib to encode to Ogg Opus
-   - Alternative: Accept browser's native Opus encoding if 16kHz not critical for web
+2. **Refactor `src/rn/services/AudioService.ts`**
+   - Replace `react-native-audio-recorder-player` imports
+   - Configure PCM stream: `{ sampleRate: 16000, channels: 1, bitsPerSample: 16 }`
+   - Accumulate PCM chunks during recording
+   - On stop: encode accumulated PCM with `encodeOggOpus({ sampleRate: 16000 })`
+   - Return Ogg Opus buffer with `mimeType: 'audio/ogg; codecs=opus'`
 
-3. **Refactor Android**
-   - Option A: Configure `react-native-audio-recorder-player` for 16kHz
-     ```typescript
-     const audioSet = {
-       AVSampleRateKeyIOS: 16000,
-       AudioSamplingRateAndroid: 16000,
-       // ...
-     };
-     ```
-   - Option B: Capture raw PCM via native module, encode with shared lib
-   - Option C: Record at native rate, resample + re-encode with shared lib
-   - Decision: Try Option A first (lowest effort)
+3. **Update playback**
+   - Android MediaPlayer handles Ogg Opus natively
+   - May need to write temp file for playback (check if URL playback works)
 
-4. **Playback compatibility**
-   - All platforms must play both 16kHz Ogg Opus (new) and legacy formats
-   - Web: HTML5 Audio supports Ogg Opus natively
-   - Android: MediaPlayer supports Ogg Opus on API 21+
-   - TUI: Use shared lib to decode → WAV → afplay
+4. **Test cross-platform**
+   - TUI → Android: TUI sends Ogg Opus, Android plays
+   - Android → TUI: Android sends Ogg Opus, TUI plays
+   - Web → Android: Web sends webm/ogg opus, Android plays
+   - Android → Web: Android sends Ogg Opus, Web plays
 
 ### Files to Modify
-- `src/tui/services/PvRecorderAudioService.ts`
-- `src/web/src/services/WebAudioService.ts`
-- `src/rn/services/AudioService.ts`
+- `src/rn/package.json` - add react-native-audio-pcm-stream
+- `src/rn/services/AudioService.ts` - rewrite for PCM + shared lib
+
+### Dependencies
+- `react-native-audio-pcm-stream` (https://github.com/mybigday/react-native-audio-pcm-stream)
+  - Configurable sample rate (16kHz supported)
+  - Streams raw PCM via events
+  - Works with bare React Native
 
 ### Success Criteria
-- All platforms record at 16kHz (or consistent rate)
-- All platforms produce Ogg Opus output
-- All platforms can play Ogg Opus from any other platform
+- Android produces Ogg Opus at 16kHz
+- Android plays Ogg Opus from TUI and Web
+- TUI and Web play Ogg Opus from Android
 - No FFmpeg dependency anywhere
 
 ---
@@ -258,16 +274,12 @@ const pcm: Uint8Array = decoder.decode(opusPacket);
 
 ## Dependencies
 
-Current (`src/tui/package.json`):
-```json
-"@evan/opus": "^1.0.3"  // ✓ Keep - 16kHz WASM encoder/decoder
-"@discordjs/opus": "^0.10.0"  // ✗ Remove - 48kHz only, native
-"libopus-node": "^0.0.4"  // ✗ Remove - native, not WASM
-```
+**After Phase 2** (current state):
+- `@evan/opus` is in `src/shared/package.json` (WASM, 16kHz)
+- Unused Opus libs removed from TUI (`@discordjs/opus`, `libopus-node`)
 
-After refactor:
-- `@evan/opus` moves to `src/shared/package.json`
-- Remove unused Opus libraries from TUI
+**Phase 3 additions** (`src/rn/package.json`):
+- `react-native-audio-pcm-stream` - raw PCM recording at 16kHz
 
 ---
 
@@ -277,7 +289,7 @@ After refactor:
 |-------|--------------|-----------|---------|
 | **1** | Replace FFmpeg with @evan/opus in TUI | `src/tui/services/PvRecorderAudioService.ts` | None |
 | **2** | Extract Ogg/Opus into shared lib | `src/shared/lib/ogg.ts`, `opus.ts`, `audio-codec.ts` | Phase 1 |
-| **3** | Refactor all platforms to use shared lib | All `*AudioService.ts` files | Phase 2 |
+| **3** | Android Ogg Opus support | `src/rn/services/AudioService.ts` | Phase 2 |
 
 ### Phase 1 Subagent Instructions
 1. Read `src/tui/services/PvRecorderAudioService.ts`
@@ -313,12 +325,16 @@ After refactor:
 8. Verify imports work from TUI, Web, and RN workspaces
 
 ### Phase 3 Subagent Instructions
-1. Investigate actual sample rates on Web and Android (see Investigation section)
-2. Update TUI to use shared lib (replace inline code from Phase 1)
-3. Update Web:
-   - Get raw PCM from AudioWorklet or ScriptProcessorNode
-   - Pass to shared lib with actual sample rate (resampling handled internally)
-4. Update Android:
-   - Either configure `react-native-audio-recorder-player` for lower sample rate
-   - Or get raw PCM and pass to shared lib (resampling handled internally)
-5. Test cross-platform: message from each platform plays on all others
+
+**Scope**: Android only. TUI is complete, Web keeps native MediaRecorder.
+
+**Steps**:
+1. Add `react-native-audio-pcm-stream` to `src/rn/package.json`
+2. Rewrite `src/rn/services/AudioService.ts`:
+   - Import from `react-native-audio-pcm-stream` and `@shared/lib/audio-codec.js`
+   - Configure: `{ sampleRate: 16000, channels: 1, bitsPerSample: 16, audioSource: 6 }`
+   - `startRecording()`: Start PCM stream, accumulate Int16Array chunks
+   - `stopRecording()`: Stop stream, concatenate chunks, call `encodeOggOpus(pcm, { sampleRate: 16000 })`
+   - Return `{ buffer, mimeType: 'audio/ogg; codecs=opus', duration, size }`
+   - Playback: Android MediaPlayer handles Ogg Opus natively (API 21+)
+3. Test: record on Android, verify plays in TUI and Web; receive from TUI/Web, verify plays on Android
