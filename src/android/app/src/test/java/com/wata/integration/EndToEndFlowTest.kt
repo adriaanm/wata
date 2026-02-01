@@ -4,6 +4,7 @@ import com.wata.client.*
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.*
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
@@ -35,6 +36,23 @@ class EndToEndFlowTest {
         // Start sync
         aliceClient.connect()
         bobClient.connect()
+    }
+
+    @After
+    fun tearDown() {
+        // Disconnect both clients to stop sync threads
+        // This is critical - without it, the JVM won't exit because
+        // the sync threads are still running
+        try {
+            aliceClient.disconnect()
+        } catch (e: Exception) {
+            aliceLogger.error("Error disconnecting Alice: $e")
+        }
+        try {
+            bobClient.disconnect()
+        } catch (e: Exception) {
+            bobLogger.error("Error disconnecting Bob: $e")
+        }
     }
 
     // ========================================================================
