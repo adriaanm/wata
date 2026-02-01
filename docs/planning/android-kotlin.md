@@ -58,12 +58,12 @@ wata/
 
 ### Tasks
 
-- [ ] **0.1** Create `src/android/` directory structure
+- [x] **0.1** Create `src/android/` directory structure
   - New Gradle project with Kotlin DSL
   - `app/` module
   - minSdk 26 (Android 8)
 
-- [ ] **0.2** Configure dependencies
+- [x] **0.2** Configure dependencies
   ```kotlin
   // build.gradle.kts
   dependencies {
@@ -87,11 +87,11 @@ wata/
   }
   ```
 
-- [ ] **0.3** Create minimal MainActivity with Compose
+- [x] **0.3** Create minimal MainActivity with Compose
   - "Hello Wata" text
   - Verify builds and runs on device
 
-- [ ] **0.4** Set up test infrastructure
+- [x] **0.4** Set up test infrastructure
   - JUnit 5 + MockK
   - MockWebServer for HTTP tests
   - Verify tests run with `./gradlew test`
