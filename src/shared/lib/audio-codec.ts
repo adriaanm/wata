@@ -179,10 +179,11 @@ export function encodeOggOpus(
   });
 
   // Step 4: Create Ogg muxer
+  // Note: Don't call writeHeaders() here - muxPackets() handles that
   const muxer = new OggOpusMuxer(OPUS_SAMPLE_RATE, channels, OPUS_PRE_SKIP);
-  muxer.writeHeaders();
 
   // Step 5: Encode frames and mux
+  // Note: @evan/opus treats Float32Array differently, so we must convert to Int16Array
   const packets: Array<{ data: Uint8Array; samples: number }> = [];
   let offset = 0;
 
@@ -191,15 +192,18 @@ export function encodeOggOpus(
 
     // @evan/opus requires exactly OPUS_FRAME_SIZE samples per frame
     // For partial frames, pad with zeros
-    let frame: Float32Array;
-    if (remaining >= OPUS_FRAME_SIZE) {
-      frame = resampledPcm.subarray(offset, offset + OPUS_FRAME_SIZE);
-    } else {
-      // Pad partial frame with zeros
-      frame = new Float32Array(OPUS_FRAME_SIZE);
-      frame.set(resampledPcm.subarray(offset), 0);
-      logger?.log(`encodeOggOpus: padded partial frame (${remaining} → ${OPUS_FRAME_SIZE} samples)`);
-    }
+    const frameFloat = remaining >= OPUS_FRAME_SIZE
+      ? resampledPcm.subarray(offset, offset + OPUS_FRAME_SIZE)
+      : (() => {
+          const padded = new Float32Array(OPUS_FRAME_SIZE);
+          padded.set(resampledPcm.subarray(offset), 0);
+          logger?.log(`encodeOggOpus: padded partial frame (${remaining} → ${OPUS_FRAME_SIZE} samples)`);
+          return padded;
+        })();
+
+    // Convert Float32Array to Int16Array for @evan/opus
+    // Float32 range: [-1.0, 1.0] -> Int16 range: [-32768, 32767]
+    const frame = float32ToInt16(frameFloat);
 
     // Encode frame
     const packet = encoder.encode(frame);
@@ -211,7 +215,7 @@ export function encodeOggOpus(
   // If we had no audio data, create one silent frame
   if (packets.length === 0) {
     logger?.log('encodeOggOpus: no audio data, creating silent frame');
-    const silentFrame = new Float32Array(OPUS_FRAME_SIZE);
+    const silentFrame = new Int16Array(OPUS_FRAME_SIZE); // zeros
     const packet = encoder.encode(silentFrame);
     packets.push({ data: packet, samples: 0 });
   }

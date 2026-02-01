@@ -292,12 +292,14 @@ export class PvRecorderAudioService {
    * Encode raw PCM buffer to Ogg Opus using shared audio library
    */
   private async encodeToOggOpus(pcmBuffer: Buffer): Promise<Buffer> {
-    // Convert Int16Array PCM to Float32Array for the shared lib
-    const samples = pcmBuffer.length / 2;
-    const float32Pcm = new Float32Array(samples);
-    for (let i = 0; i < samples; i++) {
-      float32Pcm[i] = pcmBuffer.readInt16LE(i * 2) / 32768;
-    }
+    // Create Int16Array view of the PCM buffer
+    // Note: We pass Int16Array directly - @evan/opus works correctly with Int16Array
+    // (it has issues with Float32Array that cause 2x sample count)
+    const int16Pcm = new Int16Array(
+      pcmBuffer.buffer,
+      pcmBuffer.byteOffset,
+      pcmBuffer.byteLength / 2
+    );
 
     // Create logger adapter
     const logger = {
@@ -306,7 +308,7 @@ export class PvRecorderAudioService {
       error: (msg: string) => LogService.getInstance().addEntry('error', msg),
     };
 
-    return encodeOggOpus(float32Pcm, {
+    return encodeOggOpus(int16Pcm, {
       sampleRate: this.OPUS_SAMPLE_RATE,
       channels: 1,
       logger,
