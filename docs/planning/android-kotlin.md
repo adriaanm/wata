@@ -373,7 +373,37 @@ These changes improve Android compatibility but aren't blocking for Phase 2:
   - Log state on timeout for debugging
   - Use `@Test(timeout = 60000)` annotations
 
-### 1b.4 Verification Checklist
+### 1b.4 Test Results (After 1b.0.5 Fix)
+
+As of commit 59a62b8:
+
+| Test Class | Passed | Failed | Notes |
+|------------|--------|--------|-------|
+| AuthenticationTest | 9 | 0 | ✅ 100% - Login and auth working |
+| EndToEndFlowTest | 3 | 4 | ⚠️ 42% - Basic flow works, DM room detection issues |
+| SyncEngineTest | 8 | 6 | ⚠️ 57% - Sync works, some API issues |
+| MatrixApiTest | 4 | 12 | ❌ 25% - Several endpoints failing |
+| **Total** | **24** | **22** | **52%** |
+
+**EndToEndFlowTest breakdown:**
+- ✅ `clientsHaveCorrectUserIdentities` - User lookup works
+- ✅ `connectionStateChanges_toSYNCING` - Connection state management works
+- ✅ `getAccessToken_returnsValidToken` - Token storage works
+- ❌ `completeFlow_LoginSyncCreateRoomSendReceive` - Room not detected as DM
+- ❌ `getConversationByRoomId_returnsCorrectConversation` - Room not detected as DM
+- ❌ `messagesAreInChronologicalOrder` - Room not detected as DM
+- ❌ `multiTurnConversation_fiveMessagesBackAndForth` - Room not detected as DM
+
+**Issue:** Rooms are created with `is_direct: true` but `isDMRoom` returns `false`. This suggests:
+- DmRoomService isn't detecting DM rooms from `is_direct` flag in create response
+- Or `m.direct` account data isn't being updated/set correctly
+- Or the sync engine isn't processing `is_direct` from room state
+
+**Next steps:** Investigate DmRoomService to see why `is_direct` rooms aren't being tracked.
+
+---
+
+### 1b.5 Verification Checklist
 
 Run these commands to verify the port:
 
