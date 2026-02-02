@@ -535,32 +535,35 @@ pnpm test:integration
 
 ### 3.3 Chat Screen
 
-- [ ] **3.3.1** Port `ChatScreen.tsx` → `ChatScreen.kt`
+- [x] **3.3.1** Port `ChatScreen.tsx` → `ChatScreen.kt`
   - Header with contact name and back button
-  - Message list (scrollable)
-  - Message bubbles (sent vs received)
-  - PTT recording indicator
+  - Message list (scrollable LazyColumn)
+  - Message bubbles (sent vs received alignment)
+  - PTT recording indicator with pulse animation
 
-- [ ] **3.3.2** PTT recording flow
-  - KeyEvent capture for KEYCODE_PTT
-  - Recording animation/feedback
-  - Send on release
+- [x] **3.3.2** PTT recording flow
+  - KeyEvent capture for KEYCODE_PTT in MainActivity
+  - Recording status bar with animated opacity pulse
+  - WataViewModel handles startRecording/stopRecordingAndSend
+  - AudioService integration for Ogg Opus recording
 
-- [ ] **3.3.3** Message playback
-  - Tap to play
-  - Progress indicator
-  - Mark as played
+- [x] **3.3.3** Message playback
+  - Tap to play via FocusableSurface
+  - Play indicator (green dot when playing)
+  - Mark as played via WataClient.markAsPlayed()
+  - Audio download from MXC URLs
 
 **Reference:** `src/rn/screens/ChatScreen.tsx` (~291 lines)
 
 ### 3.4 Navigation
 
-- [ ] **3.4.1** Set up Navigation Compose
-  - ContactList → Chat navigation
-  - Back button handling
-  - Hardware back key (KEYCODE_BACK)
+- [x] **3.4.1** Set up Navigation Compose
+  - ContactList → Chat navigation with URL-encoded params
+  - Back button handling via popBackStack()
+  - closeChat() cleanup on navigation back
+  - Hardware back key handled by Navigation Compose
 
-**Phase 3 exit criteria:** App is functionally equivalent to RN version.
+**Phase 3 exit criteria:** App is functionally equivalent to RN version. ✅
 
 ---
 
