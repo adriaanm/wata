@@ -128,8 +128,8 @@ data class RoomState(
 @Serializable
 data class RoomTimeline(
     val events: List<MatrixEvent>,
-    val limited: Boolean,
-    val prev_batch: String
+    val limited: Boolean = false,
+    val prev_batch: String? = null
 )
 
 @Serializable
@@ -144,8 +144,8 @@ data class RoomAccountData(
 
 @Serializable
 data class UnreadNotifications(
-    val highlight_count: Int,
-    val notification_count: Int
+    val highlight_count: Int = 0,
+    val notification_count: Int = 0
 )
 
 @Serializable
@@ -155,7 +155,7 @@ data class InvitedRoomSync(
 
 @Serializable
 data class InvitedRoomState(
-    val events: List<StrippedStateEvent>
+    val events: List<StrippedStateEvent> = emptyList()
 )
 
 @Serializable
@@ -563,7 +563,13 @@ class MatrixApi(
             contentTypeHeader?.startsWith("audio/") == true ||
             contentTypeHeader?.startsWith("video/") == true ||
             contentTypeHeader?.startsWith("image/") == true ||
+            contentTypeHeader?.startsWith("text/") == true ||
             contentTypeHeader == "application/octet-stream" -> {
+                @Suppress("UNCHECKED_CAST")
+                responseBody.bytes() as T
+            }
+            T::class == ByteArray::class -> {
+                // If caller explicitly expects ByteArray, return the raw bytes
                 @Suppress("UNCHECKED_CAST")
                 responseBody.bytes() as T
             }
