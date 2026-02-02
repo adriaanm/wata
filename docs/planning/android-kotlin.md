@@ -506,26 +506,30 @@ pnpm test:integration
 
 ### 3.1 Theme & Components
 
-- [ ] **3.1.1** Port theme constants
-  - Colors (bg, primary, text, etc.)
-  - Typography (large, readable fonts for 1.77" screen)
+- [x] **3.1.1** Port theme constants
+  - Colors (bg, primary, text, etc.) - high contrast for 1.77" screen
+  - Typography (large, readable fonts: 24sp title, 20sp header, 18sp large, 16sp body, 14sp small)
+  - Spacing (xs: 4dp, sm: 8dp, md: 12dp, lg: 16dp)
 
-- [ ] **3.1.2** Create `FocusableSurface` composable
-  - D-pad navigation support
-  - Focus indication (border/highlight)
+- [x] **3.1.2** Create `FocusableSurface` composable
+  - D-pad navigation support via `Modifier.focusable()`
+  - Focus indication (orange border + highlighted background)
+  - Enter/Center key handling for selection
 
 ### 3.2 Contact List Screen
 
-- [ ] **3.2.1** Port `ContactListScreen.tsx` → `ContactListScreen.kt`
-  - Header with user info
-  - Scrollable contact list
-  - Unread message badges
-  - D-pad navigation between contacts
+- [x] **3.2.1** Port `ContactListScreen.tsx` → `ContactListScreen.kt`
+  - Header with title and Exit button
+  - Loading state with spinner and connection status
+  - Empty state ("No contacts")
+  - Scrollable contact list with D-pad navigation
+  - Error state with retry button
 
-- [ ] **3.2.2** Wire to WataClient
-  - `client.getContacts()` for list
-  - `client.on("contactsUpdated")` for updates
-  - Navigate to Chat on select
+- [x] **3.2.2** Wire to WataClient
+  - Created `WataViewModel` with StateFlow for reactive state
+  - Auto-login with hardcoded credentials from `MatrixConfig`
+  - Observes `WataClientEvents.onContactsUpdated()` for updates
+  - Navigation Compose setup with ContactList → Chat routes
 
 **Reference:** `src/rn/screens/ContactListScreen.tsx` (~147 lines)
 
