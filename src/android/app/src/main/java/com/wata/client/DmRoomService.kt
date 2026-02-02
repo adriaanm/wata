@@ -199,23 +199,38 @@ class DmRoomService(
      */
     fun refreshFromSync() {
         val rooms = syncEngine.getRooms()
+        logger.log("[DMRoomService] refreshFromSync: scanning ${rooms.size} rooms")
 
         for (room in rooms) {
             // Skip rooms we're not joined to
-            if (room.members[userId]?.membership != "join") continue
+            val myMembership = room.members[userId]?.membership
+            if (myMembership != "join") {
+                logger.log("[DMRoomService] Room ${room.roomId.takeLast(12)}: skipping (my membership=$myMembership)")
+                continue
+            }
 
             // Check if this is a 2-person DM room
             val joinedMembers = room.members.values.filter { it.membership == "join" }
-            if (joinedMembers.size != 2) continue
+            if (joinedMembers.size != 2) {
+                logger.log("[DMRoomService] Room ${room.roomId.takeLast(12)}: skipping (${joinedMembers.size} joined members)")
+                continue
+            }
 
             val otherMember = joinedMembers.find { it.userId != userId }
-            if (otherMember == null) continue
+            if (otherMember == null) {
+                logger.log("[DMRoomService] Room ${room.roomId.takeLast(12)}: skipping (no other member)")
+                continue
+            }
 
             // Verify is_direct flag
-            if (!hasIsDirectFlag(room)) continue
+            if (!hasIsDirectFlag(room)) {
+                logger.log("[DMRoomService] Room ${room.roomId.takeLast(12)}: skipping (no is_direct flag)")
+                continue
+            }
 
             // Add to cache
             val contactUserId = otherMember.userId
+            logger.log("[DMRoomService] Room ${room.roomId.takeLast(12)}: detected as DM with $contactUserId")
             addRoomToCache(contactUserId, room.roomId)
         }
     }

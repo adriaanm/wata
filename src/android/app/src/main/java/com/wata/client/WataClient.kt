@@ -350,16 +350,20 @@ class WataClient(
      * @param roomId The room ID to join
      */
     fun joinRoom(roomId: String) {
-        logger?.log("[WataClient] Joining room: $roomId")
+        logger.log("[WataClient] Joining room: $roomId")
         api.joinRoom(roomId)
 
-        // Wait for room to appear in sync state
-        waitForRoom(roomId, 5000)
+        // Force a full sync to get complete room state (membership, is_direct flag, etc.)
+        // This is important for DM room detection on the recipient side
+        forceFullSync()
+
+        // Wait for room to appear in sync state with full data
+        waitForRoom(roomId, 10000)
 
         // Refresh DM room service to pick up the new room
         dmRoomService?.refreshFromSync()
 
-        logger?.log("[WataClient] Joined room: $roomId")
+        logger.log("[WataClient] Joined room: $roomId")
     }
 
     /**
