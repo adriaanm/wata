@@ -186,43 +186,44 @@ wata/
 
 **Goal:** Ensure the Kotlin port is functionally equivalent to TypeScript, with robust tests and proper async behavior.
 
-### Background: Code Review Findings
+### 1b.0 Bug Fixes & Code Issues
 
-A detailed comparison of TypeScript vs Kotlin implementations revealed several issues:
+Issues identified during code review (TS vs Kotlin comparison):
 
-#### Critical Issues (Fixed)
+- [x] **1b.0.1** Fix `is_direct` flag parsing (`DmRoomService.kt:420-433, 438-458`)
+  - Bug: Checked for string `"true"` instead of boolean `true`
+  - Fix: Use `jsonPrimitive.booleanOrNull` instead of `jsonPrimitive.content`
+  - Impact: DM rooms were never detected as direct messages
+  - **FIXED** in commit 7521a50
 
-1. **`is_direct` flag parsing bug** (`DmRoomService.kt`)
-   - Bug: Checked for string `"true"` instead of boolean `true`
-   - JSON has `{"is_direct": true}` (boolean), not `{"is_direct": "true"}` (string)
-   - Fix: Use `jsonPrimitive.booleanOrNull` instead of `jsonPrimitive.content`
-   - Impact: DM rooms were never detected as direct messages
+- [ ] **1b.0.2** Fix `getOrCreateDMRoom()` to actually create rooms (`WataClient.kt:738-756`)
+  - Currently throws: `"DM room creation not yet implemented"`
+  - Should call `dmRoomService.ensureDMRoom()` (which exists but is unused)
+  - Tests work around this by using `createDMRoom()` directly
 
-#### Issues Requiring Work
+- [ ] **1b.0.3** Implement `updateMDirectForRoom()` (`DmRoomService.kt:325-350`)
+  - Currently doesn't persist `m.direct` account data to server
+  - Need to serialize room list back to JsonObject and call `api.setAccountData()`
+  - Without this, other clients won't see DM room associations
 
-2. **Async behavior mismatch**
-   - TypeScript uses `async/await` throughout (non-blocking)
-   - Kotlin uses synchronous calls + background `Thread` for sync
-   - `SyncEngine` uses `Thread.sleep()` instead of coroutines
-   - Risk: ANRs on Android main thread
+- [ ] **1b.0.4** Fix auto-join for invited rooms (`WataClient.kt:1012-1024`)
+  - TS version auto-joins invites in `handleMembershipChanged()`
+  - Kotlin version has the code but may not trigger correctly
+  - Tests explicitly call `joinRoom()` as workaround
 
-3. **Incomplete DM room creation** (`WataClient.kt:738-756`)
-   - `getOrCreateDMRoom()` throws exception instead of creating rooms
-   - Tests work around this by using `createDMRoom()` directly
-   - `DmRoomService.ensureDMRoom()` is marked `suspend` but never called
+- [ ] **1b.0.5** Add `room_id` to timeline events for `getPlayedByForEvent()` (`WataClient.kt:831-840`)
+  - TS passes `room` parameter to `eventToVoiceMessage()` and `getPlayedByForEvent()`
+  - Kotlin tries to look up room from `event.room_id` which may be null
+  - Causes receipts to not be found for voice messages
 
-4. **Incomplete `m.direct` update** (`DmRoomService.kt:325-350`)
-   - `updateMDirectForRoom()` doesn't actually persist to server
-   - Account data changes are not written back
+#### Test Infrastructure Gaps
 
-#### Test Infrastructure Differences
-
-| Aspect | TypeScript | Kotlin |
-|--------|------------|--------|
-| Room creation | `orchestrator.createRoom()` → `getOrCreateDmRoom()` | `createDMRoom()` directly |
-| Room joining | Auto-join via `handleMembershipChanged()` | Explicit `joinRoom()` call |
-| Waiting | Event listeners + polling fallback | Polling only |
-| Cleanup | `orchestrator.cleanup()` | `@After tearDown()` |
+| Aspect | TypeScript | Kotlin | Issue |
+|--------|------------|--------|-------|
+| Room creation | `getOrCreateDmRoom()` | `createDMRoom()` directly | Bypasses DmRoomService |
+| Room joining | Auto-join in event handler | Explicit `joinRoom()` | May miss invite events |
+| Waiting | Event listeners + polling | Polling only | Slower, less reliable |
+| Room param | Passed to event handlers | Looked up from event | `room_id` may be null |
 
 ### 1b.1 Test Environment Setup
 
@@ -255,21 +256,20 @@ tmux attach -t wata-tests
 - Stop daemon: `./gradlew --stop`
 - Check status: `./gradlew --status`
 
-### 1b.2 Fix Async Architecture
+### 1b.2 Async Architecture (Optional - defer to Phase 3)
+
+These changes improve Android compatibility but aren't blocking for Phase 2:
 
 - [ ] **1b.2.1** Convert `SyncEngine` to use Kotlin coroutines
   - Replace `Thread` with `CoroutineScope` + `launch`
   - Replace `Thread.sleep()` with `delay()`
   - Use `withContext(Dispatchers.IO)` for network calls
+  - Risk without: potential ANRs if sync blocks main thread
 
 - [ ] **1b.2.2** Make `WataClient` methods suspend functions
   - `suspend fun login()`, `suspend fun connect()`
-  - `suspend fun getOrCreateDMRoom()`
   - Keep synchronous variants for simple lookups
-
-- [ ] **1b.2.3** Wire up `DmRoomService.ensureDMRoom()`
-  - Call from `getOrCreateDMRoom()` when cache miss
-  - Implement proper `updateMDirectForRoom()`
+  - Allows proper cancellation and timeout handling
 
 ### 1b.3 Align Tests with TypeScript Patterns
 
