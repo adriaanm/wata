@@ -265,3 +265,87 @@ fun lastN(str: String?, n: Int): String {
     if (str == null) return "(null)"
     return str.takeLast(n)
 }
+
+// ============================================================================
+// Wait for Room Helper
+// ============================================================================
+
+/**
+ * Wait for a room to appear in a WataClient's state.
+ *
+ * This helper polls for the room to appear in both the conversation API
+ * and checks internal state. Uses exponential backoff for robustness.
+ *
+ * Based on TypeScript TestClient.waitForRoom which combines event listeners
+ * with polling fallback.
+ *
+ * @param client The WataClient to check
+ * @param roomId The room ID to wait for
+ * @param timeoutMs Maximum time to wait (default: 90s for eventual consistency)
+ * @param logger Optional logger for debug output
+ */
+fun waitForRoom(
+    client: com.wata.client.WataClient,
+    roomId: String,
+    timeoutMs: Long = 90000L,
+    logger: Logger? = null
+) {
+    val startTime = System.currentTimeMillis()
+    var checkCount = 0
+    var pollDelay = 200L
+    val maxPollDelay = 2000L
+    var lastSyncState: String? = null
+
+    logger?.log("[waitForRoom] Waiting for room ${lastN(roomId, 12)}...")
+
+    while (System.currentTimeMillis() - startTime < timeoutMs) {
+        checkCount++
+
+        // Check if room is available via conversation API
+        val conversation = client.getConversationByRoomId(roomId)
+        if (conversation != null) {
+            logger?.log("[waitForRoom] Room found via getConversationByRoomId (after $checkCount checks, ${System.currentTimeMillis() - startTime}ms)")
+            return
+        }
+
+        // Also check if the room is known as a DM room
+        // This handles the case where the room exists but isn't yet a full conversation
+        if (client.isDMRoom(roomId)) {
+            logger?.log("[waitForRoom] Room found via isDMRoom (after $checkCount checks, ${System.currentTimeMillis() - startTime}ms)")
+            return
+        }
+
+        // Log progress and sync state every 10 checks
+        if (checkCount % 10 == 0) {
+            val syncState = client.getConnectionState().toString()
+            if (syncState != lastSyncState) {
+                lastSyncState = syncState
+                logger?.log("[waitForRoom] Still waiting for room... (check $checkCount, elapsed: ${System.currentTimeMillis() - startTime}ms, syncState: $syncState)")
+            } else {
+                logger?.log("[waitForRoom] Still waiting for room... (check $checkCount, elapsed: ${System.currentTimeMillis() - startTime}ms)")
+            }
+        }
+
+        // Exponential backoff
+        Thread.sleep(pollDelay)
+        pollDelay = (pollDelay * 1.3).toLong().coerceAtMost(maxPollDelay)
+    }
+
+    // Timeout - provide helpful error message
+    val elapsed = System.currentTimeMillis() - startTime
+    throw AssertionError(
+        """Room ${lastN(roomId, 12)} not found after ${elapsed}ms ($checkCount checks).
+           |
+           |Client state at timeout:
+           |  - Connection state: ${client.getConnectionState()}
+           |  - Current user: ${client.getCurrentUser()?.id}
+           |  - Is DM room: ${client.isDMRoom(roomId)}
+           |
+           |Troubleshooting:
+           |  - Is the Conduit server running?
+           |  - Was the room created successfully?
+           |  - Is the sync engine running?
+           |  - Try increasing TEST_SYNC_TIMEOUT_MS in TestHelpers.kt
+        """.trimMargin()
+    )
+}

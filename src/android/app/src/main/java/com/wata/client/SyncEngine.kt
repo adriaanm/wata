@@ -551,4 +551,17 @@ class SyncEngine(
         userId = null
         nextBatch = null
     }
+
+    /**
+     * Force a full sync on the next sync cycle.
+     *
+     * This clears the nextBatch token, causing the next sync to start
+     * from the beginning rather than incrementally syncing. Useful after
+     * operations like room creation where the new room might not appear
+     * in incremental syncs immediately.
+     */
+    fun forceFullSync() {
+        logger?.log("[SyncEngine] Forcing full sync by clearing nextBatch token")
+        nextBatch = null
+    }
 }

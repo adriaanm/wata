@@ -75,6 +75,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     testImplementation("io.mockk:mockk:1.13.9")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 
     // Android Testing
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

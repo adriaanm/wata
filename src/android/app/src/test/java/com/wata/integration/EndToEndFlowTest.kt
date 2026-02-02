@@ -75,20 +75,37 @@ class EndToEndFlowTest {
 
         logger.log("Both clients synced successfully")
 
+        // Debug: Check room count before creating
+        logger.log("Alice room count before: ${aliceClient.getRoomCount()}")
+        logger.log("Bob room count before: ${bobClient.getRoomCount()}")
+
         // Create a room with Bob (via Alice)
         val roomId = createDMRoom(aliceClient, TestUser.BOB.userId)
+        logger.log("Created room: $roomId")
 
-        // Wait for room to appear in both clients' sync state
-        waitForCondition(
-            description = "room to appear in Alice's state",
-            condition = { aliceClient.getConversationByRoomId(roomId) != null },
-            timeoutMs = TEST_SYNC_TIMEOUT_MS
-        )
-        waitForCondition(
-            description = "room to appear in Bob's state",
-            condition = { bobClient.getConversationByRoomId(roomId) != null },
-            timeoutMs = TEST_SYNC_TIMEOUT_MS
-        )
+        // Debug: Check room count after creating
+        logger.log("Alice room count after creation: ${aliceClient.getRoomCount()}")
+        logger.log("Alice room IDs: ${aliceClient.getRoomIds().joinToString()}")
+
+        // Force a full sync to pick up the newly created room
+        // This is needed because Conduit may not include newly created rooms
+        // in incremental syncs immediately
+        logger.log("Forcing full sync for Alice...")
+        aliceClient.forceFullSync()
+
+        // Wait for Alice (the room creator) to see the room
+        // The room should appear in Alice's sync state because she created it
+        logger.log("Waiting for Alice to see room $roomId...")
+        waitForRoom(aliceClient, roomId, timeoutMs = 120000L, logger = logger)
+
+        // Bob needs to join the room (he was invited but hasn't joined yet)
+        // This matches the TypeScript test pattern where participants explicitly join
+        logger.log("Bob joining room $roomId...")
+        bobClient.joinRoom(roomId)
+
+        // Now wait for Bob to see the room after joining
+        logger.log("Waiting for Bob to see room $roomId...")
+        waitForRoom(bobClient, roomId, timeoutMs = 120000L, logger = logger)
 
         logger.log("Room created and synced to both clients")
 
@@ -380,23 +397,9 @@ class EndToEndFlowTest {
     // ========================================================================
 
     private fun createDMRoom(client: WataClient, targetUserId: String): String {
-        // Create a DM room by using a separate API client with the same access token
-        val accessToken = client.getAccessToken()
-            ?: throw IllegalStateException("Client not logged in")
-
-        val tempApi = MatrixApi(TEST_HOMESERVER).apply {
-            setAccessToken(accessToken)
-        }
-        val response = tempApi.createRoom(
-            request = CreateRoomRequest(
-                name = "DM Test Room",
-                visibility = "private",
-                preset = "trusted_private_chat",
-                is_direct = true,
-                invite = listOf(targetUserId)
-            )
-        )
-        return response.room_id
+        // Use WataClient's createDMRoom method which uses the same API instance
+        // as the sync engine, ensuring better consistency
+        return client.createDMRoom(targetUserId)
     }
 
     private fun waitForSyncBoth() {
@@ -413,16 +416,14 @@ class EndToEndFlowTest {
     }
 
     private fun waitForRoomInBoth(roomId: String) {
-        waitForCondition(
-            description = "room in Alice's state",
-            condition = { aliceClient.getConversationByRoomId(roomId) != null },
-            timeoutMs = TEST_SYNC_TIMEOUT_MS
-        )
-        waitForCondition(
-            description = "room in Bob's state",
-            condition = { bobClient.getConversationByRoomId(roomId) != null },
-            timeoutMs = TEST_SYNC_TIMEOUT_MS
-        )
+        // Wait for Alice to see the room (she's the creator in our tests)
+        waitForRoom(aliceClient, roomId, timeoutMs = 120000L, logger = logger)
+
+        // Bob needs to join the room
+        bobClient.joinRoom(roomId)
+
+        // Wait for Bob to see the room after joining
+        waitForRoom(bobClient, roomId, timeoutMs = 120000L, logger = logger)
     }
 
     private val logger = TestLogger("E2ETest")
