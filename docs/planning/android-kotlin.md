@@ -211,10 +211,11 @@ Issues identified during code review (TS vs Kotlin comparison):
   - Kotlin version has the code but may not trigger correctly
   - Tests explicitly call `joinRoom()` as workaround
 
-- [ ] **1b.0.5** Add `room_id` to timeline events for `getPlayedByForEvent()` (`WataClient.kt:831-840`)
+- [x] **1b.0.5** Add `room_id` to timeline events for `getPlayedByForEvent()` (`WataClient.kt:831-840`)
   - TS passes `room` parameter to `eventToVoiceMessage()` and `getPlayedByForEvent()`
   - Kotlin tries to look up room from `event.room_id` which may be null
   - Causes receipts to not be found for voice messages
+  - **FIXED** in commit 59a62b8 - modified functions to accept optional `room` parameter
 
 #### Test Infrastructure Gaps
 
