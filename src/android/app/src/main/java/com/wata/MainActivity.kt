@@ -1,30 +1,30 @@
 package com.wata
 
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.wata.ui.screens.ContactListScreen
 import com.wata.ui.theme.WataTheme
+import com.wata.ui.viewmodel.WataViewModel
+import java.net.URLDecoder
+import java.net.URLEncoder
+
+private const val TAG = "MainActivity"
 
 class MainActivity : ComponentActivity() {
-    private var lastKeyEvent by mutableStateOf<String?>(null)
 
     companion object {
         // KEYCODE_PTT = 79, defined in KeyEvent but not always accessible
@@ -39,14 +39,14 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    WataApp(lastKeyEvent = lastKeyEvent)
+                    WataApp()
                 }
             }
         }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        lastKeyEvent = "DOWN: ${keyCodeToName(keyCode)} ($keyCode)"
+        Log.d(TAG, "KeyDown: ${keyCodeToName(keyCode)} ($keyCode)")
 
         // Capture PTT button (KEYCODE_PTT = 79)
         if (keyCode == KEYCODE_PTT) {
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        lastKeyEvent = "UP: ${keyCodeToName(keyCode)} ($keyCode)"
+        Log.d(TAG, "KeyUp: ${keyCodeToName(keyCode)} ($keyCode)")
 
         if (keyCode == KEYCODE_PTT) {
             // TODO: Stop recording and send
@@ -82,39 +82,103 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Navigation routes
+ */
+object Routes {
+    const val CONTACT_LIST = "contacts"
+    const val CHAT = "chat/{userId}/{userName}"
+
+    fun chat(userId: String, userName: String): String {
+        val encodedUserId = URLEncoder.encode(userId, "UTF-8")
+        val encodedUserName = URLEncoder.encode(userName, "UTF-8")
+        return "chat/$encodedUserId/$encodedUserName"
+    }
+}
+
 @Composable
-fun WataApp(lastKeyEvent: String?) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
+fun WataApp() {
+    val navController = rememberNavController()
+    val viewModel: WataViewModel = viewModel()
+
+    NavHost(
+        navController = navController,
+        startDestination = Routes.CONTACT_LIST
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
+        composable(Routes.CONTACT_LIST) {
+            ContactListScreen(
+                viewModel = viewModel,
+                onSelectContact = { userId, userName ->
+                    navController.navigate(Routes.chat(userId, userName))
+                },
+                onExit = {
+                    viewModel.logout()
+                    // In a real app, might finish() the activity
+                }
+            )
+        }
+
+        composable(
+            route = Routes.CHAT,
+            arguments = listOf(
+                navArgument("userId") { type = NavType.StringType },
+                navArgument("userName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val userId = URLDecoder.decode(
+                backStackEntry.arguments?.getString("userId") ?: "",
+                "UTF-8"
+            )
+            val userName = URLDecoder.decode(
+                backStackEntry.arguments?.getString("userName") ?: "",
+                "UTF-8"
+            )
+
+            // TODO: ChatScreen will be implemented in Phase 3.3
+            // For now, show a placeholder
+            ChatScreenPlaceholder(
+                userId = userId,
+                userName = userName,
+                onBack = { navController.popBackStack() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatScreenPlaceholder(
+    userId: String,
+    userName: String,
+    onBack: () -> Unit
+) {
+    androidx.compose.foundation.layout.Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+    ) {
+        androidx.compose.material3.Text(
+            text = "Chat with $userName",
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        androidx.compose.foundation.layout.Spacer(
+            modifier = Modifier.fillMaxSize().weight(0.1f)
+        )
+        androidx.compose.material3.Text(
+            text = "(Phase 3.3)",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.secondary
+        )
+        androidx.compose.foundation.layout.Spacer(
+            modifier = Modifier.fillMaxSize().weight(0.1f)
+        )
+        com.wata.ui.components.FocusableSurface(
+            onClick = onBack
         ) {
-            Text(
-                text = "Wata",
-                fontSize = 48.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+            androidx.compose.material3.Text(
+                text = "Back",
+                color = com.wata.ui.theme.WataColors.primary
             )
-
-            Text(
-                text = "Native Kotlin",
-                fontSize = 24.sp,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-
-            if (lastKeyEvent != null) {
-                Text(
-                    text = lastKeyEvent,
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.padding(top = 24.dp)
-                )
-            }
         }
     }
 }
