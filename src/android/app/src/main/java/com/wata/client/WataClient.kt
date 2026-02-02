@@ -672,7 +672,7 @@ class WataClient(
      * Get audio data for playback
      */
     fun getAudioData(message: VoiceMessage): ByteArray {
-        return api.downloadMedia(message.audioUrl)
+        return api.downloadMedia(message.mxcUrl)
     }
 
     // ==========================================================================
