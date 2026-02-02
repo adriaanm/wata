@@ -67,8 +67,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 
-    // Audio - Opus codec (add AAR to libs/ folder)
-    // implementation(files("libs/opus.aar"))
+    // Audio - Opus codec
+    implementation("io.element.android:opusencoder:1.2.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

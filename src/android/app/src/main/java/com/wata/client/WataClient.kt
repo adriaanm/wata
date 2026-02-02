@@ -489,8 +489,8 @@ class WataClient(
         // Upload audio to media repo
         val uploadResponse = api.uploadMedia(
             data = audio,
-            contentType = "audio/mp4",
-            filename = "voice-${System.currentTimeMillis()}.m4a"
+            contentType = "audio/ogg; codecs=opus",
+            filename = "voice-${System.currentTimeMillis()}.ogg"
         )
 
         // Determine target room
@@ -518,7 +518,7 @@ class WataClient(
                 put("url", uploadResponse.content_uri)
                 put("info", buildJsonObject {
                     put("duration", (duration * 1000).toInt()) // Matrix uses milliseconds
-                    put("mimetype", "audio/mp4")
+                    put("mimetype", "audio/ogg; codecs=opus")
                     put("size", audio.size)
                 })
             }
@@ -550,8 +550,8 @@ class WataClient(
         // Upload audio to media repo
         val uploadResponse = api.uploadMedia(
             data = audio,
-            contentType = "audio/mp4",
-            filename = "voice-${System.currentTimeMillis()}.m4a"
+            contentType = "audio/ogg; codecs=opus",
+            filename = "voice-${System.currentTimeMillis()}.ogg"
         )
 
         // Send m.audio event to the specified room
@@ -564,7 +564,7 @@ class WataClient(
                 put("url", uploadResponse.content_uri)
                 put("info", buildJsonObject {
                     put("duration", (duration * 1000).toInt()) // Matrix uses milliseconds
-                    put("mimetype", "audio/mp4")
+                    put("mimetype", "audio/ogg; codecs=opus")
                     put("size", audio.size)
                 })
             }
@@ -583,6 +583,26 @@ class WataClient(
             isPlayed = false,
             playedBy = emptyList()
         )
+    }
+
+    /**
+     * Send voice message from file path (for use with AudioService)
+     * @param roomId Target room ID
+     * @param filePath Path to Ogg Opus file
+     * @param duration Duration in seconds
+     */
+    fun sendVoiceMessageFromFile(
+        roomId: String,
+        filePath: String,
+        duration: Double
+    ): VoiceMessage {
+        val file = java.io.File(filePath)
+        if (!file.exists()) {
+            throw IllegalArgumentException("File not found: $filePath")
+        }
+
+        val audioData = file.readBytes()
+        return sendVoiceMessageToRoom(roomId, audioData, duration)
     }
 
     /**
