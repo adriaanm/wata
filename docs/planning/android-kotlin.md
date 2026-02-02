@@ -228,34 +228,118 @@ Issues identified during code review (TS vs Kotlin comparison):
 
 ### 1b.1 Test Environment Setup
 
-**Use tmux for test monitoring** (tests may hang on sync timeouts):
+**IMPORTANT:** Integration tests require Conduit Matrix server running on `http://localhost:8008`. Use tmux to keep Conduit running and visible while developing/testing.
+
+---
+
+#### Option A: Start Conduit with logs in tmux (Recommended for development)
+
+This keeps Conduit running in a tmux session where you can see logs in real-time:
 
 ```bash
-# Create tmux session for test monitoring
-tmux new-session -d -s wata-tests
+# From the project root, start Conduit via docker-compose in a tmux session
+tmux new-session -d -s wata-tests -n conduit -c test/docker "docker-compose up 2>&1"
 
-# Split into panes: Conduit server | Gradle tests | Log tail
-tmux split-window -h -t wata-tests
-tmux split-window -v -t wata-tests:0.1
+# Verify Conduit started successfully
+sleep 5 && tmux capture-pane -t wata-tests -p | tail -20
 
-# Pane 0: Conduit server
-tmux send-keys -t wata-tests:0.0 'cd /Users/adriaan/g/wata && pnpm dev:server' Enter
+# You should see output like:
+# [+] up 1/1
+#  ✔ Container wata-matrix Running
+# Attaching to wata-matrix
+# wata-matrix  | 2026-02-02T10:28:59.649862Z DEBUG conduit::database: cleanup: Timer ticked
 
-# Pane 1: Run tests (use Gradle daemon for performance)
-tmux send-keys -t wata-tests:0.1 'cd /Users/adriaan/g/wata/src/android && ./gradlew test --daemon' Enter
-
-# Pane 2: Monitor for hangs
-tmux send-keys -t wata-tests:0.2 'watch -n 5 "ps aux | grep -E \"(java|conduit)\" | grep -v grep"' Enter
-
-# Attach to session
+# Attach to the session to see logs in real-time
 tmux attach -t wata-tests
+
+# Detach from tmux (keep Conduit running): Press Ctrl+B then D
+# Kill Conduit when done: tmux kill-session -t wata-tests
 ```
 
-**Gradle daemon tips:**
+---
+
+#### Option B: Attach to an already-running Conduit
+
+If Conduit is already running (e.g., from a previous session):
+
+```bash
+# Attach to existing tmux session
+tmux attach -t wata-tests
+
+# If session doesn't exist but Conduit is running elsewhere:
+# Just run tests directly - they will use any Conduit on localhost:8008
+```
+
+---
+
+#### Verify Conduit is accessible
+
+Before running tests, verify Conduit responds:
+
+```bash
+curl -s http://localhost:8008/_matrix/client/versions | jq .
+```
+
+Expected output:
+```json
+{
+  "versions": ["r0.5.0", "r0.6.0", "v1.1", ...],
+  "unstable_features": { ... }
+}
+```
+
+---
+
+#### Running Kotlin tests
+
+```bash
+# From project root
+cd src/android
+
+# Run all integration tests (requires Conduit running)
+./gradlew testDebugUnitTest
+
+# Run specific test class
+./gradlew testDebugUnitTest --tests "*EndToEndFlowTest*"
+
+# Run specific test method
+./gradlew testDebugUnitTest --tests "*EndToEndFlowTest.clientsHaveCorrectUserIdentities*"
+
+# Run tests with output filtering (less noise)
+./gradlew testDebugUnitTest 2>&1 | grep -E "(PASSED|FAILED|BUILD|test)"
+
+# View test report in browser
+open app/build/reports/tests/testDebugUnitTest/index.html
+```
+
+---
+
+#### Gradle daemon tips
+
 - First run: `./gradlew --daemon` starts the daemon
 - Subsequent runs are faster (JVM stays warm)
 - Stop daemon: `./gradlew --stop`
 - Check status: `./gradlew --status`
+
+---
+
+#### Quick test cycle workflow
+
+```bash
+# 1. Start Conduit (if not already running)
+tmux new-session -d -s wata-tests -n conduit -c test/docker "docker-compose up 2>&1"
+
+# 2. Wait a few seconds for startup, then run tests
+cd src/android && ./gradlew testDebugUnitTest
+
+# 3. Check results
+# - If tests pass: continue coding
+# - If tests fail: attach to tmux to see Conduit logs
+tmux attach -t wata-tests
+
+# 4. When done: detach (Ctrl+B then D) or kill session
+tmux kill-session -t wata-tests
+```
 
 ### 1b.2 Async Architecture (Optional - defer to Phase 3)
 
@@ -294,17 +378,24 @@ These changes improve Android compatibility but aren't blocking for Phase 2:
 Run these commands to verify the port:
 
 ```bash
-# Start Conduit (in tmux pane or separate terminal)
-pnpm dev:server
+# Start Conduit in tmux
+tmux new-session -d -s wata-tests -n conduit -c test/docker "docker-compose up 2>&1"
+sleep 5
+
+# Verify Conduit is running
+curl -s http://localhost:8008/_matrix/client/versions | jq .
 
 # Run Kotlin tests
 cd src/android
-./gradlew test --daemon --info 2>&1 | tee test-output.log
+./gradlew testDebugUnitTest 2>&1 | tee test-output.log
 
 # Check for failures
-grep -E "(FAILED|PASSED|SKIPPED)" test-output.log
+grep -E "(FAILED|PASSED|SKIPPED|BUILD)" test-output.log
 
-# Run TypeScript tests for comparison
+# View detailed report
+open app/build/reports/tests/testDebugUnitTest/index.html
+
+# Run TypeScript tests for comparison (optional)
 cd ../..
 pnpm test:integration
 ```
