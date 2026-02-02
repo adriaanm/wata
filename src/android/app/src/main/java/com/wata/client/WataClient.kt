@@ -316,6 +316,92 @@ class WataClient(
         api.inviteToRoom(familyRoom.roomId, InviteRequest(user_id = targetUserId))
     }
 
+    /**
+     * Create a direct message room with a target user.
+     *
+     * This method creates a new DM room and returns the room ID.
+     * The room will appear in the sync engine's state after the next sync cycle.
+     *
+     * Note: This is a synchronous method that creates the room immediately.
+     * The caller should wait for the room to appear in sync state using
+     * WataClient.getConversationByRoomId() or by polling.
+     *
+     * @param targetUserId The Matrix user ID to create a DM with (e.g., "@bob:localhost")
+     * @return The created room ID
+     */
+    fun createDMRoom(targetUserId: String): String {
+        logger?.log("[WataClient] Creating DM room with $targetUserId")
+
+        val response = api.createRoom(
+            request = CreateRoomRequest(
+                name = null,  // Let the other user's display name be the room name
+                visibility = "private",
+                preset = "trusted_private_chat",
+                is_direct = true,
+                invite = listOf(targetUserId)
+            )
+        )
+
+        val roomId = response.room_id
+        logger?.log("[WataClient] DM room created: $roomId")
+
+        // Refresh the DM room service to pick up the new room immediately
+        // This helps with the sync engine detecting the room faster
+        dmRoomService?.refreshFromSync()
+
+        return roomId
+    }
+
+    /**
+     * Join a room by ID.
+     *
+     * This method joins an existing room. Useful for:
+     * - Accepting invites to DM rooms
+     * - Joining rooms that were created by other users
+     *
+     * @param roomId The room ID to join
+     */
+    fun joinRoom(roomId: String) {
+        logger?.log("[WataClient] Joining room: $roomId")
+        api.joinRoom(roomId)
+
+        // Wait for room to appear in sync state
+        waitForRoom(roomId, 5000)
+
+        // Refresh DM room service to pick up the new room
+        dmRoomService?.refreshFromSync()
+
+        logger?.log("[WataClient] Joined room: $roomId")
+    }
+
+    /**
+     * Debug method to get the number of rooms in sync engine state.
+     * For testing and debugging only.
+     */
+    fun getRoomCount(): Int {
+        return syncEngine?.getRooms()?.size ?: 0
+    }
+
+    /**
+     * Debug method to list all room IDs in sync engine state.
+     * For testing and debugging only.
+     */
+    fun getRoomIds(): List<String> {
+        return syncEngine?.getRooms()?.map { it.roomId } ?: emptyList()
+    }
+
+    /**
+     * Force a full sync on the next sync cycle.
+     *
+     * This is useful after operations like room creation where the new room
+     * might not appear in incremental syncs immediately due to Conduit's
+     * eventual consistency.
+     */
+    fun forceFullSync() {
+        logger?.log("[WataClient] Forcing full sync")
+        syncEngine?.forceFullSync()
+    }
+
     // ==========================================================================
     // Conversation Methods
     // ==========================================================================
@@ -650,23 +736,14 @@ class WataClient(
      * Delegates to DMRoomService for all DM room management.
      */
     private fun getOrCreateDMRoom(contactUserId: String): String {
-        // In a real async implementation, this would be suspend
-        // For now, we'll use the synchronous version and update later
-        val cachedRoom = dmRoomService?.getDMRoomId(contactUserId)
-        if (cachedRoom != null) {
-            return cachedRoom
-        }
+        val service = dmRoomService
+            ?: throw IllegalStateException("DmRoomService not initialized - call connect() first")
 
-        // Scan sync state for existing DM rooms
-        dmRoomService?.refreshFromSync()
-        val afterScan = dmRoomService?.getDMRoomId(contactUserId)
-        if (afterScan != null) {
-            return afterScan
+        // Use runBlocking to call the suspend function from sync context.
+        // This will be converted to proper coroutines in Phase 1b.2.
+        return kotlinx.coroutines.runBlocking {
+            service.ensureDMRoom(contactUserId)
         }
-
-        // No existing room - need to create
-        // For now, throw an exception - in real implementation this would be async
-        throw IllegalStateException("DM room creation not yet implemented - requires async/suspend functions")
     }
 
     /**
@@ -678,9 +755,10 @@ class WataClient(
         contact: Contact? = null
     ): Conversation {
         // Get voice messages from timeline
+        // Pass room to eventToVoiceMessage since events don't have room_id set
         val messages = room.timeline
             .filter { isVoiceMessageEvent(it) }
-            .map { eventToVoiceMessage(it) }
+            .map { eventToVoiceMessage(it, room) }
 
         // Count unplayed messages
         val unplayedCount = messages.count { !it.isPlayed }
@@ -696,9 +774,11 @@ class WataClient(
 
     /**
      * Convert MatrixEvent to VoiceMessage
+     * @param event - The Matrix event
+     * @param room - The room containing this event (events don't have room_id set)
      */
-    private fun eventToVoiceMessage(event: MatrixEvent): VoiceMessage {
-        val sender = getUserFromEvent(event)
+    private fun eventToVoiceMessage(event: MatrixEvent, room: SyncRoomState? = null): VoiceMessage {
+        val sender = getUserFromEvent(event, room)
         val content = event.content
         val mxcUrl = content["url"]?.jsonPrimitive?.content ?: ""
         val audioUrl = mxcToHttp(mxcUrl)
@@ -707,7 +787,7 @@ class WataClient(
         val timestamp = Date(event.origin_server_ts ?: 0)
 
         // Check if current user has played this message
-        val playedBy = getPlayedByForEvent(event)
+        val playedBy = getPlayedByForEvent(event, room)
         val isPlayed = playedBy.contains(userId!!)
 
         return VoiceMessage(
@@ -724,13 +804,15 @@ class WataClient(
 
     /**
      * Get User object from event sender
+     * @param event - The Matrix event
+     * @param room - The room containing this event (optional, will lookup from event.room_id if not provided)
      */
-    private fun getUserFromEvent(event: MatrixEvent): User {
+    private fun getUserFromEvent(event: MatrixEvent, room: SyncRoomState? = null): User {
         val eventUserId = event.sender ?: ""
 
-        // Try to get display name from room member info
-        val room = event.room_id?.let { syncEngine?.getRoom(it) }
-        val member = room?.members?.get(eventUserId)
+        // Use provided room or try to look up from event.room_id
+        val roomState = room ?: (event.room_id?.let { syncEngine?.getRoom(it) })
+        val member = roomState?.members?.get(eventUserId)
 
         return User(
             id = eventUserId,
@@ -741,16 +823,19 @@ class WataClient(
 
     /**
      * Get list of user IDs who have played a message
+     * @param event - The Matrix event
+     * @param room - The room containing this event (optional, will lookup from event.room_id if not provided)
      */
-    private fun getPlayedByForEvent(event: MatrixEvent): List<String> {
-        val room = event.room_id?.let { syncEngine?.getRoom(it) }
-        if (room == null) {
+    private fun getPlayedByForEvent(event: MatrixEvent, room: SyncRoomState? = null): List<String> {
+        // Use provided room or try to look up from event.room_id
+        val roomState = room ?: (event.room_id?.let { syncEngine?.getRoom(it) })
+        if (roomState == null) {
             logger.warn("[WataClient] getPlayedByForEvent: no room available for event ${event.event_id}")
             return emptyList()
         }
 
         val eventId = event.event_id ?: return emptyList()
-        return room.readReceipts[eventId]?.toList() ?: emptyList()
+        return roomState.readReceipts[eventId]?.toList() ?: emptyList()
     }
 
     /**

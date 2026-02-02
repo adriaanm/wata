@@ -382,6 +382,7 @@ class MatrixApi(
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
+        encodeDefaults = true  // Include fields with default values (including nulls)
     }
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -408,20 +409,35 @@ class MatrixApi(
 
     /**
      * Serialize any serializable object to JSON string
+     * Uses reified type parameter to preserve type information for serialization
+     * Filters out null values from the output JSON.
      */
-    private fun toJsonBody(obj: Any): String {
+    private inline fun <reified T : Any> toJsonBody(obj: T): String {
         return when (obj) {
             is String -> obj
             is ByteArray -> throw IllegalArgumentException("ByteArray should be handled separately")
-            is JsonObject -> json.encodeToString(JsonObject.serializer(), obj)
-            else -> json.encodeToString(obj)
+            is kotlinx.serialization.json.JsonObject -> json.encodeToString(JsonObject.serializer(), obj)
+            else -> {
+                val result = json.encodeToString(obj)
+                // Filter out null values like "field":null
+                val filtered = result.replace(Regex(",?\"[^\"]+\":null"), "")
+                logger?.log("[MatrixApi] Serialized JSON: $filtered")
+                filtered
+            }
         }
     }
 
     /**
-     * Make an HTTP request
+     * Create RequestOptions with a pre-serialized JSON body
      */
-    private inline fun <reified T> request(
+    private inline fun <reified T : Any> jsonBody(body: T): RequestOptions {
+        return RequestOptions(body = toJsonBody(body))
+    }
+
+    /**
+     * Make an HTTP request with a pre-serialized JSON body
+     */
+    private inline fun <reified T : Any> request(
         method: String,
         path: String,
         options: RequestOptions = RequestOptions()
@@ -456,6 +472,11 @@ class MatrixApi(
                 contentType = options.contentType ?: "application/octet-stream"
                 body = b.toRequestBody(contentType.toMediaType())
             }
+            is kotlinx.serialization.json.JsonObject -> {
+                contentType = options.contentType ?: "application/json"
+                val jsonBody = json.encodeToString(JsonObject.serializer(), b)
+                body = jsonBody.toRequestBody(contentType.toMediaType())
+            }
             is String -> {
                 contentType = options.contentType ?: "application/json"
                 body = b.toRequestBody(contentType.toMediaType())
@@ -465,9 +486,8 @@ class MatrixApi(
                 body = null
             }
             else -> {
-                contentType = options.contentType ?: "application/json"
-                val jsonBody = toJsonBody(b)
-                body = jsonBody.toRequestBody(contentType.toMediaType())
+                // This shouldn't happen if callers use jsonBody() for data classes
+                throw IllegalArgumentException("Body must be String, JsonObject, or ByteArray. Use jsonBody() helper for @Serializable data classes.")
             }
         }
 
@@ -557,7 +577,8 @@ class MatrixApi(
         logger?.log("[MatrixApi] Logging in as $username")
 
         val loginRequest = LoginRequest(
-            identifier = Identifier(user = username),
+            type = "m.login.password",
+            identifier = Identifier(type = "m.id.user", user = username),
             password = password,
             initial_device_display_name = deviceDisplayName
         )
@@ -565,10 +586,7 @@ class MatrixApi(
         val response = request<LoginResponse>(
             method = "POST",
             path = "/_matrix/client/v3/login",
-            options = RequestOptions(
-                requireAuth = false,
-                body = loginRequest
-            )
+            options = jsonBody(loginRequest).copy(requireAuth = false)
         )
 
         // Store access token for future requests
@@ -649,7 +667,7 @@ class MatrixApi(
         return request<CreateRoomResponse>(
             method = "POST",
             path = "/_matrix/client/v3/createRoom",
-            options = RequestOptions(body = request)
+            options = jsonBody(request)
         )
     }
 
@@ -660,10 +678,17 @@ class MatrixApi(
         roomIdOrAlias: String,
         request: JoinRoomRequest = JoinRoomRequest()
     ): JoinRoomResponse {
+        // For join requests with no third_party_signed, send empty JSON object {}
+        // This ensures consistent serialization that Conduit accepts
+        val body = if (request.third_party_signed == null) {
+            "{}"
+        } else {
+            toJsonBody(request)
+        }
         return request<JoinRoomResponse>(
             method = "POST",
             path = "/_matrix/client/v3/join/${roomIdOrAlias.urlEncode()}",
-            options = RequestOptions(body = request)
+            options = RequestOptions(body = body)
         )
     }
 
@@ -674,7 +699,7 @@ class MatrixApi(
         request<Unit>(
             method = "POST",
             path = "/_matrix/client/v3/rooms/${roomId.urlEncode()}/invite",
-            options = RequestOptions(body = request)
+            options = jsonBody(request)
         )
     }
 
@@ -722,7 +747,7 @@ class MatrixApi(
         return request<RedactResponse>(
             method = "PUT",
             path = "/_matrix/client/v3/rooms/${roomId.urlEncode()}/redact/${eventId.urlEncode()}/${txn.urlEncode()}",
-            options = RequestOptions(body = RedactRequest(reason))
+            options = jsonBody(RedactRequest(reason))
         )
     }
 
