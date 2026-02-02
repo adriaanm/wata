@@ -1082,6 +1082,13 @@ class WataClient(
     fun getAllDMRoomIds(contactUserId: String): List<String> {
         return dmRoomService?.getAllDMRoomIds(contactUserId) ?: emptyList()
     }
+
+    /**
+     * Download media from an MXC URL
+     */
+    fun downloadMedia(mxcUrl: String): ByteArray {
+        return api.downloadMedia(mxcUrl)
+    }
 }
 
 // ============================================================================

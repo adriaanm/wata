@@ -1,21 +1,26 @@
 package com.wata
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.wata.ui.screens.ChatScreen
 import com.wata.ui.screens.ContactListScreen
 import com.wata.ui.theme.WataTheme
 import com.wata.ui.viewmodel.WataViewModel
@@ -26,6 +31,18 @@ private const val TAG = "MainActivity"
 
 class MainActivity : ComponentActivity() {
 
+    private val viewModel: WataViewModel by viewModels()
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Log.d(TAG, "RECORD_AUDIO permission granted")
+        } else {
+            Log.w(TAG, "RECORD_AUDIO permission denied")
+        }
+    }
+
     companion object {
         // KEYCODE_PTT = 79, defined in KeyEvent but not always accessible
         private const val KEYCODE_PTT = 79
@@ -33,13 +50,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Request audio permission if needed
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+
         setContent {
             WataTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    WataApp()
+                    WataApp(viewModel = viewModel)
                 }
             }
         }
@@ -50,7 +75,11 @@ class MainActivity : ComponentActivity() {
 
         // Capture PTT button (KEYCODE_PTT = 79)
         if (keyCode == KEYCODE_PTT) {
-            // TODO: Start recording
+            if (hasRecordPermission()) {
+                viewModel.startRecording()
+            } else {
+                requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
             return true
         }
 
@@ -61,11 +90,16 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "KeyUp: ${keyCodeToName(keyCode)} ($keyCode)")
 
         if (keyCode == KEYCODE_PTT) {
-            // TODO: Stop recording and send
+            viewModel.stopRecordingAndSend()
             return true
         }
 
         return super.onKeyUp(keyCode, event)
+    }
+
+    private fun hasRecordPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     private fun keyCodeToName(keyCode: Int): String = when (keyCode) {
@@ -97,9 +131,8 @@ object Routes {
 }
 
 @Composable
-fun WataApp() {
+fun WataApp(viewModel: WataViewModel) {
     val navController = rememberNavController()
-    val viewModel: WataViewModel = viewModel()
 
     NavHost(
         navController = navController,
@@ -134,50 +167,14 @@ fun WataApp() {
                 "UTF-8"
             )
 
-            // TODO: ChatScreen will be implemented in Phase 3.3
-            // For now, show a placeholder
-            ChatScreenPlaceholder(
-                userId = userId,
-                userName = userName,
-                onBack = { navController.popBackStack() }
-            )
-        }
-    }
-}
-
-@Composable
-private fun ChatScreenPlaceholder(
-    userId: String,
-    userName: String,
-    onBack: () -> Unit
-) {
-    androidx.compose.foundation.layout.Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
-    ) {
-        androidx.compose.material3.Text(
-            text = "Chat with $userName",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        androidx.compose.foundation.layout.Spacer(
-            modifier = Modifier.fillMaxSize().weight(0.1f)
-        )
-        androidx.compose.material3.Text(
-            text = "(Phase 3.3)",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.secondary
-        )
-        androidx.compose.foundation.layout.Spacer(
-            modifier = Modifier.fillMaxSize().weight(0.1f)
-        )
-        com.wata.ui.components.FocusableSurface(
-            onClick = onBack
-        ) {
-            androidx.compose.material3.Text(
-                text = "Back",
-                color = com.wata.ui.theme.WataColors.primary
+            ChatScreen(
+                viewModel = viewModel,
+                contactUserId = userId,
+                contactName = userName,
+                onBack = {
+                    viewModel.closeChat()
+                    navController.popBackStack()
+                }
             )
         }
     }
