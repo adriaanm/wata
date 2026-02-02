@@ -1,8 +1,12 @@
 package com.wata.client
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 // ============================================================================
 // DMRoomService: Encapsulates all DM room management logic
@@ -325,25 +329,32 @@ class DmRoomService(
      */
     private suspend fun updateMDirectForRoom(contactUserId: String, roomId: String) {
         try {
-            // Get current m.direct data
-            var directData: Map<String, List<String>> = emptyMap()
+            // Get current m.direct data (map of userId -> list of roomIds)
+            val directData: MutableMap<String, MutableList<String>> = mutableMapOf()
             try {
                 val accountData = api.getAccountData(userId, "m.direct")
-                // Parse AccountDataResponse.content JsonObject
-                // The content is a JsonObject mapping user IDs to room ID arrays
-                accountData.content.forEach { (key, _) ->
-                    // This is a simplified approach - in real code we'd need to properly deserialize
+                // Parse: { "@user:server": ["!roomId1", "!roomId2"], ... }
+                for ((key, value) in accountData.content) {
+                    val roomIds = value.jsonArray.map { it.jsonPrimitive.content }
+                    directData[key] = roomIds.toMutableList()
                 }
             } catch (e: Exception) {
-                // No existing data
+                // No existing data - start fresh
             }
 
             // Add room to contact's list if not already there
-            val roomList = directData[contactUserId].orEmpty().toMutableList()
+            val roomList = directData.getOrPut(contactUserId) { mutableListOf() }
             if (!roomList.contains(roomId)) {
                 roomList.add(roomId)
-                // In real implementation, we'd serialize this back to JsonObject
-                // For now, we'll just update our local cache
+
+                // Serialize back to JsonObject and persist
+                val newContent = buildJsonObject {
+                    for ((key, rooms) in directData) {
+                        put(key, JsonArray(rooms.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                    }
+                }
+                api.setAccountData(userId, "m.direct", newContent)
+                logger.log("[DMRoomService] Updated m.direct with room $roomId for $contactUserId")
             }
         } catch (e: Exception) {
             logger.error("[DMRoomService] Failed to update m.direct: $e")

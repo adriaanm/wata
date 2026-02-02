@@ -443,9 +443,19 @@ class MatrixApi(
         options: RequestOptions = RequestOptions()
     ): T {
         // Build URL with query parameters
+        // Use addEncodedPathSegments since path components are already URL-encoded
+        // Handle query strings in the path separately
         val urlBuilder = this.baseUrl.toHttpUrl().newBuilder()
-        val pathSegments = path.removePrefix("/").split("/")
-        pathSegments.forEach { urlBuilder.addPathSegment(it) }
+        val pathWithoutLeadingSlash = path.removePrefix("/")
+        val queryIndex = pathWithoutLeadingSlash.indexOf('?')
+        if (queryIndex >= 0) {
+            val pathPart = pathWithoutLeadingSlash.substring(0, queryIndex)
+            val queryPart = pathWithoutLeadingSlash.substring(queryIndex + 1)
+            urlBuilder.addEncodedPathSegments(pathPart)
+            urlBuilder.encodedQuery(queryPart)
+        } else {
+            urlBuilder.addEncodedPathSegments(pathWithoutLeadingSlash)
+        }
         options.params?.forEach { (key, value) ->
             urlBuilder.addQueryParameter(key, value.toString())
         }

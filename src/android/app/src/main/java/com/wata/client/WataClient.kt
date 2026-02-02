@@ -317,39 +317,27 @@ class WataClient(
     }
 
     /**
-     * Create a direct message room with a target user.
+     * Create or find a direct message room with a target user.
      *
-     * This method creates a new DM room and returns the room ID.
-     * The room will appear in the sync engine's state after the next sync cycle.
-     *
-     * Note: This is a synchronous method that creates the room immediately.
-     * The caller should wait for the room to appear in sync state using
-     * WataClient.getConversationByRoomId() or by polling.
+     * This method delegates to DmRoomService.ensureDMRoom() which:
+     * 1. Checks cache for existing DM room
+     * 2. Scans sync state for existing rooms
+     * 3. Creates new room only if needed
+     * 4. Updates m.direct account data
+     * 5. Updates internal caches
      *
      * @param targetUserId The Matrix user ID to create a DM with (e.g., "@bob:localhost")
-     * @return The created room ID
+     * @return The DM room ID (existing or newly created)
      */
     fun createDMRoom(targetUserId: String): String {
-        logger?.log("[WataClient] Creating DM room with $targetUserId")
+        logger.log("[WataClient] createDMRoom called for $targetUserId")
 
-        val response = api.createRoom(
-            request = CreateRoomRequest(
-                name = null,  // Let the other user's display name be the room name
-                visibility = "private",
-                preset = "trusted_private_chat",
-                is_direct = true,
-                invite = listOf(targetUserId)
-            )
-        )
+        val service = dmRoomService
+            ?: throw IllegalStateException("DmRoomService not initialized - call login() first")
 
-        val roomId = response.room_id
-        logger?.log("[WataClient] DM room created: $roomId")
-
-        // Refresh the DM room service to pick up the new room immediately
-        // This helps with the sync engine detecting the room faster
-        dmRoomService?.refreshFromSync()
-
-        return roomId
+        return kotlinx.coroutines.runBlocking {
+            service.ensureDMRoom(targetUserId)
+        }
     }
 
     /**
