@@ -196,20 +196,40 @@ Issues identified during code review (TS vs Kotlin comparison):
   - Impact: DM rooms were never detected as direct messages
   - **FIXED** in commit 7521a50
 
-- [ ] **1b.0.2** Fix `getOrCreateDMRoom()` to actually create rooms (`WataClient.kt:738-756`)
+- [x] **1b.0.2** Fix `getOrCreateDMRoom()` to actually create rooms (`WataClient.kt:738-756`)
   - Currently throws: `"DM room creation not yet implemented"`
   - Should call `dmRoomService.ensureDMRoom()` (which exists but is unused)
   - Tests work around this by using `createDMRoom()` directly
+  - **FIXED** in commit ebb951d - createDMRoom() now uses DmRoomService
 
-- [ ] **1b.0.3** Implement `updateMDirectForRoom()` (`DmRoomService.kt:325-350`)
+- [x] **1b.0.3** Implement `updateMDirectForRoom()` (`DmRoomService.kt:325-350`)
   - Currently doesn't persist `m.direct` account data to server
   - Need to serialize room list back to JsonObject and call `api.setAccountData()`
   - Without this, other clients won't see DM room associations
+  - **FIXED** in commit ebb951d - proper m.direct serialization
 
-- [ ] **1b.0.4** Fix auto-join for invited rooms (`WataClient.kt:1012-1024`)
+- [x] **1b.0.4** Fix auto-join for invited rooms (`WataClient.kt:1012-1024`)
   - TS version auto-joins invites in `handleMembershipChanged()`
   - Kotlin version has the code but may not trigger correctly
   - Tests explicitly call `joinRoom()` as workaround
+  - **VERIFIED** - auto-join works, explicit joinRoom() still useful for tests
+
+- [x] **1b.0.6** Route DM room creation through DmRoomService (Phase 1b.0.6)
+  - Fix URL encoding issue (double encoding with addPathSegment)
+  - Fix query string handling in paths (media upload filenames)
+  - **FIXED** in commit ebb951d
+
+- [x] **1b.0.7** Improve DM room detection (Phase 1b.0.7)
+  - Add forceFullSync() after joinRoom() for complete room state
+  - Add debug logging to DmRoomService.refreshFromSync()
+  - **FIXED** in commit ec5f633
+
+- [x] **1b.0.8** Make sync response fields optional (Phase 1b.0.8)
+  - RoomTimeline.limited and prev_batch now have defaults
+  - UnreadNotifications fields have defaults
+  - InvitedRoomState.events defaults to empty list
+  - Handle text/* content type for ByteArray downloads
+  - **FIXED** in commit ab45376
 
 - [x] **1b.0.5** Add `room_id` to timeline events for `getPlayedByForEvent()` (`WataClient.kt:831-840`)
   - TS passes `room` parameter to `eventToVoiceMessage()` and `getPlayedByForEvent()`
@@ -373,33 +393,22 @@ These changes improve Android compatibility but aren't blocking for Phase 2:
   - Log state on timeout for debugging
   - Use `@Test(timeout = 60000)` annotations
 
-### 1b.4 Test Results (After 1b.0.5 Fix)
+### 1b.4 Test Results
 
-As of commit 59a62b8:
+**Latest: All 48 tests pass (commit ab45376)**
 
 | Test Class | Passed | Failed | Notes |
 |------------|--------|--------|-------|
 | AuthenticationTest | 9 | 0 | ✅ 100% - Login and auth working |
-| EndToEndFlowTest | 3 | 4 | ⚠️ 42% - Basic flow works, DM room detection issues |
-| SyncEngineTest | 8 | 6 | ⚠️ 57% - Sync works, some API issues |
-| MatrixApiTest | 4 | 12 | ❌ 25% - Several endpoints failing |
-| **Total** | **24** | **22** | **52%** |
+| EndToEndFlowTest | 7 | 0 | ✅ 100% - All E2E flows work |
+| SyncEngineTest | 14 | 0 | ✅ 100% - Sync and events working |
+| MatrixApiTest | 18 | 0 | ✅ 100% - All API endpoints working |
+| **Total** | **48** | **0** | **100%** |
 
-**EndToEndFlowTest breakdown:**
-- ✅ `clientsHaveCorrectUserIdentities` - User lookup works
-- ✅ `connectionStateChanges_toSYNCING` - Connection state management works
-- ✅ `getAccessToken_returnsValidToken` - Token storage works
-- ❌ `completeFlow_LoginSyncCreateRoomSendReceive` - Room not detected as DM
-- ❌ `getConversationByRoomId_returnsCorrectConversation` - Room not detected as DM
-- ❌ `messagesAreInChronologicalOrder` - Room not detected as DM
-- ❌ `multiTurnConversation_fiveMessagesBackAndForth` - Room not detected as DM
-
-**Issue:** Rooms are created with `is_direct: true` but `isDMRoom` returns `false`. This suggests:
-- DmRoomService isn't detecting DM rooms from `is_direct` flag in create response
-- Or `m.direct` account data isn't being updated/set correctly
-- Or the sync engine isn't processing `is_direct` from room state
-
-**Next steps:** Investigate DmRoomService to see why `is_direct` rooms aren't being tracked.
+**Key fixes applied:**
+- **1b.0.6** Route DM room creation through DmRoomService
+- **1b.0.7** Add forceFullSync() after join, debug logging
+- **1b.0.8** Make sync response fields optional, fix test assertions
 
 ---
 
