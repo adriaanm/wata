@@ -1,5 +1,6 @@
 package com.wata.client
 
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -416,16 +417,19 @@ class DmRoomService(
 
     /**
      * Check if a room has the is_direct flag set.
+     *
+     * Note: is_direct is a boolean in JSON ({"is_direct": true}), not a string.
+     * We need to check booleanOrNull, not content (which would give "true" string).
      */
     private fun hasIsDirectFlag(room: SyncRoomState): Boolean {
         for (event in room.timeline) {
-            val isDirect = event.content["is_direct"]?.jsonPrimitive?.content
-            if (event.type == "m.room.create" && isDirect == "true") {
+            val isDirect = event.content["is_direct"]?.jsonPrimitive?.booleanOrNull
+            if (event.type == "m.room.create" && isDirect == true) {
                 return true
             }
             if (event.type == "m.room.member" &&
                 event.state_key == userId &&
-                isDirect == "true") {
+                isDirect == true) {
                 return true
             }
         }
@@ -434,22 +438,24 @@ class DmRoomService(
 
     /**
      * Get DM-related info from a room (is_direct flag and creation timestamp).
+     *
+     * Note: is_direct is a boolean in JSON ({"is_direct": true}), not a string.
      */
     private fun getRoomDMInfo(room: SyncRoomState): RoomDMInfo {
         var isDirectRoom = false
         var creationTs: Long? = null
 
         for (event in room.timeline) {
-            val isDirect = event.content["is_direct"]?.jsonPrimitive?.content
+            val isDirect = event.content["is_direct"]?.jsonPrimitive?.booleanOrNull
             if (event.type == "m.room.create") {
                 creationTs = event.origin_server_ts
-                if (isDirect == "true") {
+                if (isDirect == true) {
                     isDirectRoom = true
                 }
             }
             if (event.type == "m.room.member" &&
                 event.state_key == userId &&
-                isDirect == "true") {
+                isDirect == true) {
                 isDirectRoom = true
             }
         }

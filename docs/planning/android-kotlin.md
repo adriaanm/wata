@@ -182,6 +182,140 @@ wata/
 
 ---
 
+## Phase 1b: Testing & Code Quality
+
+**Goal:** Ensure the Kotlin port is functionally equivalent to TypeScript, with robust tests and proper async behavior.
+
+### Background: Code Review Findings
+
+A detailed comparison of TypeScript vs Kotlin implementations revealed several issues:
+
+#### Critical Issues (Fixed)
+
+1. **`is_direct` flag parsing bug** (`DmRoomService.kt`)
+   - Bug: Checked for string `"true"` instead of boolean `true`
+   - JSON has `{"is_direct": true}` (boolean), not `{"is_direct": "true"}` (string)
+   - Fix: Use `jsonPrimitive.booleanOrNull` instead of `jsonPrimitive.content`
+   - Impact: DM rooms were never detected as direct messages
+
+#### Issues Requiring Work
+
+2. **Async behavior mismatch**
+   - TypeScript uses `async/await` throughout (non-blocking)
+   - Kotlin uses synchronous calls + background `Thread` for sync
+   - `SyncEngine` uses `Thread.sleep()` instead of coroutines
+   - Risk: ANRs on Android main thread
+
+3. **Incomplete DM room creation** (`WataClient.kt:738-756`)
+   - `getOrCreateDMRoom()` throws exception instead of creating rooms
+   - Tests work around this by using `createDMRoom()` directly
+   - `DmRoomService.ensureDMRoom()` is marked `suspend` but never called
+
+4. **Incomplete `m.direct` update** (`DmRoomService.kt:325-350`)
+   - `updateMDirectForRoom()` doesn't actually persist to server
+   - Account data changes are not written back
+
+#### Test Infrastructure Differences
+
+| Aspect | TypeScript | Kotlin |
+|--------|------------|--------|
+| Room creation | `orchestrator.createRoom()` → `getOrCreateDmRoom()` | `createDMRoom()` directly |
+| Room joining | Auto-join via `handleMembershipChanged()` | Explicit `joinRoom()` call |
+| Waiting | Event listeners + polling fallback | Polling only |
+| Cleanup | `orchestrator.cleanup()` | `@After tearDown()` |
+
+### 1b.1 Test Environment Setup
+
+**Use tmux for test monitoring** (tests may hang on sync timeouts):
+
+```bash
+# Create tmux session for test monitoring
+tmux new-session -d -s wata-tests
+
+# Split into panes: Conduit server | Gradle tests | Log tail
+tmux split-window -h -t wata-tests
+tmux split-window -v -t wata-tests:0.1
+
+# Pane 0: Conduit server
+tmux send-keys -t wata-tests:0.0 'cd /Users/adriaan/g/wata && pnpm dev:server' Enter
+
+# Pane 1: Run tests (use Gradle daemon for performance)
+tmux send-keys -t wata-tests:0.1 'cd /Users/adriaan/g/wata/src/android && ./gradlew test --daemon' Enter
+
+# Pane 2: Monitor for hangs
+tmux send-keys -t wata-tests:0.2 'watch -n 5 "ps aux | grep -E \"(java|conduit)\" | grep -v grep"' Enter
+
+# Attach to session
+tmux attach -t wata-tests
+```
+
+**Gradle daemon tips:**
+- First run: `./gradlew --daemon` starts the daemon
+- Subsequent runs are faster (JVM stays warm)
+- Stop daemon: `./gradlew --stop`
+- Check status: `./gradlew --status`
+
+### 1b.2 Fix Async Architecture
+
+- [ ] **1b.2.1** Convert `SyncEngine` to use Kotlin coroutines
+  - Replace `Thread` with `CoroutineScope` + `launch`
+  - Replace `Thread.sleep()` with `delay()`
+  - Use `withContext(Dispatchers.IO)` for network calls
+
+- [ ] **1b.2.2** Make `WataClient` methods suspend functions
+  - `suspend fun login()`, `suspend fun connect()`
+  - `suspend fun getOrCreateDMRoom()`
+  - Keep synchronous variants for simple lookups
+
+- [ ] **1b.2.3** Wire up `DmRoomService.ensureDMRoom()`
+  - Call from `getOrCreateDMRoom()` when cache miss
+  - Implement proper `updateMDirectForRoom()`
+
+### 1b.3 Align Tests with TypeScript Patterns
+
+- [ ] **1b.3.1** Create `TestOrchestrator.kt` equivalent
+  - Manage multiple test clients
+  - `createRoom(alice, bob)` using DmRoomService flow
+  - `waitForRoom()` with event listeners + polling
+
+- [ ] **1b.3.2** Port missing test scenarios from TypeScript
+  - `voice-message-flow.test.ts` → bidirectional messaging
+  - `read-receipts.test.ts` → mark as played flow
+  - `edge-cases.test.ts` → error handling
+
+- [ ] **1b.3.3** Add timeout guards
+  - Wrap sync waits with explicit timeouts
+  - Log state on timeout for debugging
+  - Use `@Test(timeout = 60000)` annotations
+
+### 1b.4 Verification Checklist
+
+Run these commands to verify the port:
+
+```bash
+# Start Conduit (in tmux pane or separate terminal)
+pnpm dev:server
+
+# Run Kotlin tests
+cd src/android
+./gradlew test --daemon --info 2>&1 | tee test-output.log
+
+# Check for failures
+grep -E "(FAILED|PASSED|SKIPPED)" test-output.log
+
+# Run TypeScript tests for comparison
+cd ../..
+pnpm test:integration
+```
+
+**Exit criteria for Phase 1b:**
+1. All integration tests pass (`EndToEndFlowTest`, `MatrixApiTest`, `SyncEngineTest`)
+2. Tests don't hang (complete within 2 minutes each)
+3. `is_direct` rooms are properly detected
+4. No `Thread.sleep()` on test assertions (use `waitForCondition()`)
+
+---
+
 ## Phase 2: Audio Pipeline
 
 **Goal:** Record PCM, encode to Ogg Opus, decode Ogg Opus for playback.
@@ -381,11 +515,12 @@ wata/
 
 Each phase section is designed for independent work:
 
-- **Phase 0**: Self-contained project setup, no dependencies
+- **Phase 0**: Self-contained project setup, no dependencies ✅ COMPLETE
 - **Phase 1.1-1.2**: Can start after Phase 0, types + API are independent
 - **Phase 1.3-1.5**: Requires 1.1-1.2 complete
+- **Phase 1b**: Requires Phase 1 complete; validates correctness before moving on
 - **Phase 2**: Can parallel with Phase 1 (only needs types)
-- **Phase 3**: Requires Phase 1 + Phase 2 complete
+- **Phase 3**: Requires Phase 1 + Phase 1b + Phase 2 complete
 - **Phase 4**: Final integration, requires all above
 
 For each task, provide the subagent:
@@ -393,3 +528,24 @@ For each task, provide the subagent:
 2. Reference TypeScript file path
 3. Target Kotlin file path
 4. Test requirements
+
+### Running Tests (Important)
+
+**Use tmux to manage background processes** - tests may hang on sync timeouts:
+
+```bash
+# Quick test run with Gradle daemon (faster subsequent runs)
+cd src/android && ./gradlew test --daemon
+
+# If tests hang, check running Java processes
+ps aux | grep java
+
+# Kill hung Gradle/test processes if needed
+./gradlew --stop
+pkill -f "GradleDaemon"
+```
+
+**Always ensure Conduit is running** before integration tests:
+```bash
+pnpm dev:server  # In separate terminal/tmux pane
+```
