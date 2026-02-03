@@ -99,9 +99,6 @@ importers:
 
   src/rn:
     dependencies:
-      '@react-native/gradle-plugin':
-        specifier: 0.83.1
-        version: 0.83.1
       '@react-navigation/native':
         specifier: ^7.1.26
         version: 7.1.28(react-native@0.83.1(@babel/core@7.28.6)(@react-native-community/cli@20.1.0(typescript@5.9.3))(@react-native/metro-config@0.83.1(@babel/core@7.28.6))(@types/react@19.2.9)(react@19.2.3))(react@19.2.3)
@@ -141,10 +138,6 @@ importers:
       react-native-screens:
         specifier: ^4.19.0
         version: 4.20.0(react-native@0.83.1(@babel/core@7.28.6)(@react-native-community/cli@20.1.0(typescript@5.9.3))(@react-native/metro-config@0.83.1(@babel/core@7.28.6))(@types/react@19.2.9)(react@19.2.3))(react@19.2.3)
-    devDependencies:
-      '@react-native/codegen':
-        specifier: 0.83.1
-        version: 0.83.1(@babel/core@7.28.6)
 
   src/shared:
     dependencies:
