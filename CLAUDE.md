@@ -3,8 +3,9 @@
 ## Working with Claude
 
 - **Commit Policy:** Commit coherent changes as soon as complete. Don't batch unrelated changes.
-- **Background Processes:** Prefer tmux (zsh).
+- **Keep Docs Updated:** Before committing any non-trivial code change, do a quick check if docs need to be updated.
 - **Planning:** Planning docs go in `docs/planning`. When complete, distill to `docs/` as a guide.
+- **Background Processes:** Prefer tmux (zsh).
 
 ---
 
@@ -14,6 +15,7 @@
 |-----|--------------|
 | [quickstart](docs/quickstart.md) | First time setup, daily workflow |
 | [android-development](docs/android-development.md) | Working on native Kotlin Android app |
+| [dm-room-service](docs/dm-room-service.md) | DM room management, m.direct handling |
 | [voice](docs/voice.md) | Audio recording/encoding architecture |
 | [family-model](docs/family-model.md) | Room architecture, Matrix concepts |
 | [tui-architecture](docs/tui-architecture.md) | Terminal UI frontend design |
@@ -110,6 +112,7 @@ src/
 | Topic | Location |
 |-------|----------|
 | PTT button codes | `docs/android-development.md` (Hardware Keys) |
+| DM room lookup/creation | `docs/dm-room-service.md` |
 | Opus audio format | `docs/voice.md` |
 | Matrix room types | `docs/family-model.md` |
 | TUI component patterns | `docs/tui-architecture.md` |
