@@ -31,7 +31,7 @@ export const MATRIX_CONFIG = {
    * - https://matrix.org - Production Matrix.org server
    * - http://YOUR_IP:8008 - Manual IP configuration (if adb reverse fails)
    */
-  homeserverUrl: 'http://localhost:8008',
+  homeserverUrl: 'http://macmini.fritz.box:8008',
 
   /**
    * Username for auto-login
