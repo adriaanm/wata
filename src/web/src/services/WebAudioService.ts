@@ -3,14 +3,16 @@
  *
  * Handles audio recording and playback for the web UI using:
  * - MediaRecorder API for recording with Ogg Opus encoding
- * - HTML5 Audio element for playback
+ * - Web Audio API + @shared/lib/audio-codec for Ogg Opus playback
  * - Microphone access with echo cancellation and noise suppression
  *
- * Phase 3 implementation notes:
- * - Uses browser's native MediaRecorder with Ogg Opus (Chrome/Firefox support)
- * - Falls back to WebM Opus or MP4 if Ogg Opus is not available
- * - For consistent cross-browser encoding, future implementation could use Opus WASM
+ * Playback uses decodeOggOpus from @shared/lib/audio-codec which:
+ * - Decodes Ogg Opus to PCM using @evan/opus (WASM)
+ * - Works across all browsers including Safari
  */
+
+import { Buffer } from 'buffer';
+import { decodeOggOpus } from '@shared/lib/audio-codec';
 
 export interface RecordingResult {
   data: Uint8Array;
@@ -33,10 +35,17 @@ export class WebAudioService {
   private startTime: number = 0;
   private stream: MediaStream | null = null;
 
-  // Playback state
-  private currentAudio: HTMLAudioElement | null = null;
+  // Playback state using Web Audio API
+  private audioContext: AudioContext | null = null;
+  private audioBuffer: AudioBuffer | null = null;
+  private sourceNode: AudioBufferSourceNode | null = null;
+  private gainNode: GainNode | null = null;
   private playbackState: PlaybackState = 'idle';
   private playbackCallbacks: PlaybackOptions = {};
+  private playbackStartTime: number = 0;
+  private playbackOffset: number = 0; // Current position in seconds
+  private playbackDuration: number = 0; // Total duration in seconds
+  private timeUpdateInterval: number | null = null;
 
   /**
    * Start recording audio from the microphone
@@ -88,7 +97,7 @@ export class WebAudioService {
 
   /**
    * Stop recording and return the audio data
-   * Returns a Buffer with the audio data for Matrix upload
+   * Returns a Uint8Array with the audio data for Matrix upload
    */
   async stopRecording(): Promise<RecordingResult> {
     return new Promise((resolve, reject) => {
@@ -180,8 +189,46 @@ export class WebAudioService {
   }
 
   /**
+   * Get or create AudioContext
+   */
+  private getAudioContext(): AudioContext {
+    if (!this.audioContext) {
+      this.audioContext = new AudioContext({ sampleRate: 16000 });
+    }
+    // Resume context if suspended (browser autoplay policy)
+    if (this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+    return this.audioContext;
+  }
+
+  /**
+   * Stop time update interval
+   */
+  private stopTimeUpdate(): void {
+    if (this.timeUpdateInterval !== null) {
+      clearInterval(this.timeUpdateInterval);
+      this.timeUpdateInterval = null;
+    }
+  }
+
+  /**
+   * Start time update interval
+   */
+  private startTimeUpdate(): void {
+    this.stopTimeUpdate();
+    this.timeUpdateInterval = window.setInterval(() => {
+      if (this.playbackState === 'playing') {
+        const currentTime = this.playbackOffset + (performance.now() - this.playbackStartTime) / 1000;
+        this.playbackCallbacks.onTimeUpdate?.(Math.min(currentTime, this.playbackDuration));
+      }
+    }, 100); // Update every 100ms
+  }
+
+  /**
    * Play audio from a URL
-   * Returns a promise that resolves when playback starts
+   * Uses decodeOggOpus from @shared/lib/audio-codec for Ogg Opus decoding
+   * Works across all browsers including Safari
    */
   async playAudio(url: string, options: PlaybackOptions = {}): Promise<void> {
     // Stop any existing playback
@@ -191,53 +238,64 @@ export class WebAudioService {
     this.playbackCallbacks = options;
 
     try {
-      // Fetch the audio data first (handles auth via URL params)
+      // Fetch the audio data
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      const blob = await response.blob();
+      const arrayBuffer = await response.arrayBuffer();
 
-      console.log('[WebAudioService] Fetched audio blob:', {
-        type: blob.type,
-        size: blob.size,
-      });
+      // Decode Ogg Opus to PCM using @shared/lib/audio-codec
+      const result = decodeOggOpus(Buffer.from(arrayBuffer));
 
-      // Create a blob URL for playback
-      const blobUrl = URL.createObjectURL(blob);
+      // Convert Int16Array to Float32Array for Web Audio API
+      const float32 = new Float32Array(result.pcm.length);
+      for (let i = 0; i < result.pcm.length; i++) {
+        float32[i] = result.pcm[i] / 32768;
+      }
 
-      const audio = new Audio(blobUrl);
+      // Get or create AudioContext
+      const ctx = this.getAudioContext();
 
-      // Set up event listeners
-      audio.addEventListener('ended', () => {
-        this.playbackState = 'ended';
-        this.playbackCallbacks.onEnded?.();
-        // Clean up the blob URL after playback
-        URL.revokeObjectURL(blobUrl);
-      });
+      // Create AudioBuffer
+      this.audioBuffer = ctx.createBuffer(1, float32.length, result.sampleRate);
+      this.audioBuffer.copyToChannel(float32, 0);
 
-      audio.addEventListener('error', e => {
-        this.playbackState = 'idle';
-        // Get detailed error info
-        const mediaError = (e.target as HTMLAudioElement).error;
-        const errorMsg = mediaError
-          ? `Code ${mediaError.code}: ${mediaError.message}`
-          : `Unknown error: ${JSON.stringify(e)}`;
-        const error = new Error(`Audio playback failed: ${errorMsg}`);
-        this.playbackCallbacks.onError?.(error);
-        URL.revokeObjectURL(blobUrl);
-      });
+      // Store duration
+      this.playbackDuration = result.duration;
+      this.playbackOffset = 0;
 
-      audio.addEventListener('timeupdate', () => {
-        this.playbackCallbacks.onTimeUpdate?.(audio.currentTime);
-      });
+      // Create gain node for volume control
+      this.gainNode = ctx.createGain();
+      this.gainNode.connect(ctx.destination);
 
-      this.currentAudio = audio;
+      // Create source node and start playback
+      this.sourceNode = ctx.createBufferSource();
+      this.sourceNode.buffer = this.audioBuffer;
+      this.sourceNode.connect(this.gainNode);
+
+      // Set up ended event
+      this.sourceNode.onended = () => {
+        if (this.playbackState === 'playing') {
+          // Only call onEnded if we weren't manually stopped
+          const playedDuration = (performance.now() - this.playbackStartTime) / 1000;
+          // Check if we played to the end (within 100ms)
+          if (this.playbackDuration - playedDuration < 0.1) {
+            this.playbackState = 'ended';
+            this.playbackCallbacks.onEnded?.();
+            this.stopTimeUpdate();
+          }
+        }
+      };
+
+      // Start playback
       this.playbackState = 'playing';
-
-      await audio.play();
+      this.playbackStartTime = performance.now();
+      this.startTimeUpdate();
+      this.sourceNode.start(0, this.playbackOffset);
     } catch (error) {
       this.playbackState = 'idle';
+      this.stopTimeUpdate();
       throw new Error(
         `Failed to play audio: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
@@ -248,9 +306,13 @@ export class WebAudioService {
    * Pause the currently playing audio
    */
   pauseAudio(): void {
-    if (this.currentAudio && this.playbackState === 'playing') {
-      this.currentAudio.pause();
+    if (this.playbackState === 'playing' && this.sourceNode) {
+      // Calculate current position
+      this.playbackOffset = (performance.now() - this.playbackStartTime) / 1000;
+      this.sourceNode.stop();
+      this.sourceNode = null;
       this.playbackState = 'paused';
+      this.stopTimeUpdate();
     }
   }
 
@@ -258,15 +320,31 @@ export class WebAudioService {
    * Resume paused audio
    */
   resumeAudio(): void {
-    if (this.currentAudio && this.playbackState === 'paused') {
-      this.currentAudio
-        .play()
-        .then(() => {
-          this.playbackState = 'playing';
-        })
-        .catch(error => {
-          console.error('[WebAudioService] Failed to resume audio:', error);
-        });
+    if (this.playbackState === 'paused' && this.audioBuffer) {
+      const ctx = this.getAudioContext();
+
+      // Create new source node (they can't be reused)
+      this.sourceNode = ctx.createBufferSource();
+      this.sourceNode.buffer = this.audioBuffer;
+      this.sourceNode.connect(this.gainNode!);
+
+      // Set up ended event
+      this.sourceNode.onended = () => {
+        if (this.playbackState === 'playing') {
+          const playedDuration = (performance.now() - this.playbackStartTime) / 1000;
+          if (this.playbackDuration - playedDuration < 0.1) {
+            this.playbackState = 'ended';
+            this.playbackCallbacks.onEnded?.();
+            this.stopTimeUpdate();
+          }
+        }
+      };
+
+      // Resume from offset
+      this.playbackState = 'playing';
+      this.playbackStartTime = performance.now();
+      this.startTimeUpdate();
+      this.sourceNode.start(0, this.playbackOffset);
     }
   }
 
@@ -274,12 +352,19 @@ export class WebAudioService {
    * Stop audio playback and reset state
    */
   stopAudio(): void {
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      this.currentAudio.currentTime = 0;
-      this.currentAudio = null;
+    if (this.sourceNode) {
+      try {
+        this.sourceNode.stop();
+      } catch {
+        // Already stopped
+      }
+      this.sourceNode = null;
     }
     this.playbackState = 'idle';
+    this.playbackOffset = 0;
+    this.playbackDuration = 0;
+    this.audioBuffer = null;
+    this.stopTimeUpdate();
     this.playbackCallbacks = {};
   }
 
@@ -294,25 +379,68 @@ export class WebAudioService {
    * Get the current playback time in seconds
    */
   getCurrentTime(): number {
-    return this.currentAudio?.currentTime ?? 0;
+    if (this.playbackState === 'playing') {
+      return Math.min(
+        this.playbackOffset + (performance.now() - this.playbackStartTime) / 1000,
+        this.playbackDuration,
+      );
+    }
+    return this.playbackOffset;
   }
 
   /**
    * Get the total duration of the currently loaded audio in seconds
    */
   getDuration(): number {
-    return this.currentAudio?.duration ?? 0;
+    return this.playbackDuration;
   }
 
   /**
    * Seek to a specific time in the audio (in seconds)
    */
   seekTo(time: number): void {
-    if (this.currentAudio) {
-      this.currentAudio.currentTime = Math.max(
-        0,
-        Math.min(time, this.currentAudio.duration),
-      );
+    const wasPlaying = this.playbackState === 'playing';
+    const newTime = Math.max(0, Math.min(time, this.playbackDuration));
+
+    // Stop current playback
+    if (this.sourceNode) {
+      try {
+        this.sourceNode.stop();
+      } catch {
+        // Already stopped
+      }
+      this.sourceNode = null;
+    }
+
+    this.playbackOffset = newTime;
+    this.stopTimeUpdate();
+
+    // Resume if we were playing
+    if (wasPlaying && this.audioBuffer) {
+      const ctx = this.getAudioContext();
+
+      this.sourceNode = ctx.createBufferSource();
+      this.sourceNode.buffer = this.audioBuffer;
+      this.sourceNode.connect(this.gainNode!);
+
+      this.sourceNode.onended = () => {
+        if (this.playbackState === 'playing') {
+          const playedDuration = (performance.now() - this.playbackStartTime) / 1000;
+          if (this.playbackDuration - playedDuration < 0.1) {
+            this.playbackState = 'ended';
+            this.playbackCallbacks.onEnded?.();
+            this.stopTimeUpdate();
+          }
+        }
+      };
+
+      this.playbackState = 'playing';
+      this.playbackStartTime = performance.now();
+      this.startTimeUpdate();
+      this.sourceNode.start(0, this.playbackOffset);
+    } else if (this.playbackState === 'paused') {
+      // Just update offset, don't start
+      this.playbackCallbacks.onTimeUpdate?.(newTime);
     }
   }
 
@@ -320,8 +448,9 @@ export class WebAudioService {
    * Set the volume for playback (0.0 to 1.0)
    */
   setVolume(volume: number): void {
-    if (this.currentAudio) {
-      this.currentAudio.volume = Math.max(0, Math.min(1, volume));
+    const clampedVolume = Math.max(0, Math.min(1, volume));
+    if (this.gainNode) {
+      this.gainNode.gain.value = clampedVolume;
     }
   }
 }
