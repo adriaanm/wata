@@ -16,6 +16,8 @@ export default defineConfig({
   define: {
     // Process polyfill for matrix-js-sdk
     global: 'globalThis',
+    // Environment variables for browser
+    'process.env.WATA_MATRIX_IMPL': JSON.stringify(process.env.WATA_MATRIX_IMPL || 'wata-client'),
   },
   server: {
     port: 3000,
