@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -63,17 +64,24 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val firstItemFocusRequester = remember { FocusRequester() }
 
-    // Sort messages by most recent first
-    val sortedMessages = chatState.messages.sortedByDescending { it.timestamp }
+    // Sort messages by most recent first (derive from chatState changes)
+    val sortedMessages by remember(chatState) {
+        derivedStateOf {
+            chatState.messages.sortedByDescending { it.timestamp }
+        }
+    }
 
     // Load conversation when screen opens
     LaunchedEffect(contactUserId) {
         viewModel.openChat(contactUserId)
     }
 
-    // Focus on first (most recent) message when messages load
-    LaunchedEffect(sortedMessages.isNotEmpty()) {
+    // Auto-scroll to top when new messages arrive (newest is first)
+    LaunchedEffect(sortedMessages.size) {
         if (sortedMessages.isNotEmpty()) {
+            // Scroll to top to show newest message
+            listState.scrollToItem(0)
+            // Also try to focus the first item
             try {
                 firstItemFocusRequester.requestFocus()
             } catch (e: Exception) {
