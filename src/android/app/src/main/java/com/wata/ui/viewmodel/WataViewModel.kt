@@ -88,14 +88,38 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onMessageReceived(message: VoiceMessage, conversation: Conversation) {
             Log.d(TAG, "Message received: ${message.id} in ${conversation.id}")
-            // If we're viewing this conversation, refresh messages
+            // If we're viewing this conversation, add message directly to state
             if (_chatState.value.roomId == conversation.id) {
-                refreshMessages()
+                _chatState.update { state ->
+                    // Add message if not already present
+                    if (state.messages.none { it.id == message.id }) {
+                        state.copy(messages = state.messages + message)
+                    } else {
+                        state
+                    }
+                }
             }
         }
 
         override fun onMessagePlayed(message: VoiceMessage, roomId: String) {
             Log.d(TAG, "Message played: ${message.id}")
+            // If we're viewing this conversation, update the message's played status
+            if (_chatState.value.roomId == roomId) {
+                _chatState.update { state ->
+                    state.copy(
+                        messages = state.messages.map { msg ->
+                            if (msg.id == message.id) {
+                                msg.copy(
+                                    isPlayed = message.isPlayed,
+                                    playedBy = message.playedBy
+                                )
+                            } else {
+                                msg
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -389,9 +413,14 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
                     // Mark as played
                     client.markAsPlayed(message)
 
-                    // Monitor playback state
+                    // Monitor playback state - wait for playback to actually start,
+                    // then clear when it stops
+                    var wasPlaying = false
                     audioService.isPlaying.collect { isPlaying ->
-                        if (!isPlaying && _chatState.value.playingMessageId == message.id) {
+                        if (isPlaying) {
+                            wasPlaying = true
+                        } else if (wasPlaying && _chatState.value.playingMessageId == message.id) {
+                            // Only clear when transitioning from playing to stopped
                             _chatState.update { it.copy(playingMessageId = null) }
                         }
                     }
@@ -411,6 +440,33 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
         val minutes = totalSeconds / 60
         val secs = totalSeconds % 60
         return "$minutes:${secs.toString().padStart(2, '0')}"
+    }
+
+    /**
+     * Format timestamp to friendly relative time
+     * "now", "X min ago", "X hours ago", or date/time for older
+     */
+    fun formatTimestamp(timestamp: java.util.Date): String {
+        val now = System.currentTimeMillis()
+        val diff = now - timestamp.time
+        val seconds = diff / 1000
+        val minutes = seconds / 60
+        val hours = minutes / 60
+        val days = hours / 24
+
+        return when {
+            seconds < 60 -> "now"
+            minutes < 60 -> "${minutes}m ago"
+            hours < 24 -> "${hours}h ago"
+            days < 7 -> {
+                val format = java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.getDefault())
+                format.format(timestamp)
+            }
+            else -> {
+                val format = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
+                format.format(timestamp)
+            }
+        }
     }
 
     override fun onCleared() {

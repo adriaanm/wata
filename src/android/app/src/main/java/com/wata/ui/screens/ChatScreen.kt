@@ -26,10 +26,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,16 +61,24 @@ fun ChatScreen(
 ) {
     val chatState by viewModel.chatState.collectAsState()
     val listState = rememberLazyListState()
+    val firstItemFocusRequester = remember { FocusRequester() }
+
+    // Sort messages by most recent first
+    val sortedMessages = chatState.messages.sortedByDescending { it.timestamp }
 
     // Load conversation when screen opens
     LaunchedEffect(contactUserId) {
         viewModel.openChat(contactUserId)
     }
 
-    // Scroll to bottom when new messages arrive
-    LaunchedEffect(chatState.messages.size) {
-        if (chatState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(chatState.messages.size - 1)
+    // Focus on first (most recent) message when messages load
+    LaunchedEffect(sortedMessages.isNotEmpty()) {
+        if (sortedMessages.isNotEmpty()) {
+            try {
+                firstItemFocusRequester.requestFocus()
+            } catch (e: Exception) {
+                // Focus request may fail if not yet composed
+            }
         }
     }
 
@@ -91,7 +101,7 @@ fun ChatScreen(
         }
 
         // Message list
-        if (chatState.messages.isEmpty()) {
+        if (sortedMessages.isEmpty()) {
             EmptyMessages()
         } else {
             LazyColumn(
@@ -101,15 +111,18 @@ fun ChatScreen(
                     .padding(WataSpacing.sm)
             ) {
                 items(
-                    items = chatState.messages,
+                    items = sortedMessages,
                     key = { it.id }
                 ) { message ->
+                    val isFirst = sortedMessages.firstOrNull()?.id == message.id
                     MessageItem(
                         message = message,
                         isPlaying = chatState.playingMessageId == message.id,
                         currentUserId = chatState.currentUserId,
                         onPlay = { viewModel.playMessage(message) },
-                        formatDuration = { viewModel.formatDuration(it) }
+                        formatDuration = { viewModel.formatDuration(it) },
+                        formatTimestamp = { viewModel.formatTimestamp(it) },
+                        focusRequester = if (isFirst) firstItemFocusRequester else null
                     )
                     Spacer(modifier = Modifier.height(WataSpacing.xs))
                 }
@@ -230,53 +243,85 @@ private fun MessageItem(
     isPlaying: Boolean,
     currentUserId: String?,
     onPlay: () -> Unit,
-    formatDuration: (Double) -> String
+    formatDuration: (Double) -> String,
+    formatTimestamp: (java.util.Date) -> String,
+    focusRequester: FocusRequester? = null
 ) {
     val isOwn = message.sender.id == currentUserId
+    // For own messages, check if recipient has played it
+    val isPlayedByRecipient = isOwn && message.playedBy.any { it != currentUserId }
+    // For incoming messages, check if current user has played it
+    val isPlayedByMe = !isOwn && message.isPlayed
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start
+    // Determine text color based on message state
+    // Incoming: bright when unplayed, dim when played
+    // Outgoing: muted when unplayed, dimmer when played by recipient
+    val messageColor = when {
+        isPlaying -> WataColors.playing
+        !isOwn && !isPlayedByMe -> WataColors.incoming      // Incoming, unplayed - bright
+        !isOwn && isPlayedByMe -> WataColors.incomingDim    // Incoming, played - dim
+        isOwn && !isPlayedByRecipient -> WataColors.outgoing // Outgoing, not played - muted
+        else -> WataColors.outgoingDim                       // Outgoing, played - dimmer
+    }
+
+    FocusableSurface(
+        onClick = onPlay,
+        backgroundColor = WataColors.bg,
+        focusedBackgroundColor = WataColors.bgHighlight,
+        focusRequester = focusRequester,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        FocusableSurface(
-            onClick = onPlay,
-            backgroundColor = if (isOwn) WataColors.primary else WataColors.bgSecondary,
-            focusedBackgroundColor = if (isOwn) WataColors.primaryDark else WataColors.bgHighlight,
-            modifier = Modifier.fillMaxWidth(0.85f)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Play indicator
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isPlaying) WataColors.playing
-                            else WataColors.textSecondary
-                        )
-                )
-
-                Spacer(modifier = Modifier.width(WataSpacing.sm))
-
-                // Duration
+            // Receipt indicator for own messages
+            if (isOwn) {
                 Text(
-                    text = formatDuration(message.duration),
-                    style = WataTypography.body
+                    text = if (isPlayedByRecipient) "✓✓" else "✓",
+                    style = WataTypography.small.copy(
+                        color = if (isPlayedByRecipient) WataColors.played else WataColors.textMuted
+                    )
                 )
-
-                Spacer(modifier = Modifier.width(WataSpacing.sm))
-
-                // Sender name
-                Text(
-                    text = if (isOwn) "You" else (message.sender.displayName ?: message.sender.id),
-                    style = WataTypography.small,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
+                Spacer(modifier = Modifier.width(WataSpacing.xs))
             }
+
+            // Play indicator dot
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isPlaying) WataColors.playing
+                        else messageColor.copy(alpha = 0.5f)
+                    )
+            )
+
+            Spacer(modifier = Modifier.width(WataSpacing.sm))
+
+            // Duration
+            Text(
+                text = formatDuration(message.duration),
+                style = WataTypography.body.copy(color = messageColor)
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Timestamp
+            Text(
+                text = formatTimestamp(message.timestamp),
+                style = WataTypography.small.copy(color = WataColors.textMuted)
+            )
+
+            Spacer(modifier = Modifier.width(WataSpacing.sm))
+
+            // Sender name (right-aligned)
+            Text(
+                text = if (isOwn) "You" else (message.sender.displayName ?: message.sender.id),
+                style = WataTypography.small.copy(color = messageColor.copy(alpha = 0.7f)),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

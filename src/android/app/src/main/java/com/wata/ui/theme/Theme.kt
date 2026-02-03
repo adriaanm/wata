@@ -35,9 +35,16 @@ object WataColors {
     val primary = Color(0xFF00AAFF)         // Buttons, links
     val primaryDark = Color(0xFF0088CC)     // Pressed state
 
+    // Message colors
+    val incoming = Color(0xFF00DDFF)        // Incoming messages - bright cyan
+    val incomingDim = Color(0xFF006677)     // Incoming played - dimmed
+    val outgoing = Color(0xFF88AACC)        // Outgoing messages - muted blue-gray
+    val outgoingDim = Color(0xFF445566)     // Outgoing played - dimmed
+
     // Status
     val recording = Color(0xFFFF3333)       // PTT active
     val playing = Color(0xFF33FF33)         // Audio playback
+    val played = Color(0xFF33CCFF)          // Message played by recipient (double-check)
     val error = Color(0xFFFF6666)           // Error states
 
     // Focus indicator (D-pad navigation)
