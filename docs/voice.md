@@ -90,12 +90,18 @@ The TUI supports hold-to-record PTT:
 - `src/tui/hooks/useAudioPlayer.ts` - Playback hook
 - `scripts/test-audio-poc.mjs` - POC with real microphone
 
-### Legacy: TuiAudioService
+### TuiAudioService (AudioCode Testing)
 
-Previous implementation using sox + FFmpeg pipeline. Kept for reference but no longer used.
+Utility service for testing the ABBREE hardware's audio codec. Used only in `bootstrap.ts` and `AdminView.tsx` for AudioCode testing.
 
-**Recording:** `rec (sox) → pipe → FFmpeg → .m4a file`
-**Playback:** `Matrix URL → download → temp file → afplay`
+**Functions:**
+- `playWav(path)` - Play WAV files via afplay (for tone verification)
+- `recordRawPcm(durationMs)` - Record raw PCM at 16kHz for AudioCode decoding
+
+**Recording:** `rec (sox) → temp file → Float32Array`
+**Playback:** `WAV file → afplay`
+
+Main voice recording/playback uses `PvRecorderAudioService` instead.
 
 ## Android Audio Stack
 
