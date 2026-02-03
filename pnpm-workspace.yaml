@@ -1,5 +1,14 @@
 packages:
-  - 'src/shared'
-  - 'src/rn'
-  - 'src/tui'
-  - 'src/web'
+  - src/shared
+  - src/rn
+  - src/tui
+  - src/web
+
+ignoredBuiltDependencies:
+  - '@discordjs/opus'
+  - libopus-node
+
+onlyBuiltDependencies:
+  - esbuild
+  - keytar
+  - unrs-resolver
