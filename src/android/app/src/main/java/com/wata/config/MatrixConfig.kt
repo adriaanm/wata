@@ -16,7 +16,7 @@ object MatrixConfig {
      * - For physical device with ADB reverse: http://localhost:8008
      * - For production: https://matrix.example.com
      */
-    const val HOMESERVER_URL = "http://localhost:8008"
+    const val HOMESERVER_URL = "http://macmini.fritz.box:8008"
 
     /**
      * Username to login with (without @user:server prefix)
