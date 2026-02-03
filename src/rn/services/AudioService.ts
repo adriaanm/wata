@@ -1,10 +1,10 @@
-import { Buffer } from 'buffer';
-
-import { encodeOggOpus } from '@shared/lib/audio-codec';
-
-import LiveAudioStream from 'react-native-live-audio-stream';
 import AudioRecorderPlayer, {
+  AudioEncoderAndroidType,
+  AudioSourceAndroidType,
+  OutputFormatAndroidType,
+  RecordBackType,
   PlayBackType,
+  AVEncoderAudioQualityIOSType,
 } from 'react-native-audio-recorder-player';
 import RNFS from 'react-native-fs';
 
@@ -19,23 +19,13 @@ type RecordingCallback = (currentPosition: number) => void;
 type PlaybackCallback = (currentPosition: number, duration: number) => void;
 type PlaybackCompleteCallback = () => void;
 
-// Audio configuration constants
-const SAMPLE_RATE = 16000;
-const CHANNELS = 1;
-const BITS_PER_SAMPLE = 16;
-const AUDIO_SOURCE = 6; // VOICE_RECOGNITION on Android
-
 class AudioService {
-  // AudioRecorderPlayer is exported as a singleton - used for playback only
+  // AudioRecorderPlayer is exported as a singleton
   private audioRecorderPlayer = AudioRecorderPlayer;
   private isRecording = false;
   private isPlaying = false;
   private currentRecordingPath: string | null = null;
   private recordingStartTime: number = 0;
-
-  // PCM chunks accumulated during recording
-  private pcmChunks: Int16Array[] = [];
-  private recordingProgressTimer: NodeJS.Timeout | null = null;
 
   private recordingCallbacks: RecordingCallback[] = [];
   private playbackCallbacks: PlaybackCallback[] = [];
@@ -43,16 +33,6 @@ class AudioService {
 
   constructor() {
     this.audioRecorderPlayer.setSubscriptionDuration(0.1); // Update every 100ms
-
-    // Initialize LiveAudioStream
-    LiveAudioStream.init({
-      sampleRate: SAMPLE_RATE,
-      channels: CHANNELS,
-      bitsPerSample: BITS_PER_SAMPLE,
-      audioSource: AUDIO_SOURCE,
-      bufferSize: 4096,
-      wavFile: '', // Required but unused when streaming live audio
-    } as Parameters<typeof LiveAudioStream.init>[0]);
   }
 
   async startRecording(): Promise<void> {
@@ -60,113 +40,69 @@ class AudioService {
       throw new Error('Already recording');
     }
 
-    // Clear any previous PCM data
-    this.pcmChunks = [];
-
-    // Generate unique filename for later
+    // Generate unique filename
     const timestamp = Date.now();
-    this.currentRecordingPath = `${RNFS.CachesDirectoryPath}/voice_${timestamp}.ogg`;
+    const path = `${RNFS.CachesDirectoryPath}/voice_${timestamp}.m4a`;
 
+    const audioSet = {
+      AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
+      AudioSourceAndroid: AudioSourceAndroidType.MIC,
+      AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.medium,
+      AVNumberOfChannelsKeyIOS: 1,
+      AVFormatIDKeyIOS: 'aac' as const,
+      OutputFormatAndroid: OutputFormatAndroidType.AAC_ADTS,
+    };
+
+    this.currentRecordingPath = path;
     this.recordingStartTime = Date.now();
     this.isRecording = true;
 
-    // Set up data listener for PCM chunks
-    LiveAudioStream.on('data', (data: string) => {
-      if (this.isRecording) {
-        // data is base64-encoded PCM
-        const chunk = Buffer.from(data, 'base64');
-        // Convert buffer to Int16Array (16-bit signed PCM)
-        const int16Chunk = new Int16Array(
-          chunk.buffer,
-          chunk.byteOffset,
-          chunk.byteLength / 2
-        );
-        this.pcmChunks.push(int16Chunk);
-      }
+    await this.audioRecorderPlayer.startRecorder(path, audioSet);
+
+    this.audioRecorderPlayer.addRecordBackListener((e: RecordBackType) => {
+      const position = e.currentPosition;
+      this.recordingCallbacks.forEach(cb => cb(position));
     });
-
-    // Start recording progress timer
-    this.recordingProgressTimer = setInterval(() => {
-      const position = Date.now() - this.recordingStartTime;
-      this.recordingCallbacks.forEach((cb) => cb(position));
-    }, 100);
-
-    await LiveAudioStream.start();
   }
 
   async stopRecording(): Promise<RecordingResult> {
-    if (!this.isRecording) {
+    if (!this.isRecording || !this.currentRecordingPath) {
       throw new Error('Not recording');
     }
 
-    // Stop recording
-    await LiveAudioStream.stop();
-
-    // Clear progress timer
-    if (this.recordingProgressTimer) {
-      clearInterval(this.recordingProgressTimer);
-      this.recordingProgressTimer = null;
-    }
-
+    await this.audioRecorderPlayer.stopRecorder();
+    this.audioRecorderPlayer.removeRecordBackListener();
     this.isRecording = false;
 
-    // Calculate duration
     const duration = Date.now() - this.recordingStartTime;
-
-    // Concatenate all PCM chunks into a single Int16Array
-    const totalSamples = this.pcmChunks.reduce(
-      (sum, chunk) => sum + chunk.length,
-      0
-    );
-    const pcm = new Int16Array(totalSamples);
-    let offset = 0;
-    for (const chunk of this.pcmChunks) {
-      pcm.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    // Encode to Ogg Opus using shared library
-    const oggOpusBuffer = encodeOggOpus(pcm, { sampleRate: SAMPLE_RATE });
-
-    // Write to temp file for compatibility with existing code
-    const recordingPath = this.currentRecordingPath;
-    if (!recordingPath) {
-      throw new Error('Recording path not set');
-    }
-
-    await RNFS.writeFile(
-      recordingPath,
-      oggOpusBuffer.toString('base64'),
-      'base64'
-    );
+    const stat = await RNFS.stat(this.currentRecordingPath);
 
     const result: RecordingResult = {
-      uri: recordingPath,
+      uri: this.currentRecordingPath,
       duration,
-      size: oggOpusBuffer.length,
-      mimeType: 'audio/ogg; codecs=opus',
+      size: Number(stat.size),
+      mimeType: 'audio/mp4',
     };
 
-    // Clean up
-    this.pcmChunks = [];
     this.currentRecordingPath = null;
-
     return result;
   }
 
   async cancelRecording(): Promise<void> {
     if (!this.isRecording) return;
 
-    await LiveAudioStream.stop();
-
-    // Clear progress timer
-    if (this.recordingProgressTimer) {
-      clearInterval(this.recordingProgressTimer);
-      this.recordingProgressTimer = null;
-    }
-
+    await this.audioRecorderPlayer.stopRecorder();
+    this.audioRecorderPlayer.removeRecordBackListener();
     this.isRecording = false;
-    this.pcmChunks = [];
+
+    // Delete the partial recording
+    if (this.currentRecordingPath) {
+      try {
+        await RNFS.unlink(this.currentRecordingPath);
+      } catch {
+        // Ignore deletion errors
+      }
+    }
     this.currentRecordingPath = null;
   }
 
@@ -183,12 +119,12 @@ class AudioService {
       const currentPosition = e.currentPosition;
       const duration = e.duration;
 
-      this.playbackCallbacks.forEach((cb) => cb(currentPosition, duration));
+      this.playbackCallbacks.forEach(cb => cb(currentPosition, duration));
 
       // Check if playback finished
       if (currentPosition >= duration - 100) {
         this.stopPlayback();
-        this.playbackCompleteCallbacks.forEach((cb) => cb());
+        this.playbackCompleteCallbacks.forEach(cb => cb());
       }
     });
   }
@@ -226,7 +162,7 @@ class AudioService {
     this.recordingCallbacks.push(callback);
     return () => {
       this.recordingCallbacks = this.recordingCallbacks.filter(
-        (cb) => cb !== callback
+        cb => cb !== callback,
       );
     };
   }
@@ -235,7 +171,7 @@ class AudioService {
     this.playbackCallbacks.push(callback);
     return () => {
       this.playbackCallbacks = this.playbackCallbacks.filter(
-        (cb) => cb !== callback
+        cb => cb !== callback,
       );
     };
   }
@@ -244,7 +180,7 @@ class AudioService {
     this.playbackCompleteCallbacks.push(callback);
     return () => {
       this.playbackCompleteCallbacks = this.playbackCompleteCallbacks.filter(
-        (cb) => cb !== callback
+        cb => cb !== callback,
       );
     };
   }
