@@ -13,8 +13,9 @@ Have fun with it!
 
 ## Frontends
 
-- **Android** (`src/`) - React Native app for PTT handhelds
-- **TUI** (`tui/`) - Terminal UI for macOS (see `tui/README.md`)
+- **Android** (`src/android/`) - Native Kotlin app for PTT handhelds
+- **TUI** (`src/tui/`) - Terminal UI for macOS (see `src/tui/README.md`)
+- **Web** (`src/web/`) - Web app for companion interface
 
 ## Goals
 
@@ -28,63 +29,46 @@ Wata is a walkie-talkie style app designed for:
 ## Architecture
 
 ```
-┌────────────────────────┐  ┌────────────────────────┐
-│   Android Frontend     │  │    TUI Frontend        │
-│   (React Native)       │  │    (Ink/Terminal)      │
-│                        │  │                        │
-│ - ContactListScreen    │  │ - ContactListView      │
-│ - ChatScreen           │  │ - ChatView             │
-│ - RN Audio/Keychain    │  │ - macOS Audio/Keychain │
-└───────────┬────────────┘  └───────────┬────────────┘
-            │                           │
-            └───────────┬───────────────┘
-                        ▼
-            ┌───────────────────────┐
-            │   SHARED BACKEND      │
-            │   (src/)              │
-            │                       │
-            │ - MatrixService       │
-            │ - Matrix hooks        │
-            │ - Types/Interfaces    │
-            └───────────┬───────────┘
-                        │
-                        ▼
-            ┌───────────────────────┐
-            │  Matrix Homeserver    │
-            │  (matrix.org)         │
-            └───────────────────────┘
+┌────────────────────────┐  ┌────────────────────────┐  ┌──────────────────────┐
+│   Android Frontend     │  │    TUI Frontend        │  │   Web Frontend       │
+│   (Native Kotlin)      │  │    (Ink/Terminal)      │  │   (Vite/React)       │
+│                        │  │                        │  │                      │
+│ - ContactListScreen    │  │ - ContactListView      │  │ - ContactListView    │
+│ - ChatScreen           │  │ - ChatView             │  │ - ChatView           │
+│ - Opus Audio/Keystore  │  │ - FFmpeg Audio/Keychain│  │ - Web Audio API      │
+└───────────┬────────────┘  └───────────┬────────────┘  └──────────┬───────────┘
+            │                           │                         │
+            └───────────────────────────┴─────────────────────────┘
+                                     │
+                                     ▼
+                        ┌───────────────────────┐
+                        │   SHARED BACKEND      │
+                        │   (src/shared/)      │
+                        │                       │
+                        │ - MatrixService       │
+                        │ - Matrix hooks        │
+                        │ - Types/Interfaces    │
+                        └───────────┬───────────┘
+                                    │
+                                    ▼
+                        ┌───────────────────────┐
+                        │  Matrix Homeserver    │
+                        │  (matrix.org)         │
+                        └───────────────────────┘
 ```
 
-**Both frontends share the same Matrix backend code** (`src/services/MatrixService.ts`, hooks, types), ensuring identical protocol behavior. Only UI and platform-specific services (audio, credentials) differ.
-
-### Key Files
-
-```
-src/
-├── App.tsx                    # Navigation setup
-├── config/
-│   └── matrix.ts              # Matrix credentials (configure here)
-├── services/
-│   ├── MatrixService.ts       # Matrix SDK wrapper
-│   └── AudioService.ts        # Recording/playback
-├── screens/
-│   ├── ContactListScreen.tsx  # List of DM rooms
-│   └── ChatScreen.tsx         # Voice message thread + PTT
-└── hooks/
-    ├── useMatrix.ts           # Matrix client state
-    └── useAudioRecorder.ts    # Recording state
-```
+**TUI and Web share the same Matrix backend code** (`src/shared/`), ensuring identical protocol behavior. Android has its own native Kotlin WataClient for direct hardware access.
 
 ## Tech Choices
 
 | Choice | Rationale |
 |--------|-----------|
-| React Native (bare) | Cross-platform potential, large ecosystem |
-| TypeScript | Type safety, better tooling |
-| matrix-js-sdk | Official SDK, well-maintained |
+| Native Kotlin | Direct hardware access, better Android 8 compatibility |
+| TypeScript (TUI/Web) | Type safety, better tooling |
+| matrix-js-sdk (TS) | Official SDK, well-maintained |
+| OkHttp (Android) | Efficient HTTP client |
 | matrix.org | Free, federated, no backend to maintain |
-| react-native-audio-recorder-player | Mature, supports AAC encoding |
-| react-native-keychain | Secure credential storage |
+| Ogg Opus | Voice-optimized codec, small file sizes |
 
 ## Getting Started
 
@@ -107,10 +91,7 @@ pnpm dev:server
 # For physical devices: Set up port forwarding (after connecting device)
 pnpm dev:forward
 
-# Start Metro bundler (for hot reload)
-pnpm start
-
-# In another terminal: Build and run on device
+# Build and run on Android device/emulator
 pnpm android
 ```
 
@@ -148,15 +129,15 @@ cd test/docker && docker-compose down
 
 ## Status
 
-**Current phase: Core implementation complete**
+**Current phase: Native Kotlin implementation complete**
 
-- [x] Project setup (React Native + TypeScript)
+- [x] Project setup (Native Kotlin + Gradle)
 - [x] Matrix integration (login, rooms, messaging)
-- [x] Audio recording and playback
-- [x] Basic UI screens (optimized for D-pad navigation)
+- [x] Audio recording and playback (Ogg Opus)
+- [x] Basic UI screens (Jetpack Compose, D-pad navigation)
 - [x] Auto-login (no keyboard required)
 - [x] Integration test infrastructure
-- [ ] Hardware PTT button (native Kotlin module)
+- [x] Hardware PTT button capture
 - [ ] Push notifications (FCM)
 - [ ] Device testing on Zello handhelds
 

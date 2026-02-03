@@ -26,7 +26,7 @@ interface Props {
   currentProfile: ProfileKey;
 }
 
-type AdminMode = 'menu' | 'invite' | 'set-name' | 'audiocode';
+type AdminMode = 'menu' | 'invite' | 'set-name' | 'audiocode' | 'send-test';
 
 export function AdminView({ onBack, currentProfile }: Props) {
   const profile = PROFILES[currentProfile];
@@ -44,6 +44,10 @@ export function AdminView({ onBack, currentProfile }: Props) {
   const [audioCodeStatus, setAudioCodeStatus] = useState<string>('Ready');
   const [audioCodeDecoded, setAudioCodeDecoded] = useState<string | null>(null);
   const [audioCodeRecording, setAudioCodeRecording] = useState(false);
+
+  // Send test message state
+  const [testRoomId, setTestRoomId] = useState('!4VPiIIGGXjsWj3a3KKma8IwfLqhpj5m0u40juCFIIF4');
+  const [testMessageStatus, setTestMessageStatus] = useState<string>('Ready');
 
   // Example onboarding data
   const EXAMPLE_ONBOARDING_DATA = {
@@ -146,6 +150,50 @@ export function AdminView({ onBack, currentProfile }: Props) {
       );
     } finally {
       setAudioCodeRecording(false);
+    }
+  };
+
+  // Send test message to specified room
+  const handleSendTestMessage = async () => {
+    const roomId = testRoomId.trim();
+    if (!roomId.startsWith('!')) {
+      setError('Invalid room ID (must start with !)');
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setTestMessageStatus('Sending test message...');
+
+    try {
+      // Generate 0.5 seconds of silence (16kHz PCM)
+      const SAMPLE_RATE = 16000;
+      const DURATION = 0.5; // seconds
+      const silenceSamples = new Int16Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
+
+      // Encode as WAV
+      const wavBuffer = encodeWav(silenceSamples, SAMPLE_RATE);
+
+      // Convert ArrayBuffer to Buffer
+      const buffer = Buffer.from(wavBuffer);
+
+      // Send using MatrixService API
+      const eventId = await matrixService.sendVoiceMessage(
+        roomId,
+        buffer,
+        'audio/ogg', // mimeType
+        DURATION * 1000, // duration in milliseconds
+        buffer.length, // size in bytes
+      );
+
+      setSuccess(`Sent test message to ${roomId.slice(-8)} (event: ${eventId.slice(-8)})`);
+      setTestMessageStatus('Ready');
+      LogService.getInstance().addEntry('log', `[TEST] Sent message to ${roomId.slice(-8)}: ${eventId.slice(-8)}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Send failed: ${msg}`);
+      setTestMessageStatus(`Error: ${msg}`);
+      LogService.getInstance().addEntry('error', `Send test message failed: ${msg}`);
     }
   };
 
@@ -253,6 +301,19 @@ export function AdminView({ onBack, currentProfile }: Props) {
       return;
     }
 
+    if (mode === 'send-test') {
+      if (key.escape) {
+        setMode('menu');
+        setError(null);
+        setSuccess(null);
+        setTestMessageStatus('Ready');
+      }
+      if (input === 's') {
+        handleSendTestMessage();
+      }
+      return;
+    }
+
     if (mode === 'invite') {
       if (key.escape) {
         setMode('menu');
@@ -302,6 +363,13 @@ export function AdminView({ onBack, currentProfile }: Props) {
       setAudioCodeDecoded(null);
       setError(null);
       setSuccess(null);
+    }
+
+    if (input === 't') {
+      setMode('send-test');
+      setError(null);
+      setSuccess(null);
+      setTestMessageStatus('Ready');
     }
   });
 
@@ -423,13 +491,15 @@ export function AdminView({ onBack, currentProfile }: Props) {
         <Text dimColor>
           {mode === 'menu'
             ? familyRoomId
-              ? '[n] Set name  [i] Invite  [r] Refresh  [m] Audio Test  [Esc] Back'
-              : '[n] Set name  [c] Create family  [m] Audio Test  [Esc] Back'
+              ? '[n] Set name  [i] Invite  [r] Refresh  [m] Audio Test  [t] Send Test  [Esc] Back'
+              : '[n] Set name  [c] Create family  [m] Audio Test  [t] Send Test  [Esc] Back'
             : mode === 'invite'
               ? '[Enter] Invite  [Esc] Cancel'
               : mode === 'audiocode'
                 ? '[s] Send  [r] Receive  [Esc] Back'
-                : '[Enter] Save  [Esc] Cancel'}
+                : mode === 'send-test'
+                  ? '[s] Send  [Esc] Back'
+                  : '[Enter] Save  [Esc] Cancel'}
         </Text>
       </Box>
 
@@ -482,6 +552,49 @@ export function AdminView({ onBack, currentProfile }: Props) {
               <Text>{audioCodeDecoded}</Text>
             </Box>
           )}
+        </Box>
+      )}
+
+      {/* Send Test Message Mode */}
+      {mode === 'send-test' && (
+        <Box
+          marginTop={1}
+          flexDirection="column"
+          borderStyle="single"
+          paddingX={1}
+        >
+          <Box marginBottom={1}>
+            <Text bold color={profile.color}>
+              Send Test Message
+            </Text>
+          </Box>
+
+          <Box marginBottom={1} flexDirection="column">
+            <Text>Send a test voice message (0.5s silence) to a specific room.</Text>
+            <Text dimColor>Useful for testing Android app reactivity.</Text>
+          </Box>
+
+          <Box marginBottom={1} flexDirection="column">
+            <Text>Room ID:</Text>
+            <Box>
+              <TextInput
+                value={testRoomId}
+                onChange={setTestRoomId}
+                placeholder="!roomId:server"
+              />
+            </Box>
+          </Box>
+
+          <Box marginBottom={1}>
+            <Text>Status: </Text>
+            <Text
+              color={
+                testMessageStatus === 'Ready' ? colors.playing : colors.textMuted
+              }
+            >
+              {testMessageStatus}
+            </Text>
+          </Box>
         </Box>
       )}
     </Box>

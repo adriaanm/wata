@@ -1,6 +1,5 @@
 packages:
   - src/shared
-  - src/rn
   - src/tui
   - src/web
 

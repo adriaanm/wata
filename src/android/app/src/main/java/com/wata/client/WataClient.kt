@@ -714,6 +714,8 @@ class WataClient(
         // Emit connection state changes
         engine.addEventHandler(object : SyncEngineEvents {
             override fun onSynced(nextBatch: String) {
+                // Refresh DM room cache after each sync to ensure we can find contacts for incoming messages
+                dmRoomService?.refreshFromSync()
                 emitConnectionStateChanged(ConnectionState.SYNCING)
             }
 

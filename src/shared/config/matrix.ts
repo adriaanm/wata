@@ -15,7 +15,7 @@
  * - Integration tests
  *
  * Future: This can be configured via:
- * - Build-time environment variables (react-native-config)
+ * - Build-time environment variables (for Android native Kotlin: edit MatrixConfig.kt)
  * - QR code scanning from a companion configuration app/website
  * - Device management portal
  */

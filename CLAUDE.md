@@ -3,10 +3,12 @@
 ## Working with Claude
 
 **Commit Policy:** Commit coherent changes as soon as they are complete. Don't batch unrelated changes or wait to commit until the end of a session.
+**Background Processes** Prefer tmux (remember we are using zsh).
+**Planning** Planning docs go in docs/planning. Once plan is complete, distil learnings, architecture, guidelines and move to docs/ as a guide.
 
 ## Project Status
 We are currently developing a prototype with three frontend targets:
-- **React Native app** (Android/iOS) - Primary target for PTT handhelds
+- **Android** - Primary target for PTT handhelds using Kotlin (src/android)
 - **TUI** (Terminal UI) - macOS/Linux CLI interface
 - **Web app** - Browser-based companion interface
 
@@ -17,6 +19,7 @@ v1 will target hobbyist usage (may require custom builds, but no compromises on 
 | Document | Description |
 |----------|-------------|
 | [docs/quickstart.md](docs/quickstart.md) | Getting started guide |
+| [docs/android-development.md](docs/android-development.md) | Native Android Kotlin development guide |
 | [docs/device-automation.md](docs/device-automation.md) | Physical device testing workflow |
 | [docs/tui-architecture.md](docs/tui-architecture.md) | TUI frontend design |
 | [docs/family-model.md](docs/family-model.md) | Family room architecture and Matrix mapping |
@@ -27,35 +30,22 @@ v1 will target hobbyist usage (may require custom builds, but no compromises on 
 
 ## Project Structure
 
-This is a pnpm workspaces monorepo with the following structure:
-
-```
-wata/
-├── src/
-│   ├── shared/      # Shared code (Matrix service, utils, types)
-│   ├── rn/          # React Native app (Android/iOS)
-│   ├── tui/         # Terminal UI (Ink/React)
-│   └── web/         # Web app (Vite/React)
-├── android/         # Native Android configuration
-├── ios/             # Native iOS configuration (future)
-├── test/            # Integration tests
-└── scripts/         # Development utilities
-```
+This is a mixed repo. For android, we use Gradle, sources in src/android.
+Everything TypeScript is managed by pnpm.
 
 ### Workspaces
 
 | Workspace | Package Name | Description |
 |-----------|--------------|-------------|
 | `src/shared` | `@wata/shared` | Matrix SDK integration, shared hooks, utilities |
-| `src/rn` | `@wata/rn` | React Native app |
 | `src/tui` | `@wata/tui` | Terminal UI (Ink) |
 | `src/web` | `@wata/web` | Web app (Vite) |
 
 ### Build Tools
 
-| Platform | Bundler | Transpiler |
+| Platform | Bundler/Build tool | Compiler |
 |----------|---------|------------|
-| React Native | Metro | Babel |
+| Android | Gradle | Kotlin compiler |
 | TUI | None (tsx) | TypeScript via tsx |
 | Web | Vite | esbuild |
 
@@ -69,15 +59,15 @@ import { MatrixService } from '@shared/services/MatrixService';
 ## Project Decisions
 
 ### Why Matrix over Signal/custom backend?
-- Signal requires running their server infrastructure or reverse-engineering their protocol
 - Matrix is an open standard with free hosted servers (matrix.org)
 - Voice messages sent as standard `m.audio` events are interoperable with Element
 - E2E encryption available via Olm/Megolm (deferred to v1, see `docs/roadmap.md`)
 
-### Why React Native (bare) over Expo?
-- Need native Kotlin module for hardware PTT button capture (`KeyEvent.KEYCODE_PTT`)
-- Expo's managed workflow doesn't support custom native modules without ejecting
-- Bare workflow provides full control over Android configuration
+### Why native Kotlin over React Native?
+- Direct hardware access for PTT button capture (`KeyEvent.KEYCODE_PTT`)
+- Better Android 8 compatibility without Metro/Babel complexity
+- Smaller APK size and faster startup
+- No JavaScript bridge overhead for Matrix protocol handling
 
 ### Why not real-time streaming?
 - Store-and-forward voice messages are simpler and more reliable
@@ -135,10 +125,6 @@ Note: Exact key codes may vary by device - test on actual hardware.
 - `matrix-js-sdk` uses ESM modules - Jest requires `NODE_OPTIONS='--experimental-vm-modules'`
 - Login requires `identifier` format for Conduit: `{type: 'm.id.user', user: 'username'}`
 - The SDK exports a singleton `MatrixClient` - create via `createClient()`
-- Requires crypto polyfills for React Native:
-  - `react-native-get-random-values` for `crypto.getRandomValues()`
-  - `buffer` for Node.js Buffer API
-  - Both imported in `src/rn/index.js` before app initialization
 
 **Conduit URL Normalization:**
 - Conduit requires trailing slash on `/_matrix/client/v3/pushrules/` but the SDK omits it
@@ -146,9 +132,10 @@ Note: Exact key codes may vary by device - test on actual hardware.
 - Push rules work correctly - Conduit returns proper rules and the SDK syncs successfully
 
 ### Audio
-- `react-native-audio-recorder-player` exports a singleton instance, not a class
-- Use AAC encoding (`.m4a`) for broad compatibility and small file sizes
+- Android uses native `AudioRecord`/`AudioTrack` with Opus encoding
+- TUI uses PvRecorder with FFmpeg encoding to Ogg Opus
 - Audio files uploaded to Matrix via `uploadContent()`, then sent as `m.audio` message
+- See [docs/voice.md](docs/voice.md) for architecture details
 
 ### Testing
 - Integration tests use Conduit (Rust Matrix server) - lighter than Synapse/Dendrite
@@ -171,13 +158,6 @@ See [docs/coding-rules.md](docs/coding-rules.md) for complete logging guidelines
 
 ## Remaining Work
 
-### Hardware PTT Button (Phase 4)
-Create native Kotlin module:
-- Location: `android/app/src/main/java/com/wata/PttButtonModule.kt`
-- Capture `KeyEvent.KEYCODE_PTT` (code 79) or device-specific codes
-- Bridge to JS via `NativeEventEmitter`
-- Hook: `usePttButton.ts`
-
 ### Push Notifications (v1)
 **Deferred to v1** - not needed for active PTT use.
 
@@ -189,26 +169,6 @@ Why it's not urgent:
 See `docs/roadmap.md` for implementation notes when ready.
 
 ## Development Workflow
-
-### Fast Iteration with Metro Bundler
-
-For rapid development with hot reloading:
-
-```bash
-# Terminal 1: Start Conduit server (one-time setup)
-pnpm dev:server
-
-# Terminal 2: Set up port forwarding (for physical devices, run after connecting)
-pnpm dev:forward
-
-# Terminal 3: Start Metro bundler
-pnpm start
-
-# Terminal 4: Deploy to device/emulator (one-time per session)
-pnpm android
-
-# Now edit code and see changes instantly via hot reload!
-```
 
 ### Device Testing with Local Conduit
 
@@ -239,10 +199,9 @@ homeserverUrl: 'http://192.168.x.x:8008'
 ### Commands Reference
 
 ```bash
-# React Native
-pnpm start                    # Metro bundler (for hot reload)
-pnpm android                  # Build and run on device/emulator
-pnpm ios                      # Build and run on iOS simulator
+# Android (native Kotlin)
+pnpm android                  # Build and run on device/emulator via Gradle
+cd src/android && ./gradlew assembleDebug    # Build APK only
 
 # TUI (Terminal UI)
 pnpm tui                      # Run TUI

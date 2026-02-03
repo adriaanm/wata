@@ -16,28 +16,43 @@ That's it! The server is now running and ready.
 
 ## Daily Development Workflow
 
-### Emulator (Simplest)
+### Android (Kotlin)
+
+The Android app is built with native Kotlin using Gradle. No Metro bundler or hot reload—build and deploy directly.
 
 ```bash
-# Terminal 1: Start Metro
-pnpm start
-
-# Terminal 2: Run on emulator
+# Build and install on device/emulator
 pnpm android
+
+# Or build APK only
+cd src/android && ./gradlew assembleDebug
+
+# Install APK on connected device
+cd src/android && ./gradlew installDebug
 ```
 
-Hot reload is active. Edit code and see changes instantly!
+For iterative development:
+- Edit code in `src/android/`
+- Rebuild and install with `pnpm android`
+- For faster builds, use Gradle's build cache: subsequent builds are faster
 
-### Physical Device
+### TUI (Terminal UI)
 
 ```bash
-# Terminal 1: Start Metro
-pnpm start
+# Run TUI
+pnpm tui
 
-# Terminal 2: Connect device, then set up port forwarding
+# Run with watch mode
+pnpm tui:dev
+```
+
+### Physical Device Testing
+
+```bash
+# Connect device, then set up port forwarding
 pnpm dev:forward
 
-# Terminal 3: Run on device
+# Build and deploy
 pnpm android
 ```
 
@@ -48,7 +63,8 @@ pnpm android
 The app auto-logs in as `alice`. To test messaging:
 
 **Option 1: Second device**
-- Edit `src/shared/config/matrix.ts` and change username to `'bob'`
+- Edit `src/android/app/src/main/java/com/wata/client/MatrixConfig.kt`
+- Change username to `"bob"` and rebuild
 - Build and run on second device
 
 **Option 2: Element web client**
@@ -72,7 +88,7 @@ pnpm dev:forward
 # Fallback to manual IP
 pnpm dev:ip
 
-# Update src/shared/config/matrix.ts with the IP shown
+# Update src/android/app/src/main/java/com/wata/client/MatrixConfig.kt with the IP shown
 ```
 
 **Server not responding:**
@@ -88,6 +104,5 @@ docker-compose restart
 
 The workflow is:
 1. Server running? ✓
-2. Metro running? ✓
-3. Port forwarding (for device)? ✓
-4. Deploy once, then hot reload forever!
+2. Port forwarding (for device)? ✓
+3. Build and deploy with `pnpm android`

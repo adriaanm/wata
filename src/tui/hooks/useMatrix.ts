@@ -66,13 +66,14 @@ export function useVoiceMessages(roomId: string) {
   const log = LogService.getInstance();
 
   useEffect(() => {
-    log.addEntry('log', `[useVoiceMessages] Subscribing to room ${roomId}`);
+    log.addEntry('log', `[useVoiceMessages] Subscribing to room ${roomId.slice(-8)}`);
 
     // Get initial messages
     const initialMessages = matrixService.getVoiceMessages(roomId);
+    const messageIds = initialMessages.map(m => m.eventId.slice(-8));
     log.addEntry(
       'log',
-      `[useVoiceMessages] Initial messages: ${initialMessages.length}, readBy: ${JSON.stringify(initialMessages.map(m => ({ id: m.eventId.slice(-8), readBy: m.readBy })))}`,
+      `[useVoiceMessages] Initial: ${initialMessages.length} msgs, ids: [${messageIds.slice(0, 3).join(', ')}...${messageIds.slice(-3).join(', ')}]`,
     );
     setMessages(initialMessages);
 
@@ -80,6 +81,8 @@ export function useVoiceMessages(roomId: string) {
     const unsubscribeMessages = matrixService.onNewVoiceMessage(
       (msgRoomId, message) => {
         if (msgRoomId === roomId) {
+          const newId = message.eventId.slice(-8);
+          log.addEntry('log', `[useVoiceMessages] Adding msg ${newId} to room ${roomId.slice(-8)}, size: ${messages.length} -> ${messages.length + 1}`);
           setMessages(prev => [...prev, message]);
         }
       },
@@ -89,14 +92,15 @@ export function useVoiceMessages(roomId: string) {
     const unsubscribeReceipts = matrixService.onReceiptUpdate(receiptRoomId => {
       log.addEntry(
         'log',
-        `[useVoiceMessages] Receipt update for room ${receiptRoomId}, subscribed to ${roomId}, match: ${receiptRoomId === roomId}`,
+        `[useVoiceMessages] Receipt update for room ${receiptRoomId.slice(-8)}, subscribed to ${roomId.slice(-8)}, match: ${receiptRoomId === roomId}`,
       );
       if (receiptRoomId === roomId) {
         // Re-fetch all messages to get updated readBy
         const updatedMessages = matrixService.getVoiceMessages(roomId);
+        const updatedIds = updatedMessages.map(m => m.eventId.slice(-8));
         log.addEntry(
           'log',
-          `[useVoiceMessages] Updated messages readBy: ${JSON.stringify(updatedMessages.map(m => ({ id: m.eventId.slice(-8), readBy: m.readBy })))}`,
+          `[useVoiceMessages] Updated: ${updatedMessages.length} msgs, ids: [${updatedIds.slice(0, 3).join(', ')}...${updatedIds.slice(-3).join(', ')}]`,
         );
         setMessages(updatedMessages);
       }

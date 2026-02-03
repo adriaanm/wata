@@ -9,7 +9,6 @@
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/shared/*"],
-      "@rn/*": ["src/rn/*"],
       "@tui/*": ["src/tui/*"]
     }
   },

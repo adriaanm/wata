@@ -109,9 +109,9 @@ class DmRoomService(
         val otherMember = joinedMembers.find { it.userId != userId }
         if (otherMember == null) return null
 
-        // Verify this looks like a DM by checking is_direct flag
-        if (!hasIsDirectFlag(room)) return null
-
+        // Accept any 2-person room as a DM (relaxed check for recipient-side)
+        // The is_direct flag may not be set on rooms created by others
+        logger.log("[DMRoomService] getContactForRoom: inferred DM for ${otherMember.userId} from room membership (cache miss)")
         return Contact(
             user = User(
                 id = otherMember.userId,

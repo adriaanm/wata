@@ -24,13 +24,12 @@ The TUI frontend provides a keyboard-driven interface for Matrix voice messaging
 
 ### What is Platform-Specific
 
-| Android (`src/`) | TUI (`tui/src/`) |
-|------------------|------------------|
-| `services/AudioService.ts` (RN audio) | `services/TuiAudioService.ts` (Node.js audio) |
-| `screens/*.tsx` (React Native) | `views/*.tsx` (Ink) |
-| `components/*.tsx` (RN components) | `components/*.tsx` (Ink components) |
-| `hooks/useAudioRecorder.ts` | `hooks/useAudioRecorder.ts` (reimplemented) |
-| `hooks/useAudioPlayer.ts` | `hooks/useAudioPlayer.ts` (reimplemented) |
+| Android (`src/android/`) | TUI/Web (`src/tui/`, `src/web/`) |
+|--------------------------|---------------------------------|
+| `audio/` (native Kotlin Opus) | `services/PvRecorderAudioService.ts` (FFmpeg) |
+| `ui/` (Jetpack Compose) | `views/*.tsx` (Ink) or components (React) |
+| N/A | `hooks/useAudioRecorder.ts` (keyboard-based) |
+| N/A | `hooks/useAudioPlayer.ts` |
 
 ### Abstraction Strategy
 
@@ -44,11 +43,9 @@ export interface CredentialStorage {
   clear(): Promise<void>;
 }
 
-// Android: src/services/RNCredentialStorage.ts
-// Uses @react-native-keychain
-
-// TUI: tui/src/services/KeytarCredentialStorage.ts
-// Uses keytar (macOS Keychain)
+// Android: native Android Keystore (via EncryptedSharedPreferences)
+// TUI: tui/src/services/KeytarCredentialStorage.ts (uses keytar / macOS Keychain)
+// Web: localStorage or sessionStorage
 ```
 
 MatrixService accepts these adapters via dependency injection, keeping the core logic identical.
@@ -437,18 +434,18 @@ class TuiAudioService {
 }
 ```
 
-### MatrixService Refactoring (Android)
+### MatrixService Refactoring
 
-To enable sharing, the Android `MatrixService.ts` must be refactored to remove platform-specific dependencies:
+To enable sharing, the `MatrixService.ts` must be refactored to remove platform-specific dependencies:
 
 **Before (direct dependency):**
 ```typescript
-// src/services/MatrixService.ts (Android)
-import * as Keychain from 'react-native-keychain';
+// src/services/MatrixService.ts
+import * as Keychain from 'react-native-keychain'; // Or other platform-specific lib
 
 class MatrixService {
   async storeCredentials(user: string, pass: string) {
-    await Keychain.setGenericPassword(user, pass);  // RN-specific!
+    await Keychain.setGenericPassword(user, pass);  // Platform-specific!
   }
 }
 ```
@@ -473,24 +470,22 @@ class MatrixService {
   }
 }
 
-// src/services/RNCredentialStorage.ts (Android adapter)
-import * as Keychain from 'react-native-keychain';
-export class RNCredentialStorage implements CredentialStorage { ... }
-
-// tui/src/services/KeytarCredentialStorage.ts (TUI adapter)
-import keytar from 'keytar';
-export class KeytarCredentialStorage implements CredentialStorage { ... }
+// Platform-specific implementations:
+// - TUI: src/tui/services/KeytarCredentialStorage.ts (uses keytar / macOS Keychain)
+// - Web: src/web/services/LocalStorageCredentialStorage.ts
+// - Android: native Android Keystore (separate WataClient.kt implementation)
 ```
 
-**Other platform abstractions needed:**
+**Other platform abstractions:**
 
 | Dependency | Abstraction |
 |------------|-------------|
-| `react-native-keychain` | `CredentialStorage` interface |
-| `react-native-fs` | Node.js `fs` (conditional import or abstraction) |
-| `fetch` | Works in both (Node 18+ has native fetch) |
+| keytar (TUI) | `CredentialStorage` interface |
+| localStorage (Web) | `CredentialStorage` interface |
+| Android Keystore | Native Kotlin (separate implementation) |
+| `fetch` | Works in all platforms (Node 18+ has native fetch) |
 
-The goal: **MatrixService.ts has zero React Native imports** and can be imported directly by the TUI.
+The goal: **MatrixService.ts has zero platform-specific imports** and can be imported directly by TUI and Web frontends.
 
 ## Theme Mapping
 

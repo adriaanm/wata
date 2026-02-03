@@ -5,7 +5,6 @@
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/shared/*"],
-      "@rn/*": ["src/rn/*"],
       "@tui/*": ["src/tui/*"]
     }
   },
@@ -15,8 +14,6 @@
   "include": [
     "src/shared/**/*.ts",
     "src/shared/**/*.tsx",
-    "src/rn/**/*.ts",
-    "src/rn/**/*.tsx",
     "src/tui/**/*.ts",
     "src/tui/**/*.tsx"
   ],

@@ -99,43 +99,44 @@ Previous implementation using sox + FFmpeg pipeline. Kept for reference but no l
 
 ## Android Audio Stack
 
-### Current Implementation: AudioService
+### Current Implementation: Native Kotlin with Opus
 
-Uses `react-native-audio-recorder-player` for both recording and playback.
+The Android app uses native Kotlin with the `android-opus-codec` library for encoding and `AudioRecord`/`AudioTrack` for recording and playback.
 
-**Recording:**
-```typescript
-AudioEncoderAndroid: AudioEncoderAndroidType.AAC
-OutputFormatAndroid: OutputFormatAndroidType.AAC_ADTS
-// Result: .m4a file, audio/mp4
+**Recording Pipeline:**
+```
+AudioRecord (16kHz PCM) → OpusCodec.encode() → OggMuxer → Ogg Opus file
 ```
 
-- Records directly to AAC in M4A container
-- Sample rate: device default (typically 44.1kHz)
+**Playback Pipeline:**
+```
+Matrix URL → download → OggDemuxer → OpusCodec.decode() → AudioTrack
+```
+
+**Components:**
+
+| Class | Purpose | Location |
+|-------|---------|----------|
+| `AudioService` | Recording/playback orchestration | `src/android/app/src/main/java/com/wata/audio/AudioService.kt` |
+| `OpusCodec` | Opus encoding/decoding wrapper | `src/android/app/src/main/java/com/wata/audio/OpusCodec.kt` |
+| `OggMuxer` | Ogg container creation | `src/android/app/src/main/java/com/wata/audio/OggMuxer.kt` |
+| `OggDemuxer` | Ogg container parsing | `src/android/app/src/main/java/com/wata/audio/OggDemuxer.kt` |
+
+**Recording Configuration:**
+- Sample rate: 16kHz (voice-optimized)
 - Channels: mono
-- Quality: medium
+- Opus frame size: 960 samples (60ms at 16kHz)
+- Bitrate: ~24kbps (VOIP mode)
 
 **Playback:**
-```typescript
-audioService.startPlayback(uri)  // plays from local file or URL
-```
+- Uses `AudioTrack` for low-latency playback
+- Downloads from MXC URLs to temporary file
+- Parses Ogg container, decodes Opus packets
+- Streams decoded PCM to AudioTrack
 
-**Considerations:**
-- AAC encoding is more CPU-intensive than Opus
-- AAC is designed for music, not voice
-- Files may be larger than necessary for voice
-
-### Future: Opus on Android
-
-For consistency with TUI and better voice quality, consider:
-
-1. **react-native-opus** - React Native Opus bindings
-2. **Native Kotlin module** - Direct FFI to libopus
-
-Benefits:
-- Smaller file sizes
-- Better voice quality at low bitrates
-- Consistent format across platforms
+**Files:**
+- `src/android/app/src/main/java/com/wata/audio/` - All audio-related classes
+- See [docs/android-development.md](android-development.md) for architecture details
 
 ## Playback Considerations
 

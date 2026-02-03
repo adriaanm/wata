@@ -1,7 +1,9 @@
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Buffer } from 'buffer';
 
 import { matrixService } from '../App.js';
+import { encodeWav } from '../../shared/lib/wav.js';
 import { FocusableItem } from '../components/FocusableItem.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
 import { useContactStatus } from '../hooks/useContactStatus.js';
@@ -228,6 +230,30 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     }
   }, [sendError, contacts, selectedIndex, setContactSendError]);
 
+  // Send test message to hardcoded Android room (for reactivity testing)
+  const sendTestMessage = useCallback(async () => {
+    const TEST_ROOM_ID = '!4VPiIIGGXjsWj3a3KKma8IwfLqhpj5m0u40juCFIIF4';
+    const SAMPLE_RATE = 16000;
+    const DURATION = 0.5; // seconds
+
+    LogService.getInstance().addEntry('log', `[TEST] Sending test message to ${TEST_ROOM_ID.slice(-8)}...`);
+
+    // Generate 0.5 seconds of silence (16kHz PCM)
+    const silenceSamples = new Int16Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
+    const wavBuffer = encodeWav(silenceSamples, SAMPLE_RATE);
+    const buffer = Buffer.from(wavBuffer);
+
+    const eventId = await matrixService.sendVoiceMessage(
+      TEST_ROOM_ID,
+      buffer,
+      'audio/ogg',
+      DURATION * 1000,
+      buffer.length
+    );
+
+    LogService.getInstance().addEntry('success', `[TEST] Sent! Event: ${eventId.slice(-8)}`);
+  }, []);
+
   // Calculate viewport dimensions
   const terminalHeight = stdout?.rows || 24;
   const { visibleContacts, hasMore, startIndex } = useMemo(() => {
@@ -272,6 +298,15 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
 
   // Keyboard navigation
   useInput((input, key) => {
+    // Test message to Android room (hardcoded for reactivity testing)
+    if (input === 'T') {
+      sendTestMessage().catch(err => {
+        const msg = err instanceof Error ? err.message : String(err);
+        LogService.getInstance().addEntry('error', `Test message failed: ${msg}`);
+      });
+      return;
+    }
+
     if (input === 'q' || (key.ctrl && input === 'c')) {
       exit();
     }
@@ -449,7 +484,7 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
       {/* Help text */}
       <Box marginTop={1}>
         <Text dimColor>
-          ↑↓ Navigate Space Talk Enter History a Admin l Logs q Quit
+          ↑↓ Navigate Space Talk Enter History T TestMsg a Admin l Logs q Quit
         </Text>
       </Box>
     </Box>

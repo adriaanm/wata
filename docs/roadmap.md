@@ -15,24 +15,14 @@ Complete. See [docs/voice.md](voice.md) for architecture details.
 
 ## Android Audio Review
 
-The Android app uses react-native-audio-recorder-player with AAC encoding. Consider migrating to Opus for consistency with TUI.
+The Android app uses native Kotlin with Opus encoding (Ogg Opus format). This is consistent with the TUI implementation.
 
-**Review items:**
-
-1. **Evaluate Opus on Android**
-   - Research react-native-opus or native Kotlin bindings
-   - Compare file sizes and quality vs current AAC
-   - Benchmark CPU usage on target PTT devices
-
-2. **Audio Quality Settings**
-   - Current: 44.1kHz AAC (music-optimized)
-   - Target: 16kHz Opus (voice-optimized)
-   - Potential 4-5x reduction in file size
-
-3. **Format Consistency**
-   - Both platforms should produce same format for interop
-   - Target: `audio/ogg; codecs=opus` on both TUI and Android
-   - Fallback: keep AAC if Opus proves problematic on Android
+**Current Implementation:**
+- Native `AudioRecord`/`AudioTrack` for recording/playback
+- `android-opus-codec` library for Opus encoding/decoding
+- Custom Ogg muxer/demuxer for container format
+- 16kHz mono, Opus VOIP mode at ~24kbps
+- See [docs/voice.md](voice.md) for architecture details
 
 ## Requirements for v1
 
