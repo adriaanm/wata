@@ -25,6 +25,14 @@ import kotlinx.coroutines.launch
 private const val TAG = "WataViewModel"
 
 /**
+ * Message status for a single contact
+ */
+data class ContactMessageStatus(
+    val unplayedCount: Int = 0,  // Unplayed incoming messages
+    val failedCount: Int = 0     // Failed outgoing messages
+)
+
+/**
  * UI state for the contact list
  */
 data class WataUiState(
@@ -32,7 +40,9 @@ data class WataUiState(
     val contacts: List<Contact> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null,
-    val currentUserId: String? = null
+    val currentUserId: String? = null,
+    // Per-contact message status (contactUserId -> status)
+    val contactMessageStatus: Map<String, ContactMessageStatus> = emptyMap()
 )
 
 /**
@@ -87,22 +97,70 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onMessageReceived(message: VoiceMessage, conversation: Conversation) {
-            Log.d(TAG, "Message received: ${message.id} in ${conversation.id}")
-            // If we're viewing this conversation, add message directly to state
-            if (_chatState.value.roomId == conversation.id) {
+            val currentSize = _chatState.value.messages.size
+            val currentIds = _chatState.value.messages.take(3).map { it.id.takeLast(8) } + _chatState.value.messages.takeLast(3).map { it.id.takeLast(8) }
+            Log.d(TAG, "onMessageReceived: msg=${message.id.takeLast(8)}, conv=${conversation.id.takeLast(8)}, currentRoomId=${_chatState.value.roomId?.takeLast(8)}, currentSize=$currentSize, ids=$currentIds")
+
+            // Update contact message status for the contact list
+            val contactUserId = conversation.contact?.user?.id
+            if (contactUserId != null) {
+                val isFromMe = message.sender.id == _uiState.value.currentUserId
+                _uiState.update { state ->
+                    val currentStatus = state.contactMessageStatus[contactUserId] ?: ContactMessageStatus()
+                    val newStatus = when {
+                        // Outgoing message that failed
+                        isFromMe && message.failed -> currentStatus.copy(
+                            failedCount = currentStatus.failedCount + 1
+                        )
+                        // Incoming message that's unplayed
+                        !isFromMe && !message.isPlayed -> currentStatus.copy(
+                            unplayedCount = currentStatus.unplayedCount + 1
+                        )
+                        else -> currentStatus
+                    }
+                    state.copy(
+                        contactMessageStatus = state.contactMessageStatus + (contactUserId to newStatus)
+                    )
+                }
+            }
+
+            // Once we have an active chat (roomId is set), add messages for that room to state.
+            // This ensures we don't miss messages that arrive before/during openChat's async setup.
+            // The UI will only display messages for the current roomId anyway.
+            if (_chatState.value.roomId != null && _chatState.value.roomId == conversation.id) {
                 _chatState.update { state ->
                     // Add message if not already present
                     if (state.messages.none { it.id == message.id }) {
+                        val newSize = state.messages.size + 1
+                        Log.d(TAG, "Adding message to chat state: ${message.id.takeLast(8)}, size: $currentSize -> $newSize")
                         state.copy(messages = state.messages + message)
                     } else {
+                        Log.d(TAG, "Message already in state, skipping: ${message.id.takeLast(8)}")
                         state
                     }
                 }
+            } else {
+                Log.d(TAG, "Ignoring message for different room (or no room set): roomId=${_chatState.value.roomId?.takeLast(8)}, msgConv=${conversation.id.takeLast(8)}")
             }
         }
 
         override fun onMessagePlayed(message: VoiceMessage, roomId: String) {
             Log.d(TAG, "Message played: ${message.id}")
+
+            // Update contact message status - decrement unplayed count for the sender
+            val isFromMe = message.sender.id == _uiState.value.currentUserId
+            if (!isFromMe) {
+                _uiState.update { state ->
+                    val currentStatus = state.contactMessageStatus[message.sender.id] ?: ContactMessageStatus()
+                    val newStatus = currentStatus.copy(
+                        unplayedCount = maxOf(0, currentStatus.unplayedCount - 1)
+                    )
+                    state.copy(
+                        contactMessageStatus = state.contactMessageStatus + (message.sender.id to newStatus)
+                    )
+                }
+            }
+
             // If we're viewing this conversation, update the message's played status
             if (_chatState.value.roomId == roomId) {
                 _chatState.update { state ->
@@ -208,13 +266,26 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
     fun openChat(contactUserId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                Log.d(TAG, "Opening chat with: $contactUserId")
+                Log.d(TAG, "[openChat] Starting openChat for: $contactUserId, current roomId=${_chatState.value.roomId}")
+
+                // Clear unplayed count when opening chat (user will see messages)
+                _uiState.update { state ->
+                    val currentStatus = state.contactMessageStatus[contactUserId]
+                    if (currentStatus != null && currentStatus.unplayedCount > 0) {
+                        val newStatus = currentStatus.copy(unplayedCount = 0)
+                        state.copy(
+                            contactMessageStatus = state.contactMessageStatus + (contactUserId to newStatus)
+                        )
+                    } else {
+                        state
+                    }
+                }
 
                 // Get or create DM room
                 val roomId = client.getDMRoomId(contactUserId)
                     ?: client.createDMRoom(contactUserId)
 
-                Log.d(TAG, "DM room ID: $roomId")
+                Log.d(TAG, "[openChat] Got DM room ID: $roomId")
 
                 _chatState.update {
                     it.copy(
@@ -224,11 +295,10 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
-                // Load messages
-                refreshMessages()
+                Log.d(TAG, "[openChat] Set roomId in chatState to: ${_chatState.value.roomId}")
 
-                // Start periodic message refresh while chat is open
-                startMessageRefresh()
+                // Load initial messages
+                refreshMessages()
 
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to open chat", e)
@@ -240,38 +310,26 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
      * Close the current chat
      */
     fun closeChat() {
-        messageRefreshJob?.cancel()
-        messageRefreshJob = null
         _chatState.value = ChatUiState()
     }
 
     /**
-     * Refresh messages for current chat
+     * Refresh messages for current chat (called once on open).
+     * New messages arrive reactively via onMessageReceived.
      */
     private fun refreshMessages() {
         val roomId = _chatState.value.roomId ?: return
+        Log.d(TAG, "[refreshMessages] Refreshing messages for room: $roomId")
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val conversation = client.getConversationByRoomId(roomId)
                 if (conversation != null) {
+                    Log.d(TAG, "[refreshMessages] Got ${conversation.messages.size} messages, replacing current ${_chatState.value.messages.size}")
                     _chatState.update { it.copy(messages = conversation.messages) }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to refresh messages", e)
-            }
-        }
-    }
-
-    /**
-     * Start periodic message refresh
-     */
-    private fun startMessageRefresh() {
-        messageRefreshJob?.cancel()
-        messageRefreshJob = viewModelScope.launch(Dispatchers.IO) {
-            while (true) {
-                delay(2000) // Refresh every 2 seconds
-                refreshMessages()
             }
         }
     }

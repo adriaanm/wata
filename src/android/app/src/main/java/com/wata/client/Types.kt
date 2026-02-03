@@ -106,7 +106,9 @@ data class VoiceMessage(
     /** Has current user played this message */
     val isPlayed: Boolean,
     /** User IDs who have played this message */
-    val playedBy: List<String> = emptyList()
+    val playedBy: List<String> = emptyList(),
+    /** Whether sending this message failed */
+    val failed: Boolean = false
 )
 
 // ============================================================================

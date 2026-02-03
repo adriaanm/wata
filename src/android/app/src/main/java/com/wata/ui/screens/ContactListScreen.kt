@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
@@ -19,6 +22,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wata.client.ConnectionState
@@ -65,6 +70,7 @@ fun ContactListScreen(
             uiState.contacts.isEmpty() -> EmptyContent()
             else -> ContactList(
                 contacts = uiState.contacts,
+                contactMessageStatus = uiState.contactMessageStatus,
                 onSelectContact = onSelectContact
             )
         }
@@ -184,6 +190,7 @@ private fun EmptyContent() {
 @Composable
 private fun ContactList(
     contacts: List<Contact>,
+    contactMessageStatus: Map<String, com.wata.ui.viewmodel.ContactMessageStatus>,
     onSelectContact: (contactUserId: String, contactName: String) -> Unit
 ) {
     LazyColumn(
@@ -195,8 +202,11 @@ private fun ContactList(
             items = contacts,
             key = { it.user.id }
         ) { contact ->
+            val status = contactMessageStatus[contact.user.id]
             ContactItem(
                 contact = contact,
+                hasUnplayed = status?.unplayedCount ?: 0 > 0,
+                hasFailed = status?.failedCount ?: 0 > 0,
                 onClick = {
                     onSelectContact(
                         contact.user.id,
@@ -212,20 +222,56 @@ private fun ContactList(
 @Composable
 private fun ContactItem(
     contact: Contact,
+    hasUnplayed: Boolean,
+    hasFailed: Boolean,
     onClick: () -> Unit
 ) {
     FocusableSurface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column {
-            Text(
-                text = contact.user.displayName ?: contact.user.id,
-                style = WataTypography.large.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            // TODO: Add last message preview when available
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = contact.user.displayName ?: contact.user.id,
+                    style = WataTypography.large.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Status indicators
+            if (hasFailed || hasUnplayed) {
+                Row(
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.width(WataSpacing.lg)
+                ) {
+                    // Red dot for failed messages (shown first/leftmost)
+                    if (hasFailed) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(WataColors.error)
+                        )
+                    }
+                    // Blue dot for unplayed messages (shown after failed)
+                    if (hasUnplayed) {
+                        if (hasFailed) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(WataColors.primary)
+                        )
+                    }
+                }
+            }
         }
     }
 }
