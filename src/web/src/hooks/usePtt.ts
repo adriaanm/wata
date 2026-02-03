@@ -102,7 +102,7 @@ export function usePtt({
       setPttState('sending');
       setSendError(null);
 
-      // Stop audio recording and get the buffer
+      // Stop audio recording and get the audio data
       const result = await stopAudioRecording();
 
       // Get the Matrix room ID for this contact
@@ -111,7 +111,7 @@ export function usePtt({
       // Send the voice message to Matrix
       await matrixService.sendVoiceMessage(
         roomId,
-        result.buffer,
+        result.data,
         result.mimeType,
         result.duration,
         result.size,

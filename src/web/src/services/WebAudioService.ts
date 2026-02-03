@@ -12,10 +12,8 @@
  * - For consistent cross-browser encoding, future implementation could use Opus WASM
  */
 
-import { Buffer } from 'buffer';
-
 export interface RecordingResult {
-  buffer: Buffer;
+  data: Uint8Array;
   mimeType: string;
   duration: number;
   size: number;
@@ -110,11 +108,11 @@ export class WebAudioService {
           this.stream = null;
 
           const arrayBuffer = await blob.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
+          const data = new Uint8Array(arrayBuffer);
           const duration = (Date.now() - this.startTime) / 1000; // Convert to seconds
 
           resolve({
-            buffer,
+            data,
             mimeType: blob.type,
             duration,
             size: blob.size,
@@ -192,28 +190,51 @@ export class WebAudioService {
     // Store callbacks for this playback session
     this.playbackCallbacks = options;
 
-    const audio = new Audio(url);
-
-    // Set up event listeners
-    audio.addEventListener('ended', () => {
-      this.playbackState = 'ended';
-      this.playbackCallbacks.onEnded?.();
-    });
-
-    audio.addEventListener('error', e => {
-      this.playbackState = 'idle';
-      const error = new Error(`Audio playback failed: ${e}`);
-      this.playbackCallbacks.onError?.(error);
-    });
-
-    audio.addEventListener('timeupdate', () => {
-      this.playbackCallbacks.onTimeUpdate?.(audio.currentTime);
-    });
-
-    this.currentAudio = audio;
-    this.playbackState = 'playing';
-
     try {
+      // Fetch the audio data first (handles auth via URL params)
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const blob = await response.blob();
+
+      console.log('[WebAudioService] Fetched audio blob:', {
+        type: blob.type,
+        size: blob.size,
+      });
+
+      // Create a blob URL for playback
+      const blobUrl = URL.createObjectURL(blob);
+
+      const audio = new Audio(blobUrl);
+
+      // Set up event listeners
+      audio.addEventListener('ended', () => {
+        this.playbackState = 'ended';
+        this.playbackCallbacks.onEnded?.();
+        // Clean up the blob URL after playback
+        URL.revokeObjectURL(blobUrl);
+      });
+
+      audio.addEventListener('error', e => {
+        this.playbackState = 'idle';
+        // Get detailed error info
+        const mediaError = (e.target as HTMLAudioElement).error;
+        const errorMsg = mediaError
+          ? `Code ${mediaError.code}: ${mediaError.message}`
+          : `Unknown error: ${JSON.stringify(e)}`;
+        const error = new Error(`Audio playback failed: ${errorMsg}`);
+        this.playbackCallbacks.onError?.(error);
+        URL.revokeObjectURL(blobUrl);
+      });
+
+      audio.addEventListener('timeupdate', () => {
+        this.playbackCallbacks.onTimeUpdate?.(audio.currentTime);
+      });
+
+      this.currentAudio = audio;
+      this.playbackState = 'playing';
+
       await audio.play();
     } catch (error) {
       this.playbackState = 'idle';

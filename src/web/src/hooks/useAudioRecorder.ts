@@ -101,7 +101,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
 
   /**
    * Stop recording and return the audio data
-   * Returns a RecordingResult with buffer, mimeType, duration, and size
+   * Returns a RecordingResult with data, mimeType, duration, and size
    */
   const stopRecording = useCallback(async (): Promise<RecordingResult> => {
     try {
