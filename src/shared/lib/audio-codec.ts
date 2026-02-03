@@ -15,7 +15,7 @@
  */
 
 import { OggOpusMuxer, OggDemuxer } from './ogg.js';
-import { OpusEncoder, OpusDecoder } from './opus.js';
+import { EncoderFactory, DecoderFactory, OpusEncoder, OpusDecoder } from './opus.js';
 import { resample } from './resample.js';
 import type { Logger } from './wata-client/types.js';
 
@@ -135,7 +135,8 @@ function float32ToInt16(float32: Float32Array): Int16Array {
  */
 export function encodeOggOpus(
   pcm: Int16Array | Float32Array,
-  options: EncodeOptions
+  options: EncodeOptions,
+  mkEncoder: EncoderFactory
 ): Buffer {
   const { sampleRate, channels = 1, logger } = options;
 
@@ -175,8 +176,8 @@ export function encodeOggOpus(
     sampleRate: OPUS_SAMPLE_RATE,
     channels,
     application: 'voip',
-    logger,
-  });
+    logger
+  }, mkEncoder );
 
   // Step 4: Create Ogg muxer
   // Note: Don't call writeHeaders() here - muxPackets() handles that
@@ -261,6 +262,7 @@ export function encodeOggOpus(
  */
 export function decodeOggOpus(
   ogg: Buffer,
+  mkDecoder: DecoderFactory,
   options?: DecodeOptions
 ): DecodeResult {
   const { logger } = options ?? {};
@@ -282,7 +284,7 @@ export function decodeOggOpus(
     sampleRate: OPUS_SAMPLE_RATE,
     channels: OPUS_CHANNELS,
     logger,
-  });
+  }, mkDecoder);
 
   // Step 3: Decode all packets
   const frames: Int16Array[] = [];

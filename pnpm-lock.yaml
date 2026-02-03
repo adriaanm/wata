@@ -81,6 +81,9 @@ importers:
 
   src/tui:
     dependencies:
+      '@evan/wasm':
+        specifier: ^0.0.95
+        version: 0.0.95
       '@picovoice/pvrecorder-node':
         specifier: ^1.2.8
         version: 1.2.8
@@ -108,6 +111,9 @@ importers:
 
   src/web:
     dependencies:
+      '@evan/wasm':
+        specifier: ^0.0.95
+        version: 0.0.95
       '@wata/shared':
         specifier: workspace:*
         version: link:../shared

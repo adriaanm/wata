@@ -13,6 +13,7 @@
 
 import { Buffer } from 'buffer';
 import { decodeOggOpus } from '@shared/lib/audio-codec';
+import { mkDecoder } from '../lib/opus-factories';
 
 export interface RecordingResult {
   data: Uint8Array;
@@ -246,7 +247,7 @@ export class WebAudioService {
       const arrayBuffer = await response.arrayBuffer();
 
       // Decode Ogg Opus to PCM using @shared/lib/audio-codec
-      const result = decodeOggOpus(Buffer.from(arrayBuffer));
+      const result = decodeOggOpus(Buffer.from(arrayBuffer), mkDecoder);
 
       // Convert Int16Array to Float32Array for Web Audio API
       const float32 = new Float32Array(result.pcm.length);

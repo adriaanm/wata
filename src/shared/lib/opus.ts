@@ -7,7 +7,6 @@
  * @module opus
  */
 
-import { Encoder, Decoder } from '@evan/wasm/target/opus/deno.js';
 import type { Logger } from './wata-client/types.js';
 
 // ============================================================================
@@ -41,6 +40,75 @@ export interface OpusDecoderOptions {
 }
 
 // ============================================================================
+// Abstract Encoder/Decoder Types
+// ============================================================================
+
+/**
+ * Abstract interface for audio encoders
+ *
+ * Defines the contract for platform-specific encoder implementations.
+ */
+export interface Encoder {
+  /**
+   * Encode PCM audio data
+   *
+   * @param pcm - PCM audio data to encode
+   * @returns Encoded audio packet
+   */
+  encode(pcm: Int16Array | Float32Array): Uint8Array;
+
+  /**
+   * Reset encoder state
+   */
+  reset(): void;
+}
+
+/**
+ * Abstract interface for audio decoders
+ *
+ * Defines the contract for platform-specific decoder implementations.
+ */
+export interface Decoder {
+  /**
+   * Decode audio packet to PCM data
+   *
+   * @param packet - Encoded audio packet to decode
+   * @returns Decoded PCM audio data as Uint8Array
+   */
+  decode(packet: Uint8Array): Uint8Array;
+
+  /**
+   * Reset decoder state
+   */
+  reset(): void;
+}
+
+// ============================================================================
+// Factory Functions
+// ============================================================================
+
+/**
+ * Factory function type for creating Encoder instances
+ *
+ * Takes individual arguments instead of an options object.
+ */
+export type EncoderFactory = (
+  sampleRate: 8000 | 12000 | 16000 | 24000 | 48000,
+  channels: 1 | 2,
+  application: 'voip' | 'audio' | 'restricted_lowdelay'
+) => Encoder;
+
+/**
+ * Factory function type for creating Decoder instances
+ *
+ * Takes individual arguments instead of an options object.
+ */
+export type DecoderFactory = (
+  sampleRate: 8000 | 12000 | 16000 | 24000 | 48000,
+  channels: 1 | 2
+) => Decoder;
+
+// ============================================================================
 // OpusEncoder
 // ============================================================================
 
@@ -63,19 +131,16 @@ export class OpusEncoder {
    * Create a new Opus encoder
    *
    * @param options - Encoder configuration options
+   * @param mkEncoder - Factory function for creating encoder instances
    */
-  constructor(options: OpusEncoderOptions) {
+  constructor(options: OpusEncoderOptions, mkEncoder: EncoderFactory) {
     this.logger = options.logger;
 
     const { sampleRate, channels = 1, application = 'voip' } = options;
 
     this.logger?.log(`Creating Opus encoder: ${sampleRate}Hz, ${channels}ch, ${application}`);
 
-    this.encoder = new Encoder({
-      sample_rate: sampleRate,
-      channels,
-      application,
-    });
+    this.encoder = mkEncoder(sampleRate, channels, application);
 
     this.logger?.log('Opus encoder created successfully');
   }
@@ -144,18 +209,16 @@ export class OpusDecoder {
    * Create a new Opus decoder
    *
    * @param options - Decoder configuration options
+   * @param mkDecoder - Factory function for creating decoder instances
    */
-  constructor(options: OpusDecoderOptions) {
+  constructor(options: OpusDecoderOptions, mkDecoder: DecoderFactory) {
     this.logger = options.logger;
 
     const { sampleRate, channels = 1 } = options;
 
     this.logger?.log(`Creating Opus decoder: ${sampleRate}Hz, ${channels}ch`);
 
-    this.decoder = new Decoder({
-      sample_rate: sampleRate,
-      channels,
-    });
+    this.decoder = mkDecoder(sampleRate, channels);
 
     this.logger?.log('Opus decoder created successfully');
   }

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@evan/wasm": "^0.0.95",
     "@wata/shared": "workspace:*",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"

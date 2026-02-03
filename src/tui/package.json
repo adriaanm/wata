@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@evan/wasm": "^0.0.95",
     "@wata/shared": "workspace:*",
     "@picovoice/pvrecorder-node": "^1.2.8",
     "ink": "^6.6.0",

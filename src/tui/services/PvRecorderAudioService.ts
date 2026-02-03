@@ -8,6 +8,7 @@ import { join } from 'path';
 import { PvRecorder } from '@picovoice/pvrecorder-node';
 
 import { encodeOggOpus, decodeOggOpus, type DecodeResult } from '@shared/lib/audio-codec.js';
+import { mkEncoder, mkDecoder } from '../lib/opus-factories.js';
 import { encodeWav } from '@shared/lib/wav.js';
 import { LogService } from './LogService.js';
 
@@ -312,7 +313,7 @@ export class PvRecorderAudioService {
       sampleRate: this.OPUS_SAMPLE_RATE,
       channels: 1,
       logger,
-    });
+    }, mkEncoder);
   }
 
   /**
@@ -449,7 +450,7 @@ export class PvRecorderAudioService {
         };
 
         // Decode Ogg Opus to PCM using shared lib
-        const result: DecodeResult = decodeOggOpus(audioBuffer, { logger });
+        const result: DecodeResult = decodeOggOpus(audioBuffer, mkDecoder, { logger });
 
         // Convert Int16Array to Float32Array for encodeWav
         const pcmFloat32 = new Float32Array(result.pcm.length);
