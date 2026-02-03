@@ -183,14 +183,14 @@ export function encodeOggOpus(
   const muxer = new OggOpusMuxer(OPUS_SAMPLE_RATE, channels, OPUS_PRE_SKIP);
 
   // Step 5: Encode frames and mux
-  // Note: @evan/opus treats Float32Array differently, so we must convert to Int16Array
+  // Note: @evan/wasm opus treats Float32Array differently, so we must convert to Int16Array
   const packets: Array<{ data: Uint8Array; samples: number }> = [];
   let offset = 0;
 
   while (offset < resampledPcm.length) {
     const remaining = resampledPcm.length - offset;
 
-    // @evan/opus requires exactly OPUS_FRAME_SIZE samples per frame
+    // @evan/wasm opus requires exactly OPUS_FRAME_SIZE samples per frame
     // For partial frames, pad with zeros
     const frameFloat = remaining >= OPUS_FRAME_SIZE
       ? resampledPcm.subarray(offset, offset + OPUS_FRAME_SIZE)
@@ -201,7 +201,7 @@ export function encodeOggOpus(
           return padded;
         })();
 
-    // Convert Float32Array to Int16Array for @evan/opus
+    // Convert Float32Array to Int16Array for @evan/wasm opus
     // Float32 range: [-1.0, 1.0] -> Int16 range: [-32768, 32767]
     const frame = float32ToInt16(frameFloat);
 

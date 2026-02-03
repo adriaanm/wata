@@ -1,5 +1,5 @@
 /**
- * Opus encoder/decoder wrapper around @evan/opus
+ * Opus encoder/decoder wrapper around @evan/wasm opus module
  *
  * Provides a cleaner API for encoding and decoding Opus audio packets.
  * Opus is a low-latency audio codec ideal for voice communication.
@@ -7,7 +7,7 @@
  * @module opus
  */
 
-import { Encoder, Decoder } from '@evan/opus';
+import { Encoder, Decoder } from '@evan/wasm/target/opus/deno.js';
 import type { Logger } from './wata-client/types.js';
 
 // ============================================================================
@@ -45,7 +45,7 @@ export interface OpusDecoderOptions {
 // ============================================================================
 
 /**
- * Wraps the @evan/opus Encoder with a cleaner API
+ * Wraps the @evan/wasm opus Encoder with a cleaner API
  *
  * Encodes PCM audio data to Opus format.
  *
@@ -105,12 +105,12 @@ export class OpusEncoder {
   /**
    * Destroy the encoder and free resources
    *
-   * Note: @evan/opus uses finalization for cleanup, but calling reset()
+   * Note: @evan/wasm opus uses finalization for cleanup, but calling reset()
    * can help free encoder state when no longer needed.
    */
   destroy(): void {
     this.logger?.log('Destroying Opus encoder');
-    // @evan/opus Encoder doesn't have an explicit destroy method
+    // @evan/wasm opus Encoder doesn't have an explicit destroy method
     // but reset() can be used to clear encoder state
     try {
       this.encoder.reset();
@@ -126,7 +126,7 @@ export class OpusEncoder {
 // ============================================================================
 
 /**
- * Wraps the @evan/opus Decoder with a cleaner API
+ * Wraps the @evan/wasm opus Decoder with a cleaner API
  *
  * Decodes Opus packets to PCM audio data.
  *
@@ -172,7 +172,7 @@ export class OpusDecoder {
     this.logger?.log(`Decoding ${opusPacket.length} bytes from Opus`);
 
     try {
-      // @evan/opus decode() returns Uint8Array containing Int16 samples
+      // @evan/wasm opus decode() returns Uint8Array containing Int16 samples
       const decodedBytes = this.decoder.decode(opusPacket);
 
       // Create Int16Array view of the same buffer
@@ -193,12 +193,12 @@ export class OpusDecoder {
   /**
    * Destroy the decoder and free resources
    *
-   * Note: @evan/opus uses finalization for cleanup, but calling reset()
+   * Note: @evan/wasm opus uses finalization for cleanup, but calling reset()
    * can help free decoder state when no longer needed.
    */
   destroy(): void {
     this.logger?.log('Destroying Opus decoder');
-    // @evan/opus Decoder doesn't have an explicit destroy method
+    // @evan/wasm opus Decoder doesn't have an explicit destroy method
     // but reset() can be used to clear decoder state
     try {
       this.decoder.reset();

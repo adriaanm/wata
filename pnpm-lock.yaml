@@ -69,9 +69,9 @@ importers:
 
   src/shared:
     dependencies:
-      '@evan/opus':
-        specifier: ^1.0.3
-        version: 1.0.3
+      '@evan/wasm':
+        specifier: ^0.0.95
+        version: 0.0.95
       buffer:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1091,8 +1091,8 @@ packages:
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
-  '@evan/opus@1.0.3':
-    resolution: {integrity: sha512-ADfwIad83W1LuiZDNMjDMDNQRsPz8rj5xnDLExhVWTnA5wGJCLntOn12Ir5rxGBqdfo10QhnNVdd2+gXiZ6xCg==}
+  '@evan/wasm@0.0.95':
+    resolution: {integrity: sha512-fWW2p6iNhEVhsMStf3gj4UD+IQz2TZFunqRPjSeKYlVUHyoLoStNrW3XaiiEj4b7u/0mUPcvT4oYAauerDWF/Q==}
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -4934,7 +4934,7 @@ snapshots:
       '@eslint/core': 0.17.0
       levn: 0.4.1
 
-  '@evan/opus@1.0.3': {}
+  '@evan/wasm@0.0.95': {}
 
   '@humanfs/core@0.19.1': {}
 

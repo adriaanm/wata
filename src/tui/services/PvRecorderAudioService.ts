@@ -293,7 +293,7 @@ export class PvRecorderAudioService {
    */
   private async encodeToOggOpus(pcmBuffer: Buffer): Promise<Buffer> {
     // Create Int16Array view of the PCM buffer
-    // Note: We pass Int16Array directly - @evan/opus works correctly with Int16Array
+    // Note: We pass Int16Array directly - @evan/wasm opus works correctly with Int16Array
     // (it has issues with Float32Array that cause 2x sample count)
     const int16Pcm = new Int16Array(
       pcmBuffer.buffer,

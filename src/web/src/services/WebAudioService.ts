@@ -7,7 +7,7 @@
  * - Microphone access with echo cancellation and noise suppression
  *
  * Playback uses decodeOggOpus from @shared/lib/audio-codec which:
- * - Decodes Ogg Opus to PCM using @evan/opus (WASM)
+ * - Decodes Ogg Opus to PCM using @evan/wasm opus (WASM)
  * - Works across all browsers including Safari
  */
 

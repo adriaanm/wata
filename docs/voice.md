@@ -75,7 +75,7 @@ PCM buffer:        continuous samples for FFmpeg
 
 **Future: Real-time Streaming**
 
-For future real-time Opus encoding (e.g., live PTT streaming), consider using `@evan/opus` which supports 16kHz natively. Many other Opus encoders (e.g., Discord's) only support 48kHz, which would require resampling overhead.
+For future real-time Opus encoding (e.g., live PTT streaming), the `@evan/wasm` opus module supports 16kHz natively. Many other Opus encoders (e.g., Discord's) only support 48kHz, which would require resampling overhead.
 
 **PTT (Push-to-Talk) Behavior:**
 
@@ -166,7 +166,7 @@ Matrix URL → fetch → decodeOggOpus() → Web Audio API → speakers
 |---------|---------|----------|
 | `MediaRecorder API` | Browser audio capture | Native API |
 | `@shared/lib/audio-codec` | Ogg Opus encoding/decoding | `src/shared/lib/audio-codec.ts` |
-| `@evan/opus` | Opus codec (WASM) | npm dependency |
+| `@evan/wasm` | Opus codec (WASM) | npm dependency |
 | `Web Audio API` | Cross-browser playback | Native API |
 
 **Recording Configuration:**
