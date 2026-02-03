@@ -257,10 +257,20 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
     // =========================================================================
 
     /**
+     * Check if currently recording
+     */
+    fun isRecording(): Boolean = _chatState.value.isRecording
+
+    /**
      * Start PTT recording
      */
     @androidx.annotation.RequiresPermission(android.Manifest.permission.RECORD_AUDIO)
     fun startRecording() {
+        // Guard against key repeat events
+        if (_chatState.value.isRecording) {
+            return
+        }
+
         if (_chatState.value.roomId == null) {
             Log.w(TAG, "Cannot record: no active chat")
             return
@@ -356,22 +366,23 @@ class WataViewModel(application: Application) : AndroidViewModel(application) {
             // Start playing new message
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    Log.d(TAG, "Playing message: ${message.audioUrl}")
+                    Log.d(TAG, "Playing message: mxcUrl=${message.mxcUrl}")
                     _chatState.update { it.copy(playingMessageId = message.id) }
 
-                    // Download the audio file first if it's an MXC URL
-                    val audioUri = if (message.audioUrl.startsWith("mxc://")) {
-                        // Download to cache
+                    // Always download from Matrix server using mxcUrl
+                    val cacheFile = java.io.File(
+                        getApplication<Application>().cacheDir,
+                        "playback_${message.id}.ogg"
+                    )
+
+                    // Download if not cached
+                    if (!cacheFile.exists()) {
+                        Log.d(TAG, "Downloading audio to cache: ${cacheFile.absolutePath}")
                         val audioData = client.downloadMedia(message.mxcUrl)
-                        val cacheFile = java.io.File(
-                            getApplication<Application>().cacheDir,
-                            "playback_${message.id}.ogg"
-                        )
                         cacheFile.writeBytes(audioData)
-                        cacheFile.absolutePath
-                    } else {
-                        message.audioUrl
                     }
+
+                    val audioUri = cacheFile.absolutePath
 
                     audioService.startPlayback(audioUri)
 

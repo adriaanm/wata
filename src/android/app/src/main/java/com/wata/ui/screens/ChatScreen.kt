@@ -164,20 +164,30 @@ private fun RecordingBar(duration: Long) {
         initialValue = 1f,
         targetValue = 0.3f,
         animationSpec = infiniteRepeatable(
-            animation = tween(400),
+            animation = tween(500),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulse"
     )
 
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(WataColors.recording)
-            .alpha(alpha)
             .padding(vertical = WataSpacing.md),
-        contentAlignment = Alignment.Center
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        // Pulsing record indicator dot
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .alpha(alpha)
+                .clip(CircleShape)
+                .background(WataColors.text)
+        )
+        Spacer(modifier = Modifier.width(WataSpacing.sm))
+        // Stable duration text
         Text(
             text = "REC ${formatDurationMs(duration)}",
             style = WataTypography.status

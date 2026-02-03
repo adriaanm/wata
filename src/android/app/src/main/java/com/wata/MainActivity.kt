@@ -33,6 +33,10 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: WataViewModel by viewModels()
 
+    // PTT state for toggle/hold detection
+    private var pttPressedAt: Long = 0
+    private var pttIsHeld: Boolean = false
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -44,8 +48,10 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        // KEYCODE_PTT = 79, defined in KeyEvent but not always accessible
-        private const val KEYCODE_PTT = 79
+        // PTT key code - device specific (103 for RG353P)
+        private const val KEYCODE_PTT = 103
+        // Hold threshold: if held longer than this, release stops recording
+        private const val PTT_HOLD_THRESHOLD_MS = 300L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,12 +79,26 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         Log.d(TAG, "KeyDown: ${keyCodeToName(keyCode)} ($keyCode)")
 
-        // Capture PTT button (KEYCODE_PTT = 79)
         if (keyCode == KEYCODE_PTT) {
-            if (hasRecordPermission()) {
-                viewModel.startRecording()
+            // Ignore key repeat events
+            if (event?.repeatCount != 0) {
+                return true
+            }
+
+            if (viewModel.isRecording()) {
+                // Already recording - this is a toggle-off tap
+                Log.d(TAG, "PTT: toggle off")
+                viewModel.stopRecordingAndSend()
             } else {
-                requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                // Start recording
+                Log.d(TAG, "PTT: start recording")
+                pttPressedAt = System.currentTimeMillis()
+                pttIsHeld = false
+                if (hasRecordPermission()) {
+                    viewModel.startRecording()
+                } else {
+                    requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             }
             return true
         }
@@ -90,7 +110,22 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "KeyUp: ${keyCodeToName(keyCode)} ($keyCode)")
 
         if (keyCode == KEYCODE_PTT) {
-            viewModel.stopRecordingAndSend()
+            if (!viewModel.isRecording()) {
+                // Not recording, nothing to do
+                return true
+            }
+
+            val holdDuration = System.currentTimeMillis() - pttPressedAt
+            Log.d(TAG, "PTT: released after ${holdDuration}ms")
+
+            if (holdDuration >= PTT_HOLD_THRESHOLD_MS) {
+                // Held long enough - this is hold-to-talk mode, stop on release
+                Log.d(TAG, "PTT: hold mode - stopping")
+                viewModel.stopRecordingAndSend()
+            } else {
+                // Short tap - toggle mode, keep recording until next tap
+                Log.d(TAG, "PTT: toggle mode - continuing")
+            }
             return true
         }
 
@@ -103,7 +138,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun keyCodeToName(keyCode: Int): String = when (keyCode) {
-        KEYCODE_PTT -> "PTT"
+        KEYCODE_PTT -> "PTT (103)"
+        79 -> "PTT_STANDARD (79)"
         KeyEvent.KEYCODE_DPAD_UP -> "UP"
         KeyEvent.KEYCODE_DPAD_DOWN -> "DOWN"
         KeyEvent.KEYCODE_DPAD_LEFT -> "LEFT"
