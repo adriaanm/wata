@@ -144,6 +144,60 @@ Matrix URL → download → OggDemuxer → OpusCodec.decode() → AudioTrack
 - `src/android/app/src/main/java/com/wata/audio/` - All audio-related classes
 - See [docs/android-development.md](android-development.md) for architecture details
 
+## Web Audio Stack (Browser)
+
+### Current Implementation: WebAudioService
+
+Uses browser APIs for recording and shared audio-codec library for playback.
+
+**Recording Pipeline:**
+```
+MediaRecorder API → Ogg Opus (browser native) → Uint8Array
+```
+
+**Playback Pipeline:**
+```
+Matrix URL → fetch → decodeOggOpus() → Web Audio API → speakers
+```
+
+**Components:**
+
+| Library | Purpose | Location |
+|---------|---------|----------|
+| `MediaRecorder API` | Browser audio capture | Native API |
+| `@shared/lib/audio-codec` | Ogg Opus encoding/decoding | `src/shared/lib/audio-codec.ts` |
+| `@evan/opus` | Opus codec (WASM) | npm dependency |
+| `Web Audio API` | Cross-browser playback | Native API |
+
+**Recording Configuration:**
+- Prioritizes Ogg Opus, falls back to WebM Opus or MP4 AAC
+- Sample rate: 16kHz (voice-optimized)
+- Channels: mono
+- Echo cancellation, noise suppression, auto gain enabled
+
+**Playback:**
+- Fetches Ogg Opus from Matrix
+- Decodes using `decodeOggOpus()` from `@shared/lib/audio-codec`
+- Converts Int16Array PCM to Float32Array
+- Plays via `AudioContext` + `AudioBufferSourceNode`
+- Supports pause/resume/seek via offset tracking
+
+**Cross-Browser Compatibility:**
+
+The WASM-based Opus decoder works on all browsers including Safari, which doesn't natively support Ogg Opus playback.
+
+| Browser | Recording | Playback |
+|---------|-----------|----------|
+| Chrome | ✅ Ogg Opus | ✅ WASM decode |
+| Firefox | ✅ Ogg Opus | ✅ WASM decode |
+| Safari | ⚠️ MP4 AAC | ✅ WASM decode |
+
+**Files:**
+- `src/web/src/services/WebAudioService.ts` - Main service
+- `src/shared/lib/audio-codec.ts` - encodeOggOpus/decodeOggOpus
+- `src/shared/lib/opus.ts` - Opus encoder/decoder wrapper
+- `src/shared/lib/ogg.ts` - Ogg muxer/demuxer
+
 ## Playback Considerations
 
 ### Download vs Streaming
@@ -160,6 +214,7 @@ For walkie-talkie use (short messages), download-first is acceptable.
 
 | Platform | Player | Supported Formats |
 |----------|--------|-------------------|
+| Web | Web Audio API + WASM | Ogg Opus (all browsers) |
 | macOS TUI | `afplay` | M4A, MP3, WAV, AIFF |
 | macOS TUI | `ffplay` | Any (via FFmpeg) |
 | Android | MediaPlayer | M4A, MP3, Ogg, WebM |
