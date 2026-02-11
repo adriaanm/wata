@@ -34,17 +34,9 @@ export function useContacts(): Contact[] {
   const [dmRoomMap, setDmRoomMap] = useState<DmRoomMap>({});
   const [unreadCounts, setUnreadCounts] = useState<UnreadCounts>({});
 
-  // Get unread count for a room using Matrix SDK
+  // Get unread count for a room
   const getUnreadCount = useCallback((roomId: string): number => {
-    const client = matrixService.getClient();
-    if (!client) return 0;
-
-    const room = client.getRoom(roomId);
-    if (!room) return 0;
-
-    // Get unread notification count from Matrix
-    // This counts messages since the last read receipt
-    return room.getUnreadNotificationCount() ?? 0;
+    return matrixService.getUnreadNotificationCount(roomId);
   }, []);
 
   // Update unread counts for all known rooms

@@ -597,14 +597,14 @@ class WataService {
    */
   async sendVoiceMessage(
     roomId: string,
-    audioBuffer: Buffer,
+    audioBuffer: Buffer | Uint8Array,
     _mimeType: string,
     duration: number,
     _size: number
   ): Promise<string> {
     log(`[WataService] Sending voice message to ${roomId}`);
 
-    // Convert Buffer to ArrayBuffer
+    // Convert Buffer/Uint8Array to ArrayBuffer
     const arrayBuffer: ArrayBuffer = audioBuffer.buffer.slice(
       audioBuffer.byteOffset,
       audioBuffer.byteOffset + audioBuffer.byteLength
@@ -745,20 +745,31 @@ class WataService {
     return this.wataClient.getAccessToken();
   }
 
+  /**
+   * Get homeserver URL
+   */
+  getHomeserverUrl(): string {
+    return HOMESERVER_URL;
+  }
+
+  /**
+   * Kick a user from a room
+   */
+  async kick(roomId: string, userId: string, reason?: string): Promise<void> {
+    await this.wataClient.getApi().kickFromRoom(roomId, userId, reason);
+  }
+
+  /**
+   * Get unread notification count for a room
+   */
+  getUnreadNotificationCount(roomId: string): number {
+    const room = this.wataClient.getSyncEngine().getRoom(roomId);
+    return room?.unreadNotifications?.notification_count ?? 0;
+  }
+
   // ==========================================================================
   // Test Interface
   // ==========================================================================
-
-  /**
-   * Get underlying Matrix client (not available in WataService)
-   * WataService does not expose the underlying client.
-   */
-  getClient(): null {
-    logWarn(
-      '[WataService] getClient() returns null - direct client access not available'
-    );
-    return null;
-  }
 
   /**
    * Get current sync state

@@ -223,6 +223,20 @@ export class WataClient {
   }
 
   /**
+   * Get the underlying MatrixApi instance
+   */
+  getApi(): MatrixApi {
+    return this.api;
+  }
+
+  /**
+   * Get the underlying SyncEngine instance
+   */
+  getSyncEngine(): SyncEngine {
+    return this.syncEngine;
+  }
+
+  /**
    * Get connection state
    */
   getConnectionState(): ConnectionState {

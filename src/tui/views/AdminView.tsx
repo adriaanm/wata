@@ -169,7 +169,7 @@ export function AdminView({ onBack, currentProfile }: Props) {
       // Generate 0.5 seconds of silence (16kHz PCM)
       const SAMPLE_RATE = 16000;
       const DURATION = 0.5; // seconds
-      const silenceSamples = new Int16Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
+      const silenceSamples = new Float32Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
 
       // Encode as WAV
       const wavBuffer = encodeWav(silenceSamples, SAMPLE_RATE);

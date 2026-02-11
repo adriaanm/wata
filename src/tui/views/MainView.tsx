@@ -239,7 +239,7 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     LogService.getInstance().addEntry('log', `[TEST] Sending test message to ${TEST_ROOM_ID.slice(-8)}...`);
 
     // Generate 0.5 seconds of silence (16kHz PCM)
-    const silenceSamples = new Int16Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
+    const silenceSamples = new Float32Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
     const wavBuffer = encodeWav(silenceSamples, SAMPLE_RATE);
     const buffer = Buffer.from(wavBuffer);
 

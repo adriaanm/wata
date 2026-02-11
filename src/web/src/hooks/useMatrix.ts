@@ -1,7 +1,5 @@
 /**
  * Web-specific hooks for Matrix integration.
- * These wrap the shared hooks from @shared/hooks/useMatrix.ts
- * to provide web-specific functionality where needed.
  */
 
 import { useState, useEffect, useCallback } from 'react';

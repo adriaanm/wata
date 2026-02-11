@@ -539,6 +539,23 @@ export class MatrixApi {
   }
 
   /**
+   * Kick a user from a room
+   */
+  async kickFromRoom(
+    roomId: string,
+    userId: string,
+    reason?: string
+  ): Promise<void> {
+    await this.request<Record<string, never>>(
+      'POST',
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`,
+      {
+        body: { user_id: userId, reason },
+      }
+    );
+  }
+
+  /**
    * Resolve room alias to room ID
    */
   async getRoomIdForAlias(roomAlias: string): Promise<RoomAliasResponse> {

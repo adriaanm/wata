@@ -28,7 +28,6 @@ export function LogsPanel() {
   useEffect(() => {
     const loadDiagnostics = async () => {
       try {
-        const client = matrixService.getClient();
         const familyRoomId = await matrixService.getFamilyRoomId();
         let memberCount = 0;
 
@@ -40,7 +39,7 @@ export function LogsPanel() {
         setInfo({
           syncState: matrixService.getSyncState() || 'Not syncing',
           userId: matrixService.getUserId(),
-          homeserver: client?.getHomeserverUrl() || 'Not connected',
+          homeserver: matrixService.getHomeserverUrl(),
           isLoggedIn: matrixService.isLoggedIn(),
           hasAccessToken: !!matrixService.getAccessToken(),
           familyRoomId,

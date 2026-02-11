@@ -68,14 +68,13 @@ export function FamilyManager() {
       setRemovingUserId(userId);
       setError(null);
 
-      const client = matrixService.getClient();
       const roomId = await matrixService.getFamilyRoomId();
 
-      if (!client || !roomId) {
+      if (!roomId) {
         throw new Error('Not connected to family room');
       }
 
-      await client.kick(roomId, userId, 'Removed from family');
+      await matrixService.kick(roomId, userId, 'Removed from family');
       setShowConfirmRemove(null);
       await loadFamilyState();
     } catch (err) {
