@@ -1190,4 +1190,20 @@ export class WataClient {
   getEventBufferStats(): { roomCount: number; eventCount: number; oldestEventAge: number } {
     return this.eventBuffer.getStats();
   }
+
+  /**
+   * Paginate (backfill) older messages for a room
+   *
+   * Fetches older messages using the Matrix /messages API and adds them
+   * to the room's timeline. This is useful when timeline.limited is true
+   * in sync responses, indicating there's a gap in the timeline.
+   *
+   * @param roomId - The room to paginate
+   * @param limit - Maximum number of events to fetch (default: 50)
+   * @returns Number of new events added to the timeline
+   */
+  async paginateRoom(roomId: string, limit = 50): Promise<number> {
+    this.logger.log(`[WataClient] Paginating room ${roomId} (limit: ${limit})`);
+    return this.syncEngine.backfillRoom(roomId, limit);
+  }
 }

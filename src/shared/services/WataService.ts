@@ -903,6 +903,17 @@ class WataService {
   }
 
   /**
+   * Paginate (backfill) older messages for a room
+   *
+   * @param roomId - The room to paginate
+   * @param limit - Maximum number of events to fetch (default: 50)
+   * @returns Number of new events added to the timeline
+   */
+  async paginateRoom(roomId: string, limit = 50): Promise<number> {
+    return this.wataClient.paginateRoom(roomId, limit);
+  }
+
+  /**
    * Cleanup all callbacks
    */
   cleanup(): void {

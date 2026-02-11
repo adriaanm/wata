@@ -242,6 +242,21 @@ export interface ReceiptResponse {
   // Empty response
 }
 
+export interface GetMessagesParams {
+  from: string;       // Pagination token from timeline.prev_batch or previous response
+  to?: string;        // Optional end token
+  dir: 'b' | 'f';     // Direction: 'b' for backward (older), 'f' for forward (newer)
+  limit?: number;     // Max number of events to return (default: 10)
+  filter?: string;    // Filter ID or JSON filter
+}
+
+export interface GetMessagesResponse {
+  start: string;      // Token for the start of the returned chunk
+  end: string;        // Token for the end of the returned chunk
+  chunk: MatrixEvent[]; // Events in the requested direction
+  state?: MatrixEvent[]; // State events for the room (if requested)
+}
+
 // --- Media ---
 
 export interface UploadResponse {
@@ -622,6 +637,31 @@ export class MatrixApi {
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/m.read/${encodeURIComponent(eventId)}`,
       {
         body: threadId ? ({ thread_id: threadId } satisfies ReceiptRequest) : {},
+      }
+    );
+  }
+
+  /**
+   * Get a chunk of room messages (for pagination/backfill)
+   */
+  async getMessages(
+    roomId: string,
+    params: GetMessagesParams
+  ): Promise<GetMessagesResponse> {
+    const queryParams: Record<string, string | number> = {
+      from: params.from,
+      dir: params.dir,
+    };
+
+    if (params.to !== undefined) queryParams.to = params.to;
+    if (params.limit !== undefined) queryParams.limit = params.limit;
+    if (params.filter !== undefined) queryParams.filter = params.filter;
+
+    return this.request<GetMessagesResponse>(
+      'GET',
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages`,
+      {
+        params: queryParams,
       }
     );
   }

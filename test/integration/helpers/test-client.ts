@@ -355,12 +355,11 @@ export class TestClient {
       `[TestClient:${this.username}] Paginating timeline for room ${roomId} (limit: ${limit})...`,
     );
 
-    // WataService doesn't expose pagination yet
-    // For now, just wait a bit for any pending messages to arrive
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Use WataService's paginateRoom to backfill older messages
+    const newEventsCount = await this.service.paginateRoom(roomId, limit);
 
     console.log(
-      `[TestClient:${this.username}] Pagination complete, timeline has ${this.service.getMessageCount(roomId)} events`,
+      `[TestClient:${this.username}] Pagination complete: ${newEventsCount} new events, timeline has ${this.service.getMessageCount(roomId)} events`,
     );
   }
 

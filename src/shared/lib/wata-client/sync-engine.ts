@@ -60,6 +60,8 @@ export interface RoomState {
   accountData: Map<string, Record<string, any>>;
   /** Read receipts: eventId -> Set of userIds who read it */
   readReceipts: Map<string, Set<string>>;
+  /** Pagination token for fetching older messages (from timeline.prev_batch) */
+  prevBatch: string | null;
 }
 
 // ============================================================================
@@ -354,6 +356,17 @@ export class SyncEngine {
     // Process timeline events (new messages)
     if (roomData.timeline?.events) {
       this.logger.log(`[SyncEngine] Processing ${roomData.timeline.events.length} timeline events for room ${roomId}`);
+
+      // Store prev_batch token for pagination
+      if (roomData.timeline.prev_batch) {
+        room.prevBatch = roomData.timeline.prev_batch;
+      }
+
+      // Log if timeline is limited (indicating potential message gap)
+      if (roomData.timeline.limited) {
+        this.logger.log(`[SyncEngine] Timeline limited for room ${roomId}, prev_batch: ${room.prevBatch?.slice(-12)}`);
+      }
+
       roomData.timeline.events.forEach((event) => {
         // Skip if event already exists in timeline (prevent duplicates from incremental syncs)
         const exists = room!.timeline.some(e => e.event_id === event.event_id);
@@ -562,7 +575,93 @@ export class SyncEngine {
       timeline: [],
       accountData: new Map(),
       readReceipts: new Map(),
+      prevBatch: null,
     };
+  }
+
+  // ==========================================================================
+  // Timeline Pagination
+  // ==========================================================================
+
+  /**
+   * Backfill older messages for a room using the /messages endpoint
+   *
+   * @param roomId - The room to backfill
+   * @param limit - Maximum number of events to fetch (default: 50)
+   * @returns Number of new events added to the timeline
+   */
+  async backfillRoom(roomId: string, limit = 50): Promise<number> {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new Error(`Room ${roomId} not found`);
+    }
+
+    if (!room.prevBatch) {
+      this.logger.log(`[SyncEngine] No prev_batch token for room ${roomId}, cannot backfill`);
+      return 0;
+    }
+
+    this.logger.log(`[SyncEngine] Backfilling room ${roomId} from ${room.prevBatch.slice(-12)} (limit: ${limit})`);
+
+    try {
+      const response = await this.api.getMessages(roomId, {
+        from: room.prevBatch,
+        dir: 'b', // Backward (older messages)
+        limit,
+      });
+
+      this.logger.log(`[SyncEngine] Backfill response: ${response.chunk.length} events`);
+
+      // Track how many new events were added
+      let newEventsCount = 0;
+
+      // Collect non-duplicate events to insert
+      const eventsToInsert: MatrixEvent[] = [];
+
+      // Process events in reverse order (the API returns them newest-first when dir=b)
+      // We reverse to get oldest-first for proper chronological insertion
+      const eventsOldestFirst = response.chunk.reverse();
+
+      for (const event of eventsOldestFirst) {
+        // Skip if event already exists in timeline
+        const exists = room.timeline.some(e => e.event_id === event.event_id);
+        if (exists) {
+          this.logger.log(`[SyncEngine] Skipping duplicate backfilled event ${event.event_id?.slice(-12)}`);
+          continue;
+        }
+
+        eventsToInsert.push(event);
+        newEventsCount++;
+
+        // Process state events
+        if (event.state_key !== undefined) {
+          this.processStateEvent(room, event);
+        }
+      }
+
+      // Insert all events at the beginning in one operation
+      // This maintains chronological order: [oldest backfilled...newest backfilled, ...existing timeline]
+      room.timeline.unshift(...eventsToInsert);
+
+      // Emit timeline events
+      for (const event of eventsToInsert) {
+        this.emit('timelineEvent', roomId, event);
+      }
+
+      // Update prev_batch for further pagination
+      room.prevBatch = response.end || null;
+
+      this.logger.log(`[SyncEngine] Backfill complete: ${newEventsCount} new events added, new prev_batch: ${room.prevBatch?.slice(-12) || 'none'}`);
+
+      // Emit room updated event
+      this.emit('roomUpdated', roomId, room);
+
+      return newEventsCount;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`[SyncEngine] Backfill error for room ${roomId}: ${err.message}`);
+      throw err;
+    }
   }
 
   // ==========================================================================
