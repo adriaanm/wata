@@ -20,7 +20,7 @@ module.exports = [
       'src/web/dist/**',
     ],
   },
-  ...compat.extends('@react-native', 'plugin:@typescript-eslint/recommended'),
+  ...compat.extends('plugin:@typescript-eslint/recommended'),
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
     plugins: {
@@ -64,10 +64,8 @@ module.exports = [
       'import/no-duplicates': 'error',
       'import/no-unresolved': 'off', // TypeScript handles this
 
-      // React
-      'react/react-in-jsx-scope': 'off', // Not needed with React 17+
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
+      // Note: React rules removed - react and react-hooks plugins not installed
+      // These can be re-added if needed in the future
 
       // General
       'no-console': ['warn', { allow: ['warn', 'error'] }],
