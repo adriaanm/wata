@@ -23,6 +23,7 @@ import type {
   ConnectionState,
   WataClientEvents,
   WataClientEventName,
+  WataClientEventHandler,
   Logger,
 } from './types';
 
@@ -717,7 +718,7 @@ export class WataClient {
       this.flushAllClassifiedRooms();
     });
 
-    this.syncEngine.on('error', () => {
+    this.syncEngine.on('onError', () => {
       this.emit('connectionStateChanged', 'error');
     });
 

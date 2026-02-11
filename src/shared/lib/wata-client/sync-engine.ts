@@ -202,7 +202,7 @@ export class SyncEngine {
       // If initial sync fails, we'll retry in the background loop
       this.logger.error(`[SyncEngine] Initial sync failed: ${error}`);
       const err = error instanceof Error ? error : new Error(String(error));
-      this.emit('error', err);
+      this.emit('onError', err);
     }
 
     // Start the background sync loop
@@ -256,7 +256,7 @@ export class SyncEngine {
         // Emit error event
         const err = error instanceof Error ? error : new Error(String(error));
         this.logger.error(`[SyncEngine] Sync error: ${err.message}`);
-        this.emit('error', err);
+        this.emit('onError', err);
 
         // Stop if we're no longer running
         if (!this.isRunning) {
