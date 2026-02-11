@@ -73,7 +73,7 @@ export class TestClient {
    *
    * Logs sync state changes and checks if already synced.
    */
-  async waitForSync(timeoutMs = 30000): Promise<void> {
+  async waitForSync(timeoutMs = 10000): Promise<void> {
     if (!this.service) throw new Error('Not logged in');
 
     console.log(`[TestClient:${this.username}] Waiting for sync...`);
@@ -109,10 +109,10 @@ export class TestClient {
   /**
    * Wait for a specific room to appear in the client's room list
    *
-   * Combines room update events with exponential backoff polling to handle
-   * Conduit's eventual consistency and timing issues.
+   * Uses fast polling (100ms) - rooms typically appear within milliseconds.
+   * No exponential backoff: we want consistent, predictable timing.
    */
-  async waitForRoom(roomId: string, timeoutMs = 15000): Promise<void> {
+  async waitForRoom(roomId: string, timeoutMs = 5000): Promise<void> {
     if (!this.service) throw new Error('Not logged in');
 
     console.log(`[TestClient:${this.username}] Waiting for room ${roomId}...`);
@@ -141,6 +141,7 @@ export class TestClient {
 
       const cleanup = () => {
         clearTimeout(timeout);
+        clearInterval(pollInterval);
         unsubscribe();
       };
 
@@ -151,7 +152,7 @@ export class TestClient {
             resolved = true;
             cleanup();
             console.log(
-              `[TestClient:${this.username}] Room found (after ${checkCount} checks)`,
+              `[TestClient:${this.username}] Room found (after ${checkCount} checks, ${Date.now() - startTime}ms)`,
             );
             resolve();
           }
@@ -165,44 +166,29 @@ export class TestClient {
         checkRoom();
       });
 
-      // Poll with exponential backoff as fallback (in case events are missed)
-      let pollDelay = 100;
-      const maxPollDelay = 2000;
-
-      const poll = () => {
+      // Fast polling (100ms) - rooms appear quickly
+      const pollInterval = setInterval(() => {
         if (resolved) return;
-
         checkCount++;
-        if (!checkRoom()) {
-          // Exponential backoff up to max delay
-          pollDelay = Math.min(pollDelay * 1.2, maxPollDelay);
-          if (checkCount % 10 === 0) {
-            console.log(
-              `[TestClient:${this.username}] Still waiting for room... (${checkCount} checks)`,
-            );
-          }
-          // Continue polling if not timed out
-          if (Date.now() - startTime < timeoutMs) {
-            setTimeout(poll, pollDelay);
-          }
+        if (!checkRoom() && checkCount % 20 === 0) {
+          console.log(
+            `[TestClient:${this.username}] Still waiting for room... (${checkCount} checks, ${Date.now() - startTime}ms)`,
+          );
         }
-      };
-
-      // Start polling
-      poll();
+      }, 100);
     });
   }
 
   /**
    * Wait for a voice message matching the filter
    *
-   * Checks existing messages first, then waits for new ones via events.
-   * Includes polling fallback in case events are missed.
+   * Uses fast polling (100ms) - messages typically arrive within milliseconds.
+   * No exponential backoff: we want consistent, predictable timing.
    */
   async waitForMessage(
     roomId: string,
     filter: MessageFilter,
-    timeoutMs = 20000,
+    timeoutMs = 10000,
   ): Promise<VoiceMessage> {
     if (!this.service) throw new Error('Not logged in');
 
@@ -211,10 +197,13 @@ export class TestClient {
       filter,
     );
 
+    const startTime = Date.now();
+
     return new Promise((resolve, reject) => {
       let resolved = false;
-      let unsubscribe: (() => void) | undefined; // Declare before cleanup uses it
-      let pollInterval: ReturnType<typeof setInterval> | undefined; // Declare before cleanup uses it
+      let checkCount = 0;
+      let unsubscribe: (() => void) | undefined;
+      let pollInterval: ReturnType<typeof setInterval> | undefined;
 
       const timeout = setTimeout(() => {
         if (!resolved) {
@@ -237,7 +226,7 @@ export class TestClient {
         if (!resolved) {
           resolved = true;
           cleanup();
-          console.log(`[TestClient:${this.username}] Message received`);
+          console.log(`[TestClient:${this.username}] Message received (${Date.now() - startTime}ms)`);
           resolve(msg);
         }
       };
@@ -267,19 +256,16 @@ export class TestClient {
         },
       );
 
-      // Poll periodically as fallback (handles missed events)
-      let pollCount = 0;
+      // Fast polling (100ms) - messages arrive quickly
       pollInterval = setInterval(() => {
-        if (!resolved) {
-          pollCount++;
-          if (pollCount % 5 === 0) {
-            console.log(
-              `[TestClient:${this.username}] Still waiting for message... (${pollCount} checks)`,
-            );
-          }
-          checkExisting();
+        if (resolved) return;
+        checkCount++;
+        if (!checkExisting() && checkCount % 20 === 0) {
+          console.log(
+            `[TestClient:${this.username}] Still waiting for message... (${checkCount} checks, ${Date.now() - startTime}ms)`,
+          );
         }
-      }, 1000);
+      }, 100);
     });
   }
 
@@ -318,7 +304,7 @@ export class TestClient {
 
     // Room should be immediately available since we used the SDK
     // But still wait briefly for sync to complete
-    await this.waitForRoom(roomId, 10000);
+    await this.waitForRoom(roomId, 5000);
 
     return { room_id: roomId };
   }
@@ -331,8 +317,7 @@ export class TestClient {
 
     console.log(`[TestClient:${this.username}] Joining room ${roomId}...`);
     await this.service.joinRoom(roomId);
-    // Increased timeout to handle accumulated server state
-    await this.waitForRoom(roomId, 30000);
+    await this.waitForRoom(roomId, 10000);
     console.log(`[TestClient:${this.username}] Room joined`);
   }
 
@@ -523,22 +508,21 @@ export class TestClient {
   }
 
   /**
-   * Wait for a condition to become true, polling with exponential backoff.
+   * Wait for a condition to become true, polling frequently.
    * Use this instead of fixed setTimeout delays to make tests deterministic.
+   * No exponential backoff: conditions typically resolve quickly.
    */
   async waitForCondition(
     description: string,
     condition: () => boolean,
-    timeoutMs = 15000,
-    pollMs = 200,
+    timeoutMs = 10000,
+    pollMs = 100,
   ): Promise<void> {
     const startTime = Date.now();
-    let delay = pollMs;
 
     while (Date.now() - startTime < timeoutMs) {
       if (condition()) return;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      delay = Math.min(delay * 1.3, 2000);
+      await new Promise(resolve => setTimeout(resolve, pollMs));
     }
 
     throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
@@ -550,7 +534,7 @@ export class TestClient {
   async waitForMessageCount(
     roomId: string,
     minCount: number,
-    timeoutMs = 20000,
+    timeoutMs = 10000,
   ): Promise<VoiceMessage[]> {
     if (!this.service) throw new Error('Not logged in');
 
