@@ -312,7 +312,9 @@ describe('Message Ordering', () => {
     }
 
     // Wait for bob to receive all 15 messages by event ID
-    await orchestrator.waitForEventIds('bob', roomId, expectedEventIds, 45000);
+    // Note: waitForEventIds modifies the Set in place, so pass a copy
+    const eventIdsCopy = new Set(expectedEventIds);
+    await orchestrator.waitForEventIds('bob', roomId, eventIdsCopy, 45000);
 
     // Verify all event IDs are unique
     expect(expectedEventIds.size).toBe(15);
@@ -358,28 +360,21 @@ describe('Message Ordering', () => {
         AudioDurations.SHORT,
       );
 
-      // Verify message is received by bob
-      await orchestrator.verifyMessageReceived(
-        'bob',
-        roomId,
-        { eventId },
-        15000,
-      );
-
-      // Both clients should see the same timestamp for this message
-      const aliceMessages = await orchestrator.getAllVoiceMessages(
+      // Verify message is received by both alice and bob
+      // Note: We use verifyMessageReceived which handles eventId matching robustly
+      // (handles case where local echo ID differs from server-assigned ID)
+      const aliceMsg = await orchestrator.verifyMessageReceived(
         'alice',
         roomId,
-        50,
+        { eventId, sender: '@alice:localhost' },
+        15000,
       );
-      const bobMessages = await orchestrator.getAllVoiceMessages(
+      const bobMsg = await orchestrator.verifyMessageReceived(
         'bob',
         roomId,
-        50,
+        { eventId, sender: '@alice:localhost' },
+        15000,
       );
-
-      const aliceMsg = aliceMessages.find(m => m.eventId === eventId);
-      const bobMsg = bobMessages.find(m => m.eventId === eventId);
 
       expect(aliceMsg).toBeDefined();
       expect(bobMsg).toBeDefined();

@@ -197,13 +197,10 @@ describe('Matrix Integration Tests', () => {
     }, 15000);
 
     test('should send an audio message', async () => {
-      // Get initial message count
-      const initialCount = aliceService.getMessageCount(testRoomId);
-
       const fakeAudioData = Buffer.from('fake audio content for testing');
 
-      // Send voice message using MatrixService API
-      await aliceService.sendVoiceMessage(
+      // Send voice message using MatrixService API and get event ID
+      const eventId = await aliceService.sendVoiceMessage(
         testRoomId,
         fakeAudioData,
         'audio/mp4',
@@ -211,20 +208,19 @@ describe('Matrix Integration Tests', () => {
         fakeAudioData.length,
       );
 
-      // Wait for message to appear in timeline
+      // Wait for the specific message to appear (by event ID)
       await waitForCondition(
-        'message appears in alice timeline',
-        () => aliceService.getMessageCount(testRoomId) > initialCount,
+        'message with event ID in alice timeline',
+        () => aliceService.getVoiceMessages(testRoomId).some(m => m.eventId === eventId),
       );
 
       // Verify message was sent by checking local timeline
       const messages = aliceService.getVoiceMessages(testRoomId);
-      expect(messages.length).toBe(initialCount + 1);
+      const sentMessage = messages.find(m => m.eventId === eventId);
 
-      // Get the last message we just sent
-      const lastMessage = messages[messages.length - 1];
-      expect(lastMessage.isOwn).toBe(true);
-      expect(lastMessage.duration).toBe(5000);
+      expect(sentMessage).toBeDefined();
+      expect(sentMessage?.isOwn).toBe(true);
+      expect(sentMessage?.duration).toBe(5000);
     });
 
     test('should receive messages in room timeline', async () => {
