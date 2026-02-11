@@ -95,6 +95,20 @@ export class DMRoomService {
   }
 
   /**
+   * Get all known DM room IDs.
+   */
+  getAllKnownDMRoomIds(): string[] {
+    return Array.from(this.contactByRoom.keys());
+  }
+
+  /**
+   * Get contact user ID for a DM room.
+   */
+  getContactUserIdForRoom(roomId: string): string | null {
+    return this.contactByRoom.get(roomId) || null;
+  }
+
+  /**
    * Get the contact user ID for a DM room (reverse lookup).
    * Returns null if the room isn't a known DM room.
    */

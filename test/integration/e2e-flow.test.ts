@@ -68,6 +68,10 @@ describe('End-to-End Voice Chat Flow', () => {
     const roomId = await orchestrator.createRoom('alice', 'bob');
 
     // Step 3: List contacts (verify room appears in list)
+    // Wait for DM classification to complete on both clients
+    await aliceClient?.waitForDirectRoom(roomId, 10000);
+    await bobClient?.waitForDirectRoom(roomId, 10000);
+
     const aliceRooms = aliceClient?.getDirectRooms() || [];
     expect(aliceRooms.some(r => r.roomId === roomId)).toBe(true);
 

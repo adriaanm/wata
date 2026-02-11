@@ -547,6 +547,20 @@ export class TestClient {
     return this.getVoiceMessages(roomId);
   }
 
+  /**
+   * Wait for a room to appear in getDirectRooms().
+   * Use this to ensure DM classification is complete.
+   */
+  async waitForDirectRoom(roomId: string, timeoutMs = 10000): Promise<void> {
+    if (!this.service) throw new Error('Not logged in');
+
+    await this.waitForCondition(
+      `room ${roomId} in direct rooms`,
+      () => this.service!.getDirectRooms().some(r => r.roomId === roomId),
+      timeoutMs,
+    );
+  }
+
   // Private helpers
 
   private matchesFilter(message: VoiceMessage, filter: MessageFilter): boolean {

@@ -1133,6 +1133,20 @@ export class WataClient {
     return this.dmRoomService.getAllDMRoomIds(contactUserId);
   }
 
+  /**
+   * Get all known DM room IDs (across all contacts).
+   */
+  getAllKnownDMRoomIds(): string[] {
+    return this.dmRoomService.getAllKnownDMRoomIds();
+  }
+
+  /**
+   * Get contact user ID for a DM room.
+   */
+  getContactUserIdForRoom(roomId: string): string | null {
+    return this.dmRoomService.getContactUserIdForRoom(roomId);
+  }
+
   // ==========================================================================
   // Event Buffer Management
   // ==========================================================================

@@ -293,7 +293,7 @@ class WataService {
       });
     }
 
-    // Collect all unique room IDs from both sources
+    // Collect all unique room IDs from multiple sources
     const allRoomIds = new Set<string>();
 
     // Add primary rooms
@@ -306,6 +306,12 @@ class WataService {
       for (const roomId of roomIdSet) {
         allRoomIds.add(roomId);
       }
+    }
+
+    // Also add rooms known to DMRoomService but not yet in mappings
+    // This handles rooms that were just joined and haven't received messages yet
+    for (const roomId of this.wataClient.getAllKnownDMRoomIds()) {
+      allRoomIds.add(roomId);
     }
 
     // Build rooms list by querying WataClient for each room
@@ -322,14 +328,15 @@ class WataService {
       if (contact) {
         const convo = this.wataClient.getConversationByRoomId(roomId);
         const messageCount = convo?.messages.length ?? 0;
+        const lastMessage = convo?.messages[messageCount - 1];
 
         log(`[WataService] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`);
         rooms.push({
           roomId,
           name: contact.user.displayName,
           avatarUrl: contact.user.avatarUrl,
-          lastMessage: null,
-          lastMessageTime: null,
+          lastMessage: lastMessage ? 'Voice message' : null,
+          lastMessageTime: lastMessage ? lastMessage.timestamp.getTime() : null,
           isDirect: true,
         });
       } else {
