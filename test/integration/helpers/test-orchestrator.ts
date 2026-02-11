@@ -58,29 +58,33 @@ export class TestOrchestrator {
 
     const ownerClient = this.getClient(owner);
 
+    // Add a unique name to prevent room reuse across test runs
+    // The DM room service may find existing rooms, so we make each test's room unique
+    const uniqueName = `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     // Create the room with invites
     const result = await ownerClient.createRoom({
       is_direct: true,
       invite: participants.map(u => `@${u}:localhost`),
       preset: 'trusted_private_chat' as any,
+      name: uniqueName, // Unique name prevents reuse
     });
 
     const roomId = result.room_id;
 
     // Wait for owner to see the room first
-    await ownerClient.waitForRoom(roomId, 10000);
+    await ownerClient.waitForRoom(roomId, 15000);
 
-    // Wait for all participants to see the room and join if needed
+    // Wait for all participants to join the room
     const joinPromises = participants.map(async participant => {
       const client = this.getClient(participant);
 
-      // Wait for participant to see the room
-      await client.waitForRoom(roomId, 15000);
-
-      // Try to join the room (may already be auto-joined)
+      // Try to join the room with retries
+      // Note: We skip waitForRoom here because participants can't see invited rooms
+      // until after joining, creating a chicken-and-egg problem
       let joined = false;
       let attempts = 0;
-      const maxAttempts = 3;
+      const maxAttempts = 5; // Increased from 3 for better reliability
 
       while (!joined && attempts < maxAttempts) {
         try {
@@ -96,10 +100,10 @@ export class TestOrchestrator {
             joined = true;
           } else if (attempts < maxAttempts) {
             console.log(
-              `[TestOrchestrator] ${participant} join attempt ${attempts} failed, retrying...`,
+              `[TestOrchestrator] ${participant} join attempt ${attempts} failed, retrying in ${1000 * attempts}ms...`,
             );
-            // Wait a bit before retrying
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Exponential backoff: 1s, 2s, 3s, 4s
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
           } else {
             console.warn(
               `[TestOrchestrator] ${participant} failed to join after ${maxAttempts} attempts:`,
@@ -107,6 +111,11 @@ export class TestOrchestrator {
             );
           }
         }
+      }
+
+      // After joining, wait for room to appear in the participant's room list
+      if (joined) {
+        await client.waitForRoom(roomId, 15000);
       }
     });
 
@@ -213,11 +222,9 @@ export class TestOrchestrator {
     eventId: string;
     receivedMessage: VoiceMessage;
   }> {
-    // Create or get room
-    let roomId = this.getRoomId(sender, receiver);
-    if (!roomId) {
-      roomId = await this.createRoom(sender, receiver);
-    }
+    // Always create a new room to avoid issues with accumulated server state
+    // where clients don't have access to rooms from previous test sessions
+    const roomId = await this.createRoom(sender, receiver);
 
     // Send message
     const eventId = await this.sendVoiceMessage(
@@ -233,7 +240,7 @@ export class TestOrchestrator {
       receiver,
       roomId,
       { eventId },
-      10000,
+      15000, // Increased timeout for accumulated state scenarios
     );
 
     return { roomId, eventId, receivedMessage };
@@ -282,6 +289,7 @@ export class TestOrchestrator {
     const startTime = Date.now();
     const client = this.getClient(username);
     const initialCount = eventIds.size;
+    const expectedIds = Array.from(eventIds); // Save original IDs for error message
     console.log(
       `[TestOrchestrator] Waiting for ${initialCount} events for ${username} in ${roomId}`,
     );
@@ -289,7 +297,10 @@ export class TestOrchestrator {
     // Paginate once at the start to ensure we're not missing messages
     await this.paginateTimeline(username, roomId, 100);
 
+    let checkCount = 0;
     while (Date.now() - startTime < timeoutMs && eventIds.size > 0) {
+      checkCount++;
+
       // Use getAllVoiceMessages to ensure we paginate
       const messages = await this.getAllVoiceMessages(username, roomId, 100);
       const foundIds = new Set<string>();
@@ -312,24 +323,33 @@ export class TestOrchestrator {
       }
 
       if (eventIds.size > 0) {
-        // Wait a bit before checking again
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Use adaptive polling: start fast, slow down gradually
+        // This helps with both quick responses and not overwhelming the system
+        const pollDelay = Math.min(100 + checkCount * 10, 500);
+        await new Promise(resolve => setTimeout(resolve, pollDelay));
+
+        // Re-paginate every 10 checks to ensure we're not missing server updates
+        if (checkCount % 10 === 0) {
+          await this.paginateTimeline(username, roomId, 100);
+        }
       }
     }
 
     if (eventIds.size > 0) {
       const messages = await this.getAllVoiceMessages(username, roomId, 100);
       const actualEventIds = new Set(messages.map(m => m.eventId));
+      const missingIds = Array.from(eventIds);
       throw new Error(
-        `Timed out waiting for ${eventIds.size} events after ${timeoutMs}ms. ` +
-          `Missing: ${Array.from(eventIds).join(', ')}. ` +
-          `Client has ${messages.length} messages. ` +
-          `IDs in timeline: ${Array.from(actualEventIds).slice(0, 5).join(', ')}...`,
+        `Timed out waiting for ${eventIds.size}/${initialCount} events after ${timeoutMs}ms. ` +
+          `Missing IDs: ${missingIds.join(', ')}. ` +
+          `Expected IDs: ${expectedIds.join(', ')}. ` +
+          `Client has ${messages.length} messages with ${actualEventIds.size} unique IDs. ` +
+          `Sample IDs in timeline: ${Array.from(actualEventIds).slice(0, 5).join(', ')}...`,
       );
     }
 
     console.log(
-      `[TestOrchestrator] ${username} received all ${initialCount} events`,
+      `[TestOrchestrator] ${username} received all ${initialCount} events after ${checkCount} checks`,
     );
   }
 

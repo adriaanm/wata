@@ -512,7 +512,10 @@ describe('Voice Message End-to-End', () => {
 
 ## Test Execution Strategy
 
-### Local Development
+### AGENTS: iterate using tmux
+For fast iteration, it's important to be able to observe the matrix server logs. To do this, you must start the server yourself in a tmux session, using `docker-compose up` (in test/docker). Then, you can run the test suite and observe the logs easily in the corresponding panel.
+
+### Local Development (Not for agents)
 ```bash
 # Start Conduit once
 pnpm dev:server

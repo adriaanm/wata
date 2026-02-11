@@ -3,7 +3,7 @@
  *
  * Tests for read receipt flow: Alice sends message, Bob plays it, Alice sees readBy update.
  *
- * NOTE: These tests work with both WataClient (MatrixServiceAdapter) and matrix-js-sdk
+ * NOTE: These tests work with both WataClient (WataService) and matrix-js-sdk
  * (MatrixService) implementations. After the receipt callback fires, we wait for a sync
  * to complete before checking readBy. This ensures matrix-js-sdk has fully processed the
  * receipt and updated its internal state (getUsersReadUpTo) before we query it.
@@ -168,7 +168,7 @@ describe('Read Receipts', () => {
 
     // Wait for a sync to complete to ensure matrix-js-sdk has fully processed the receipt
     // and updated its internal state (getUsersReadUpTo) before we query it.
-    // WataClient (MatrixServiceAdapter) doesn't need this as getVoiceMessages() always
+    // WataClient (WataService) doesn't need this as getVoiceMessages() always
     // fetches fresh data, but it doesn't hurt to wait for sync anyway.
     await aliceService.waitForSync(10000);
     console.log('[Test] Sync complete after receipt');

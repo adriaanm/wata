@@ -1,15 +1,15 @@
 /**
- * MatrixServiceAdapter: Backward compatibility wrapper around WataClient
+ * WataService: Service interface around WataClient
  *
- * This adapter wraps WataClient to maintain the same public interface as MatrixService,
- * allowing existing code to use the new WataClient implementation without changes.
+ * This service wraps WataClient to provide a clean, idiomatic interface
+ * for Wata applications to interact with the Matrix protocol.
  *
- * ⚠️ IMPORTANT: This is a THIN ADAPTER/FACADE.
+ *  IMPORTANT: This is a THIN SERVICE/FACADE.
  * Any logic related to the Matrix protocol does NOT belong here.
  * All such logic MUST be implemented in WataClient (src/shared/lib/wata-client/).
  *
  * This file should ONLY contain:
- * - Type mapping between MatrixService and WataClient types
+ * - Type mapping between WataService and WataClient types
  * - Callback/event bridging (delegation only)
  * - Simple method forwarding to WataClient
  *
@@ -17,10 +17,10 @@
  * Move it to WataClient instead.
  *
  * Key responsibilities:
- * - Map MatrixService callbacks to WataClient event listeners
+ * - Map WataService callbacks to WataClient event listeners
  * - Maintain roomId <-> Conversation mappings (for synchronous getDirectRooms/getVoiceMessages)
- * - Bridge domain types between MatrixService and WataClient
- * - Preserve MatrixService method signatures exactly
+ * - Bridge domain types between WataService and WataClient
+ * - Preserve public API for backward compatibility
  */
 
 import { Buffer } from 'buffer';
@@ -36,7 +36,7 @@ import type {
   Family,
 } from '@shared/lib/wata-client/types';
 
-// Re-export MatrixService types for compatibility
+// Export public types
 export interface Logger {
   log(message: string): void;
   warn(message: string): void;
@@ -120,9 +120,9 @@ export function getFamilyAliasPrefix(): string {
 }
 
 /**
- * MatrixServiceAdapter: Wraps WataClient to maintain MatrixService API compatibility
+ * WataService: Wraps WataClient to provide a clean service interface
  */
-class MatrixServiceAdapter {
+class WataService {
   private wataClient: WataClient;
   private credentialStorage: CredentialStorage;
   private syncCallbacks: SyncCallback[] = [];
@@ -133,7 +133,7 @@ class MatrixServiceAdapter {
   private currentUsername: string | null = null;
   private currentPassword: string | null = null;
 
-  // Mappings to bridge between WataClient and MatrixService
+  // Mappings to bridge between WataClient and WataService
   private contactByUserId: Map<string, Contact> = new Map();
   /** contactUserId -> PRIMARY roomId (deterministically selected, one per contact) */
   private primaryRoomIdByContactUserId: Map<string, string> = new Map();
@@ -147,13 +147,13 @@ class MatrixServiceAdapter {
 
   constructor(credentialStorage: CredentialStorage, externalLogger?: Logger) {
     this.credentialStorage = credentialStorage;
-    // Pass the external logger to WataClient (falls back to no-op if not provided)
+    // Pass external logger to WataClient (falls back to no-op if not provided)
     this.wataClient = new WataClient(HOMESERVER_URL, externalLogger);
     this.setupWataClientListeners();
   }
 
   /**
-   * Set up WataClient event listeners and bridge to MatrixService callbacks
+   * Set up WataClient event listeners and bridge to WataService callbacks
    */
   private setupWataClientListeners(): void {
     // Connection state changes
@@ -190,15 +190,15 @@ class MatrixServiceAdapter {
       if (conversation.type === 'dm' && conversation.contact) {
         const contactId = conversation.contact.user.id;
 
-        // Track the PRIMARY room for this contact
-        // The conversation.id from WataClient is the PRIMARY room (deterministically selected)
+        // Track PRIMARY room for this contact
+        // The conversation.id from WataClient is PRIMARY room (deterministically selected)
         const existingPrimary = this.primaryRoomIdByContactUserId.get(contactId);
         if (existingPrimary && existingPrimary !== conversation.id) {
-          log(`[MatrixServiceAdapter] Contact ${contactId}: primary room changed from ${existingPrimary.slice(-12)} to ${conversation.id.slice(-12)}`);
+          log(`[WataService] Contact ${contactId}: primary room changed from ${existingPrimary.slice(-12)} to ${conversation.id.slice(-12)}`);
         }
         this.primaryRoomIdByContactUserId.set(contactId, conversation.id);
 
-        // Add to the set of ALL room IDs for this contact
+        // Add to set of ALL room IDs for this contact
         if (!this.roomIdsByContactUserId.has(contactId)) {
           this.roomIdsByContactUserId.set(contactId, new Set());
         }
@@ -206,7 +206,7 @@ class MatrixServiceAdapter {
         if (!roomIds.has(conversation.id)) {
           if (roomIds.size > 0) {
             const existing = Array.from(roomIds).join(', ');
-            log(`[MatrixServiceAdapter] Contact ${contactId} now has multiple rooms: ${existing}, ${conversation.id}`);
+            log(`[WataService] Contact ${contactId} now has multiple rooms: ${existing}, ${conversation.id}`);
           }
           roomIds.add(conversation.id);
         }
@@ -220,8 +220,8 @@ class MatrixServiceAdapter {
     // Message played (receipt update)
     // roomId is now passed directly from WataClient, no need to search
     this.wataClient.on('messagePlayed', (message, roomId) => {
-      log(`[MatrixServiceAdapter] messagePlayed event for message ${message.id} in room ${roomId}`);
-      log(`[MatrixServiceAdapter] Notifying ${this.receiptCallbacks.length} callbacks`);
+      log(`[WataService] messagePlayed event for message ${message.id} in room ${roomId}`);
+      log(`[WataService] Notifying ${this.receiptCallbacks.length} callbacks`);
       this.receiptCallbacks.forEach((cb) => cb(roomId));
     });
 
@@ -248,7 +248,7 @@ class MatrixServiceAdapter {
   }
 
   /**
-   * Convert WataClient VoiceMessage to MatrixService VoiceMessage
+   * Convert WataClient VoiceMessage to WataService VoiceMessage
    */
   private wataToMatrixMessage(message: WataVoiceMessage): VoiceMessage {
     const userId = this.wataClient.getCurrentUser()?.id || '';
@@ -259,7 +259,7 @@ class MatrixServiceAdapter {
       timestamp: message.timestamp.getTime(),
       audioUrl: message.audioUrl,
       mxcUrl: message.mxcUrl,
-      duration: message.duration * 1000, // Convert WataClient seconds to MatrixService milliseconds
+      duration: message.duration * 1000, // Convert WataClient seconds to WataService milliseconds
       isOwn: message.sender.id === userId,
       readBy: message.playedBy.filter((id) => id !== message.sender.id),
     };
@@ -274,8 +274,8 @@ class MatrixServiceAdapter {
   }
 
   /**
-   * Convert WataClient data to MatrixService MatrixRoom format
-   * Returns the PRIMARY room for each contact (deterministically selected by WataClient)
+   * Convert WataClient data to WataService MatrixRoom format
+   * Returns PRIMARY room for each contact (deterministically selected by WataClient)
    */
   getDirectRooms(): MatrixRoom[] {
     const rooms: MatrixRoom[] = [];
@@ -317,14 +317,14 @@ class MatrixServiceAdapter {
         continue;
       }
 
-      // Try to get the contact for this DM room
+      // Try to get contact for this DM room
       const contact = this.wataClient.getContactForDMRoom(roomId);
 
       if (contact) {
         const convo = this.wataClient.getConversationByRoomId(roomId);
         const messageCount = convo?.messages.length ?? 0;
 
-        log(`[MatrixServiceAdapter] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`);
+        log(`[WataService] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`);
         rooms.push({
           roomId,
           name: contact.user.displayName,
@@ -336,11 +336,11 @@ class MatrixServiceAdapter {
       } else {
         // If getContactForDMRoom returns null, this might not be a DM room
         // or we don't have enough info yet. Skip it.
-        log(`[MatrixServiceAdapter] getDirectRooms: Skipping room ${roomId} (no contact found)`);
+        log(`[WataService] getDirectRooms: Skipping room ${roomId} (no contact found)`);
       }
     }
 
-    log(`[MatrixServiceAdapter] getDirectRooms returning ${rooms.length} rooms`);
+    log(`[WataService] getDirectRooms returning ${rooms.length} rooms`);
     return rooms;
   }
 
@@ -348,7 +348,7 @@ class MatrixServiceAdapter {
    * Login with username and password
    */
   async login(username: string, password: string): Promise<void> {
-    log('[MatrixServiceAdapter] login() called with:');
+    log('[WataService] login() called with:');
     log(`  username: ${username}, homeserver: ${HOMESERVER_URL}`);
 
     this.currentUsername = username;
@@ -368,7 +368,7 @@ class MatrixServiceAdapter {
 
     await this.credentialStorage.storeSession(username, credentials);
 
-    log('[MatrixServiceAdapter] Login successful');
+    log('[WataService] Login successful');
 
     // Update sync state to PREPARED
     this.currentSyncState = 'PREPARED';
@@ -409,7 +409,7 @@ class MatrixServiceAdapter {
 
       return true;
     } catch (error) {
-      logError(`[MatrixServiceAdapter] Failed to restore session: ${error}`);
+      logError(`[WataService] Failed to restore session: ${error}`);
       return false;
     }
   }
@@ -430,7 +430,7 @@ class MatrixServiceAdapter {
   }
 
   /**
-   * Get the currently logged-in username (without homeserver domain)
+   * Get currently logged-in username (without homeserver domain)
    */
   getCurrentUsername(): string | null {
     const user = this.wataClient.getCurrentUser();
@@ -440,7 +440,7 @@ class MatrixServiceAdapter {
   }
 
   /**
-   * Get the current user's display name from their profile
+   * Get current user's display name from their profile
    */
   async getDisplayName(): Promise<string | null> {
     const user = this.wataClient.getCurrentUser();
@@ -448,11 +448,11 @@ class MatrixServiceAdapter {
   }
 
   /**
-   * Set the current user's display name
+   * Set current user's display name
    */
   async setDisplayName(displayName: string): Promise<void> {
     await this.wataClient.setDisplayName(displayName);
-    log(`[MatrixServiceAdapter] Display name set to: ${displayName}`);
+    log(`[WataService] Display name set to: ${displayName}`);
   }
 
   /**
@@ -502,11 +502,11 @@ class MatrixServiceAdapter {
     // Get or create conversation
     const conversation = await this.wataClient.getConversation(contact);
 
-    // Track the PRIMARY room for this contact
-    // WataClient.getConversation() returns the primary room (deterministically selected)
+    // Track PRIMARY room for this contact
+    // WataClient.getConversation() returns primary room (deterministically selected)
     this.primaryRoomIdByContactUserId.set(userId, conversation.id);
 
-    // Add to the set of ALL room IDs for this contact (may be multiple due to races)
+    // Add to set of ALL room IDs for this contact (may be multiple due to races)
     if (!this.roomIdsByContactUserId.has(userId)) {
       this.roomIdsByContactUserId.set(userId, new Set());
     }
@@ -523,13 +523,13 @@ class MatrixServiceAdapter {
    */
   async createFamilyRoom(): Promise<string> {
     log(
-      `[MatrixServiceAdapter] Creating family room with alias #${FAMILY_ALIAS_PREFIX}`
+      `[WataService] Creating family room with alias #${FAMILY_ALIAS_PREFIX}`
     );
 
     const family = await this.wataClient.createFamily('Family');
     this.familyRoomId = family.id;
 
-    log(`[MatrixServiceAdapter] Family room created: ${family.id}`);
+    log(`[WataService] Family room created: ${family.id}`);
     return family.id;
   }
 
@@ -537,7 +537,7 @@ class MatrixServiceAdapter {
    * Invite user to family room
    */
   async inviteToFamily(userId: string): Promise<void> {
-    log(`[MatrixServiceAdapter] Inviting ${userId} to family room`);
+    log(`[WataService] Inviting ${userId} to family room`);
     await this.wataClient.inviteToFamily(userId);
   }
 
@@ -571,14 +571,14 @@ class MatrixServiceAdapter {
    */
   async joinRoom(_roomIdOrAlias: string): Promise<void> {
     // WataClient auto-joins rooms, so this is a no-op
-    log('[MatrixServiceAdapter] joinRoom() called - WataClient auto-joins');
+    log('[WataService] joinRoom() called - WataClient auto-joins');
   }
 
   /**
    * Check if user is member of a room
    */
   isRoomMember(roomId: string): boolean {
-    // Check if it's the family room
+    // Check if it's family room
     if (this.familyRoomId === roomId) {
       return this.wataClient.getFamily() !== null;
     }
@@ -603,7 +603,7 @@ class MatrixServiceAdapter {
     duration: number,
     _size: number
   ): Promise<string> {
-    log(`[MatrixServiceAdapter] Sending voice message to ${roomId}`);
+    log(`[WataService] Sending voice message to ${roomId}`);
 
     // Convert Buffer to ArrayBuffer
     const arrayBuffer: ArrayBuffer = audioBuffer.buffer.slice(
@@ -614,7 +614,7 @@ class MatrixServiceAdapter {
     // Convert milliseconds to seconds (WataClient expects seconds)
     const durationSeconds = duration / 1000;
 
-    // Send message to the specific room ID
+    // Send message to specific room ID
     // Use sendVoiceMessageToRoom to ensure message goes to the exact room specified,
     // not a deterministically-selected room from getOrCreateDMRoom
     const sentMessage: WataVoiceMessage = roomId === this.familyRoomId
@@ -642,7 +642,7 @@ class MatrixServiceAdapter {
   ): Promise<void> {
     // TODO: Implement via WataClient when deleteMessage is exposed
     logWarn(
-      '[MatrixServiceAdapter] redactMessage() not yet implemented in WataClient'
+      '[WataService] redactMessage() not yet implemented in WataClient'
     );
   }
 
@@ -664,7 +664,7 @@ class MatrixServiceAdapter {
    * Always fetches fresh data from WataClient to ensure readBy status is current
    */
   getVoiceMessages(roomId: string): VoiceMessage[] {
-    // Use the synchronous getConversationByRoomId to get fresh data
+    // Use synchronous getConversationByRoomId to get fresh data
     // This ensures readBy/playedBy reflects the latest receipt updates
     const convo = this.wataClient.getConversationByRoomId(roomId);
     if (convo) {
@@ -678,7 +678,7 @@ class MatrixServiceAdapter {
    * Mark message as played
    */
   async markMessageAsPlayed(roomId: string, eventId: string): Promise<void> {
-    log(`[MatrixServiceAdapter] markMessageAsPlayed: room=${roomId}, event=${eventId}`);
+    log(`[WataService] markMessageAsPlayed: room=${roomId}, event=${eventId}`);
     await this.wataClient.markAsPlayedById(roomId, eventId);
   }
 
@@ -751,12 +751,12 @@ class MatrixServiceAdapter {
   // ==========================================================================
 
   /**
-   * Get the underlying Matrix client (not available in adapter)
-   * Admin features requiring direct MatrixClient should use MatrixService instead
+   * Get underlying Matrix client (not available in WataService)
+   * WataService does not expose the underlying client.
    */
   getClient(): null {
     logWarn(
-      '[MatrixServiceAdapter] getClient() returns null - use MatrixService for admin features'
+      '[WataService] getClient() returns null - direct client access not available'
     );
     return null;
   }
@@ -867,5 +867,5 @@ class MatrixServiceAdapter {
   }
 }
 
-// Export MatrixServiceAdapter as default export
-export { MatrixServiceAdapter };
+// Export WataService
+export { WataService };

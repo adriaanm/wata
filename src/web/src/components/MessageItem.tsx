@@ -5,7 +5,7 @@
  * Shows sender, timestamp, duration, play/pause button, and progress bar.
  */
 
-import type { VoiceMessage } from '@shared/services/MatrixService';
+import type { VoiceMessage } from '@shared/services/WataService';
 import { useEffect, useCallback, useRef } from 'react';
 
 import { useAudioPlayer } from '../hooks/useAudioPlayer.js';

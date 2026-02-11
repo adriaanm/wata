@@ -4,8 +4,7 @@
  * Tests for family room functionality: creation, invitation, member retrieval,
  * and DM room creation on-demand.
  *
- * NOTE: These tests work with both WataClient (MatrixServiceAdapter) and
- * matrix-js-sdk (MatrixService) implementations via the test factory.
+ * NOTE: These tests work with WataClient (WataService) implementation.
  *
  * Note: These tests are designed to work with a persistent Conduit server where
  * the family room may already exist from previous test runs.
@@ -15,8 +14,7 @@ import {
   createTestService,
   createTestCredentialStorage,
 } from './helpers/test-service-factory';
-import { setHomeserverUrl, setFamilyAliasPrefix } from '../../src/shared/services/MatrixService';
-import { setHomeserverUrl as setAdapterHomeserverUrl, setFamilyAliasPrefix as setAdapterFamilyAliasPrefix } from '../../src/shared/services/MatrixServiceAdapter';
+import { setHomeserverUrl, setFamilyAliasPrefix } from '../../src/shared/services/WataService';
 
 import { createFakeAudioBuffer } from './helpers/audio-helpers';
 
@@ -52,10 +50,10 @@ const TEST_USERS = {
  * Helper to ensure the family room exists and the user is a member.
  * Creates the room if it doesn't exist, or joins it if it does.
  *
- * Note: Works with both MatrixService and MatrixServiceAdapter via duck typing.
+ * Note: Works with both MatrixService and WataService via duck typing.
  */
 async function ensureFamilyRoomMembership(
-  service: any, // MatrixService | MatrixServiceAdapter
+  service: any, // WataService
 ): Promise<string> {
   // First check if the family room exists via alias
   const existingRoomId = await service.getFamilyRoomIdFromAlias();
@@ -101,11 +99,11 @@ describe('Family Room', () => {
 
     // Set homeserver URL for both implementations (factory chooses which to use)
     setHomeserverUrl(TEST_HOMESERVER);
-    setAdapterHomeserverUrl(TEST_HOMESERVER);
+    setHomeserverUrl(TEST_HOMESERVER);
 
     // Use a separate family room for tests to avoid interfering with manual testing
     setFamilyAliasPrefix('family-test');
-    setAdapterFamilyAliasPrefix('family-test');
+    setFamilyAliasPrefix('family-test');
   }, 10000);
 
   beforeEach(async () => {
@@ -563,7 +561,7 @@ describe('Family Room', () => {
       console.log('[Test] Alice sent message with eventId:', aliceEventId);
 
       // Wait for alice's message to appear locally
-      // Note: MatrixServiceAdapter returns VoiceMessage with eventId property
+      // Note: WataService returns VoiceMessage with eventId property
       await waitForCondition(
         'alice message appears',
         () => aliceService.getVoiceMessages(dmRoomId).some(m => m.eventId === aliceEventId),
@@ -613,7 +611,7 @@ describe('Family Room', () => {
       );
 
       // Then: both should see both messages we sent in this test
-      // Note: MatrixServiceAdapter VoiceMessage has eventId (not id) and sender as string (not User)
+      // Note: WataService VoiceMessage has eventId (not id) and sender as string (not User)
       const aliceMsg = aliceMessages.find(m => m.eventId === aliceEventId);
       const bobMsg = aliceMessages.find(m => m.eventId === bobEventId);
       expect(aliceMsg).toBeTruthy();

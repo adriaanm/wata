@@ -14,7 +14,7 @@ The TUI frontend provides a keyboard-driven interface for Matrix voice messaging
 
 | Module | Purpose | Notes |
 |--------|---------|-------|
-| `services/MatrixService.ts` | Matrix client, auth, sync, messaging | Core backend - must be identical |
+| `services/WataService.ts` | Matrix client, auth, sync, messaging | Core backend - must be identical |
 | `hooks/useMatrixSync.ts` | Sync state subscription | Shared logic |
 | `hooks/useRooms.ts` | Room list subscription | Shared logic |
 | `hooks/useVoiceMessages.ts` | Message list subscription | Shared logic |
@@ -48,7 +48,7 @@ export interface CredentialStorage {
 // Web: localStorage or sessionStorage
 ```
 
-MatrixService accepts these adapters via dependency injection, keeping the core logic identical.
+WataService accepts these adapters via dependency injection, keeping the core logic identical.
 
 ## Technology Stack
 
@@ -58,7 +58,7 @@ MatrixService accepts these adapters via dependency injection, keeping the core 
 | TUI Framework | [Ink](https://github.com/vadimdemedes/ink) | React-based (familiar patterns), composable, TypeScript |
 | Audio Recording | [node-record-lpcm16](https://www.npmjs.com/package/node-record-lpcm16) + FFmpeg | Cross-platform, AAC encoding via FFmpeg |
 | Audio Playback | [play-sound](https://www.npmjs.com/package/play-sound) or `afplay` | macOS native player, simple API |
-| Matrix Client | `matrix-js-sdk` | Same SDK as mobile app |
+| Matrix Client | `WataClient` | Custom client library (lighter) |
 | Keypress | Ink built-in `useInput()` | Handles raw keyboard input |
 | Storage | `keytar` | macOS Keychain for credentials (like RN Keychain) |
 
@@ -112,8 +112,8 @@ MatrixService accepts these adapters via dependency injection, keeping the core 
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │                    Shared Services                       │   │
 │  │  ┌──────────────────────────────────────────────────┐   │   │
-│  │  │  MatrixService (core backend)                     │   │   │
-│  │  │  - matrix-js-sdk                                  │   │   │
+│  │  │  WataService (core backend)                    │   │   │
+│  │  │  - WataClient                                     │   │   │
 │  │  │  - Login, sync, room management                   │   │   │
 │  │  │  - Voice message send/receive                     │   │   │
 │  │  │  - Accepts CredentialStorage adapter              │   │   │
@@ -132,7 +132,7 @@ MatrixService accepts these adapters via dependency injection, keeping the core 
 wata/
 ├── src/                          # SHARED BACKEND (Android primary)
 │   ├── services/
-│   │   ├── MatrixService.ts      # Core Matrix logic (shared)
+│   │   ├── WataService.ts        # Core Matrix logic (shared)
 │   │   ├── AudioService.ts       # Android audio (platform-specific)
 │   │   └── CredentialStorage.ts  # Interface for credential adapters
 │   │
@@ -204,7 +204,7 @@ wata/
 
 ```typescript
 // tui/src/App.tsx
-import { MatrixService } from '@shared/services/MatrixService';
+import { WataService } from '@shared/services/WataService';
 import { useRooms } from '@shared/hooks/useRooms';
 import type { MatrixRoom } from '@shared/types/MatrixRoom';
 ```
@@ -332,13 +332,13 @@ Accessed by pressing Enter on a contact with unread messages. Shows messages fro
 
 1. Initialize `tui/` directory with package.json
 2. Set up TypeScript with path aliases to `../src/`
-3. **Refactor Android's MatrixService** to accept a `CredentialStorage` adapter (dependency injection)
+3. **Refactor Android's WataService** to accept a `CredentialStorage` adapter (dependency injection)
 4. Create `KeytarCredentialStorage.ts` implementing the adapter interface
-5. Verify shared imports work: `MatrixService`, types, config
+5. Verify shared imports work: `WataService`, types, config
 6. Create basic App shell with navigation state
 7. Implement LoadingView for startup
 
-**Deliverable:** TUI app that logs in using shared MatrixService
+**Deliverable:** TUI app that logs in using shared WataService
 
 ### Phase 2: Main View (Family List + PTT)
 
@@ -436,14 +436,14 @@ class TuiAudioService {
 
 ### MatrixService Refactoring
 
-To enable sharing, the `MatrixService.ts` must be refactored to remove platform-specific dependencies:
+To enable sharing, the `WataService.ts` must be refactored to remove platform-specific dependencies:
 
 **Before (direct dependency):**
 ```typescript
 // src/services/MatrixService.ts
 import * as Keychain from 'react-native-keychain'; // Or other platform-specific lib
 
-class MatrixService {
+class WataService {
   async storeCredentials(user: string, pass: string) {
     await Keychain.setGenericPassword(user, pass);  // Platform-specific!
   }
@@ -462,7 +462,7 @@ export interface CredentialStorage {
 // src/services/MatrixService.ts (shared)
 import type { CredentialStorage } from './CredentialStorage';
 
-class MatrixService {
+class WataService {
   constructor(private credentials: CredentialStorage) {}
 
   async storeCredentials(user: string, pass: string) {
@@ -627,4 +627,4 @@ Integration tests can share `test/integration/` setup from mobile app.
 - [ ] Unread tracking (clear after playback)
 - [ ] Family broadcast (send to family room)
 - [ ] Integration tests passing against Conduit
-- [ ] **Shared backend**: TUI imports `MatrixService`, hooks, and types from `src/` with zero duplication
+- [ ] **Shared backend**: TUI imports `WataService`, hooks, and types from `src/` with zero duplication

@@ -299,7 +299,7 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
       // Verify the audio URL is valid
       expect(receivedMessage.audioUrl).toMatch(/^http/);
       // TODO: Poorly implemented — VoiceMessage interface does not have an mxcUrl field.
-      // Neither MatrixService nor MatrixServiceAdapter populates it. Fix: either add
+      // Neither WataService nor populates it. Fix: either add
       // mxcUrl to the VoiceMessage interface and populate it, or derive the MXC URL
       // from audioUrl (which encodes the MXC path as an HTTP download URL).
       expect(receivedMessage.mxcUrl).toMatch(/^mxc:/);

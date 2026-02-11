@@ -1,10 +1,10 @@
 /**
  * TestClient - High-level test helper for Matrix operations
  *
- * Wraps MatrixService with test-friendly utilities for waiting on async operations,
+ * Wraps WataService with test-friendly utilities for waiting on async operations,
  * creating rooms, sending/receiving messages, and managing test state.
  *
- * IMPORTANT: This uses the same MatrixService as production code to ensure
+ * IMPORTANT: This uses the same WataService as production code to ensure
  * tests validate the actual code path used by apps.
  */
 
@@ -13,7 +13,7 @@ import type {
   MatrixRoom,
   VoiceMessage as BaseVoiceMessage,
 } from '@shared/services';
-import { setHomeserverUrl } from '@shared/services/MatrixService';
+import { setHomeserverUrl, type WataService } from '@shared/services/WataService';
 
 import { createTestService, createTestCredentialStorage } from './test-service-factory';
 
@@ -31,9 +31,9 @@ export type VoiceMessage = BaseVoiceMessage;
 type MatrixServiceLike = ReturnType<typeof createTestService>;
 
 /**
- * TestClient wraps MatrixService for testing
+ * TestClient wraps WataService for testing
  *
- * All operations go through the production MatrixService, ensuring tests
+ * All operations go through the production WataService, ensuring tests
  * validate the actual code path used by apps.
  */
 export class TestClient {
@@ -59,10 +59,10 @@ export class TestClient {
     // Set homeserver URL for this test
     setHomeserverUrl(this.homeserverUrl);
 
-    // Create service using the production factory
+    // Create service using the WataService
     this.service = createTestService(this.homeserverUrl, this.credentialStorage);
 
-    // Login through MatrixService (same as production)
+    // Login through WataService (same as production)
     await this.service.login(this.username, this.password);
 
     console.log(`[TestClient:${this.username}] Login successful`);
@@ -94,7 +94,7 @@ export class TestClient {
     });
 
     try {
-      // Use MatrixService's waitForSync method
+      // Use WataService's waitForSync method
       await this.service.waitForSync(timeoutMs);
 
       const rooms = this.service.getDirectRooms();
@@ -285,6 +285,8 @@ export class TestClient {
 
   /**
    * Create a room and wait for it to be ready
+   *
+   * For tests: Creates rooms using Matrix SDK so they're immediately available.
    */
   async createRoom(options: {
     is_direct?: boolean;
@@ -297,25 +299,28 @@ export class TestClient {
   }): Promise<{ room_id: string }> {
     if (!this.service) throw new Error('Not logged in');
 
-    console.log(`[TestClient:${this.username}] Creating room...`);
+    console.log(`[TestClient:${this.username}] Creating room via SDK...`);
 
-    // For DM rooms, use the production getOrCreateDmRoom
-    if (options.is_direct && options.invite && options.invite.length > 0) {
-      const otherUserId = options.invite[0];
-      const roomId = await this.service.getOrCreateDmRoom(otherUserId);
-      console.log(`[TestClient:${this.username}] DM room created: ${roomId}`);
+    // Use WataService's createRoom to create via SDK
+    // This makes the room immediately available to the client
+    const result = await this.service.createRoom({
+      is_direct: options.is_direct,
+      invite: options.invite,
+      preset: options.preset || 'trusted_private_chat',
+      name: options.name, // Unique name prevents DM service from matching
+      room_alias_name: options.room_alias_name,
+      visibility: options.visibility,
+      initial_state: options.initial_state,
+    });
 
-      // Wait for room to appear
-      await this.waitForRoom(roomId, 5000);
+    const roomId = result.room_id;
+    console.log(`[TestClient:${this.username}] Room created: ${roomId}`);
 
-      return { room_id: roomId };
-    }
+    // Room should be immediately available since we used the SDK
+    // But still wait briefly for sync to complete
+    await this.waitForRoom(roomId, 10000);
 
-    // For other room types, we'd need to add createRoom to MatrixService
-    // For now, throw an error since tests should use DM rooms
-    throw new Error(
-      'Non-DM room creation not yet supported - tests should use DM rooms',
-    );
+    return { room_id: roomId };
   }
 
   /**
@@ -326,7 +331,8 @@ export class TestClient {
 
     console.log(`[TestClient:${this.username}] Joining room ${roomId}...`);
     await this.service.joinRoom(roomId);
-    await this.waitForRoom(roomId, 5000);
+    // Increased timeout to handle accumulated server state
+    await this.waitForRoom(roomId, 30000);
     console.log(`[TestClient:${this.username}] Room joined`);
   }
 
@@ -345,7 +351,7 @@ export class TestClient {
       `[TestClient:${this.username}] Sending voice message to room ${roomId}...`,
     );
 
-    // Send through MatrixService and get the event ID directly
+    // Send through WataService and get the event ID directly
     const eventId = await this.service.sendVoiceMessage(
       roomId,
       audioBuffer,
@@ -383,7 +389,7 @@ export class TestClient {
       `[TestClient:${this.username}] Paginating timeline for room ${roomId} (limit: ${limit})...`,
     );
 
-    // MatrixService doesn't expose pagination yet
+    // WataService doesn't expose pagination yet
     // For now, just wait a bit for any pending messages to arrive
     await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -433,7 +439,7 @@ export class TestClient {
   }
 
   /**
-   * Get direct message rooms with metadata (similar to MatrixService.getDirectRooms)
+   * Get direct message rooms with metadata (similar to WataService.getDirectRooms)
    */
   getDirectRooms(): Array<{
     roomId: string;

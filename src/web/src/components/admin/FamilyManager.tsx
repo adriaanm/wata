@@ -1,4 +1,4 @@
-import type { FamilyMember } from '@shared/services/MatrixService';
+import type { FamilyMember } from '@shared/services/WataService';
 import { useCallback, useEffect, useState } from 'react';
 
 import { matrixService } from '../../services/matrixService.js';

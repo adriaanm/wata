@@ -1,8 +1,7 @@
 import { Box, useInput, useStdout } from 'ink';
 import React, { useState, useEffect } from 'react';
 
-import { MatrixService, setLogger } from '../shared/services/MatrixService.js';
-import { createMatrixService } from '../shared/services/index.js';
+import { WataService, setLogger } from '../shared/services/WataService.js';
 
 import { KeytarCredentialStorage } from './services/KeytarCredentialStorage';
 import { LogService } from './services/LogService.js';
@@ -30,15 +29,12 @@ const tuiLogger = {
   error: (message: string) => LogService.getInstance().addEntry('error', message),
 };
 
-// Wire up TUI's LogService to the shared MatrixServiceAdapter code
+// Wire up TUI's LogService to WataService
 setLogger(tuiLogger);
 
-// Create TUI-specific MatrixService instance with LogService-based logger
+// Create TUI-specific WataService instance with LogService-based logger
 const credentialStorage = new KeytarCredentialStorage();
-export const matrixService = createMatrixService({
-  credentialStorage,
-  logger: tuiLogger,
-});
+export const matrixService = new WataService(credentialStorage, tuiLogger);
 
 type Screen =
   | 'loading'

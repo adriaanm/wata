@@ -3,13 +3,13 @@
  * Uses WebCredentialStorage for browser credential management.
  */
 
-import { createMatrixService } from '@shared/services';
-import { setLogger } from '@shared/services/MatrixService';
+import { WataService } from '@shared/services';
+import { setLogger } from '@shared/services/WataService';
 
 import { LogService } from './LogService';
 import { webCredentialStorage } from './WebCredentialStorage';
 
-// Wire up web's LogService to the shared MatrixService
+// Wire up web's LogService to WataService
 setLogger({
   log: (message: string) => LogService.getInstance().addEntry('log', message),
   warn: (message: string) => LogService.getInstance().addEntry('warn', message),
@@ -18,6 +18,4 @@ setLogger({
 });
 
 // Create the singleton instance with web-specific credential storage
-export const matrixService = createMatrixService({
-  credentialStorage: webCredentialStorage,
-});
+export const matrixService = new WataService(webCredentialStorage);

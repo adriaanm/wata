@@ -44,13 +44,4 @@ export const MATRIX_CONFIG = {
    * Password for auto-login
    */
   password: 'testpass123',
-
-  /**
-   * Matrix client implementation to use
-   * - 'wata-client': Our custom client library (default, smaller, walkie-talkie focused)
-   * - 'matrix-js-sdk': Official SDK (fallback, more battle-tested)
-   *
-   * Can also be set via environment variable WATA_MATRIX_IMPL
-   */
-  implementation: (process.env.WATA_MATRIX_IMPL as 'wata-client' | 'matrix-js-sdk') || 'wata-client',
 };

@@ -1,10 +1,10 @@
 /**
- * Integration tests for MatrixService / MatrixServiceAdapter
+ * Integration tests for WataService
  *
  * These tests run against a local Conduit Matrix server.
  * Start the server first: cd test/docker && ./setup.sh
  *
- * Implementation: Uses MatrixService API via test factory
+ * Implementation: Uses WataService API via test factory
  */
 
 import { Buffer } from 'buffer';
@@ -14,7 +14,7 @@ import {
   createTestCredentialStorage,
   getImplementationName,
 } from './helpers/test-service-factory';
-import type { MatrixService, MatrixServiceAdapter, VoiceMessage } from '@shared/services/MatrixService';
+import type { WataService, VoiceMessage } from '@shared/services/WataService';
 
 /**
  * Poll until a condition is true, with exponential backoff.
@@ -44,7 +44,7 @@ const TEST_USERS = {
 };
 
 // Type union for the service (either implementation)
-type TestService = MatrixService | MatrixServiceAdapter;
+type TestService = WataService;
 
 describe('Matrix Integration Tests', () => {
   let aliceService: TestService;
@@ -232,7 +232,9 @@ describe('Matrix Integration Tests', () => {
     test('should receive messages in room timeline', async () => {
       // Send a message from Alice
       const fakeAudioData = Buffer.from('fake audio content for receiving test');
-      await aliceService.sendVoiceMessage(
+      const initialCount = aliceService.getVoiceMessages(testRoomId).length;
+
+      const eventId = await aliceService.sendVoiceMessage(
         testRoomId,
         fakeAudioData,
         'audio/mp4',
@@ -240,20 +242,21 @@ describe('Matrix Integration Tests', () => {
         fakeAudioData.length,
       );
 
-      // Wait for message to appear
+      // Wait for the specific message to appear (by event ID)
       await waitForCondition(
-        'message in alice timeline',
-        () => aliceService.getVoiceMessages(testRoomId).length > 0,
+        'message with event ID in alice timeline',
+        () => aliceService.getVoiceMessages(testRoomId).some(m => m.eventId === eventId),
       );
 
       // Check Alice's timeline
       const aliceMessages = aliceService.getVoiceMessages(testRoomId);
-      expect(aliceMessages.length).toBeGreaterThan(0);
+      expect(aliceMessages.length).toBeGreaterThan(initialCount);
 
-      // Verify message content
-      const lastMessage = aliceMessages[aliceMessages.length - 1];
-      expect(lastMessage.isOwn).toBe(true);
-      expect(lastMessage.duration).toBe(3000);
+      // Verify message content by finding the specific message we sent
+      const sentMessage = aliceMessages.find(m => m.eventId === eventId);
+      expect(sentMessage).toBeDefined();
+      expect(sentMessage!.isOwn).toBe(true);
+      expect(sentMessage!.duration).toBe(3000);
     });
 
     test('should handle multiple voice messages', async () => {

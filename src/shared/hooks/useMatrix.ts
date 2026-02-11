@@ -1,5 +1,5 @@
-import type { MatrixRoom, VoiceMessage } from '@shared/services/MatrixService';
-import { matrixService } from '@shared/services/MatrixService.rn';
+import type { MatrixRoom, VoiceMessage } from '@shared/services/WataService';
+import { WataService as matrixService } from '@shared/services/WataService';
 import { useState, useEffect, useCallback } from 'react';
 
 export function useMatrixSync() {

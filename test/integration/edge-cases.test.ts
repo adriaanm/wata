@@ -68,7 +68,7 @@ describe('Edge Cases and Error Handling', () => {
         -2,
       );
       expect(result.receivedMessage.audioUrl).toBeDefined();
-    }, 35000);
+    }, 90000);
 
     test('medium voice message (15 seconds)', async () => {
       await orchestrator.createClient(
@@ -92,7 +92,7 @@ describe('Edge Cases and Error Handling', () => {
         AudioDurations.MEDIUM,
         -2,
       );
-    }, 35000);
+    }, 90000);
 
     test('long voice message (60 seconds)', async () => {
       await orchestrator.createClient(
@@ -116,7 +116,7 @@ describe('Edge Cases and Error Handling', () => {
         AudioDurations.LONG,
         -2,
       );
-    }, 40000);
+    }, 100000);
   });
 
   describe('Audio Size Edge Cases', () => {
@@ -148,7 +148,7 @@ describe('Edge Cases and Error Handling', () => {
 
       expect(received.audioUrl).toBeDefined();
       expect(received.audioUrl).toMatch(/^http/);
-    }, 35000);
+    }, 90000);
 
     test('larger audio file (100KB)', async () => {
       await orchestrator.createClient(
@@ -177,7 +177,7 @@ describe('Edge Cases and Error Handling', () => {
       });
 
       expect(received.audioUrl).toBeDefined();
-    }, 40000);
+    }, 100000);
   });
 
   describe('Rapid Message Sending', () => {
@@ -217,7 +217,7 @@ describe('Edge Cases and Error Handling', () => {
       for (const eventId of expectedEventIds) {
         expect(messages.some(m => m.eventId === eventId)).toBe(true);
       }
-    }, 50000);
+    }, 110000);
 
     test('alternating rapid sends (alice and bob)', async () => {
       await orchestrator.createClient(
@@ -270,7 +270,7 @@ describe('Edge Cases and Error Handling', () => {
       // Both clients should see all 6 messages
       expect(aliceMessages.length).toBeGreaterThanOrEqual(6);
       expect(bobMessages.length).toBeGreaterThanOrEqual(6);
-    }, 50000);
+    }, 110000);
   });
 
   describe('Room Edge Cases', () => {
@@ -335,7 +335,7 @@ describe('Edge Cases and Error Handling', () => {
 
       expect(received).toBeDefined();
       expect(received.eventId).toBe(eventId);
-    }, 40000);
+    }, 100000);
   });
 
   describe('Sender and Receiver Identity', () => {
@@ -393,7 +393,7 @@ describe('Edge Cases and Error Handling', () => {
 
       expect(bobMsg).toBeDefined();
       expect(bobMsg?.isOwn).toBe(false);
-    }, 40000);
+    }, 100000);
 
     test('verify sender field is correct', async () => {
       await orchestrator.createClient(
@@ -426,7 +426,7 @@ describe('Edge Cases and Error Handling', () => {
 
       expect(received.sender).toBe('@alice:localhost');
       expect(received.senderName).toBeDefined();
-    }, 45000);
+    }, 105000);
   });
 
   describe('Metadata Validation', () => {
@@ -464,7 +464,7 @@ describe('Edge Cases and Error Handling', () => {
 
       // Should be parseable as URL
       expect(() => new URL(received.audioUrl)).not.toThrow();
-    }, 45000);
+    }, 105000);
 
     test('timestamp is reasonable (within last minute)', async () => {
       await orchestrator.createClient(
@@ -500,7 +500,7 @@ describe('Edge Cases and Error Handling', () => {
       // Timestamp should be within reasonable range
       expect(received.timestamp).toBeGreaterThanOrEqual(beforeSend - 60000);
       expect(received.timestamp).toBeLessThanOrEqual(afterSend + 60000);
-    }, 60000);
+    }, 120000);
 
     test('event ID is unique and non-empty', async () => {
       await orchestrator.createClient(
@@ -537,6 +537,6 @@ describe('Edge Cases and Error Handling', () => {
       // All event IDs should be unique
       const uniqueIds = new Set(eventIds);
       expect(uniqueIds.size).toBe(eventIds.length);
-    }, 50000);
+    }, 110000);
   });
 });

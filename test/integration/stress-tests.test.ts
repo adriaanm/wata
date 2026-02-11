@@ -29,8 +29,7 @@ const TEST_USERS = {
   bob: { username: 'bob', password: 'testpass123' },
 };
 
-// eslint-disable-next-line jest/no-disabled-tests
-describe.skip('Stress Tests', () => {
+describe('Stress Tests', () => {
   let orchestrator: TestOrchestrator;
 
   beforeAll(async () => {
@@ -91,8 +90,8 @@ describe.skip('Stress Tests', () => {
       const sendDuration = Date.now() - startTime;
       console.log(`[STRESS] Sent 30 messages in ${sendDuration}ms`);
 
-      // Wait for all messages to sync (needs more time for bulk messages)
-      await new Promise(resolve => setTimeout(resolve, 20000));
+      // Wait for all specific messages by event ID (robust approach)
+      await orchestrator.waitForEventIds('bob', roomId, new Set(eventIds), 90000);
 
       // Verify bob received all messages (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(
@@ -102,8 +101,10 @@ describe.skip('Stress Tests', () => {
       );
 
       console.log(`[STRESS] Bob received ${messages.length} messages`);
-      // Rapid sends may not all sync in time - accept at least 60% (18/30)
-      expect(messages.length).toBeGreaterThanOrEqual(18);
+      // With event ID checking, we should get all messages (or very close)
+      // Allow for accumulated state from previous tests by checking for at least our 30
+      const ourMessages = messages.filter(m => eventIds.includes(m.eventId));
+      expect(ourMessages.length).toBe(30);
 
       // Check ordering for received messages (allow some out-of-order due to rapid sends)
       let outOfOrderCount = 0;
@@ -149,8 +150,8 @@ describe.skip('Stress Tests', () => {
       const sendDuration = Date.now() - startTime;
       console.log(`[STRESS] Sent 50 messages in ${sendDuration}ms`);
 
-      // Wait for sync (needs more time for 50 messages)
-      await new Promise(resolve => setTimeout(resolve, 25000));
+      // Wait for all specific messages by event ID
+      await orchestrator.waitForEventIds('bob', roomId, new Set(eventIds), 120000);
 
       // Verify (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(
@@ -160,8 +161,9 @@ describe.skip('Stress Tests', () => {
       );
 
       console.log(`[STRESS] Bob received ${messages.length} messages`);
-      // Rapid sends may not all sync - accept at least 50% (25/50)
-      expect(messages.length).toBeGreaterThanOrEqual(25);
+      // Verify we got all 50 messages we sent
+      const ourMessages = messages.filter(m => eventIds.includes(m.eventId));
+      expect(ourMessages.length).toBe(50);
 
       // Check for duplicates
       const eventIdSet = new Set(messages.map(m => m.eventId));
@@ -212,8 +214,9 @@ describe.skip('Stress Tests', () => {
 
       console.log(`[STRESS] Sent 50 concurrent messages in ${sendDuration}ms`);
 
-      // Wait for sync (concurrent sends need even more time)
-      await new Promise(resolve => setTimeout(resolve, 30000));
+      // Wait for both clients to receive all messages by event ID
+      await orchestrator.waitForEventIds('alice', roomId, new Set(allEventIds), 120000);
+      await orchestrator.waitForEventIds('bob', roomId, new Set(allEventIds), 120000);
 
       // Both clients should see all 50 messages (use pagination to fetch all)
       const aliceMessages = await orchestrator.getAllVoiceMessages(
@@ -231,12 +234,7 @@ describe.skip('Stress Tests', () => {
         `[STRESS] Alice sees ${aliceMessages.length}, Bob sees ${bobMessages.length}`,
       );
 
-      // Concurrent sends from multiple clients can have sync race conditions
-      // Accept at least 50% delivery for concurrent stress test
-      expect(aliceMessages.length).toBeGreaterThanOrEqual(25);
-      expect(bobMessages.length).toBeGreaterThanOrEqual(25);
-
-      // Verify most event IDs are present (allow some loss in concurrent stress)
+      // Verify all event IDs are present (robust check)
       const aliceEventIds = new Set(aliceMessages.map(m => m.eventId));
       const bobEventIds = new Set(bobMessages.map(m => m.eventId));
 
@@ -247,9 +245,9 @@ describe.skip('Stress Tests', () => {
         bobEventIds.has(id),
       ).length;
 
-      // At least 50% of messages should be received
-      expect(aliceReceivedCount).toBeGreaterThanOrEqual(25);
-      expect(bobReceivedCount).toBeGreaterThanOrEqual(25);
+      // All 50 messages should be received by both clients
+      expect(aliceReceivedCount).toBe(50);
+      expect(bobReceivedCount).toBe(50);
     }, 180000);
   });
 
@@ -281,9 +279,6 @@ describe.skip('Stress Tests', () => {
         burst1EventIds.push(eventId);
       }
 
-      // Wait
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
       // Second burst: 10 messages
       const burst2Buffers = createAudioBuffers(10, AudioDurations.SHORT);
       const burst2EventIds: string[] = [];
@@ -299,8 +294,9 @@ describe.skip('Stress Tests', () => {
         burst2EventIds.push(eventId);
       }
 
-      // Wait for sync
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Wait for all messages by event ID
+      const allEventIds = [...burst1EventIds, ...burst2EventIds];
+      await orchestrator.waitForEventIds('bob', roomId, new Set(allEventIds), 60000);
 
       // Verify bob received all 20 messages (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(
@@ -309,15 +305,9 @@ describe.skip('Stress Tests', () => {
         50,
       );
 
-      expect(messages.length).toBeGreaterThanOrEqual(20);
-
-      // Verify all messages are present
-      const allEventIds = [...burst1EventIds, ...burst2EventIds];
-      const receivedEventIds = messages.map(m => m.eventId);
-
-      for (const eventId of allEventIds) {
-        expect(receivedEventIds.includes(eventId)).toBe(true);
-      }
+      // Verify all our messages are present
+      const ourMessages = messages.filter(m => allEventIds.includes(m.eventId));
+      expect(ourMessages.length).toBe(20);
     }, 90000);
 
     test('sustained load: 20 messages over 10 seconds', async () => {
@@ -355,8 +345,8 @@ describe.skip('Stress Tests', () => {
       const totalTime = Date.now() - startTime;
       console.log(`[STRESS] Sustained load completed in ${totalTime}ms`);
 
-      // Wait for final sync
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for all messages by event ID
+      await orchestrator.waitForEventIds('bob', roomId, new Set(eventIds), 60000);
 
       // Verify (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(
@@ -365,12 +355,17 @@ describe.skip('Stress Tests', () => {
         50,
       );
 
-      expect(messages.length).toBeGreaterThanOrEqual(20);
+      // Filter to just our messages
+      const ourMessages = messages
+        .filter(m => eventIds.includes(m.eventId))
+        .sort((a, b) => a.timestamp - b.timestamp);
 
-      // Verify ordering
-      for (let i = 1; i < messages.length; i++) {
-        expect(messages[i].timestamp).toBeGreaterThanOrEqual(
-          messages[i - 1].timestamp,
+      expect(ourMessages.length).toBe(20);
+
+      // Verify ordering of our messages
+      for (let i = 1; i < ourMessages.length; i++) {
+        expect(ourMessages[i].timestamp).toBeGreaterThanOrEqual(
+          ourMessages[i - 1].timestamp,
         );
       }
     }, 90000);
@@ -433,9 +428,6 @@ describe.skip('Stress Tests', () => {
       );
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
-
-      // Wait for room to fully sync before measuring
-      await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Send message and measure time until bob receives it
       const audio = createAudioBuffers(1, AudioDurations.SHORT)[0];

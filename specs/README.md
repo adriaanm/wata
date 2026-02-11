@@ -148,16 +148,23 @@ From [read-receipt.md](flows/read-receipt.md):
   - Workaround: Extra waitForSync() call after receipt
 ```
 
-## Common Test Workarounds
+## Acceptable Test Patterns
 
 The specs document these recurring test patterns:
 
+The following are acceptable patterns, as they reflect the nature of asynchronous communication:
+
 1. **Polling for State**: `waitForCondition()` with exponential backoff instead of event-driven waits
-2. **Fixed Delays**: `await sleep(2000)` assuming sync will complete
-3. **Event ID Polling**: `waitForEventIds()` checking for specific messages
-4. **Extra Sync Waits**: `waitForSync()` calls to ensure state propagation
-5. **Membership Polling**: Checking `isRoomMember()` repeatedly
-6. **Long Timeouts**: 15-35 second timeouts for operations that should be instant
+2. **Event ID Polling**: `waitForEventIds()` checking for specific messages
+3. **Extra Sync Waits**: `waitForSync()` calls to ensure state propagation
+4. **Membership Polling**: Checking `isRoomMember()` repeatedly
+
+## Unacceptable Test Patterns
+These are bad patterns, as we cannot rely on a constant amount of time to be enough, plus the tests should complete as quickly as possible:
+
+1. **Fixed Delays**: `await sleep(2000)` assuming sync will complete
+2. **Long Timeouts**: 15-35 second timeouts for operations that should be instant
+3. **Correlation without IDs**: the only way to check a certain message was received is via its ID. You cannot rely on a specific order of events without checking (see polling/waiting/retrying above), or on being the only one producing messages (i.e. you cannot rely on message counts).
 
 ## Using These Specs
 
@@ -191,7 +198,7 @@ The specs document these recurring test patterns:
 ✅ **Cross-references** - Related specs linked together
 ✅ **Known workarounds** - All test hacks documented
 
-## Next Steps (Not in Current Scope)
+## Next Steps 
 
 After specs are reviewed and approved:
 

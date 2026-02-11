@@ -5,7 +5,7 @@
  * Shows a list of voice messages with playback controls.
  */
 
-import type { VoiceMessage } from '@shared/services/MatrixService';
+import type { VoiceMessage } from '@shared/services/WataService';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 
 import { useVoiceMessages } from '../hooks/useMatrix.js';
