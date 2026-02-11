@@ -452,7 +452,19 @@ export class DMRoomService {
       return true;
     }
 
-    // Fallback: scan timeline for is_direct (for message deduplication)
+    // Fallback: A 2-member room (current user + one other) is a DM
+    // This handles rooms where we joined (not created via is_direct invite)
+    const joinedMembers = Array.from(room.members.values()).filter(
+      (m) => m.membership === 'join'
+    );
+    if (joinedMembers.length === 2) {
+      const otherMember = joinedMembers.find((m) => m.userId !== this.userId);
+      if (otherMember) {
+        return true;
+      }
+    }
+
+    // Timeline scan for is_direct (for legacy deduplication)
     for (const event of room.timeline) {
       if (
         event.type === 'm.room.member' &&
