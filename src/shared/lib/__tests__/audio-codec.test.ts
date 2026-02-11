@@ -17,9 +17,21 @@ import {
   OPUS_FRAME_SIZE,
   OPUS_PRE_SKIP,
   type DecodeResult,
-  type Logger,
 } from '@shared/lib/audio-codec';
 import { oggCrc32, createOpusHead, createOpusTags, createOggPage } from '@shared/lib/ogg';
+import type { Logger } from '@shared/lib/wata-client/types';
+import type { EncoderFactory, DecoderFactory } from '@shared/lib/opus';
+import { Encoder, Decoder } from '@evan/wasm/target/opus/node.mjs';
+
+// ============================================================================
+// Opus Factories (Node.js / @evan/wasm)
+// ============================================================================
+
+const mkEncoder: EncoderFactory = (sampleRate, channels, application) =>
+  new Encoder({ sample_rate: sampleRate, channels, application });
+
+const mkDecoder: DecoderFactory = (sampleRate, channels) =>
+  new Decoder({ sample_rate: sampleRate, channels });
 
 // ============================================================================
 // Test Logger
@@ -164,7 +176,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI) / OPUS_FRAME_SIZE);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -177,7 +189,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.round(Math.sin((i * 2 * Math.PI) / OPUS_FRAME_SIZE) * 16000);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -188,7 +200,7 @@ describe('encodeOggOpus', () => {
 
       // Empty input should either return minimal valid Ogg or throw
       // Based on implementation, it will encode 0 packets and return headers
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       // Should at least have headers (OpusHead + OpusTags pages)
       expect(result.length).toBeGreaterThan(0);
@@ -201,7 +213,7 @@ describe('encodeOggOpus', () => {
         samples[i] = 0.5;
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -213,7 +225,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -225,7 +237,7 @@ describe('encodeOggOpus', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE);
       samples.fill(0.5);
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(hasOggMagic(result)).toBe(true);
     });
@@ -234,7 +246,7 @@ describe('encodeOggOpus', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE);
       samples.fill(0.5);
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(hasOpusHead(result)).toBe(true);
     });
@@ -243,7 +255,7 @@ describe('encodeOggOpus', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE);
       samples.fill(0.5);
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(hasOpusTags(result)).toBe(true);
     });
@@ -254,7 +266,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       // Verify each page has valid CRC
       let offset = 0;
@@ -304,7 +316,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / 44100);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 44100 });
+      const result = encodeOggOpus(samples, { sampleRate: 44100 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -319,7 +331,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / 48000);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 48000 });
+      const result = encodeOggOpus(samples, { sampleRate: 48000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -333,7 +345,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / 22050);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 22050 });
+      const result = encodeOggOpus(samples, { sampleRate: 22050 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -346,7 +358,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / 8000);
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 8000 });
+      const result = encodeOggOpus(samples, { sampleRate: 8000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -358,7 +370,7 @@ describe('encodeOggOpus', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE);
 
       expect(() => {
-        encodeOggOpus(samples, { sampleRate: 16000, channels: 2 as 1 });
+        encodeOggOpus(samples, { sampleRate: 16000, channels: 2 as 1 }, mkEncoder);
       }).toThrow('Only mono audio is supported');
     });
   });
@@ -371,7 +383,7 @@ describe('encodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      encodeOggOpus(samples, { sampleRate: 16000, logger });
+      encodeOggOpus(samples, { sampleRate: 16000, logger }, mkEncoder);
 
       expect(logger.logs.length).toBeGreaterThan(0);
       expect(logger.logs.some((l) => l.includes('encodeOggOpus: starting'))).toBe(true);
@@ -383,7 +395,7 @@ describe('encodeOggOpus', () => {
       const samples = new Int16Array(OPUS_FRAME_SIZE);
       samples.fill(1000);
 
-      encodeOggOpus(samples, { sampleRate: 16000, logger });
+      encodeOggOpus(samples, { sampleRate: 16000, logger }, mkEncoder);
 
       expect(logger.logs.some((l) => l.includes('converting Int16Array to Float32Array'))).toBe(
         true
@@ -394,7 +406,7 @@ describe('encodeOggOpus', () => {
       const logger = new TestLogger();
       const samples = new Float32Array(OPUS_FRAME_SIZE * 3);
 
-      encodeOggOpus(samples, { sampleRate: 44100, logger });
+      encodeOggOpus(samples, { sampleRate: 44100, logger }, mkEncoder);
 
       // Log format: "encodeOggOpus: resampling 44100Hz → 16000Hz"
       expect(logger.logs.some((l) => l.includes('resampling') && l.includes('44100'))).toBe(true);
@@ -409,7 +421,7 @@ describe('encodeOggOpus', () => {
         samples[i] = 0.5;
       }
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -418,7 +430,7 @@ describe('encodeOggOpus', () => {
     it('should handle zero input (silence)', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE * 2).fill(0);
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -428,7 +440,7 @@ describe('encodeOggOpus', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE);
       samples.fill(1.0);
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -438,7 +450,7 @@ describe('encodeOggOpus', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE);
       samples.fill(-1.0);
 
-      const result = encodeOggOpus(samples, { sampleRate: 16000 });
+      const result = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.length).toBeGreaterThan(0);
@@ -459,10 +471,10 @@ describe('decodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       // Now decode it
-      const result = decodeOggOpus(encoded);
+      const result = decodeOggOpus(encoded, mkDecoder);
 
       expect(result).toHaveProperty('pcm');
       expect(result).toHaveProperty('sampleRate');
@@ -479,8 +491,8 @@ describe('decodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const result = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const result = decodeOggOpus(encoded, mkDecoder);
 
       const expectedDuration = (OPUS_FRAME_SIZE * frameCount) / OPUS_SAMPLE_RATE;
       // Duration should be close (Opus may add/remove some samples)
@@ -498,8 +510,8 @@ describe('decodeOggOpus', () => {
           samples[i] = Math.sin((i * 2 * Math.PI * 440) / rate);
         }
 
-        const encoded = encodeOggOpus(samples, { sampleRate: rate });
-        const result = decodeOggOpus(encoded);
+        const encoded = encodeOggOpus(samples, { sampleRate: rate }, mkEncoder);
+        const result = decodeOggOpus(encoded, mkDecoder);
 
         expect(result.sampleRate).toBe(16000);
       }
@@ -509,7 +521,7 @@ describe('decodeOggOpus', () => {
   describe('error handling', () => {
     it('should throw on empty buffer', () => {
       expect(() => {
-        decodeOggOpus(Buffer.from([]));
+        decodeOggOpus(Buffer.from([]), mkDecoder);
       }).toThrow();
     });
 
@@ -517,7 +529,7 @@ describe('decodeOggOpus', () => {
       const invalidData = Buffer.from('invalid ogg data');
 
       expect(() => {
-        decodeOggOpus(invalidData);
+        decodeOggOpus(invalidData, mkDecoder);
       }).toThrow();
     });
 
@@ -526,7 +538,7 @@ describe('decodeOggOpus', () => {
       const malformed = Buffer.alloc(100, 0xFF);
 
       expect(() => {
-        decodeOggOpus(malformed);
+        decodeOggOpus(malformed, mkDecoder);
       }).toThrow();
     });
 
@@ -541,7 +553,7 @@ describe('decodeOggOpus', () => {
       const oggData = Buffer.concat([Buffer.from(headPage), Buffer.from(tagsPage)]);
 
       expect(() => {
-        decodeOggOpus(oggData);
+        decodeOggOpus(oggData, mkDecoder);
       }).toThrow('No Opus packets found');
     });
   });
@@ -554,8 +566,8 @@ describe('decodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      decodeOggOpus(encoded, { logger });
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      decodeOggOpus(encoded, mkDecoder, { logger });
 
       expect(logger.logs.some((l) => l.includes('decodeOggOpus: starting'))).toBe(true);
       expect(logger.logs.some((l) => l.includes('decodeOggOpus: complete'))).toBe(true);
@@ -569,8 +581,8 @@ describe('decodeOggOpus', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const result = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const result = decodeOggOpus(encoded, mkDecoder);
 
       for (let i = 0; i < result.pcm.length; i++) {
         expect(Number.isFinite(result.pcm[i])).toBe(true);
@@ -580,8 +592,8 @@ describe('decodeOggOpus', () => {
     it('should handle silence correctly', () => {
       const samples = new Float32Array(OPUS_FRAME_SIZE * 2).fill(0);
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const result = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const result = decodeOggOpus(encoded, mkDecoder);
 
       // Decoded silence should be close to zero
       let maxAbs = 0;
@@ -603,8 +615,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should preserve audio data through roundtrip', () => {
       const original = createTestTone(OPUS_FRAME_SIZE * 3, 440, 16000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       // Check similarity (Opus is lossy, so we allow tolerance)
       assertBuffersSimilar(decoded.pcm, original, 0.15);
@@ -613,8 +625,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should handle low frequency tone', () => {
       const original = createTestTone(OPUS_FRAME_SIZE * 3, 100, 16000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       assertBuffersSimilar(decoded.pcm, original, 0.15);
     });
@@ -622,8 +634,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should handle high frequency tone', () => {
       const original = createTestTone(OPUS_FRAME_SIZE * 3, 2000, 16000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       assertBuffersSimilar(decoded.pcm, original, 0.2);
     });
@@ -633,8 +645,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should preserve audio from 44.1kHz source', () => {
       const original = createTestTone(OPUS_FRAME_SIZE * 3, 440, 44100);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 44100 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 44100 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       // Decode output is always 16kHz, so we compare with resampled original
       // Just check that we got reasonable audio data
@@ -645,8 +657,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should preserve audio from 48kHz source', () => {
       const original = createTestTone(OPUS_FRAME_SIZE * 3, 440, 48000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 48000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 48000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm.length).toBeGreaterThan(0);
       expect(decoded.sampleRate).toBe(16000);
@@ -655,8 +667,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should preserve audio from 8kHz source', () => {
       const original = createTestTone(OPUS_FRAME_SIZE * 3, 440, 8000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 8000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 8000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm.length).toBeGreaterThan(0);
       expect(decoded.sampleRate).toBe(16000);
@@ -670,8 +682,8 @@ describe('Roundtrip: encode → decode', () => {
         original[i] = Math.round(Math.sin((i * 2 * Math.PI * 440) / 16000) * 16000);
       }
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm).toBeInstanceOf(Int16Array);
       expect(decoded.pcm.length).toBeGreaterThan(0);
@@ -685,8 +697,8 @@ describe('Roundtrip: encode → decode', () => {
         original[i] = Math.sin((i * 2 * Math.PI * 440) / 16000);
       }
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm.length).toBeGreaterThan(0);
     });
@@ -694,8 +706,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should handle silence', () => {
       const original = new Float32Array(OPUS_FRAME_SIZE * 2).fill(0);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       // Should decode to near-zero values
       let maxAbs = 0;
@@ -713,8 +725,8 @@ describe('Roundtrip: encode → decode', () => {
         original[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE) * 1.0;
       }
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       // Should have peaks near full scale
       const validSamples = decoded.pcm.subarray(OPUS_PRE_SKIP);
@@ -732,8 +744,8 @@ describe('Roundtrip: encode → decode', () => {
         original[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE) * 1.0;
       }
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       // Should have troughs near full scale negative
       const validSamples = decoded.pcm.subarray(OPUS_PRE_SKIP);
@@ -749,8 +761,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should always return sampleRate of 16000', () => {
       const original = createTestTone(OPUS_FRAME_SIZE * 2, 440, 16000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.sampleRate).toBe(16000);
     });
@@ -759,8 +771,8 @@ describe('Roundtrip: encode → decode', () => {
       const frameCount = 4;
       const original = createTestTone(OPUS_FRAME_SIZE * frameCount, 440, 16000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       // Duration should be approximately samples / sampleRate
       const expectedDuration = decoded.pcm.length / decoded.sampleRate;
@@ -770,8 +782,8 @@ describe('Roundtrip: encode → decode', () => {
     it('should return Int16Array for pcm', () => {
       const original = createTestTone(OPUS_FRAME_SIZE, 440, 16000);
 
-      const encoded = encodeOggOpus(original, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(original, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm).toBeInstanceOf(Int16Array);
     });
@@ -786,8 +798,8 @@ describe('Roundtrip: encode → decode', () => {
         samples[i] = samples[i] * 2 - 1; // Scale to [-1, 1]
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm.length).toBeGreaterThan(0);
     });
@@ -804,8 +816,8 @@ describe('Roundtrip: encode → decode', () => {
           3;
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm.length).toBeGreaterThan(0);
       // Check that values are reasonable
@@ -824,8 +836,8 @@ describe('Roundtrip: encode → decode', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE) * amplitude;
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm.length).toBeGreaterThan(0);
       // Amplitude should generally increase (though Opus modifies it)
@@ -858,8 +870,8 @@ describe('Roundtrip: encode → decode', () => {
           2;
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       expect(decoded.pcm.length).toBeGreaterThan(0);
       // Opus is optimized for voice, so should handle this well
@@ -875,8 +887,8 @@ describe('Roundtrip: encode → decode', () => {
         samples[i] = Math.sin(2 * Math.PI * 440 * t) * 0.5;
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
-      const decoded = decodeOggOpus(encoded);
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
+      const decoded = decodeOggOpus(encoded, mkDecoder);
 
       // Duration may be slightly longer due to frame padding (up to 1 frame = 60ms)
       expect(decoded.duration).toBeGreaterThanOrEqual(duration);
@@ -892,7 +904,7 @@ describe('Roundtrip: encode → decode', () => {
         samples[i] = Math.sin((i * 2 * Math.PI * 440) / OPUS_SAMPLE_RATE);
       }
 
-      const encoded = encodeOggOpus(samples, { sampleRate: 16000 });
+      const encoded = encodeOggOpus(samples, { sampleRate: 16000 }, mkEncoder);
 
       // Input size: samples * 4 bytes per float32
       const inputSize = samples.length * 4;
