@@ -346,6 +346,13 @@ class WataService {
       }
     }
 
+    // Sort by lastMessageTime descending (newer first)
+    rooms.sort((a, b) => {
+      const aTime = a.lastMessageTime || 0;
+      const bTime = b.lastMessageTime || 0;
+      return bTime - aTime;
+    });
+
     log(`[WataService] getDirectRooms returning ${rooms.length} rooms`);
     return rooms;
   }

@@ -497,10 +497,12 @@ export class DMRoomService {
 
     const member = room.members.get(contactUserId);
     if (member) {
+      // Use display name from member, or fall back to user ID localpart
+      const displayName = member.displayName || contactUserId.split(':')[0].substring(1);
       return {
         user: {
           id: contactUserId,
-          displayName: member.displayName,
+          displayName,
           avatarUrl: member.avatarUrl,
         },
       };
