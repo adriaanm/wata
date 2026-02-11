@@ -80,9 +80,9 @@ export interface SyncEngineEvents {
   /** Emitted when a membership change occurs */
   membershipChanged: (roomId: string, userId: string, membership: string) => void;
   /** Emitted when global account data is updated */
-  accountDataUpdated: (type: string, content: Record<string, any>) => void;
+  accountDataUpdated: (type: string, content: Record<string, unknown>) => void;
   /** Emitted when sync encounters an error */
-  error: (error: Error) => void;
+  onError: (error: Error) => void;
 }
 
 type SyncEngineEventName = keyof SyncEngineEvents;
@@ -111,7 +111,7 @@ export class SyncEngine {
   private nextBatch: string | null = null;
   private isRunning = false;
   private syncLoopPromise: Promise<void> | null = null;
-  private eventHandlers: Map<SyncEngineEventName, Set<Function>> = new Map();
+  private eventHandlers: Map<SyncEngineEventName, Set<SyncEngineEventHandler>> = new Map();
   private logger: Logger;
   private syncTimeoutMs: number;
 
@@ -132,7 +132,7 @@ export class SyncEngine {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, new Set());
     }
-    this.eventHandlers.get(event)!.add(handler as Function);
+    this.eventHandlers.get(event)!.add(handler as SyncEngineEventHandler);
   }
 
   off<K extends SyncEngineEventName>(
@@ -141,7 +141,7 @@ export class SyncEngine {
   ): void {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
-      handlers.delete(handler as Function);
+      handlers.delete(handler as SyncEngineEventHandler);
     }
   }
 
@@ -322,7 +322,6 @@ export class SyncEngine {
   private processJoinedRoom(roomId: string, roomData: JoinedRoomSync): void {
     // Get or create room state
     let room = this.rooms.get(roomId);
-    const isNewRoom = !room;
     if (!room) {
       room = this.createEmptyRoom(roomId);
       this.rooms.set(roomId, room);

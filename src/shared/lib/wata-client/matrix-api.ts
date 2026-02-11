@@ -45,13 +45,9 @@ export interface WhoamiResponse {
   is_guest?: boolean;
 }
 
-export interface LogoutRequest {
-  // Empty body
-}
+export type LogoutRequest = Record<string, never>;
 
-export interface LogoutResponse {
-  // Empty response
-}
+export type LogoutResponse = Record<string, never>;
 
 // --- Sync ---
 
@@ -201,9 +197,7 @@ export interface InviteRequest {
   reason?: string;
 }
 
-export interface InviteResponse {
-  // Empty response
-}
+export type InviteResponse = Record<string, never>;
 
 export interface RoomAliasResponse {
   room_id: string;
@@ -238,9 +232,7 @@ export interface ReceiptRequest {
   thread_id?: string;
 }
 
-export interface ReceiptResponse {
-  // Empty response
-}
+export type ReceiptResponse = Record<string, never>;
 
 export interface GetMessagesParams {
   from: string;       // Pagination token from timeline.prev_batch or previous response
@@ -277,9 +269,7 @@ export interface SetDisplayNameRequest {
   displayname: string;
 }
 
-export interface SetDisplayNameResponse {
-  // Empty response
-}
+export type SetDisplayNameResponse = Record<string, never>;
 
 export interface AccountDataResponse {
   // Content varies by type
@@ -291,9 +281,7 @@ export interface SetAccountDataRequest {
   [key: string]: any;
 }
 
-export interface SetAccountDataResponse {
-  // Empty response
-}
+export type SetAccountDataResponse = Record<string, never>;
 
 // ============================================================================
 // Matrix API Client

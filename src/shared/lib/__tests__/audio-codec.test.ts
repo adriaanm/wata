@@ -14,10 +14,8 @@ import {
   encodeOggOpus,
   decodeOggOpus,
   OPUS_SAMPLE_RATE,
-  OPUS_CHANNELS,
   OPUS_FRAME_SIZE,
   OPUS_PRE_SKIP,
-  type DecodeResult,
 } from '@shared/lib/audio-codec';
 import { oggCrc32, createOpusHead, createOpusTags, createOggPage } from '@shared/lib/ogg';
 import type { EncoderFactory, DecoderFactory } from '@shared/lib/opus';

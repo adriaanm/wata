@@ -68,7 +68,7 @@ module.exports = [
       // These can be re-added if needed in the future
 
       // General
-      'no-console': ['warn', { allow: ['warn', 'error'] }],
+      'no-console': ['warn', { allow: ['log', 'warn', 'error'] }],
       'prefer-const': 'error',
       'no-var': 'error',
       eqeqeq: ['error', 'always', { null: 'ignore' }],

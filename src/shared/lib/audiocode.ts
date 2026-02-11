@@ -58,10 +58,11 @@
  * ```
  */
 
-/// <reference path="./reedsolomon.es.d.ts" />
+
 
 import { Buffer } from 'buffer';
 
+// import type { ReedSolomonES } from './reedsolomon.es.d';
 import { ReedSolomonES } from './rsWrapper.js';
 
 // ============================================================================

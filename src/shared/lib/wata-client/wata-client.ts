@@ -13,7 +13,7 @@ import { EventBuffer } from './event-buffer';
 import { MatrixApi } from './matrix-api';
 import type { MatrixEvent } from './matrix-api';
 import { SyncEngine } from './sync-engine';
-import type { SyncEngineOptions , RoomState, MemberInfo } from './sync-engine';
+import type { SyncEngineOptions , RoomState } from './sync-engine';
 import type {
   User,
   Contact,
@@ -48,7 +48,7 @@ export class WataClient {
   private bufferCheckTimer?: ReturnType<typeof setInterval>;
   private userId: string | null = null;
   private familyRoomId: string | null = null;
-  private eventHandlers: Map<WataClientEventName, Set<Function>> = new Map();
+  private eventHandlers: Map<WataClientEventName, Set<WataClientEventHandler>> = new Map();
   private isConnected = false;
   private logger: Logger;
   private syncOptions?: SyncEngineOptions;
@@ -70,7 +70,7 @@ export class WataClient {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, new Set());
     }
-    this.eventHandlers.get(event)!.add(handler as Function);
+    this.eventHandlers.get(event)!.add(handler as WataClientEventHandler);
   }
 
   off<K extends WataClientEventName>(
@@ -79,7 +79,7 @@ export class WataClient {
   ): void {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
-      handlers.delete(handler as Function);
+      handlers.delete(handler as WataClientEventHandler);
     }
   }
 
@@ -1002,7 +1002,7 @@ export class WataClient {
   /**
    * Handle room updates
    */
-  private handleRoomUpdated(roomId: string, room: RoomState): void {
+  private handleRoomUpdated(roomId: string, _room: RoomState): void {
     // If family room updated, emit family/contacts events
     if (this.isFamilyRoom(roomId)) {
       const family = this.getFamily();
@@ -1084,9 +1084,6 @@ export class WataClient {
     content: Record<string, any>
   ): void {
     if (type === 'm.direct') {
-      // Get list of rooms before update to detect new ones
-      const knownRooms = new Set(this.dmRoomService.getAllDMRoomIds(Object.keys(content).join(',')));
-
       // Delegate m.direct handling to DMRoomService
       this.dmRoomService.handleMDirectUpdate(content as Record<string, string[]>);
 

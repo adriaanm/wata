@@ -26,7 +26,7 @@ const initialProfile =
   profileIndex !== -1 && args[profileIndex + 1] ? args[profileIndex + 1] : null;
 const sendCredentials = args.includes('--send-credentials');
 const receiveCredentials = args.includes('--receive-credentials');
-const debugMode = args.includes('--debug');
+const _debugMode = args.includes('--debug');
 
 // Show help and exit
 if (showHelp) {
@@ -51,7 +51,7 @@ if (showHelp) {
 }
 
 // Export debug mode for other modules to check
-export const isDebugMode = debugMode;
+export const isDebugMode = _debugMode;
 
 // Enable alternate screen buffer (should disable scrollback)
 // Note: This works in most terminals but NOT in macOS Terminal.app
@@ -72,7 +72,7 @@ async function bootstrap() {
   // Step 1: Import LogService (but skip installation in debug mode)
   const { LogService: _LogService } = await import('./services/LogService.js');
 
-  if (debugMode) {
+  if (_debugMode) {
     // In debug mode, immediately uninstall LogService to get direct console output
     _LogService.getInstance().uninstall();
     console.log('[bootstrap] DEBUG MODE: LogService disabled, using direct console');
@@ -134,7 +134,7 @@ async function bootstrap() {
 
   // Step 6: Render with initial profile (pass debug mode through)
   // Ink will now render to the alternate screen buffer (no scrollback)
-  render(React.createElement(App, { initialProfile, debugMode }));
+  render(React.createElement(App, { initialProfile, _debugMode }));
 }
 
 /**

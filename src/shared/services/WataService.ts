@@ -28,10 +28,7 @@ import { Buffer } from 'buffer';
 import { MATRIX_CONFIG } from '@shared/config/matrix';
 import type {
   Contact,
-  Conversation,
   VoiceMessage as WataVoiceMessage,
-  User,
-  Family,
 } from '@shared/lib/wata-client/types';
 import { WataClient } from '@shared/lib/wata-client/wata-client';
 import type { CredentialStorage, StoredCredentials } from '@shared/services/CredentialStorage';
