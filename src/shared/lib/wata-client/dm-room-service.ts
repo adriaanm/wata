@@ -446,10 +446,14 @@ export class DMRoomService {
    * Check if a room has the is_direct flag set.
    */
   private hasIsDirectFlag(room: RoomState): boolean {
+    // Check if our own member event has is_direct flag (set by server when room is created as DM)
+    const myMember = room.members.get(this.userId);
+    if (myMember?.isDirect === true) {
+      return true;
+    }
+
+    // Fallback: scan timeline for is_direct (for message deduplication)
     for (const event of room.timeline) {
-      if (event.type === 'm.room.create' && event.content?.is_direct === true) {
-        return true;
-      }
       if (
         event.type === 'm.room.member' &&
         event.state_key === this.userId &&

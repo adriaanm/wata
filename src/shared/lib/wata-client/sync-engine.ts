@@ -32,6 +32,8 @@ export interface MemberInfo {
   displayName: string;
   avatarUrl: string | null;
   membership: 'join' | 'invite' | 'leave' | 'ban' | 'knock';
+  /** True if this member event indicates the room is a direct message */
+  isDirect?: boolean;
 }
 
 /**
@@ -498,6 +500,7 @@ export class SyncEngine {
             displayName: event.content.displayname || userId,
             avatarUrl: event.content.avatar_url || null,
             membership,
+            isDirect: event.content.is_direct === true,
           };
 
           room.members.set(userId, member);
