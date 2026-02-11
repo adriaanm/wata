@@ -17,6 +17,4 @@ export {
 export {
   createTestService,
   createTestCredentialStorage,
-  isUsingWataClient,
-  getImplementationName,
 } from './test-service-factory';

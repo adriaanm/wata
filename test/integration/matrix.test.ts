@@ -12,7 +12,6 @@ import { Buffer } from 'buffer';
 import {
   createTestService,
   createTestCredentialStorage,
-  getImplementationName,
 } from './helpers/test-service-factory';
 import type { WataService, VoiceMessage } from '@shared/services/WataService';
 
@@ -65,8 +64,7 @@ describe('Matrix Integration Tests', () => {
       );
     }
 
-    // Log which implementation is being used
-    console.log(`\n  Using implementation: ${getImplementationName()}\n`);
+    console.log(`\n  Using implementation: WataClient\n`);
   }, 10000);
 
   afterEach(async () => {

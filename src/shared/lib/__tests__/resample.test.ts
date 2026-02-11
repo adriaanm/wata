@@ -4,6 +4,7 @@
  * Tests audio resampling using linear interpolation.
  */
 
+import { jest } from '@jest/globals';
 import { resample } from '../resample';
 
 describe('resample', () => {

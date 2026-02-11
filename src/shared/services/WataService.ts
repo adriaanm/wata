@@ -144,10 +144,10 @@ class WataService {
   // Messages are fetched fresh from WataClient via getConversationByRoomId()
   private dmRoomContacts: Map<string, Contact> = new Map();
 
-  constructor(credentialStorage: CredentialStorage, externalLogger?: Logger) {
+  constructor(credentialStorage: CredentialStorage, externalLogger?: Logger, options?: { syncTimeoutMs?: number }) {
     this.credentialStorage = credentialStorage;
     // Pass external logger to WataClient (falls back to no-op if not provided)
-    this.wataClient = new WataClient(HOMESERVER_URL, externalLogger);
+    this.wataClient = new WataClient(HOMESERVER_URL, externalLogger, options?.syncTimeoutMs ? { sync: { syncTimeoutMs: options.syncTimeoutMs } } : undefined);
     this.setupWataClientListeners();
   }
 
@@ -589,6 +589,12 @@ class WataService {
       }
     }
 
+    // Check sync engine directly (room may exist but not yet processed as DM)
+    const room = this.wataClient.getSyncEngine().getRoom(roomId);
+    if (room) {
+      return true;
+    }
+
     return false;
   }
 
@@ -765,6 +771,22 @@ class WataService {
   getUnreadNotificationCount(roomId: string): number {
     const room = this.wataClient.getSyncEngine().getRoom(roomId);
     return room?.unreadNotifications?.notification_count ?? 0;
+  }
+
+  /**
+   * Create a room (low-level Matrix API)
+   */
+  async createRoom(options: {
+    is_direct?: boolean;
+    invite?: string[];
+    preset?: string;
+    name?: string;
+    room_alias_name?: string;
+    visibility?: string;
+    initial_state?: Array<{ type: string; state_key?: string; content: Record<string, unknown> }>;
+  }): Promise<{ room_id: string }> {
+    const response = await this.wataClient.getApi().createRoom(options as any);
+    return { room_id: response.room_id };
   }
 
   // ==========================================================================

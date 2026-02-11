@@ -11,6 +11,7 @@
 import { DMRoomService } from './dm-room-service';
 import { MatrixApi } from './matrix-api';
 import { SyncEngine } from './sync-engine';
+import type { SyncEngineOptions } from './sync-engine';
 import type { RoomState, MemberInfo } from './sync-engine';
 import type { MatrixEvent } from './matrix-api';
 import type {
@@ -48,10 +49,12 @@ export class WataClient {
   private eventHandlers: Map<WataClientEventName, Set<Function>> = new Map();
   private isConnected = false;
   private logger: Logger;
+  private syncOptions?: SyncEngineOptions;
 
-  constructor(homeserverUrl: string, logger?: Logger) {
+  constructor(homeserverUrl: string, logger?: Logger, options?: { sync?: SyncEngineOptions }) {
     this.api = new MatrixApi(homeserverUrl);
     this.logger = logger ?? noopLogger;
+    this.syncOptions = options?.sync;
   }
 
   // ==========================================================================
@@ -108,7 +111,7 @@ export class WataClient {
     this.logger.log(`[WataClient] Login successful: ${this.userId}`);
 
     // Create sync engine and set user ID
-    this.syncEngine = new SyncEngine(this.api, this.logger);
+    this.syncEngine = new SyncEngine(this.api, this.logger, this.syncOptions);
     this.syncEngine.setUserId(this.userId);
 
     // Create DM room service

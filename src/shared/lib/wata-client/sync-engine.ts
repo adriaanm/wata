@@ -95,6 +95,11 @@ const noopLogger: Logger = {
   error: () => {},
 };
 
+export interface SyncEngineOptions {
+  /** Long-poll timeout in milliseconds (default: 30000) */
+  syncTimeoutMs?: number;
+}
+
 export class SyncEngine {
   private api: MatrixApi;
   private rooms: Map<string, RoomState> = new Map();
@@ -104,10 +109,12 @@ export class SyncEngine {
   private syncLoopPromise: Promise<void> | null = null;
   private eventHandlers: Map<SyncEngineEventName, Set<Function>> = new Map();
   private logger: Logger;
+  private syncTimeoutMs: number;
 
-  constructor(api: MatrixApi, logger?: Logger) {
+  constructor(api: MatrixApi, logger?: Logger, options?: SyncEngineOptions) {
     this.api = api;
     this.logger = logger ?? noopLogger;
+    this.syncTimeoutMs = options?.syncTimeoutMs ?? 30000;
   }
 
   // ==========================================================================
@@ -225,9 +232,8 @@ export class SyncEngine {
 
     while (this.isRunning) {
       try {
-        // Call sync endpoint with 30 second timeout
         const response = await this.api.sync({
-          timeout: 30000,
+          timeout: this.syncTimeoutMs,
           since: this.nextBatch ?? undefined,
         });
 

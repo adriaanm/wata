@@ -31,5 +31,7 @@ module.exports = {
     '^@shared/(.*)$': '<rootDir>/src/shared/$1',
     '^@rn/(.*)$': '<rootDir>/src/rn/$1',
     '^@tui/(.*)$': '<rootDir>/src/tui/$1',
+    // Resolve .js imports to .ts files (ESM-style imports in TypeScript)
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
 };

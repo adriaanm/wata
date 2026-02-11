@@ -26,8 +26,8 @@ export function createTestService(
   // Set the homeserver URL
   setHomeserverUrl(homeserver);
 
-  // Create WataService instance
-  return new WataService(credentialStorage);
+  // Create WataService instance with fast sync for tests
+  return new WataService(credentialStorage, undefined, { syncTimeoutMs: 3000 });
 }
 
 /**
@@ -41,7 +41,7 @@ export function createTestService(
 export function createTestCredentialStorage(): CredentialStorage {
   // Simple in-memory storage for testing
   const sessions = new Map<string, { username: string; password: string }>();
-  const matrixSessions = new Map<string, import('@shared/lib/matrix-auth').StoredCredentials>();
+  const matrixSessions = new Map<string, import('@shared/services/CredentialStorage').StoredCredentials>();
 
   return {
     async store(username: string, password: string): Promise<void> {
@@ -61,14 +61,14 @@ export function createTestCredentialStorage(): CredentialStorage {
 
     async storeSession(
       username: string,
-      credentials: import('@shared/lib/matrix-auth').StoredCredentials
+      credentials: import('@shared/services/CredentialStorage').StoredCredentials
     ): Promise<void> {
       matrixSessions.set(username, credentials);
     },
 
     async retrieveSession(
       username: string
-    ): Promise<import('@shared/lib/matrix-auth').StoredCredentials | null> {
+    ): Promise<import('@shared/services/CredentialStorage').StoredCredentials | null> {
       return matrixSessions.get(username) || null;
     },
 

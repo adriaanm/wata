@@ -2,17 +2,11 @@
  * Read Receipt Tests
  *
  * Tests for read receipt flow: Alice sends message, Bob plays it, Alice sees readBy update.
- *
- * NOTE: These tests work with both WataClient (WataService) and matrix-js-sdk
- * (MatrixService) implementations. After the receipt callback fires, we wait for a sync
- * to complete before checking readBy. This ensures matrix-js-sdk has fully processed the
- * receipt and updated its internal state (getUsersReadUpTo) before we query it.
  */
 
 import {
   createTestService,
   createTestCredentialStorage,
-  getImplementationName,
 } from './helpers/test-service-factory';
 import { createFakeAudioBuffer } from './helpers';
 
@@ -41,8 +35,7 @@ describe('Read Receipts', () => {
       );
     }
 
-    // Log which implementation is being used
-    console.log(`\n  Using implementation: ${getImplementationName()}\n`);
+    console.log(`\n  Using implementation: WataClient\n`);
   }, 10000);
 
   beforeEach(async () => {
