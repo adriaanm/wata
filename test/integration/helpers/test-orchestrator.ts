@@ -47,85 +47,43 @@ export class TestOrchestrator {
   }
 
   /**
-   * Create a direct message room between users
+   * Create a direct message room between two users using production code path
    *
-   * Includes retry logic for Conduit's eventual consistency.
+   * Uses WataClient's DMRoomService to ensure proper DM registration with m.direct.
+   * Only supports 1:1 DMs (one participant).
    */
   async createRoom(owner: string, ...participants: string[]): Promise<string> {
+    if (participants.length !== 1) {
+      throw new Error('createRoom() only supports 1:1 DMs. Use exactly one participant.');
+    }
+
+    const participant = participants[0];
     console.log(
-      `[TestOrchestrator] Creating room: ${owner} with ${participants.join(', ')}`,
+      `[TestOrchestrator] Creating DM room: ${owner} <-> ${participant}`,
     );
 
     const ownerClient = this.getClient(owner);
+    const participantClient = this.getClient(participant);
 
-    // Add a unique name to prevent room reuse across test runs
-    // The DM room service may find existing rooms, so we make each test's room unique
-    const uniqueName = `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Use WataClient's DMRoomService.ensureDMRoom() (via getOrCreateDmRoom)
+    // This properly registers the room with m.direct account data
+    const participantUserId = `@${participant}:localhost`;
+    const roomId = await ownerClient.createDMRoom(participantUserId);
 
-    // Create the room with invites
-    const result = await ownerClient.createRoom({
-      is_direct: true,
-      invite: participants.map(u => `@${u}:localhost`),
-      preset: 'trusted_private_chat' as any,
-      name: uniqueName, // Unique name prevents reuse
-    });
+    console.log(`[TestOrchestrator] DM room created: ${roomId}`);
 
-    const roomId = result.room_id;
+    // Wait for participant to receive invite and auto-join
+    // (Auto-join happens via WataClient's auto-join flow)
+    await participantClient.waitForRoom(roomId, 15000);
+    await participantClient.waitForDirectRoom(roomId, 15000);
 
-    // Wait for owner to see the room first
-    await ownerClient.waitForRoom(roomId, 15000);
-
-    // Wait for all participants to join the room
-    const joinPromises = participants.map(async participant => {
-      const client = this.getClient(participant);
-
-      // Try to join the room with retries
-      // Note: We skip waitForRoom here because participants can't see invited rooms
-      // until after joining, creating a chicken-and-egg problem
-      let joined = false;
-      let attempts = 0;
-      const maxAttempts = 5; // Increased from 3 for better reliability
-
-      while (!joined && attempts < maxAttempts) {
-        try {
-          attempts++;
-          await client.joinRoom(roomId);
-          joined = true;
-          console.log(`[TestOrchestrator] ${participant} joined room`);
-        } catch (error) {
-          // Check if already in the room
-          const room = client.getRooms().find(r => r.roomId === roomId);
-          if (room) {
-            console.log(`[TestOrchestrator] ${participant} already in room`);
-            joined = true;
-          } else if (attempts < maxAttempts) {
-            console.log(
-              `[TestOrchestrator] ${participant} join attempt ${attempts} failed, retrying in ${1000 * attempts}ms...`,
-            );
-            // Exponential backoff: 1s, 2s, 3s, 4s
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
-          } else {
-            console.warn(
-              `[TestOrchestrator] ${participant} failed to join after ${maxAttempts} attempts:`,
-              error,
-            );
-          }
-        }
-      }
-
-      // After joining, wait for room to appear in the participant's room list
-      if (joined) {
-        await client.waitForRoom(roomId, 15000);
-      }
-    });
-
-    await Promise.all(joinPromises);
+    console.log(`[TestOrchestrator] ${participant} has joined and classified DM`);
 
     // Store room reference
-    const roomKey = [owner, ...participants].sort().join('-');
+    const roomKey = [owner, participant].sort().join('-');
     this.rooms.set(roomKey, roomId);
 
-    console.log(`[TestOrchestrator] Room ready: ${roomId}`);
+    console.log(`[TestOrchestrator] DM room ready: ${roomId}`);
     return roomId;
   }
 

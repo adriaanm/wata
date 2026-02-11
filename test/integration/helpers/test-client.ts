@@ -270,43 +270,24 @@ export class TestClient {
   }
 
   /**
-   * Create a room and wait for it to be ready
+   * Create a DM room using WataClient's DMRoomService (production code path)
    *
-   * For tests: Creates rooms using Matrix SDK so they're immediately available.
+   * This ensures rooms are properly registered as DMs with m.direct account data.
    */
-  async createRoom(options: {
-    is_direct?: boolean;
-    invite?: string[];
-    preset?: string;
-    name?: string;
-    room_alias_name?: string;
-    visibility?: string;
-    initial_state?: Array<{ type: string; state_key: string; content: any }>;
-  }): Promise<{ room_id: string }> {
+  async createDMRoom(otherUserId: string): Promise<string> {
     if (!this.service) throw new Error('Not logged in');
 
-    console.log(`[TestClient:${this.username}] Creating room via SDK...`);
+    console.log(`[TestClient:${this.username}] Creating DM room with ${otherUserId}...`);
 
-    // Use WataService's createRoom to create via SDK
-    // This makes the room immediately available to the client
-    const result = await this.service.createRoom({
-      is_direct: options.is_direct,
-      invite: options.invite,
-      preset: options.preset || 'trusted_private_chat',
-      name: options.name, // Unique name prevents DM service from matching
-      room_alias_name: options.room_alias_name,
-      visibility: options.visibility,
-      initial_state: options.initial_state,
-    });
+    // Use WataService's getOrCreateDmRoom which delegates to DMRoomService
+    const roomId = await this.service.getOrCreateDmRoom(otherUserId);
 
-    const roomId = result.room_id;
-    console.log(`[TestClient:${this.username}] Room created: ${roomId}`);
+    console.log(`[TestClient:${this.username}] DM room ready: ${roomId}`);
 
-    // Room should be immediately available since we used the SDK
-    // But still wait briefly for sync to complete
-    await this.waitForRoom(roomId, 5000);
+    // Wait for room to appear in direct rooms list (DM classification complete)
+    await this.waitForDirectRoom(roomId, 15000);
 
-    return { room_id: roomId };
+    return roomId;
   }
 
   /**
