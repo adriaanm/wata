@@ -42,3 +42,50 @@ Apply the same buffer-and-retry philosophy to tests:
 - Log elapsed time to debug slow operations
 
 **See:** `test/integration/helpers/test-client.ts` - `waitForRoom`, `waitForMessage`, `waitForCondition`
+
+## DM Room Detection
+
+**Check ALL member events for `is_direct` flag:**
+When Bob joins a room created by Alice, Bob's join event may not have `is_direct=true` (only the invite did). The fix: check ALL member events in the room for the flag, not just the current user's.
+
+**getDirectRooms() must query DMRoomService cache:**
+Rooms weren't appearing until a message was received. The fix: include rooms from DMRoomService cache in `getDirectRooms()`, not just rooms that have received messages.
+
+**See:** `src/shared/lib/wata-client/dm-room-service.ts` - `hasIsDirectFlag`, `getAllKnownDMRoomIds`
+
+## Test Infrastructure
+
+**Tests MUST use production code paths:**
+- ✅ Use WataClient → DMRoomService for DM room creation
+- ✅ Properly registers rooms with `m.direct` account data
+- ❌ Don't call Matrix API directly (bypasses DM detection)
+
+**DM Room Reuse is REQUIRED:**
+- Production behavior: `getOrCreateDmRoom()` reuses existing DM rooms
+- Tests MUST account for room reuse between test runs
+- Use event IDs to verify specific messages, not message counts
+- Per spec: "You cannot rely on message counts" (specs/README.md:167)
+
+**See:** `test/integration/helpers/test-orchestrator.ts`
+
+## Message Delivery Bug: Rapid Sends
+
+**CRITICAL BUG FOUND:** Messages are lost when sent rapidly (2026-02-11)
+
+**Symptoms:**
+- Slow sends (one-by-one with verification): ✅ All messages delivered
+- Rapid sends (20 messages sequential): ❌ ~50% message loss
+
+**Diagnosis:**
+- Event IDs are correctly returned from server
+- Missing messages never arrive in receiver's timeline
+- Not a test artifact - real message loss
+
+**Likely causes:**
+1. Server-side: Conduit may drop messages under load
+2. Client-side: Race condition in concurrent upload/send
+3. Sync issue: Messages sent faster than sync delivers
+
+**See:** `test/integration/diagnose-message-loss.test.ts`
+
+**TODO:** Investigate WataClient send path for concurrency issues
