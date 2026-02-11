@@ -9,6 +9,7 @@
  */
 
 import { DMRoomService } from './dm-room-service';
+import { EventBuffer } from './event-buffer';
 import { MatrixApi } from './matrix-api';
 import { SyncEngine } from './sync-engine';
 import type { SyncEngineOptions } from './sync-engine';
@@ -44,6 +45,8 @@ export class WataClient {
   private api: MatrixApi;
   private syncEngine!: SyncEngine;
   private dmRoomService!: DMRoomService;
+  private eventBuffer!: EventBuffer;
+  private bufferCheckTimer?: ReturnType<typeof setInterval>;
   private userId: string | null = null;
   private familyRoomId: string | null = null;
   private eventHandlers: Map<WataClientEventName, Set<Function>> = new Map();
@@ -122,6 +125,12 @@ export class WataClient {
       this.logger
     );
 
+    // Create event buffer for out-of-order events
+    this.eventBuffer = new EventBuffer({
+      maxAgeMs: 5 * 60 * 1000, // 5 minutes
+      maxEventsPerRoom: 100,
+    });
+
     // Wire up sync engine events
     this.setupSyncEngineListeners();
   }
@@ -150,6 +159,24 @@ export class WataClient {
     // Room state and account data will be populated during sync
     await this.syncEngine.start();
 
+    // Start buffer retry timer - checks for newly-classified rooms every 300ms,
+    // and prunes stale events every 10 seconds
+    let pruneCounter = 0;
+    this.bufferCheckTimer = setInterval(() => {
+      // Always check for newly-classified rooms
+      this.flushAllClassifiedRooms();
+
+      // Prune every ~10 seconds (33 iterations at 300ms)
+      pruneCounter++;
+      if (pruneCounter >= 33) {
+        const pruned = this.eventBuffer.prune();
+        if (pruned > 0) {
+          this.logger.log(`[WataClient] Pruned ${pruned} stale buffered events`);
+        }
+        pruneCounter = 0;
+      }
+    }, 300);
+
     this.isConnected = true;
     this.logger.log('[WataClient] Connected and syncing');
   }
@@ -163,6 +190,13 @@ export class WataClient {
     }
 
     this.logger.log('[WataClient] Disconnecting');
+
+    // Stop buffer check timer
+    if (this.bufferCheckTimer) {
+      clearInterval(this.bufferCheckTimer);
+      this.bufferCheckTimer = undefined;
+    }
+
     await this.syncEngine.stop();
     this.isConnected = false;
     this.emit('connectionStateChanged', 'offline');
@@ -184,6 +218,7 @@ export class WataClient {
     this.familyRoomId = null;
     this.dmRoomService?.clear();
     this.syncEngine.clear();
+    this.eventBuffer?.clear();
     this.logger.log('[WataClient] Logged out');
   }
 
@@ -672,9 +707,15 @@ export class WataClient {
    * Set up listeners for sync engine events
    */
   private setupSyncEngineListeners(): void {
-    // Emit connection state changes
+    // Emit connection state changes and flush any newly-classified rooms
     this.syncEngine.on('synced', () => {
       this.emit('connectionStateChanged', 'syncing');
+
+      // Refresh DM room cache from sync state
+      this.dmRoomService.refreshFromSync();
+
+      // Flush buffered events for rooms that are now classified as DMs
+      this.flushAllClassifiedRooms();
     });
 
     this.syncEngine.on('error', () => {
@@ -925,29 +966,32 @@ export class WataClient {
         return;
       }
 
-      // Pass room to eventToVoiceMessage for playedBy data
-      const message = this.eventToVoiceMessage(event, room);
-
-      // Determine conversation type by checking canonical alias
-      let conversation: Conversation;
+      // Check if this is the family room (always process immediately)
       if (this.isFamilyRoom(roomId)) {
         this.logger.log(`[WataClient] Message is in family room`);
-        conversation = this.roomToConversation(room, 'family');
-      } else {
-        // Find the contact for this DM
-        const contact = this.getContactForDMRoom(roomId);
-        if (!contact) {
-          this.logger.warn(`[WataClient] Could not find contact for DM room ${roomId}, dropping message`);
-          // Log room membership for debugging
-          const members = Array.from(room.members.entries());
-          this.logger.warn(`[WataClient] Room has ${members.length} members: ${members.map(([id, m]) => `${id}(${m.membership})`).join(', ')}`);
-          return;
-        }
-        this.logger.log(`[WataClient] Message is DM from ${contact.user.displayName}`);
-        conversation = this.roomToConversation(room, 'dm', contact);
+        const message = this.eventToVoiceMessage(event, room);
+        const conversation = this.roomToConversation(room, 'family');
+        this.emit('messageReceived', message, conversation);
+        return;
       }
 
-      this.emit('messageReceived', message, conversation);
+      // Check if this is a known DM room
+      const contact = this.getContactForDMRoom(roomId);
+      if (contact) {
+        this.logger.log(`[WataClient] Message is DM from ${contact.user.displayName}`);
+        const message = this.eventToVoiceMessage(event, room);
+        const conversation = this.roomToConversation(room, 'dm', contact);
+        this.emit('messageReceived', message, conversation);
+        return;
+      }
+
+      // Unknown room type - buffer for later processing
+      // Will be retried until DM info arrives or event ages out
+      this.logger.log(`[WataClient] Room ${roomId} not yet classified as DM, buffering event`);
+      const buffered = this.eventBuffer.buffer(roomId, event);
+      if (!buffered) {
+        this.logger.warn(`[WataClient] Buffer full for room ${roomId}, dropping event`);
+      }
     }
 
     // Handle redacted events
@@ -1024,6 +1068,9 @@ export class WataClient {
         // This will detect and track new DM rooms
         await this.waitForRoom(roomId, 3000);
         this.dmRoomService.refreshFromSync();
+
+        // Flush any buffered events for this room now that it's classified
+        this.flushBufferedEvents(roomId);
       } catch (error) {
         this.logger.error(`Failed to auto-join room ${roomId}: ${error}`);
       }
@@ -1038,8 +1085,20 @@ export class WataClient {
     content: Record<string, any>
   ): void {
     if (type === 'm.direct') {
+      // Get list of rooms before update to detect new ones
+      const knownRooms = new Set(this.dmRoomService.getAllDMRoomIds(Object.keys(content).join(',')));
+
       // Delegate m.direct handling to DMRoomService
       this.dmRoomService.handleMDirectUpdate(content as Record<string, string[]>);
+
+      // Flush buffered events for any newly-classified DM rooms
+      for (const roomIds of Object.values(content)) {
+        for (const roomId of roomIds as string[]) {
+          if (this.eventBuffer.hasBufferedEvents(roomId)) {
+            this.flushBufferedEvents(roomId);
+          }
+        }
+      }
     }
   }
 
@@ -1072,5 +1131,49 @@ export class WataClient {
    */
   getAllDMRoomIds(contactUserId: string): string[] {
     return this.dmRoomService.getAllDMRoomIds(contactUserId);
+  }
+
+  // ==========================================================================
+  // Event Buffer Management
+  // ==========================================================================
+
+  /**
+   * Flush buffered events for a specific room.
+   * Called when a room is classified as a DM.
+   */
+  private flushBufferedEvents(roomId: string): void {
+    if (!this.eventBuffer.hasBufferedEvents(roomId)) {
+      return;
+    }
+
+    const count = this.eventBuffer.flush(roomId, (roomId, event) => {
+      // Re-process the event now that we know the room type
+      this.handleTimelineEvent(roomId, event);
+    });
+
+    if (count > 0) {
+      this.logger.log(`[WataClient] Flushed ${count} buffered events for room ${roomId}`);
+    }
+  }
+
+  /**
+   * Flush buffered events for all rooms that are now classified.
+   * Called after each sync cycle and by the retry timer.
+   */
+  private flushAllClassifiedRooms(): void {
+    const bufferedRoomIds = this.eventBuffer.getBufferedRoomIds();
+    for (const roomId of bufferedRoomIds) {
+      // Only flush if DMRoomService explicitly knows this room
+      if (this.dmRoomService.isDMRoom(roomId)) {
+        this.flushBufferedEvents(roomId);
+      }
+    }
+  }
+
+  /**
+   * Get statistics about the event buffer (for debugging).
+   */
+  getEventBufferStats(): { roomCount: number; eventCount: number; oldestEventAge: number } {
+    return this.eventBuffer.getStats();
   }
 }

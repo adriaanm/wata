@@ -11,6 +11,29 @@ The DM Room Service (`DmRoomService` for Kotlin, `DMRoomService` for TypeScript)
 - **Deduplication** - Selecting the "primary" room when multiple exist
 - **Sync** - Updating caches from Matrix sync responses
 
+## Event Buffering
+
+Matrix events can arrive out of order. A message for a room might arrive before we know whether it's a DM room (via `m.direct` account data or `is_direct` flag).
+
+The `EventBuffer` class handles this by:
+
+1. **Buffering** - When a message arrives for an unclassified room, buffer it
+2. **Retrying** - Every 300ms, check if buffered rooms are now classified as DMs
+3. **Flushing** - When room is classified as DM, process buffered events
+
+**No heuristics** - We never guess based on room membership. We only classify a room as DM when we have definitive evidence:
+- `m.direct` account data includes the room
+- `is_direct: true` flag in our member event
+
+**Flush triggers:**
+- `m.direct` account data update
+- `refreshFromSync()` discovers room with `is_direct` flag
+- Retry timer (every 300ms)
+
+**Buffer limits:**
+- Max 5 minutes age (pruned every ~10 seconds)
+- Max 100 events per room
+
 ## Why This Service Exists
 
 Matrix has no protocol-level guarantee of a single DM room between two users. The `m.direct` account data is:

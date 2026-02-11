@@ -104,40 +104,16 @@ export class DMRoomService {
 
   /**
    * Get Contact object for a DM room.
-   * Returns null if not a DM room or contact not found.
+   * Returns null if not a known DM room or contact not found.
+   * Only returns contact if room is in our cache (via m.direct or is_direct flag).
    */
   getContactForRoom(roomId: string): Contact | null {
-    // First try the cached mapping
+    // Only use the cached mapping - no inference
     const contactUserId = this.contactByRoom.get(roomId);
     if (contactUserId) {
-      // Cache hit - buildContactFromRoom always returns a Contact now
       return this.buildContactFromRoom(roomId, contactUserId);
     }
-
-    // Fallback: Infer from room membership (recipient-side issue)
-    // A DM room has exactly 2 members: current user and contact
-    const room = this.syncEngine.getRoom(roomId);
-    if (!room) return null;
-
-    const joinedMembers = Array.from(room.members.values()).filter(
-      (m) => m.membership === 'join'
-    );
-
-    if (joinedMembers.length !== 2) return null;
-
-    const otherMember = joinedMembers.find((m) => m.userId !== this.userId);
-    if (!otherMember) return null;
-
-    // Verify this looks like a DM by checking is_direct flag
-    if (!this.hasIsDirectFlag(room)) return null;
-
-    return {
-      user: {
-        id: otherMember.userId,
-        displayName: otherMember.displayName,
-        avatarUrl: otherMember.avatarUrl,
-      },
-    };
+    return null;
   }
 
   // ==========================================================================
@@ -444,6 +420,7 @@ export class DMRoomService {
 
   /**
    * Check if a room has the is_direct flag set.
+   * Only returns true if we have definitive evidence (not heuristics).
    */
   private hasIsDirectFlag(room: RoomState): boolean {
     // Check if our own member event has is_direct flag (set by server when room is created as DM)
@@ -452,19 +429,7 @@ export class DMRoomService {
       return true;
     }
 
-    // Fallback: A 2-member room (current user + one other) is a DM
-    // This handles rooms where we joined (not created via is_direct invite)
-    const joinedMembers = Array.from(room.members.values()).filter(
-      (m) => m.membership === 'join'
-    );
-    if (joinedMembers.length === 2) {
-      const otherMember = joinedMembers.find((m) => m.userId !== this.userId);
-      if (otherMember) {
-        return true;
-      }
-    }
-
-    // Timeline scan for is_direct (for legacy deduplication)
+    // Timeline scan for is_direct (for cases where member state hasn't updated yet)
     for (const event of room.timeline) {
       if (
         event.type === 'm.room.member' &&
