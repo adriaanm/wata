@@ -24,9 +24,8 @@
  */
 
 import { Buffer } from 'buffer';
+
 import { MATRIX_CONFIG } from '@shared/config/matrix';
-import type { CredentialStorage, StoredCredentials } from '@shared/services/CredentialStorage';
-import { WataClient } from '@shared/lib/wata-client/wata-client';
 import type {
   Contact,
   Conversation,
@@ -34,6 +33,8 @@ import type {
   User,
   Family,
 } from '@shared/lib/wata-client/types';
+import { WataClient } from '@shared/lib/wata-client/wata-client';
+import type { CredentialStorage, StoredCredentials } from '@shared/services/CredentialStorage';
 
 // Export public types
 export interface Logger {

@@ -91,7 +91,7 @@ describe('oggCrc32', () => {
   it('should handle larger inputs (1KB)', () => {
     const input = new Uint8Array(1024);
     for (let i = 0; i < 1024; i++) {
-      // eslint-disable-next-line no-bitwise
+       
       input[i] = i & 0xff;
     }
     const result = oggCrc32(input);
@@ -774,7 +774,7 @@ describe('Integration: Mux/Demux Roundtrip', () => {
     // Create a 500-byte packet (will create [255, 245] segment table)
     const largePacket = new Uint8Array(500);
     for (let i = 0; i < 500; i++) {
-      // eslint-disable-next-line no-bitwise
+       
       largePacket[i] = i & 0xff;
     }
 

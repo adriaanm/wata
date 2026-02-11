@@ -11,10 +11,9 @@
 import { DMRoomService } from './dm-room-service';
 import { EventBuffer } from './event-buffer';
 import { MatrixApi } from './matrix-api';
-import { SyncEngine } from './sync-engine';
-import type { SyncEngineOptions } from './sync-engine';
-import type { RoomState, MemberInfo } from './sync-engine';
 import type { MatrixEvent } from './matrix-api';
+import { SyncEngine } from './sync-engine';
+import type { SyncEngineOptions , RoomState, MemberInfo } from './sync-engine';
 import type {
   User,
   Contact,

@@ -1,9 +1,10 @@
-import { Box, Text, useInput, useApp, useStdout } from 'ink';
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Buffer } from 'buffer';
 
-import { matrixService } from '../App.js';
+import { Box, Text, useInput, useApp, useStdout } from 'ink';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+
 import { encodeWav } from '../../shared/lib/wav.js';
+import { matrixService } from '../App.js';
 import { FocusableItem } from '../components/FocusableItem.js';
 import { useAudioRecorder } from '../hooks/useAudioRecorder.js';
 import { useContactStatus } from '../hooks/useContactStatus.js';

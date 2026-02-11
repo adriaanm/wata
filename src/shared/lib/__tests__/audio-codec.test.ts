@@ -9,6 +9,7 @@
 
 import { Buffer } from 'buffer';
 
+import { Encoder, Decoder } from '@evan/wasm/target/opus/node.mjs';
 import {
   encodeOggOpus,
   decodeOggOpus,
@@ -19,9 +20,8 @@ import {
   type DecodeResult,
 } from '@shared/lib/audio-codec';
 import { oggCrc32, createOpusHead, createOpusTags, createOggPage } from '@shared/lib/ogg';
-import type { Logger } from '@shared/lib/wata-client/types';
 import type { EncoderFactory, DecoderFactory } from '@shared/lib/opus';
-import { Encoder, Decoder } from '@evan/wasm/target/opus/node.mjs';
+import type { Logger } from '@shared/lib/wata-client/types';
 
 // ============================================================================
 // Opus Factories (Node.js / @evan/wasm)

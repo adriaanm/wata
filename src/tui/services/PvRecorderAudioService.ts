@@ -6,10 +6,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { PvRecorder } from '@picovoice/pvrecorder-node';
-
 import { encodeOggOpus, decodeOggOpus, type DecodeResult } from '@shared/lib/audio-codec.js';
-import { mkEncoder, mkDecoder } from '../lib/opus-factories.js';
 import { encodeWav } from '@shared/lib/wav.js';
+
+import { mkEncoder, mkDecoder } from '../lib/opus-factories.js';
+
 import { LogService } from './LogService.js';
 
 export interface RecordingResult {

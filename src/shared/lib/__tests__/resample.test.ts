@@ -5,6 +5,7 @@
  */
 
 import { jest } from '@jest/globals';
+
 import { resample } from '../resample';
 
 describe('resample', () => {
