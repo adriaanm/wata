@@ -421,19 +421,22 @@ export class DMRoomService {
   /**
    * Check if a room has the is_direct flag set.
    * Only returns true if we have definitive evidence (not heuristics).
+   * Checks ALL member events for is_direct, since any member having this flag
+   * indicates the room was created as a DM.
    */
   private hasIsDirectFlag(room: RoomState): boolean {
-    // Check if our own member event has is_direct flag (set by server when room is created as DM)
-    const myMember = room.members.get(this.userId);
-    if (myMember?.isDirect === true) {
-      return true;
+    // Check if any member event has is_direct flag
+    for (const member of room.members.values()) {
+      if (member.isDirect === true) {
+        return true;
+      }
     }
 
     // Timeline scan for is_direct (for cases where member state hasn't updated yet)
+    // Check ALL member events, not just our own
     for (const event of room.timeline) {
       if (
         event.type === 'm.room.member' &&
-        event.state_key === this.userId &&
         event.content?.is_direct === true
       ) {
         return true;
