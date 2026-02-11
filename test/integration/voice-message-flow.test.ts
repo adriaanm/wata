@@ -206,6 +206,10 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
       expect(reply.sender).toBe('@bob:localhost');
       expect(reply.duration).toBeCloseTo(4000, -2);
 
+      // Wait for both clients to see both messages
+      await orchestrator.waitForMessageCount('alice', roomId, 2);
+      await orchestrator.waitForMessageCount('bob', roomId, 2);
+
       // Check both clients see both messages
       const aliceMessages = orchestrator.getVoiceMessages('alice', roomId);
       const bobMessages = orchestrator.getVoiceMessages('bob', roomId);
@@ -298,10 +302,7 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
 
       // Verify the audio URL is valid
       expect(receivedMessage.audioUrl).toMatch(/^http/);
-      // TODO: Poorly implemented — VoiceMessage interface does not have an mxcUrl field.
-      // Neither WataService nor populates it. Fix: either add
-      // mxcUrl to the VoiceMessage interface and populate it, or derive the MXC URL
-      // from audioUrl (which encodes the MXC path as an HTTP download URL).
+      // Verify MXC URL is populated
       expect(receivedMessage.mxcUrl).toMatch(/^mxc:/);
 
       // Download the audio using authenticated request
@@ -345,7 +346,7 @@ describe('Voice Message Flow (with TestOrchestrator)', () => {
         15000,
       );
 
-      // TODO: Poorly implemented — same mxcUrl issue as "bob can download" test above.
+      // Download and verify the audio
       const aliceClient = orchestrator.getClient('alice');
       const { buffer: downloadedBuffer } = await aliceClient.downloadMedia(
         receivedMessage.mxcUrl!,
