@@ -177,7 +177,7 @@ export function AdminView({ onBack, currentProfile }: Props) {
       // Convert ArrayBuffer to Buffer
       const buffer = Buffer.from(wavBuffer);
 
-      // Send using MatrixService API
+      // Send using WataService API
       const eventId = await matrixService.sendVoiceMessage(
         roomId,
         buffer,

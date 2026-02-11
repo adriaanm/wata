@@ -15,33 +15,10 @@
 - Robust Docker availability checking with helpful error messages
 
 **Core Fixes:**
-- `src/lib/fixed-fetch-api.ts` - Added URL object support for Node.js fetch
-- `src/services/MatrixService.ts` - Added test interface methods (waitForSync, waitForMessage, cleanup)
+- WataService/WataClient - Test interface methods (waitForSync, waitForMessage, cleanup)
 
 **Example Test Suite:**
 - `test/integration/voice-message-flow.test.ts` - 6 comprehensive test scenarios
-
-### ✅ Resolved: Conduit URL Trailing Slash Issue
-
-**Original Problem:**
-The Matrix SDK got 404 errors when fetching push rules from Conduit because:
-1. SDK sends requests to `/_matrix/client/v3/pushrules` (no trailing slash)
-2. Conduit only accepts `/_matrix/client/v3/pushrules/` (with trailing slash)
-3. SDK treats 404 as fatal error and enters ERROR state
-
-Note: Conduit **does** implement push rules - this was purely a URL routing issue.
-
-**Solution Implemented:**
-We normalize the pushrules URL in `src/shared/lib/fixed-fetch-api.ts` to add the trailing slash:
-
-```typescript
-// In normalizeUrl():
-if (normalized.includes('/_matrix/client/v3/pushrules') && !normalized.includes('pushrules/')) {
-  normalized = normalized.replace('/pushrules', '/pushrules/');
-}
-```
-
-**Push rules now work correctly** - Conduit returns proper push rules and the SDK syncs successfully.
 
 ### 📝 Current Test Infrastructure Capabilities
 
@@ -83,11 +60,6 @@ await orchestrator.sendAndVerifyVoiceMessage('alice', 'bob', audio)
    - Phase 3: Reception, multi-client scenarios
    - Phase 4: E2E flows, edge cases
 
-3. **Future: Re-evaluate Push Notifications**
-   - If push notifications become needed, switch to Synapse
-   - Or wait for Conduit to implement push rules endpoint
-   - See "To Remove This Workaround" section above
-
 ## Current Test Coverage
 
 ### Existing Tests (`test/integration/matrix.test.ts`)
@@ -108,9 +80,8 @@ await orchestrator.sendAndVerifyVoiceMessage('alice', 'bob', audio)
 
 **Test Infrastructure:**
 - Jest with ts-jest (ESM mode)
-- React Native mocks for: keychain, fs, audio-recorder-player
 - Conduit server via Docker (alice & bob test users)
-- Shared login helper (`loginToMatrix`)
+- WataClient-based test helpers
 
 ### Test Coverage (Updated 2026-01-14)
 
@@ -135,8 +106,8 @@ await orchestrator.sendAndVerifyVoiceMessage('alice', 'bob', audio)
 
 ### Service Layer (Good Foundation)
 
-**MatrixService** (`src/services/MatrixService.ts`):
-- Singleton pattern ✅
+**WataService** (`src/shared/services/WataService.ts`):
+- Thin facade over WataClient ✅
 - Event-driven callbacks (sync, rooms, messages) ✅
 - Separated concerns (auth, rooms, messaging) ✅
 - Can be used without UI ✅
@@ -146,7 +117,7 @@ await orchestrator.sendAndVerifyVoiceMessage('alice', 'bob', audio)
 - Event-driven callbacks (recording, playback) ✅
 - Can be used without UI ✅
 
-**Authentication** (`src/lib/matrix-auth.ts`):
+**Authentication** (via WataClient):
 - Shared between app and tests ✅
 - Clean separation ✅
 
@@ -156,7 +127,7 @@ await orchestrator.sendAndVerifyVoiceMessage('alice', 'bob', audio)
 - `useMatrixSync()`, `useRooms()`, `useVoiceMessages()` require React context
 - Can't be used in headless test scenarios ❌
 
-**MatrixService improvements needed:**
+**WataService improvements needed:**
 - Missing: `waitForSync()` helper for tests
 - Missing: `waitForMessage()` helper for tests
 - Missing: `getMessageById()` for verification
@@ -207,9 +178,9 @@ export function createFakeAudioBuffer(durationMs: number): Buffer;
 export function createRealTestAudio(durationMs: number): Promise<Buffer>;
 ```
 
-**2. Enhance MatrixService for Testing**
+**2. Enhance WataService for Testing**
 
-Add to `MatrixService`:
+Add to `WataService`:
 ```typescript
 // For tests only - wait for specific conditions
 async waitForSync(timeoutMs = 5000): Promise<void>;
@@ -217,7 +188,7 @@ async waitForMessage(roomId: string, filter: (msg: VoiceMessage) => boolean, tim
 
 // Test isolation
 async cleanup(): Promise<void>; // Clear all callbacks
-getClient(): MatrixClient | null; // For advanced test scenarios
+getClient(): WataClient | null; // For advanced test scenarios
 ```
 
 **3. Mock Audio Recording** (`test/integration/__mocks__/audio-generator.ts`)
@@ -324,7 +295,7 @@ describe('Edge Cases', () => {
 
 ### Design Pattern: Testable Service Layer
 
-The key insight is that both `MatrixService` and `AudioService` are already singletons that can run without UI. We need to:
+The key insight is that both `WataService` and `AudioService` are already singletons that can run without UI. We need to:
 
 1. **Add programmatic control** - Methods to drive the services from tests
 2. **Add test observability** - Ways to wait for and verify async operations
@@ -332,10 +303,10 @@ The key insight is that both `MatrixService` and `AudioService` are already sing
 
 ### Proposed Additions
 
-**1. MatrixService Test Interface**
+**1. WataService Test Interface**
 
 ```typescript
-// Add to MatrixService
+// Add to WataService
 export interface TestInterface {
   // Control
   async loginAs(username: string, password: string): Promise<void>;
@@ -365,8 +336,8 @@ const roomId = await client1.createRoom(...);
 await client1.sendVoiceMessage(roomId, audioBuffer, ...);
 
 // For multi-client tests, need separate instances
-import { MatrixService } from '../services/MatrixService';
-const client2 = new MatrixService(); // Create second instance
+import { WataService } from '../services/WataService';
+const client2 = new WataService(); // Create second instance
 await client2.loginAs('bob', 'testpass123');
 await client2.waitForMessage(roomId, msg => msg.sender === '@alice:localhost');
 ```
@@ -390,11 +361,11 @@ export interface TestInterface {
 ```typescript
 // test/integration/lib/test-orchestrator.ts
 export class TestOrchestrator {
-  private clients = new Map<string, MatrixService>();
+  private clients = new Map<string, WataService>();
   private rooms = new Map<string, string>();
 
-  async createClient(username: string, password: string): Promise<MatrixService> {
-    const client = new MatrixService();
+  async createClient(username: string, password: string): Promise<WataService> {
+    const client = new WataService();
     await client.loginAs(username, password);
     await client.waitForSync();
     this.clients.set(username, client);
@@ -591,7 +562,7 @@ pnpm test:integration
 **Concurrent Send Reliability:**
 - When both clients send simultaneously, some messages may not sync immediately
 - Tests accept 50% delivery rate for extreme concurrent stress scenarios
-- This is a Matrix SDK/Conduit limitation, not an application bug
+- This is a Conduit limitation, not an application bug
 
 **Timeline Pagination:**
 - Default `room.timeline` only shows ~10 recent events
@@ -602,7 +573,6 @@ pnpm test:integration
 
 - The architecture is already well-suited for headless testing (singleton services)
 - Docker must be running for integration tests (`pnpm dev:server`)
-- Matrix SDK logger must be silenced - see `test/integration/setup.ts`
-- SDK emits noisy RTC/push rule warnings that are filtered in setup.ts
+- Noisy logs should be silenced - see `test/integration/setup.ts`
 - Use `VERBOSE_TESTS=1 pnpm test:integration` to see all logs when debugging
-- Tests use `loginToMatrix()` from `src/shared/lib/matrix-auth.ts` which includes URL normalization via `createFixedFetch()`
+- Tests use WataClient directly for authentication

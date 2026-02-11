@@ -39,7 +39,6 @@ This requires Push Notifications.
 
 **Prerequisites:**
 1. Switch from Conduit to Synapse (Conduit doesn't support push rules)
-2. Remove push rules interception from `src/lib/fixed-fetch-api.ts`
 
 ## Delivery for intermittently connected devices
 Basic off-line synch for incoming messages. Outgoing messages only send when device is connected. Otherwise, sending is disabled.
@@ -94,7 +93,7 @@ Full offline support for incoming and outgoing messages. Retention is configurab
 **When to implement:** If messages need to be private from server operators.
 
 **Implementation:**
-- Enable Olm/Megolm crypto in matrix-js-sdk
+- Enable Olm/Megolm crypto in WataClient
 - Handle key backup and device verification
 - Consider UX for verification on keypad-only devices
 

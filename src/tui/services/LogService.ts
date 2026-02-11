@@ -107,7 +107,7 @@ export class LogService {
   }
 
   /**
-   * Add a log entry directly (used by SilentLogger)
+   * Add a log entry directly
    */
   addEntry(level: LogEntry['level'], message: string): void {
     this.logs.push({

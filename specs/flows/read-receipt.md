@@ -11,7 +11,7 @@ This flow covers marking a voice message as played (sending a read receipt), the
   - Tests: Complete receipt flow
   - Verifies: Bob sends receipt, Alice sees Bob in playedBy
   - Workaround: 15s polling for onReceiptUpdate callback to fire
-  - Workaround: Extra waitForSync() call after receipt to ensure matrix-js-sdk state updates
+  - Workaround: Extra waitForSync() call after receipt to ensure state updates
 
 - "receipt callback fires when message is played"
   - Tests: onReceiptUpdate callback mechanism
@@ -280,24 +280,8 @@ Both call MatrixApi.sendReadReceipt(roomId, eventId)
 ## Known Workarounds in Tests
 
 1. **Polling for Receipt Callback**: Tests poll for 15 seconds waiting for onReceiptUpdate to fire
-2. **Extra waitForSync() Call**: Tests call waitForSync() after receipt callback to ensure matrix-js-sdk updates getUsersReadUpTo() state
+2. **Extra waitForSync() Call**: Tests call waitForSync() after receipt callback to ensure state is updated
 3. **Polling for playedBy Update**: Tests poll getVoiceMessages() checking playedBy field instead of using messagePlayed event
-
-## Implementation Differences
-
-### WataClient (MatrixServiceAdapter)
-
-- **Immediate Update**: getVoiceMessages() queries room.readReceipts directly
-- **No Extra Sync**: State always fresh from SyncEngine
-- **No Workaround Needed**: Tests work without extra waitForSync()
-
-### matrix-js-sdk (MatrixService)
-
-- **Delayed Update**: getUsersReadUpTo() has internal cache
-- **Extra Sync Needed**: Must wait for SDK to process receipt internally
-- **Workaround Required**: Tests must call waitForSync() after receipt callback
-
-**Test Strategy**: Tests accommodate both implementations by always calling waitForSync()
 
 ## Related Specs
 

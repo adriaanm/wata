@@ -47,7 +47,7 @@ export function MessageItem({
 
   // Get HTTP URL for audio playback with authorization
   const getAuthenticatedUrl = useCallback(() => {
-    // The audioUrl from MatrixService already has the HTTP URL
+    // The audioUrl from WataService already has the HTTP URL
     // For authenticated media, we need to add the access token
     const accessToken = matrixService.getAccessToken();
     if (accessToken && message.audioUrl) {

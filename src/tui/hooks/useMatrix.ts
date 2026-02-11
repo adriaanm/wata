@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import type {
   MatrixRoom,
   VoiceMessage,
-} from '../../shared/services/MatrixService.js';
+} from '../../shared/services/WataService.js';
 import { matrixService } from '../App.js';
 import { LogService } from '../services/LogService.js';
 

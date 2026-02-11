@@ -57,7 +57,7 @@ export class LogService {
           : level === 'error'
             ? console.error
             : console.info;
-    logFn(`[MatrixService] ${level.toUpperCase()}: ${message}`);
+    logFn(`[WataService] ${level.toUpperCase()}: ${message}`);
   }
 
   /**

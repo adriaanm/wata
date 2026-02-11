@@ -116,4 +116,4 @@ src/
 | Opus audio format | `docs/voice.md` |
 | Matrix room types | `docs/family-model.md` |
 | TUI component patterns | `docs/tui-architecture.md` |
-| Conduit URL fix | `src/shared/lib/fixed-fetch-api.ts` |
+| WataClient specs | `specs/` |

@@ -20,7 +20,6 @@ The TUI frontend provides a keyboard-driven interface for Matrix voice messaging
 | `hooks/useVoiceMessages.ts` | Message list subscription | Shared logic |
 | `types/*.ts` | `MatrixRoom`, `VoiceMessage`, etc. | Shared interfaces |
 | `config/matrix.ts` | Homeserver URL, credentials | Shared config |
-| `lib/fixed-fetch-api.ts` | Conduit workarounds | Shared workaround |
 
 ### What is Platform-Specific
 
@@ -149,7 +148,7 @@ wata/
 │   │   └── matrix.ts             # Shared config
 │   │
 │   ├── lib/
-│   │   └── fixed-fetch-api.ts    # Shared Conduit workaround
+│   │   └── wata-client/          # WataClient library
 │   │
 │   ├── screens/                  # Android-only (React Native)
 │   └── components/               # Android-only (React Native)

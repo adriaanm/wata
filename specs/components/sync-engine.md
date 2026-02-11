@@ -24,7 +24,7 @@ SyncEngine manages the Matrix /sync loop and maintains in-memory state for all j
 **test/integration/read-receipts.test.ts**
 - Tests read receipt processing via receiptUpdated event
 - Workaround: Polls for 15 seconds waiting for receipt callback to fire
-- Workaround: Calls waitForSync() after receipt to ensure matrix-js-sdk state updated
+- Workaround: Calls waitForSync() after receipt to ensure state is updated
 
 **test/integration/edge-cases.test.ts**
 - Tests auto-join behavior via membershipChanged event

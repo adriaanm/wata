@@ -86,14 +86,7 @@ async function bootstrap() {
     console.log(`[bootstrap] Initial profile from CLI: ${initialProfile}`);
   }
 
-  // Step 2: Configure global matrix-js-sdk logger
-  // In debug mode, use verbose console logging; otherwise redirect to LogService
-  const { ensureGlobalMatrixLogger } =
-    await import('./services/MatrixLogger.js');
-  await ensureGlobalMatrixLogger(debugMode);
-  console.log('[bootstrap] Global matrix-js-sdk logger configured');
-
-  // Step 3: Initialize audio service
+  // Step 2: Initialize audio service
   const { pvRecorderAudioService } =
     await import('./services/PvRecorderAudioService.js');
   try {
@@ -105,7 +98,7 @@ async function bootstrap() {
     // Continue anyway - audio errors will be shown when user tries to record
   }
 
-  // Step 4: Set up cleanup handlers
+  // Step 3: Set up cleanup handlers
   const cleanup = async () => {
     await pvRecorderAudioService.release();
     restoreTerminal(); // Restore normal screen buffer with scrollback
@@ -121,7 +114,7 @@ async function bootstrap() {
     process.exit(0);
   });
 
-  // Step 5: Check for AudioCode CLI commands (skip TUI if specified)
+  // Step 4: Check for AudioCode CLI commands (skip TUI if specified)
   if (sendCredentials || receiveCredentials) {
     // Restore terminal for AudioCode mode (no alternate screen buffer)
     restoreTerminal();
@@ -134,12 +127,12 @@ async function bootstrap() {
     return; // Unreachable but TypeScript needs it
   }
 
-  // Step 6: Now import the rest of the app
+  // Step 5: Now import the rest of the app
   const React = await import('react');
   const { render } = await import('ink');
   const { App } = await import('./App.js');
 
-  // Step 7: Render with initial profile (pass debug mode through)
+  // Step 6: Render with initial profile (pass debug mode through)
   // Ink will now render to the alternate screen buffer (no scrollback)
   render(React.createElement(App, { initialProfile, debugMode }));
 }

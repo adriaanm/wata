@@ -5,6 +5,5 @@
  */
 
 export { WataService } from './WataService';
-export { MatrixService } from './MatrixService';
 export type { CredentialStorage } from './CredentialStorage';
 export type { Logger, MatrixRoom, FamilyMember, VoiceMessage } from './WataService';

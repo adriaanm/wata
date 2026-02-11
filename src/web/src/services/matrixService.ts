@@ -1,5 +1,5 @@
 /**
- * Web-specific MatrixService singleton.
+ * Web-specific WataService singleton.
  * Uses WebCredentialStorage for browser credential management.
  */
 

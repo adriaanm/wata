@@ -8,7 +8,7 @@
  *
  * Integrates with:
  * - useAudioRecorder for audio recording
- * - MatrixService for voice message sending
+ * - WataService for voice message sending
  */
 
 import { useState, useCallback, useEffect } from 'react';

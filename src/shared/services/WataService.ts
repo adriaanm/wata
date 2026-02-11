@@ -25,8 +25,7 @@
 
 import { Buffer } from 'buffer';
 import { MATRIX_CONFIG } from '@shared/config/matrix';
-import type { StoredCredentials } from '@shared/lib/matrix-auth';
-import type { CredentialStorage } from '@shared/services/CredentialStorage';
+import type { CredentialStorage, StoredCredentials } from '@shared/services/CredentialStorage';
 import { WataClient } from '@shared/lib/wata-client/wata-client';
 import type {
   Contact,
