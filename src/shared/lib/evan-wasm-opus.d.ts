@@ -33,13 +33,25 @@ declare module '@evan/wasm/target/opus/deno.js' {
     packet_loss: number;
     vbr_constraint: boolean;
     application: 'voip' | 'audio' | 'restricted_lowdelay';
-    max_bandwidth: 'auto' | 'narrowband' | 'mediumband' | 'wideband' | 'superwideband' | 'fullband';
+    max_bandwidth:
+      | 'auto'
+      | 'narrowband'
+      | 'mediumband'
+      | 'wideband'
+      | 'superwideband'
+      | 'fullband';
     force_channels: 1 | 2 | 'auto';
     prediction_disabled: boolean;
     expert_frame_duration: number | 'arg';
     in_dtx: boolean;
     sample_rate: number;
-    bandwidth: 'auto' | 'narrowband' | 'mediumband' | 'wideband' | 'superwideband' | 'fullband';
+    bandwidth:
+      | 'auto'
+      | 'narrowband'
+      | 'mediumband'
+      | 'wideband'
+      | 'superwideband'
+      | 'fullband';
     phase_inversion_disabled: boolean;
     set bitrate(arg: number | 'auto' | 'max'): void;
     set vbr(bool: boolean): void;
@@ -47,7 +59,15 @@ declare module '@evan/wasm/target/opus/deno.js' {
     set signal(arg: 'auto' | 'voice' | 'music'): void;
     set inband_fec(bool: boolean): void;
     set lsb_depth(int: number): void;
-    set bandwidth(arg: 'auto' | 'narrowband' | 'mediumband' | 'wideband' | 'superwideband' | 'fullband'): void;
+    set bandwidth(
+      arg:
+        | 'auto'
+        | 'narrowband'
+        | 'mediumband'
+        | 'wideband'
+        | 'superwideband'
+        | 'fullband',
+    ): void;
     set complexity(int: number): void;
     set vbr_constraint(bool: boolean): void;
     set application(arg: 'voip' | 'audio' | 'restricted_lowdelay'): void;
@@ -55,7 +75,15 @@ declare module '@evan/wasm/target/opus/deno.js' {
     set packet_loss(int: number): void;
     set prediction_disabled(bool: boolean): void;
     set expert_frame_duration(arg: number): void;
-    set max_bandwidth(arg: 'auto' | 'narrowband' | 'mediumband' | 'wideband' | 'superwideband' | 'fullband'): void;
+    set max_bandwidth(
+      arg:
+        | 'auto'
+        | 'narrowband'
+        | 'mediumband'
+        | 'wideband'
+        | 'superwideband'
+        | 'fullband',
+    ): void;
     set phase_inversion_disabled(bool: boolean): void;
   }
 
@@ -71,7 +99,13 @@ declare module '@evan/wasm/target/opus/deno.js' {
     last_packet_duration: number;
     in_dtx: boolean;
     sample_rate: number;
-    bandwidth: 'auto' | 'narrowband' | 'mediumband' | 'wideband' | 'superwideband' | 'fullband';
+    bandwidth:
+      | 'auto'
+      | 'narrowband'
+      | 'mediumband'
+      | 'wideband'
+      | 'superwideband'
+      | 'fullband';
     phase_inversion_disabled: boolean;
     set gain(int: number): void;
     set phase_inversion_disabled(bool: boolean): void;

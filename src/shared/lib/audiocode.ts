@@ -58,8 +58,6 @@
  * ```
  */
 
-
-
 import { Buffer } from 'buffer';
 
 // import type { ReedSolomonES } from './reedsolomon.es.d';

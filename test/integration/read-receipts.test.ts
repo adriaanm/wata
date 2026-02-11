@@ -91,8 +91,12 @@ describe('Read Receipts', () => {
       bobRooms = bobService.getDirectRooms();
       attempts++;
     }
-    console.log(`[Test] Bob has ${bobRooms.length} rooms after ${attempts} attempts`);
-    console.log(`[Test] Bob's rooms: ${bobRooms.map(r => r.roomId).join(', ')}`);
+    console.log(
+      `[Test] Bob has ${bobRooms.length} rooms after ${attempts} attempts`,
+    );
+    console.log(
+      `[Test] Bob's rooms: ${bobRooms.map(r => r.roomId).join(', ')}`,
+    );
 
     // Step 3: Alice sends voice message
     console.log('[Test] Step 3: Alice sends voice message');
@@ -116,26 +120,32 @@ describe('Read Receipts', () => {
 
     const sentMessage = aliceMessages[aliceMessages.length - 1];
     console.log(`[Test] Message eventId: ${sentMessage.eventId}`);
-    console.log(`[Test] Message readBy (before): ${JSON.stringify(sentMessage.readBy)}`);
+    console.log(
+      `[Test] Message readBy (before): ${JSON.stringify(sentMessage.readBy)}`,
+    );
 
     // Step 5: Wait for Bob to receive the message
     console.log('[Test] Step 5: Waiting for Bob to receive message...');
-    let bobMessages = bobService.getVoiceMessages(roomId);  // Use Alice's roomId!
+    let bobMessages = bobService.getVoiceMessages(roomId); // Use Alice's roomId!
     attempts = 0;
     while (bobMessages.length === 0 && attempts < 20) {
       await new Promise(resolve => setTimeout(resolve, 500));
       bobMessages = bobService.getVoiceMessages(roomId);
       attempts++;
     }
-    console.log(`[Test] Bob has ${bobMessages.length} messages after ${attempts} attempts`);
+    console.log(
+      `[Test] Bob has ${bobMessages.length} messages after ${attempts} attempts`,
+    );
 
     expect(bobMessages.length).toBeGreaterThanOrEqual(1);
-    const messageToPlay = bobMessages.find(m => m.eventId === sentMessage.eventId) || bobMessages[bobMessages.length - 1];
+    const messageToPlay =
+      bobMessages.find(m => m.eventId === sentMessage.eventId) ||
+      bobMessages[bobMessages.length - 1];
     console.log(`[Test] Bob will play message: ${messageToPlay.eventId}`);
 
     // Step 6: Bob marks message as played
     console.log('[Test] Step 6: Bob marks message as played');
-    await bobService.markMessageAsPlayed(roomId, messageToPlay.eventId);  // Use Alice's roomId!
+    await bobService.markMessageAsPlayed(roomId, messageToPlay.eventId); // Use Alice's roomId!
     console.log('[Test] Bob marked message as played');
 
     // Step 7: Wait for Alice to receive the receipt via sync
@@ -143,12 +153,16 @@ describe('Read Receipts', () => {
 
     // Set up a listener for receipt updates
     let receiptReceived = false;
-    const unsubscribe = aliceService.onReceiptUpdate((receiptRoomId: string) => {
-      console.log(`[Test] Alice received receipt update for room ${receiptRoomId}`);
-      if (receiptRoomId === roomId) {
-        receiptReceived = true;
-      }
-    });
+    const unsubscribe = aliceService.onReceiptUpdate(
+      (receiptRoomId: string) => {
+        console.log(
+          `[Test] Alice received receipt update for room ${receiptRoomId}`,
+        );
+        if (receiptRoomId === roomId) {
+          receiptReceived = true;
+        }
+      },
+    );
 
     // Wait for the receipt to propagate (up to 15 seconds)
     const startTime = Date.now();
@@ -173,7 +187,9 @@ describe('Read Receipts', () => {
       m => m.eventId === sentMessage.eventId,
     );
 
-    console.log(`[Test] Updated message readBy: ${JSON.stringify(updatedMessage?.readBy)}`);
+    console.log(
+      `[Test] Updated message readBy: ${JSON.stringify(updatedMessage?.readBy)}`,
+    );
 
     expect(updatedMessage).toBeDefined();
     expect(updatedMessage!.readBy).toContain('@bob:localhost');
@@ -220,7 +236,7 @@ describe('Read Receipts', () => {
     // Wait for Bob to receive the message
     console.log('[Test] Waiting for Bob to receive message...');
     attempts = 0;
-    let bobMessages = bobService.getVoiceMessages(roomId);  // Use Alice's roomId
+    let bobMessages = bobService.getVoiceMessages(roomId); // Use Alice's roomId
     while (bobMessages.length === 0 && attempts < 20) {
       await new Promise(resolve => setTimeout(resolve, 500));
       bobMessages = bobService.getVoiceMessages(roomId);
@@ -239,9 +255,13 @@ describe('Read Receipts', () => {
 
     // Bob marks as played
     if (bobMessages.length > 0) {
-      const messageToPlay = bobMessages.find(m => m.eventId === sentMessage.eventId) || bobMessages[bobMessages.length - 1];
-      console.log(`[Test] Bob marking message as played: ${messageToPlay.eventId}`);
-      await bobService.markMessageAsPlayed(roomId, messageToPlay.eventId);  // Use Alice's roomId
+      const messageToPlay =
+        bobMessages.find(m => m.eventId === sentMessage.eventId) ||
+        bobMessages[bobMessages.length - 1];
+      console.log(
+        `[Test] Bob marking message as played: ${messageToPlay.eventId}`,
+      );
+      await bobService.markMessageAsPlayed(roomId, messageToPlay.eventId); // Use Alice's roomId
     }
 
     // Wait for callback
@@ -252,7 +272,9 @@ describe('Read Receipts', () => {
     }
     unsubscribe();
 
-    console.log(`[Test] Callback fired: ${callbackFired}, roomId: ${callbackRoomId}`);
+    console.log(
+      `[Test] Callback fired: ${callbackFired}, roomId: ${callbackRoomId}`,
+    );
     expect(callbackFired).toBe(true);
     expect(callbackRoomId).toBe(roomId);
   }, 60000);

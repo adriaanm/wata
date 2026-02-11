@@ -54,7 +54,9 @@ export class TestOrchestrator {
    */
   async createRoom(owner: string, ...participants: string[]): Promise<string> {
     if (participants.length !== 1) {
-      throw new Error('createRoom() only supports 1:1 DMs. Use exactly one participant.');
+      throw new Error(
+        'createRoom() only supports 1:1 DMs. Use exactly one participant.',
+      );
     }
 
     const participant = participants[0];
@@ -77,7 +79,9 @@ export class TestOrchestrator {
     await participantClient.waitForRoom(roomId, 15000);
     await participantClient.waitForDirectRoom(roomId, 15000);
 
-    console.log(`[TestOrchestrator] ${participant} has joined and classified DM`);
+    console.log(
+      `[TestOrchestrator] ${participant} has joined and classified DM`,
+    );
 
     // Store room reference
     const roomKey = [owner, participant].sort().join('-');

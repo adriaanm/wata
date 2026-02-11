@@ -31,7 +31,10 @@ import type {
   VoiceMessage as WataVoiceMessage,
 } from '@shared/lib/wata-client/types';
 import { WataClient } from '@shared/lib/wata-client/wata-client';
-import type { CredentialStorage, StoredCredentials } from '@shared/services/CredentialStorage';
+import type {
+  CredentialStorage,
+  StoredCredentials,
+} from '@shared/services/CredentialStorage';
 
 // Export public types
 export interface Logger {
@@ -142,10 +145,20 @@ class WataService {
   // Messages are fetched fresh from WataClient via getConversationByRoomId()
   private dmRoomContacts: Map<string, Contact> = new Map();
 
-  constructor(credentialStorage: CredentialStorage, externalLogger?: Logger, options?: { syncTimeoutMs?: number }) {
+  constructor(
+    credentialStorage: CredentialStorage,
+    externalLogger?: Logger,
+    options?: { syncTimeoutMs?: number },
+  ) {
     this.credentialStorage = credentialStorage;
     // Pass external logger to WataClient (falls back to no-op if not provided)
-    this.wataClient = new WataClient(HOMESERVER_URL, externalLogger, options?.syncTimeoutMs ? { sync: { syncTimeoutMs: options.syncTimeoutMs } } : undefined);
+    this.wataClient = new WataClient(
+      HOMESERVER_URL,
+      externalLogger,
+      options?.syncTimeoutMs
+        ? { sync: { syncTimeoutMs: options.syncTimeoutMs } }
+        : undefined,
+    );
     this.setupWataClientListeners();
   }
 
@@ -154,7 +167,7 @@ class WataService {
    */
   private setupWataClientListeners(): void {
     // Connection state changes
-    this.wataClient.on('connectionStateChanged', (state) => {
+    this.wataClient.on('connectionStateChanged', state => {
       // Map WataClient connection states to sync states
       let syncState: string;
       switch (state) {
@@ -174,14 +187,14 @@ class WataService {
           syncState = 'SYNCING';
       }
       this.currentSyncState = syncState;
-      this.syncCallbacks.forEach((cb) => cb(syncState));
+      this.syncCallbacks.forEach(cb => cb(syncState));
     });
 
     // Message received
     this.wataClient.on('messageReceived', (message, conversation) => {
       const roomId = conversation.id;
       const matrixMessage = this.wataToMatrixMessage(message);
-      this.messageCallbacks.forEach((cb) => cb(roomId, matrixMessage));
+      this.messageCallbacks.forEach(cb => cb(roomId, matrixMessage));
 
       // Update DM room -> contact mapping for getDirectRooms()
       if (conversation.type === 'dm' && conversation.contact) {
@@ -189,9 +202,12 @@ class WataService {
 
         // Track PRIMARY room for this contact
         // The conversation.id from WataClient is PRIMARY room (deterministically selected)
-        const existingPrimary = this.primaryRoomIdByContactUserId.get(contactId);
+        const existingPrimary =
+          this.primaryRoomIdByContactUserId.get(contactId);
         if (existingPrimary && existingPrimary !== conversation.id) {
-          log(`[WataService] Contact ${contactId}: primary room changed from ${existingPrimary.slice(-12)} to ${conversation.id.slice(-12)}`);
+          log(
+            `[WataService] Contact ${contactId}: primary room changed from ${existingPrimary.slice(-12)} to ${conversation.id.slice(-12)}`,
+          );
         }
         this.primaryRoomIdByContactUserId.set(contactId, conversation.id);
 
@@ -203,7 +219,9 @@ class WataService {
         if (!roomIds.has(conversation.id)) {
           if (roomIds.size > 0) {
             const existing = Array.from(roomIds).join(', ');
-            log(`[WataService] Contact ${contactId} now has multiple rooms: ${existing}, ${conversation.id}`);
+            log(
+              `[WataService] Contact ${contactId} now has multiple rooms: ${existing}, ${conversation.id}`,
+            );
           }
           roomIds.add(conversation.id);
         }
@@ -217,19 +235,21 @@ class WataService {
     // Message played (receipt update)
     // roomId is now passed directly from WataClient, no need to search
     this.wataClient.on('messagePlayed', (message, roomId) => {
-      log(`[WataService] messagePlayed event for message ${message.id} in room ${roomId}`);
+      log(
+        `[WataService] messagePlayed event for message ${message.id} in room ${roomId}`,
+      );
       log(`[WataService] Notifying ${this.receiptCallbacks.length} callbacks`);
-      this.receiptCallbacks.forEach((cb) => cb(roomId));
+      this.receiptCallbacks.forEach(cb => cb(roomId));
     });
 
     // Family/contacts updated
-    this.wataClient.on('familyUpdated', (family) => {
+    this.wataClient.on('familyUpdated', family => {
       this.familyRoomId = family.id;
       this.updateContactMappings(family.members);
       this.notifyRoomUpdate();
     });
 
-    this.wataClient.on('contactsUpdated', (contacts) => {
+    this.wataClient.on('contactsUpdated', contacts => {
       this.updateContactMappings(contacts);
       this.notifyRoomUpdate();
     });
@@ -258,7 +278,7 @@ class WataService {
       mxcUrl: message.mxcUrl,
       duration: message.duration * 1000, // Convert WataClient seconds to WataService milliseconds
       isOwn: message.sender.id === userId,
-      readBy: message.playedBy.filter((id) => id !== message.sender.id),
+      readBy: message.playedBy.filter(id => id !== message.sender.id),
     };
   }
 
@@ -267,7 +287,7 @@ class WataService {
    */
   private notifyRoomUpdate(): void {
     const rooms = this.getDirectRooms();
-    this.roomCallbacks.forEach((cb) => cb(rooms));
+    this.roomCallbacks.forEach(cb => cb(rooms));
   }
 
   /**
@@ -328,7 +348,9 @@ class WataService {
         const messageCount = convo?.messages.length ?? 0;
         const lastMessage = convo?.messages[messageCount - 1];
 
-        log(`[WataService] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`);
+        log(
+          `[WataService] getDirectRooms: DM with ${contact.user.id} -> room ${roomId} (${messageCount} msgs)`,
+        );
         rooms.push({
           roomId,
           name: contact.user.displayName,
@@ -340,7 +362,9 @@ class WataService {
       } else {
         // If getContactForDMRoom returns null, this might not be a DM room
         // or we don't have enough info yet. Skip it.
-        log(`[WataService] getDirectRooms: Skipping room ${roomId} (no contact found)`);
+        log(
+          `[WataService] getDirectRooms: Skipping room ${roomId} (no contact found)`,
+        );
       }
     }
 
@@ -383,7 +407,7 @@ class WataService {
 
     // Update sync state to PREPARED
     this.currentSyncState = 'PREPARED';
-    this.syncCallbacks.forEach((cb) => cb('PREPARED'));
+    this.syncCallbacks.forEach(cb => cb('PREPARED'));
   }
 
   /**
@@ -416,7 +440,7 @@ class WataService {
       await this.wataClient.connect();
 
       this.currentSyncState = 'PREPARED';
-      this.syncCallbacks.forEach((cb) => cb('PREPARED'));
+      this.syncCallbacks.forEach(cb => cb('PREPARED'));
 
       return true;
     } catch (error) {
@@ -471,7 +495,7 @@ class WataService {
    */
   async getFamilyMembers(includeSelf = false): Promise<FamilyMember[]> {
     const contacts = this.wataClient.getContacts();
-    const members: FamilyMember[] = contacts.map((contact) => ({
+    const members: FamilyMember[] = contacts.map(contact => ({
       userId: contact.user.id,
       displayName: contact.user.displayName,
       avatarUrl: contact.user.avatarUrl,
@@ -534,7 +558,7 @@ class WataService {
    */
   async createFamilyRoom(): Promise<string> {
     log(
-      `[WataService] Creating family room with alias #${FAMILY_ALIAS_PREFIX}`
+      `[WataService] Creating family room with alias #${FAMILY_ALIAS_PREFIX}`,
     );
 
     const family = await this.wataClient.createFamily('Family');
@@ -618,14 +642,14 @@ class WataService {
     audioBuffer: Buffer | Uint8Array,
     _mimeType: string,
     duration: number,
-    _size: number
+    _size: number,
   ): Promise<string> {
     log(`[WataService] Sending voice message to ${roomId}`);
 
     // Convert Buffer/Uint8Array to ArrayBuffer
     const arrayBuffer: ArrayBuffer = audioBuffer.buffer.slice(
       audioBuffer.byteOffset,
-      audioBuffer.byteOffset + audioBuffer.byteLength
+      audioBuffer.byteOffset + audioBuffer.byteLength,
     ) as ArrayBuffer;
 
     // Convert milliseconds to seconds (WataClient expects seconds)
@@ -634,9 +658,18 @@ class WataService {
     // Send message to specific room ID
     // Use sendVoiceMessageToRoom to ensure message goes to the exact room specified,
     // not a deterministically-selected room from getOrCreateDMRoom
-    const sentMessage: WataVoiceMessage = roomId === this.familyRoomId
-      ? await this.wataClient.sendVoiceMessage('family', arrayBuffer, durationSeconds)
-      : await this.wataClient.sendVoiceMessageToRoom(roomId, arrayBuffer, durationSeconds);
+    const sentMessage: WataVoiceMessage =
+      roomId === this.familyRoomId
+        ? await this.wataClient.sendVoiceMessage(
+            'family',
+            arrayBuffer,
+            durationSeconds,
+          )
+        : await this.wataClient.sendVoiceMessageToRoom(
+            roomId,
+            arrayBuffer,
+            durationSeconds,
+          );
 
     return sentMessage.id; // WataClient uses 'id' for event ID
   }
@@ -655,12 +688,10 @@ class WataService {
   async redactMessage(
     _roomId: string,
     _eventId: string,
-    _reason?: string
+    _reason?: string,
   ): Promise<void> {
     // TODO: Implement via WataClient when deleteMessage is exposed
-    logWarn(
-      '[WataService] redactMessage() not yet implemented in WataClient'
-    );
+    logWarn('[WataService] redactMessage() not yet implemented in WataClient');
   }
 
   /**
@@ -669,7 +700,7 @@ class WataService {
   async redactMessages(
     roomId: string,
     eventIds: string[],
-    reason?: string
+    reason?: string,
   ): Promise<void> {
     for (const eventId of eventIds) {
       await this.redactMessage(roomId, eventId, reason);
@@ -685,7 +716,7 @@ class WataService {
     // This ensures readBy/playedBy reflects the latest receipt updates
     const convo = this.wataClient.getConversationByRoomId(roomId);
     if (convo) {
-      return convo.messages.map((m) => this.wataToMatrixMessage(m));
+      return convo.messages.map(m => this.wataToMatrixMessage(m));
     }
 
     return [];
@@ -704,7 +735,7 @@ class WataService {
    */
   getMessageReadBy(roomId: string, eventId: string): string[] {
     const messages = this.getVoiceMessages(roomId);
-    const message = messages.find((m) => m.eventId === eventId);
+    const message = messages.find(m => m.eventId === eventId);
     return message?.readBy || [];
   }
 
@@ -715,14 +746,14 @@ class WataService {
   onSyncStateChange(callback: SyncCallback): () => void {
     this.syncCallbacks.push(callback);
     return () => {
-      this.syncCallbacks = this.syncCallbacks.filter((cb) => cb !== callback);
+      this.syncCallbacks = this.syncCallbacks.filter(cb => cb !== callback);
     };
   }
 
   onRoomUpdate(callback: RoomCallback): () => void {
     this.roomCallbacks.push(callback);
     return () => {
-      this.roomCallbacks = this.roomCallbacks.filter((cb) => cb !== callback);
+      this.roomCallbacks = this.roomCallbacks.filter(cb => cb !== callback);
     };
   }
 
@@ -730,7 +761,7 @@ class WataService {
     this.messageCallbacks.push(callback);
     return () => {
       this.messageCallbacks = this.messageCallbacks.filter(
-        (cb) => cb !== callback
+        cb => cb !== callback,
       );
     };
   }
@@ -739,7 +770,7 @@ class WataService {
     this.receiptCallbacks.push(callback);
     return () => {
       this.receiptCallbacks = this.receiptCallbacks.filter(
-        (cb) => cb !== callback
+        cb => cb !== callback,
       );
     };
   }
@@ -795,7 +826,11 @@ class WataService {
     name?: string;
     room_alias_name?: string;
     visibility?: string;
-    initial_state?: Array<{ type: string; state_key?: string; content: Record<string, unknown> }>;
+    initial_state?: Array<{
+      type: string;
+      state_key?: string;
+      content: Record<string, unknown>;
+    }>;
   }): Promise<{ room_id: string }> {
     const response = await this.wataClient.getApi().createRoom(options as any);
     return { room_id: response.room_id };
@@ -860,14 +895,14 @@ class WataService {
   async waitForMessage(
     roomId: string,
     predicate: (msg: VoiceMessage) => boolean,
-    timeoutMs = 10000
+    timeoutMs = 10000,
   ): Promise<VoiceMessage> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(
           new Error(
-            `Message not received in room ${roomId} after ${timeoutMs}ms`
-          )
+            `Message not received in room ${roomId} after ${timeoutMs}ms`,
+          ),
         );
       }, timeoutMs);
 

@@ -208,7 +208,12 @@ describe('Edge Cases and Error Handling', () => {
       }
 
       // Wait for bob to receive all 5 messages by event ID
-      await orchestrator.waitForEventIds('bob', roomId, expectedEventIds, 30000);
+      await orchestrator.waitForEventIds(
+        'bob',
+        roomId,
+        expectedEventIds,
+        30000,
+      );
 
       const bobClient = orchestrator.getClient('bob');
       const messages = bobClient?.getVoiceMessages(roomId) || [];
@@ -314,7 +319,6 @@ describe('Edge Cases and Error Handling', () => {
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
 
-
       // Send exactly one message
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);
       const eventId = await orchestrator.sendVoiceMessage(
@@ -361,15 +365,15 @@ describe('Edge Cases and Error Handling', () => {
       );
 
       // Wait for both users to see the message
-      await orchestrator.waitForCondition(
-        'alice',
-        'alice sees message',
-        () => orchestrator.getVoiceMessages('alice', roomId).some(m => m.eventId === eventId),
+      await orchestrator.waitForCondition('alice', 'alice sees message', () =>
+        orchestrator
+          .getVoiceMessages('alice', roomId)
+          .some(m => m.eventId === eventId),
       );
-      await orchestrator.waitForCondition(
-        'bob',
-        'bob sees message',
-        () => orchestrator.getVoiceMessages('bob', roomId).some(m => m.eventId === eventId),
+      await orchestrator.waitForCondition('bob', 'bob sees message', () =>
+        orchestrator
+          .getVoiceMessages('bob', roomId)
+          .some(m => m.eventId === eventId),
       );
 
       // Alice should see isOwn = true (use pagination to ensure message is fetched)
@@ -407,7 +411,6 @@ describe('Edge Cases and Error Handling', () => {
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
 
-
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);
       const eventId = await orchestrator.sendVoiceMessage(
         'alice',
@@ -441,7 +444,6 @@ describe('Edge Cases and Error Handling', () => {
       );
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
-
 
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);
       const eventId = await orchestrator.sendVoiceMessage(
@@ -477,7 +479,6 @@ describe('Edge Cases and Error Handling', () => {
       );
 
       const roomId = await orchestrator.createRoom('alice', 'bob');
-
 
       const beforeSend = Date.now();
       const audio = createFakeAudioBuffer(AudioDurations.SHORT);

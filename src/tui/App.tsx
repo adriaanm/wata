@@ -26,7 +26,8 @@ const logError = (message: string): void => {
 const tuiLogger = {
   log: (message: string) => LogService.getInstance().addEntry('log', message),
   warn: (message: string) => LogService.getInstance().addEntry('warn', message),
-  error: (message: string) => LogService.getInstance().addEntry('error', message),
+  error: (message: string) =>
+    LogService.getInstance().addEntry('error', message),
 };
 
 // Wire up TUI's LogService to WataService

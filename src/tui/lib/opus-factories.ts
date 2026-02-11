@@ -15,17 +15,16 @@ import type { EncoderFactory, DecoderFactory } from '@shared/lib/opus.js';
  */
 export const mkEncoder: EncoderFactory = (sampleRate, channels, application) =>
   new Encoder({
-      sample_rate: sampleRate,
-      channels,
-      application,
-   });
+    sample_rate: sampleRate,
+    channels,
+    application,
+  });
 
 /**
  * Create an Opus decoder for the TUI (Node.js) environment
  */
 export const mkDecoder: DecoderFactory = (sampleRate, channels) =>
   new Decoder({
-      sample_rate: sampleRate,
-      channels,
-    });
-
+    sample_rate: sampleRate,
+    channels,
+  });

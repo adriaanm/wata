@@ -34,16 +34,26 @@ if (showHelp) {
   console.log('Usage: pnpm tui [options]\n');
   console.log('Options:');
   console.log('  --help               Show this help message');
-  console.log('  --profile <name>     Start with the specified profile (e.g., alice, bob)');
-  console.log('  --send-credentials   Encode and send onboarding credentials via AudioCode');
-  console.log('  --receive-credentials Record and decode onboarding credentials via AudioCode');
-  console.log('  --debug              Disable LogService and enable verbose console logging\n');
+  console.log(
+    '  --profile <name>     Start with the specified profile (e.g., alice, bob)',
+  );
+  console.log(
+    '  --send-credentials   Encode and send onboarding credentials via AudioCode',
+  );
+  console.log(
+    '  --receive-credentials Record and decode onboarding credentials via AudioCode',
+  );
+  console.log(
+    '  --debug              Disable LogService and enable verbose console logging\n',
+  );
   console.log('Profiles:');
   console.log('  alice                Alice (default)');
   console.log('  bob                  Bob');
   console.log('  charlie              Charlie\n');
   console.log('Examples:');
-  console.log('  pnpm tui                              Start with default profile (alice)');
+  console.log(
+    '  pnpm tui                              Start with default profile (alice)',
+  );
   console.log('  pnpm tui -- --profile bob             Start as bob');
   console.log('  pnpm tui -- --debug                   Enable debug logging');
   console.log('  pnpm tui -- --help                    Show this help\n');
@@ -75,7 +85,9 @@ async function bootstrap() {
   if (_debugMode) {
     // In debug mode, immediately uninstall LogService to get direct console output
     _LogService.getInstance().uninstall();
-    console.log('[bootstrap] DEBUG MODE: LogService disabled, using direct console');
+    console.log(
+      '[bootstrap] DEBUG MODE: LogService disabled, using direct console',
+    );
   } else {
     // Normal mode: verify LogService is installed
     console.log(

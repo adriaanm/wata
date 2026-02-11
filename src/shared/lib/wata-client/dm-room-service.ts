@@ -56,7 +56,7 @@ export class DMRoomService {
     api: MatrixApi,
     syncEngine: SyncEngine,
     userId: string,
-    logger?: Logger
+    logger?: Logger,
   ) {
     this.api = api;
     this.syncEngine = syncEngine;
@@ -167,7 +167,9 @@ export class DMRoomService {
     }
 
     // Step 3: No existing room found, create new one
-    this.logger.log(`[DMRoomService] Creating new DM room with ${contactUserId}`);
+    this.logger.log(
+      `[DMRoomService] Creating new DM room with ${contactUserId}`,
+    );
     const roomId = await this.createDMRoom(contactUserId);
 
     return roomId;
@@ -215,11 +217,11 @@ export class DMRoomService {
 
       // Check if this is a 2-person DM room
       const joinedMembers = Array.from(room.members.values()).filter(
-        (m) => m.membership === 'join'
+        m => m.membership === 'join',
       );
       if (joinedMembers.length !== 2) continue;
 
-      const otherMember = joinedMembers.find((m) => m.userId !== this.userId);
+      const otherMember = joinedMembers.find(m => m.userId !== this.userId);
       if (!otherMember) continue;
 
       // Verify is_direct flag
@@ -249,7 +251,11 @@ export class DMRoomService {
    * Returns the primary room ID if found, null otherwise.
    */
   private findExistingDMRoom(contactUserId: string): string | null {
-    const candidateRooms: { roomId: string; creationTs: number; messageCount: number }[] = [];
+    const candidateRooms: {
+      roomId: string;
+      creationTs: number;
+      messageCount: number;
+    }[] = [];
     const rooms = this.syncEngine.getRooms();
 
     for (const room of rooms) {
@@ -258,11 +264,11 @@ export class DMRoomService {
 
       // Check if this is a 2-person room with the target user
       const joinedMembers = Array.from(room.members.values()).filter(
-        (m) => m.membership === 'join'
+        m => m.membership === 'join',
       );
       if (joinedMembers.length !== 2) continue;
 
-      const hasTargetUser = joinedMembers.some((m) => m.userId === contactUserId);
+      const hasTargetUser = joinedMembers.some(m => m.userId === contactUserId);
       if (!hasTargetUser) continue;
 
       // Check is_direct flag and get creation timestamp
@@ -271,11 +277,11 @@ export class DMRoomService {
       // Only include valid DM rooms with timestamps
       if (isDirectRoom && creationTs !== null && creationTs > 0) {
         const messageCount = room.timeline.filter(
-          (e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio'
+          e => e.type === 'm.room.message' && e.content?.msgtype === 'm.audio',
         ).length;
         candidateRooms.push({ roomId: room.roomId, creationTs, messageCount });
         this.logger.log(
-          `[DMRoomService] Found candidate room ${room.roomId} (created: ${new Date(creationTs).toISOString()}, ${messageCount} msgs)`
+          `[DMRoomService] Found candidate room ${room.roomId} (created: ${new Date(creationTs).toISOString()}, ${messageCount} msgs)`,
         );
       }
     }
@@ -285,10 +291,13 @@ export class DMRoomService {
     // Log warning if multiple rooms found
     if (candidateRooms.length > 1) {
       const roomList = candidateRooms
-        .map((r) => `${r.roomId.slice(-12)} (${new Date(r.creationTs).toISOString().slice(0, 10)}, ${r.messageCount} msgs)`)
+        .map(
+          r =>
+            `${r.roomId.slice(-12)} (${new Date(r.creationTs).toISOString().slice(0, 10)}, ${r.messageCount} msgs)`,
+        )
         .join(', ');
       this.logger.warn(
-        `[DMRoomService] Multiple DM rooms with ${contactUserId}: ${roomList}. Selecting oldest.`
+        `[DMRoomService] Multiple DM rooms with ${contactUserId}: ${roomList}. Selecting oldest.`,
       );
     }
 
@@ -300,7 +309,7 @@ export class DMRoomService {
 
     const primaryRoom = candidateRooms[0];
     this.logger.log(
-      `[DMRoomService] Selected primary room ${primaryRoom.roomId} (${candidateRooms.length} candidates)`
+      `[DMRoomService] Selected primary room ${primaryRoom.roomId} (${candidateRooms.length} candidates)`,
     );
 
     // Update cache with all candidate rooms
@@ -340,7 +349,7 @@ export class DMRoomService {
    */
   private async updateMDirectForRoom(
     contactUserId: string,
-    roomId: string
+    roomId: string,
   ): Promise<void> {
     try {
       // Get current m.direct data
@@ -449,10 +458,7 @@ export class DMRoomService {
     // Timeline scan for is_direct (for cases where member state hasn't updated yet)
     // Check ALL member events, not just our own
     for (const event of room.timeline) {
-      if (
-        event.type === 'm.room.member' &&
-        event.content?.is_direct === true
-      ) {
+      if (event.type === 'm.room.member' && event.content?.is_direct === true) {
         return true;
       }
     }
@@ -462,7 +468,10 @@ export class DMRoomService {
   /**
    * Get DM-related info from a room (is_direct flag and creation timestamp).
    */
-  private getRoomDMInfo(room: RoomState): { isDirectRoom: boolean; creationTs: number | null } {
+  private getRoomDMInfo(room: RoomState): {
+    isDirectRoom: boolean;
+    creationTs: number | null;
+  } {
     let isDirectRoom = false;
     let creationTs: number | null = null;
 
@@ -489,7 +498,10 @@ export class DMRoomService {
    * Build a Contact object from room membership info.
    * Works for joined members as well as invited members (DM room with pending invite).
    */
-  private buildContactFromRoom(roomId: string, contactUserId: string): Contact | null {
+  private buildContactFromRoom(
+    roomId: string,
+    contactUserId: string,
+  ): Contact | null {
     const room = this.syncEngine.getRoom(roomId);
     if (!room) {
       return null;
@@ -498,7 +510,8 @@ export class DMRoomService {
     const member = room.members.get(contactUserId);
     if (member) {
       // Use display name from member, or fall back to user ID localpart
-      const displayName = member.displayName || contactUserId.split(':')[0].substring(1);
+      const displayName =
+        member.displayName || contactUserId.split(':')[0].substring(1);
       return {
         user: {
           id: contactUserId,

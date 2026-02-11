@@ -46,7 +46,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
   const [audioCodeRecording, setAudioCodeRecording] = useState(false);
 
   // Send test message state
-  const [testRoomId, setTestRoomId] = useState('!4VPiIIGGXjsWj3a3KKma8IwfLqhpj5m0u40juCFIIF4');
+  const [testRoomId, setTestRoomId] = useState(
+    '!4VPiIIGGXjsWj3a3KKma8IwfLqhpj5m0u40juCFIIF4',
+  );
   const [testMessageStatus, setTestMessageStatus] = useState<string>('Ready');
 
   // Example onboarding data
@@ -169,7 +171,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
       // Generate 0.5 seconds of silence (16kHz PCM)
       const SAMPLE_RATE = 16000;
       const DURATION = 0.5; // seconds
-      const silenceSamples = new Float32Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
+      const silenceSamples = new Float32Array(
+        Math.floor(SAMPLE_RATE * DURATION),
+      ).fill(0);
 
       // Encode as WAV
       const wavBuffer = encodeWav(silenceSamples, SAMPLE_RATE);
@@ -186,14 +190,22 @@ export function AdminView({ onBack, currentProfile }: Props) {
         buffer.length, // size in bytes
       );
 
-      setSuccess(`Sent test message to ${roomId.slice(-8)} (event: ${eventId.slice(-8)})`);
+      setSuccess(
+        `Sent test message to ${roomId.slice(-8)} (event: ${eventId.slice(-8)})`,
+      );
       setTestMessageStatus('Ready');
-      LogService.getInstance().addEntry('log', `[TEST] Sent message to ${roomId.slice(-8)}: ${eventId.slice(-8)}`);
+      LogService.getInstance().addEntry(
+        'log',
+        `[TEST] Sent message to ${roomId.slice(-8)}: ${eventId.slice(-8)}`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`Send failed: ${msg}`);
       setTestMessageStatus(`Error: ${msg}`);
-      LogService.getInstance().addEntry('error', `Send test message failed: ${msg}`);
+      LogService.getInstance().addEntry(
+        'error',
+        `Send test message failed: ${msg}`,
+      );
     }
   };
 
@@ -570,7 +582,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
           </Box>
 
           <Box marginBottom={1} flexDirection="column">
-            <Text>Send a test voice message (0.5s silence) to a specific room.</Text>
+            <Text>
+              Send a test voice message (0.5s silence) to a specific room.
+            </Text>
             <Text dimColor>Useful for testing Android app reactivity.</Text>
           </Box>
 
@@ -589,7 +603,9 @@ export function AdminView({ onBack, currentProfile }: Props) {
             <Text>Status: </Text>
             <Text
               color={
-                testMessageStatus === 'Ready' ? colors.playing : colors.textMuted
+                testMessageStatus === 'Ready'
+                  ? colors.playing
+                  : colors.textMuted
               }
             >
               {testMessageStatus}

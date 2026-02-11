@@ -129,7 +129,7 @@ export class EventBuffer {
 
     for (const [roomId, events] of this.eventsByRoom) {
       // Filter out old events
-      const fresh = events.filter((e) => now - e.bufferedAt < this.maxAgeMs);
+      const fresh = events.filter(e => now - e.bufferedAt < this.maxAgeMs);
       prunedCount += events.length - fresh.length;
 
       if (fresh.length === 0) {

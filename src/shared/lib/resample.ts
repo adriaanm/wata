@@ -82,7 +82,7 @@ export function resample(
   samples: Float32Array,
   fromRate: number,
   toRate: number,
-  logger: Logger = noopLogger
+  logger: Logger = noopLogger,
 ): Float32Array {
   // Validate inputs
   if (samples.length === 0) {
@@ -91,7 +91,9 @@ export function resample(
   }
 
   if (fromRate <= 0 || toRate <= 0) {
-    throw new Error(`Invalid sample rates: fromRate=${fromRate}, toRate=${toRate}`);
+    throw new Error(
+      `Invalid sample rates: fromRate=${fromRate}, toRate=${toRate}`,
+    );
   }
 
   if (fromRate === toRate) {
@@ -104,7 +106,7 @@ export function resample(
 
   logger.log(
     `resample: ${fromRate} Hz → ${toRate} Hz (${isDownsampling ? 'downsampling' : 'upsampling'}), ` +
-      `${samples.length} samples, ratio=${ratio.toFixed(4)}`
+      `${samples.length} samples, ratio=${ratio.toFixed(4)}`,
   );
 
   // Calculate output length

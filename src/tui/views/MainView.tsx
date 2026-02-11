@@ -237,10 +237,15 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     const SAMPLE_RATE = 16000;
     const DURATION = 0.5; // seconds
 
-    LogService.getInstance().addEntry('log', `[TEST] Sending test message to ${TEST_ROOM_ID.slice(-8)}...`);
+    LogService.getInstance().addEntry(
+      'log',
+      `[TEST] Sending test message to ${TEST_ROOM_ID.slice(-8)}...`,
+    );
 
     // Generate 0.5 seconds of silence (16kHz PCM)
-    const silenceSamples = new Float32Array(Math.floor(SAMPLE_RATE * DURATION)).fill(0);
+    const silenceSamples = new Float32Array(
+      Math.floor(SAMPLE_RATE * DURATION),
+    ).fill(0);
     const wavBuffer = encodeWav(silenceSamples, SAMPLE_RATE);
     const buffer = Buffer.from(wavBuffer);
 
@@ -249,10 +254,13 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
       buffer,
       'audio/ogg',
       DURATION * 1000,
-      buffer.length
+      buffer.length,
     );
 
-    LogService.getInstance().addEntry('success', `[TEST] Sent! Event: ${eventId.slice(-8)}`);
+    LogService.getInstance().addEntry(
+      'success',
+      `[TEST] Sent! Event: ${eventId.slice(-8)}`,
+    );
   }, []);
 
   // Calculate viewport dimensions
@@ -303,7 +311,10 @@ export function MainView({ onSelectContact, currentProfile }: Props) {
     if (input === 'T') {
       sendTestMessage().catch(err => {
         const msg = err instanceof Error ? err.message : String(err);
-        LogService.getInstance().addEntry('error', `Test message failed: ${msg}`);
+        LogService.getInstance().addEntry(
+          'error',
+          `Test message failed: ${msg}`,
+        );
       });
       return;
     }

@@ -160,12 +160,22 @@ describe('End-to-End Voice Chat Flow', () => {
     // Verify conversation history - use verifyMessageReceived which polls for the messages
     // This handles the case where sendVoiceMessage may return a local echo ID that gets
     // replaced with the server-assigned ID during sync
-    const aliceMsg = await orchestrator.verifyMessageReceived('alice', roomId, {
-      eventId: aliceEventId,
-    }, 15000);
-    const bobMsg = await orchestrator.verifyMessageReceived('alice', roomId, {
-      eventId: bobEventId,
-    }, 15000);
+    const aliceMsg = await orchestrator.verifyMessageReceived(
+      'alice',
+      roomId,
+      {
+        eventId: aliceEventId,
+      },
+      15000,
+    );
+    const bobMsg = await orchestrator.verifyMessageReceived(
+      'alice',
+      roomId,
+      {
+        eventId: bobEventId,
+      },
+      15000,
+    );
 
     expect(aliceMsg).toBeDefined();
     expect(bobMsg).toBeDefined();
@@ -211,8 +221,16 @@ describe('End-to-End Voice Chat Flow', () => {
 
     // Verify both clients have all 5 messages
     // Use getAllVoiceMessages to ensure we paginate and fetch all messages from server
-    const aliceMessages = await orchestrator.getAllVoiceMessages('alice', roomId, 100);
-    const bobMessages = await orchestrator.getAllVoiceMessages('bob', roomId, 100);
+    const aliceMessages = await orchestrator.getAllVoiceMessages(
+      'alice',
+      roomId,
+      100,
+    );
+    const bobMessages = await orchestrator.getAllVoiceMessages(
+      'bob',
+      roomId,
+      100,
+    );
 
     expect(aliceMessages.length).toBeGreaterThanOrEqual(5);
     expect(bobMessages.length).toBeGreaterThanOrEqual(5);
@@ -349,10 +367,10 @@ describe('End-to-End Voice Chat Flow', () => {
     );
 
     // Wait for the message to appear in alice's timeline
-    await orchestrator.waitForCondition(
-      'alice',
-      'alice sees own message',
-      () => (aliceClient?.getVoiceMessages(roomId) || []).some(m => m.eventId === eventId),
+    await orchestrator.waitForCondition('alice', 'alice sees own message', () =>
+      (aliceClient?.getVoiceMessages(roomId) || []).some(
+        m => m.eventId === eventId,
+      ),
     );
 
     const messages = aliceClient?.getVoiceMessages(roomId) || [];

@@ -235,16 +235,16 @@ export interface ReceiptRequest {
 export type ReceiptResponse = Record<string, never>;
 
 export interface GetMessagesParams {
-  from: string;       // Pagination token from timeline.prev_batch or previous response
-  to?: string;        // Optional end token
-  dir: 'b' | 'f';     // Direction: 'b' for backward (older), 'f' for forward (newer)
-  limit?: number;     // Max number of events to return (default: 10)
-  filter?: string;    // Filter ID or JSON filter
+  from: string; // Pagination token from timeline.prev_batch or previous response
+  to?: string; // Optional end token
+  dir: 'b' | 'f'; // Direction: 'b' for backward (older), 'f' for forward (newer)
+  limit?: number; // Max number of events to return (default: 10)
+  filter?: string; // Filter ID or JSON filter
 }
 
 export interface GetMessagesResponse {
-  start: string;      // Token for the start of the returned chunk
-  end: string;        // Token for the end of the returned chunk
+  start: string; // Token for the start of the returned chunk
+  end: string; // Token for the end of the returned chunk
   chunk: MatrixEvent[]; // Events in the requested direction
   state?: MatrixEvent[]; // State events for the room (if requested)
 }
@@ -315,7 +315,7 @@ export class MatrixApi {
       params?: Record<string, string | number | boolean>;
       requireAuth?: boolean;
       contentType?: string;
-    } = {}
+    } = {},
   ): Promise<T> {
     const { body, params, requireAuth = true, contentType } = options;
 
@@ -408,7 +408,7 @@ export class MatrixApi {
   async login(
     username: string,
     password: string,
-    deviceDisplayName?: string
+    deviceDisplayName?: string,
   ): Promise<LoginResponse> {
     const response = await this.request<LoginResponse>(
       'POST',
@@ -424,7 +424,7 @@ export class MatrixApi {
           password,
           initial_device_display_name: deviceDisplayName,
         } satisfies LoginRequest,
-      }
+      },
     );
 
     // Store access token for future requests
@@ -451,7 +451,7 @@ export class MatrixApi {
   async whoami(): Promise<WhoamiResponse> {
     return this.request<WhoamiResponse>(
       'GET',
-      '/_matrix/client/v3/account/whoami'
+      '/_matrix/client/v3/account/whoami',
     );
   }
 
@@ -505,7 +505,7 @@ export class MatrixApi {
       '/_matrix/client/v3/createRoom',
       {
         body: request,
-      }
+      },
     );
   }
 
@@ -514,14 +514,14 @@ export class MatrixApi {
    */
   async joinRoom(
     roomIdOrAlias: string,
-    request: JoinRoomRequest = {}
+    request: JoinRoomRequest = {},
   ): Promise<JoinRoomResponse> {
     return this.request<JoinRoomResponse>(
       'POST',
       `/_matrix/client/v3/join/${encodeURIComponent(roomIdOrAlias)}`,
       {
         body: request,
-      }
+      },
     );
   }
 
@@ -530,14 +530,14 @@ export class MatrixApi {
    */
   async inviteToRoom(
     roomId: string,
-    request: InviteRequest
+    request: InviteRequest,
   ): Promise<InviteResponse> {
     return this.request<InviteResponse>(
       'POST',
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
       {
         body: request,
-      }
+      },
     );
   }
 
@@ -547,14 +547,14 @@ export class MatrixApi {
   async kickFromRoom(
     roomId: string,
     userId: string,
-    reason?: string
+    reason?: string,
   ): Promise<void> {
     await this.request<Record<string, never>>(
       'POST',
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`,
       {
         body: { user_id: userId, reason },
-      }
+      },
     );
   }
 
@@ -564,7 +564,7 @@ export class MatrixApi {
   async getRoomIdForAlias(roomAlias: string): Promise<RoomAliasResponse> {
     return this.request<RoomAliasResponse>(
       'GET',
-      `/_matrix/client/v3/directory/room/${encodeURIComponent(roomAlias)}`
+      `/_matrix/client/v3/directory/room/${encodeURIComponent(roomAlias)}`,
     );
   }
 
@@ -579,7 +579,7 @@ export class MatrixApi {
     roomId: string,
     eventType: string,
     content: SendMessageRequest,
-    txnId?: string
+    txnId?: string,
   ): Promise<SendMessageResponse> {
     const txn = txnId || this.generateTxnId();
     return this.request<SendMessageResponse>(
@@ -587,7 +587,7 @@ export class MatrixApi {
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/${encodeURIComponent(txn)}`,
       {
         body: content,
-      }
+      },
     );
   }
 
@@ -598,7 +598,7 @@ export class MatrixApi {
     roomId: string,
     eventId: string,
     reason?: string,
-    txnId?: string
+    txnId?: string,
   ): Promise<RedactResponse> {
     const txn = txnId || this.generateTxnId();
     return this.request<RedactResponse>(
@@ -608,7 +608,7 @@ export class MatrixApi {
         body: {
           reason,
         } satisfies RedactRequest,
-      }
+      },
     );
   }
 
@@ -618,14 +618,16 @@ export class MatrixApi {
   async sendReadReceipt(
     roomId: string,
     eventId: string,
-    threadId?: string
+    threadId?: string,
   ): Promise<void> {
     await this.request<ReceiptResponse>(
       'POST',
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/m.read/${encodeURIComponent(eventId)}`,
       {
-        body: threadId ? ({ thread_id: threadId } satisfies ReceiptRequest) : {},
-      }
+        body: threadId
+          ? ({ thread_id: threadId } satisfies ReceiptRequest)
+          : {},
+      },
     );
   }
 
@@ -634,7 +636,7 @@ export class MatrixApi {
    */
   async getMessages(
     roomId: string,
-    params: GetMessagesParams
+    params: GetMessagesParams,
   ): Promise<GetMessagesResponse> {
     const queryParams: Record<string, string | number> = {
       from: params.from,
@@ -650,7 +652,7 @@ export class MatrixApi {
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages`,
       {
         params: queryParams,
-      }
+      },
     );
   }
 
@@ -667,7 +669,7 @@ export class MatrixApi {
   async uploadMedia(
     data: ArrayBuffer,
     contentType: string,
-    filename?: string
+    filename?: string,
   ): Promise<UploadResponse> {
     let path = '/_matrix/media/v3/upload';
     if (filename) {
@@ -696,7 +698,7 @@ export class MatrixApi {
 
     return this.request<ArrayBuffer>(
       'GET',
-      `/_matrix/client/v1/media/download/${encodeURIComponent(serverName)}/${encodeURIComponent(mediaId)}`
+      `/_matrix/client/v1/media/download/${encodeURIComponent(serverName)}/${encodeURIComponent(mediaId)}`,
     );
   }
 
@@ -710,17 +712,14 @@ export class MatrixApi {
   async getProfile(userId: string): Promise<ProfileResponse> {
     return this.request<ProfileResponse>(
       'GET',
-      `/_matrix/client/v3/profile/${encodeURIComponent(userId)}`
+      `/_matrix/client/v3/profile/${encodeURIComponent(userId)}`,
     );
   }
 
   /**
    * Set display name for current user
    */
-  async setDisplayName(
-    userId: string,
-    displayName: string
-  ): Promise<void> {
+  async setDisplayName(userId: string, displayName: string): Promise<void> {
     await this.request<SetDisplayNameResponse>(
       'PUT',
       `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
@@ -728,7 +727,7 @@ export class MatrixApi {
         body: {
           displayname: displayName,
         } satisfies SetDisplayNameRequest,
-      }
+      },
     );
   }
 
@@ -743,7 +742,7 @@ export class MatrixApi {
         body: {
           avatar_url: avatarUrl,
         },
-      }
+      },
     );
   }
 
@@ -752,11 +751,11 @@ export class MatrixApi {
    */
   async getAccountData(
     userId: string,
-    type: string
+    type: string,
   ): Promise<AccountDataResponse> {
     return this.request<AccountDataResponse>(
       'GET',
-      `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`
+      `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
     );
   }
 
@@ -766,14 +765,14 @@ export class MatrixApi {
   async setAccountData(
     userId: string,
     type: string,
-    content: Record<string, any>
+    content: Record<string, any>,
   ): Promise<void> {
     await this.request<SetAccountDataResponse>(
       'PUT',
       `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
       {
         body: content,
-      }
+      },
     );
   }
 
@@ -783,11 +782,11 @@ export class MatrixApi {
   async getRoomAccountData(
     userId: string,
     roomId: string,
-    type: string
+    type: string,
   ): Promise<AccountDataResponse> {
     return this.request<AccountDataResponse>(
       'GET',
-      `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(type)}`
+      `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(type)}`,
     );
   }
 
@@ -798,14 +797,14 @@ export class MatrixApi {
     userId: string,
     roomId: string,
     type: string,
-    content: Record<string, any>
+    content: Record<string, any>,
   ): Promise<void> {
     await this.request<SetAccountDataResponse>(
       'PUT',
       `/_matrix/client/v3/user/${encodeURIComponent(userId)}/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(type)}`,
       {
         body: content,
-      }
+      },
     );
   }
 }

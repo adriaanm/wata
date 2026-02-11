@@ -102,11 +102,11 @@ export interface VoiceMessage {
  * Client connection/sync state
  */
 export type ConnectionState =
-  | 'connecting'  // Initial connection in progress
-  | 'connected'   // Connected, not yet synced
-  | 'syncing'     // Actively syncing
-  | 'error'       // Connection error
-  | 'offline';    // Disconnected
+  | 'connecting' // Initial connection in progress
+  | 'connected' // Connected, not yet synced
+  | 'syncing' // Actively syncing
+  | 'error' // Connection error
+  | 'offline'; // Disconnected
 
 // ============================================================================
 // Event Handler Types
@@ -132,7 +132,7 @@ export type ContactsUpdatedHandler = (contacts: Contact[]) => void;
  */
 export type MessageReceivedHandler = (
   message: VoiceMessage,
-  conversation: Conversation
+  conversation: Conversation,
 ) => void;
 
 /**
@@ -140,14 +140,17 @@ export type MessageReceivedHandler = (
  */
 export type MessageDeletedHandler = (
   messageId: string,
-  conversationId: string
+  conversationId: string,
 ) => void;
 
 /**
  * Handler for message played status update
  * Includes roomId to avoid needing to search for the room
  */
-export type MessagePlayedHandler = (message: VoiceMessage, roomId: string) => void;
+export type MessagePlayedHandler = (
+  message: VoiceMessage,
+  roomId: string,
+) => void;
 
 // ============================================================================
 // Event Map

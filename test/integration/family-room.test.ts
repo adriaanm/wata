@@ -14,7 +14,10 @@ import {
   createTestService,
   createTestCredentialStorage,
 } from './helpers/test-service-factory';
-import { setHomeserverUrl, setFamilyAliasPrefix } from '../../src/shared/services/WataService';
+import {
+  setHomeserverUrl,
+  setFamilyAliasPrefix,
+} from '../../src/shared/services/WataService';
 
 import { createFakeAudioBuffer } from './helpers/audio-helpers';
 
@@ -37,7 +40,9 @@ async function waitForCondition(
     delay = Math.min(delay * 1.3, 2000);
   }
 
-  throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
+  throw new Error(
+    `Timed out waiting for: ${description} (after ${timeoutMs}ms)`,
+  );
 }
 
 const TEST_HOMESERVER = 'http://localhost:8008';
@@ -65,9 +70,8 @@ async function ensureFamilyRoomMembership(
       console.log('[Test] Family room exists, joining...');
       await service.joinRoom(existingRoomId);
       // Wait until we're a member
-      await waitForCondition(
-        'joined family room',
-        () => service.isRoomMember(existingRoomId),
+      await waitForCondition('joined family room', () =>
+        service.isRoomMember(existingRoomId),
       );
     }
     return existingRoomId;
@@ -107,8 +111,14 @@ describe('Family Room', () => {
   }, 10000);
 
   beforeEach(async () => {
-    aliceService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
-    bobService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
+    aliceService = createTestService(
+      TEST_HOMESERVER,
+      createTestCredentialStorage(),
+    );
+    bobService = createTestService(
+      TEST_HOMESERVER,
+      createTestCredentialStorage(),
+    );
   }, 5000);
 
   afterEach(async () => {
@@ -293,7 +303,8 @@ describe('Family Room', () => {
       }
 
       // Wait until alice sees bob as a family member
-      let members: Awaited<ReturnType<typeof aliceService.getFamilyMembers>> = [];
+      let members: Awaited<ReturnType<typeof aliceService.getFamilyMembers>> =
+        [];
       await waitForCondition(
         'alice sees bob in family members',
         async () => {
@@ -347,8 +358,7 @@ describe('Family Room', () => {
       let delay = 500;
 
       while (Date.now() - startTime < maxWaitTime) {
-        secondRoomId =
-          await aliceService.getOrCreateDmRoom('@bob:localhost');
+        secondRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
         if (secondRoomId === firstRoomId) break;
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 1.5, 3000);
@@ -471,14 +481,15 @@ describe('Family Room', () => {
       console.log('[Test] Bob joined DM room');
 
       // Wait for bob to be a member
-      await waitForCondition(
-        'bob joined DM room',
-        () => bobService.isRoomMember(dmRoomId),
+      await waitForCondition('bob joined DM room', () =>
+        bobService.isRoomMember(dmRoomId),
       );
 
       // Now alice sends a voice message
       const expectedDuration = 4000;
-      const audioBuffer = createFakeAudioBuffer(expectedDuration, { prefix: 'DM_MSG' });
+      const audioBuffer = createFakeAudioBuffer(expectedDuration, {
+        prefix: 'DM_MSG',
+      });
       console.log('[Test] Sending voice message to DM room...');
 
       const beforeSendTimestamp = Date.now();
@@ -493,29 +504,28 @@ describe('Family Room', () => {
 
       // Wait for bob to receive the message - match by sender + expected duration
       // This is robust to room reuse since we match specific message characteristics
-      await waitForCondition(
-        'bob receives voice message in DM',
-        () => {
-          const messages = bobService.getVoiceMessages(dmRoomId);
-          // Find the most recent message from Alice with expected duration
-          // sent after our timestamp
-          return messages.some(m =>
+      await waitForCondition('bob receives voice message in DM', () => {
+        const messages = bobService.getVoiceMessages(dmRoomId);
+        // Find the most recent message from Alice with expected duration
+        // sent after our timestamp
+        return messages.some(
+          m =>
             m.sender === '@alice:localhost' &&
             Math.abs(m.duration - expectedDuration) < 500 &&
-            m.timestamp >= beforeSendTimestamp
-          );
-        },
-      );
+            m.timestamp >= beforeSendTimestamp,
+        );
+      });
 
       // Then: bob should receive the message in the DM room
       const bobMessages = bobService.getVoiceMessages(dmRoomId);
       console.log('[Test] Bob received messages in DM:', bobMessages.length);
 
       // Find the specific message we just sent (by sender + duration + timestamp)
-      const sentMessage = bobMessages.find(m =>
-        m.sender === '@alice:localhost' &&
-        Math.abs(m.duration - expectedDuration) < 500 &&
-        m.timestamp >= beforeSendTimestamp
+      const sentMessage = bobMessages.find(
+        m =>
+          m.sender === '@alice:localhost' &&
+          Math.abs(m.duration - expectedDuration) < 500 &&
+          m.timestamp >= beforeSendTimestamp,
       );
 
       expect(sentMessage).toBeDefined();
@@ -543,9 +553,8 @@ describe('Family Room', () => {
       // Create DM room and have bob join
       const dmRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
       await bobService.joinRoom(dmRoomId);
-      await waitForCondition(
-        'bob joined DM room',
-        () => bobService.isRoomMember(dmRoomId),
+      await waitForCondition('bob joined DM room', () =>
+        bobService.isRoomMember(dmRoomId),
       );
 
       // Alice sends a message - track the event ID for reliable matching
@@ -562,9 +571,10 @@ describe('Family Room', () => {
 
       // Wait for alice's message to appear locally
       // Note: WataService returns VoiceMessage with eventId property
-      await waitForCondition(
-        'alice message appears',
-        () => aliceService.getVoiceMessages(dmRoomId).some(m => m.eventId === aliceEventId),
+      await waitForCondition('alice message appears', () =>
+        aliceService
+          .getVoiceMessages(dmRoomId)
+          .some(m => m.eventId === aliceEventId),
       );
 
       // Bob sends a reply - track the event ID
@@ -582,7 +592,10 @@ describe('Family Room', () => {
         'alice sees both messages',
         () => {
           const msgs = aliceService.getVoiceMessages(dmRoomId);
-          return msgs.some(m => m.eventId === aliceEventId) && msgs.some(m => m.eventId === bobEventId);
+          return (
+            msgs.some(m => m.eventId === aliceEventId) &&
+            msgs.some(m => m.eventId === bobEventId)
+          );
         },
         20000,
       );
@@ -590,7 +603,10 @@ describe('Family Room', () => {
         'bob sees both messages',
         () => {
           const msgs = bobService.getVoiceMessages(dmRoomId);
-          return msgs.some(m => m.eventId === aliceEventId) && msgs.some(m => m.eventId === bobEventId);
+          return (
+            msgs.some(m => m.eventId === aliceEventId) &&
+            msgs.some(m => m.eventId === bobEventId)
+          );
         },
         20000,
       );
@@ -650,9 +666,8 @@ describe('Family Room', () => {
       await bobService.joinRoom(dmRoomId);
 
       // Wait until bob recognizes the room as a direct room
-      await waitForCondition(
-        'bob sees DM room in direct rooms',
-        () => bobService.getDirectRooms().some(r => r.roomId === dmRoomId),
+      await waitForCondition('bob sees DM room in direct rooms', () =>
+        bobService.getDirectRooms().some(r => r.roomId === dmRoomId),
       );
 
       // Then: Bob should recognize the room as a DM
@@ -710,8 +725,14 @@ describe('Family Onboarding Flow (E2E)', () => {
   }, 10000);
 
   beforeEach(async () => {
-    aliceService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
-    bobService = createTestService(TEST_HOMESERVER, createTestCredentialStorage());
+    aliceService = createTestService(
+      TEST_HOMESERVER,
+      createTestCredentialStorage(),
+    );
+    bobService = createTestService(
+      TEST_HOMESERVER,
+      createTestCredentialStorage(),
+    );
   }, 5000);
 
   afterEach(async () => {
@@ -761,14 +782,11 @@ describe('Family Onboarding Flow (E2E)', () => {
     }
 
     // Wait until both can access the family room
-    await waitForCondition(
-      'both see family room',
-      async () => {
-        const a = await aliceService.getFamilyRoom();
-        const b = await bobService.getFamilyRoom();
-        return !!(a && b);
-      },
-    );
+    await waitForCondition('both see family room', async () => {
+      const a = await aliceService.getFamilyRoom();
+      const b = await bobService.getFamilyRoom();
+      return !!(a && b);
+    });
 
     // 4. Verify both can access the family room
     const aliceFamilyRoom = await aliceService.getFamilyRoom();

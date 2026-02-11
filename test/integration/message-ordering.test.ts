@@ -167,7 +167,12 @@ describe('Message Ordering', () => {
     }
 
     // Wait for bob to receive alice's messages
-    await orchestrator.waitForEventIds('bob', roomId, new Set(aliceEventIds), 30000);
+    await orchestrator.waitForEventIds(
+      'bob',
+      roomId,
+      new Set(aliceEventIds),
+      30000,
+    );
 
     // Then, bob sends 5 messages
     for (let i = 0; i < 5; i++) {
@@ -186,7 +191,12 @@ describe('Message Ordering', () => {
     }
 
     // Wait for alice to receive bob's messages
-    await orchestrator.waitForEventIds('alice', roomId, new Set(bobEventIds), 30000);
+    await orchestrator.waitForEventIds(
+      'alice',
+      roomId,
+      new Set(bobEventIds),
+      30000,
+    );
 
     // Both clients should see the same ordering (use pagination to fetch all)
     const aliceMessages = await orchestrator.getAllVoiceMessages(
@@ -264,8 +274,18 @@ describe('Message Ordering', () => {
     await Promise.all([...aliceSends, ...bobSends]);
 
     // Wait for alice to receive bob's messages, and bob to receive alice's messages
-    await orchestrator.waitForEventIds('alice', roomId, new Set(bobEventIds), 45000);
-    await orchestrator.waitForEventIds('bob', roomId, new Set(aliceEventIds), 45000);
+    await orchestrator.waitForEventIds(
+      'alice',
+      roomId,
+      new Set(bobEventIds),
+      45000,
+    );
+    await orchestrator.waitForEventIds(
+      'bob',
+      roomId,
+      new Set(aliceEventIds),
+      45000,
+    );
 
     // Both clients should see all messages (use pagination to fetch all)
     const aliceMessages = await orchestrator.getAllVoiceMessages(
@@ -326,7 +346,9 @@ describe('Message Ordering', () => {
 
     // Check that bob's messages have the same event IDs
     const bobEventIds = messages.map(m => m.eventId);
-    const matchingIds = Array.from(expectedEventIds).filter(id => bobEventIds.includes(id));
+    const matchingIds = Array.from(expectedEventIds).filter(id =>
+      bobEventIds.includes(id),
+    );
 
     expect(matchingIds.length).toBe(expectedEventIds.size);
   }, 70000);

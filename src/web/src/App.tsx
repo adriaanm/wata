@@ -37,13 +37,7 @@ function App() {
 
   // Show login form if not authenticated
   if (!isLoggedIn) {
-    return (
-      <LoginView
-        login={login}
-        isLoading={isLoading}
-        error={loginError}
-      />
-    );
+    return <LoginView login={login} isLoading={isLoading} error={loginError} />;
   }
 
   // Render view based on state

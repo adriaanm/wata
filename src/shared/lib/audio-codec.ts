@@ -15,7 +15,12 @@
  */
 
 import { OggOpusMuxer, OggDemuxer } from './ogg.js';
-import { EncoderFactory, DecoderFactory, OpusEncoder, OpusDecoder } from './opus.js';
+import {
+  EncoderFactory,
+  DecoderFactory,
+  OpusEncoder,
+  OpusDecoder,
+} from './opus.js';
 import { resample } from './resample.js';
 import type { Logger } from './wata-client/types.js';
 
@@ -136,7 +141,7 @@ function float32ToInt16(float32: Float32Array): Int16Array {
 export function encodeOggOpus(
   pcm: Int16Array | Float32Array,
   options: EncodeOptions,
-  mkEncoder: EncoderFactory
+  mkEncoder: EncoderFactory,
 ): Buffer {
   const { sampleRate, channels = 1, logger } = options;
 
@@ -146,7 +151,7 @@ export function encodeOggOpus(
   }
 
   logger?.log(
-    `encodeOggOpus: starting, ${pcm.length} samples at ${sampleRate}Hz`
+    `encodeOggOpus: starting, ${pcm.length} samples at ${sampleRate}Hz`,
   );
 
   // Step 1: Convert Int16Array to Float32Array if needed
@@ -162,22 +167,27 @@ export function encodeOggOpus(
   let resampledPcm: Float32Array;
   if (sampleRate !== OPUS_SAMPLE_RATE) {
     logger?.log(
-      `encodeOggOpus: resampling ${sampleRate}Hz → ${OPUS_SAMPLE_RATE}Hz`
+      `encodeOggOpus: resampling ${sampleRate}Hz → ${OPUS_SAMPLE_RATE}Hz`,
     );
     resampledPcm = resample(floatPcm, sampleRate, OPUS_SAMPLE_RATE, logger);
   } else {
     resampledPcm = floatPcm;
   }
 
-  logger?.log(`encodeOggOpus: ${resampledPcm.length} samples at ${OPUS_SAMPLE_RATE}Hz`);
+  logger?.log(
+    `encodeOggOpus: ${resampledPcm.length} samples at ${OPUS_SAMPLE_RATE}Hz`,
+  );
 
   // Step 3: Create Opus encoder
-  const encoder = new OpusEncoder({
-    sampleRate: OPUS_SAMPLE_RATE,
-    channels,
-    application: 'voip',
-    logger
-  }, mkEncoder );
+  const encoder = new OpusEncoder(
+    {
+      sampleRate: OPUS_SAMPLE_RATE,
+      channels,
+      application: 'voip',
+      logger,
+    },
+    mkEncoder,
+  );
 
   // Step 4: Create Ogg muxer
   // Note: Don't call writeHeaders() here - muxPackets() handles that
@@ -193,14 +203,17 @@ export function encodeOggOpus(
 
     // @evan/wasm opus requires exactly OPUS_FRAME_SIZE samples per frame
     // For partial frames, pad with zeros
-    const frameFloat = remaining >= OPUS_FRAME_SIZE
-      ? resampledPcm.subarray(offset, offset + OPUS_FRAME_SIZE)
-      : (() => {
-          const padded = new Float32Array(OPUS_FRAME_SIZE);
-          padded.set(resampledPcm.subarray(offset), 0);
-          logger?.log(`encodeOggOpus: padded partial frame (${remaining} → ${OPUS_FRAME_SIZE} samples)`);
-          return padded;
-        })();
+    const frameFloat =
+      remaining >= OPUS_FRAME_SIZE
+        ? resampledPcm.subarray(offset, offset + OPUS_FRAME_SIZE)
+        : (() => {
+            const padded = new Float32Array(OPUS_FRAME_SIZE);
+            padded.set(resampledPcm.subarray(offset), 0);
+            logger?.log(
+              `encodeOggOpus: padded partial frame (${remaining} → ${OPUS_FRAME_SIZE} samples)`,
+            );
+            return padded;
+          })();
 
     // Convert Float32Array to Int16Array for @evan/wasm opus
     // Float32 range: [-1.0, 1.0] -> Int16 range: [-32768, 32767]
@@ -208,7 +221,10 @@ export function encodeOggOpus(
 
     // Encode frame
     const packet = encoder.encode(frame);
-    packets.push({ data: packet, samples: Math.min(remaining, OPUS_FRAME_SIZE) });
+    packets.push({
+      data: packet,
+      samples: Math.min(remaining, OPUS_FRAME_SIZE),
+    });
 
     offset += OPUS_FRAME_SIZE;
   }
@@ -263,7 +279,7 @@ export function encodeOggOpus(
 export function decodeOggOpus(
   ogg: Buffer,
   mkDecoder: DecoderFactory,
-  options?: DecodeOptions
+  options?: DecodeOptions,
 ): DecodeResult {
   const { logger } = options ?? {};
 
@@ -280,11 +296,14 @@ export function decodeOggOpus(
   logger?.log(`decodeOggOpus: extracted ${opusPackets.length} Opus packets`);
 
   // Step 2: Create Opus decoder
-  const decoder = new OpusDecoder({
-    sampleRate: OPUS_SAMPLE_RATE,
-    channels: OPUS_CHANNELS,
-    logger,
-  }, mkDecoder);
+  const decoder = new OpusDecoder(
+    {
+      sampleRate: OPUS_SAMPLE_RATE,
+      channels: OPUS_CHANNELS,
+      logger,
+    },
+    mkDecoder,
+  );
 
   // Step 3: Decode all packets
   const frames: Int16Array[] = [];

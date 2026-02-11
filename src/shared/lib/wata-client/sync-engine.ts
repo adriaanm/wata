@@ -76,9 +76,17 @@ export interface SyncEngineEvents {
   /** Emitted when a new timeline event arrives */
   timelineEvent: (roomId: string, event: MatrixEvent) => void;
   /** Emitted when read receipts are updated */
-  receiptUpdated: (roomId: string, eventId: string, userIds: Set<string>) => void;
+  receiptUpdated: (
+    roomId: string,
+    eventId: string,
+    userIds: Set<string>,
+  ) => void;
   /** Emitted when a membership change occurs */
-  membershipChanged: (roomId: string, userId: string, membership: string) => void;
+  membershipChanged: (
+    roomId: string,
+    userId: string,
+    membership: string,
+  ) => void;
   /** Emitted when global account data is updated */
   accountDataUpdated: (type: string, content: Record<string, unknown>) => void;
   /** Emitted when sync encounters an error */
@@ -111,7 +119,8 @@ export class SyncEngine {
   private nextBatch: string | null = null;
   private isRunning = false;
   private syncLoopPromise: Promise<void> | null = null;
-  private eventHandlers: Map<SyncEngineEventName, Set<SyncEngineEventHandler>> = new Map();
+  private eventHandlers: Map<SyncEngineEventName, Set<SyncEngineEventHandler>> =
+    new Map();
   private logger: Logger;
   private syncTimeoutMs: number;
 
@@ -127,7 +136,7 @@ export class SyncEngine {
 
   on<K extends SyncEngineEventName>(
     event: K,
-    handler: SyncEngineEvents[K]
+    handler: SyncEngineEvents[K],
   ): void {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, new Set());
@@ -137,7 +146,7 @@ export class SyncEngine {
 
   off<K extends SyncEngineEventName>(
     event: K,
-    handler: SyncEngineEvents[K]
+    handler: SyncEngineEvents[K],
   ): void {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
@@ -151,7 +160,7 @@ export class SyncEngine {
   ): void {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
-      handlers.forEach((handler) => {
+      handlers.forEach(handler => {
         try {
           (handler as any)(...args);
         } catch (error) {
@@ -272,7 +281,7 @@ export class SyncEngine {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   // ==========================================================================
@@ -285,7 +294,7 @@ export class SyncEngine {
   processSyncResponse(response: SyncResponse): void {
     // Process global account data
     if (response.account_data?.events) {
-      response.account_data.events.forEach((event) => {
+      response.account_data.events.forEach(event => {
         // Emit account data updated event for global account data
         this.emit('accountDataUpdated', event.type, event.content);
       });
@@ -330,14 +339,14 @@ export class SyncEngine {
 
     // Process state events (m.room.name, m.room.avatar, m.room.member, etc.)
     if (roomData.state?.events) {
-      roomData.state.events.forEach((event) => {
+      roomData.state.events.forEach(event => {
         this.processStateEvent(room!, event);
       });
     }
 
     // Process state_after events (state changes between since and end of timeline)
     if (roomData.state_after?.events) {
-      roomData.state_after.events.forEach((event) => {
+      roomData.state_after.events.forEach(event => {
         this.processStateEvent(room!, event);
       });
     }
@@ -354,7 +363,9 @@ export class SyncEngine {
 
     // Process timeline events (new messages)
     if (roomData.timeline?.events) {
-      this.logger.log(`[SyncEngine] Processing ${roomData.timeline.events.length} timeline events for room ${roomId}`);
+      this.logger.log(
+        `[SyncEngine] Processing ${roomData.timeline.events.length} timeline events for room ${roomId}`,
+      );
 
       // Store prev_batch token for pagination
       if (roomData.timeline.prev_batch) {
@@ -363,14 +374,18 @@ export class SyncEngine {
 
       // Log if timeline is limited (indicating potential message gap)
       if (roomData.timeline.limited) {
-        this.logger.log(`[SyncEngine] Timeline limited for room ${roomId}, prev_batch: ${room.prevBatch?.slice(-12)}`);
+        this.logger.log(
+          `[SyncEngine] Timeline limited for room ${roomId}, prev_batch: ${room.prevBatch?.slice(-12)}`,
+        );
       }
 
-      roomData.timeline.events.forEach((event) => {
+      roomData.timeline.events.forEach(event => {
         // Skip if event already exists in timeline (prevent duplicates from incremental syncs)
         const exists = room!.timeline.some(e => e.event_id === event.event_id);
         if (exists) {
-          this.logger.log(`[SyncEngine] Skipping duplicate event ${event.event_id?.slice(-12)}`);
+          this.logger.log(
+            `[SyncEngine] Skipping duplicate event ${event.event_id?.slice(-12)}`,
+          );
           return;
         }
 
@@ -384,7 +399,9 @@ export class SyncEngine {
 
         // Log message events
         if (event.type === 'm.room.message') {
-          this.logger.log(`[SyncEngine] Message event: ${event.content?.msgtype} from ${event.sender}`);
+          this.logger.log(
+            `[SyncEngine] Message event: ${event.content?.msgtype} from ${event.sender}`,
+          );
         }
 
         // Emit timeline event
@@ -394,7 +411,7 @@ export class SyncEngine {
 
     // Process ephemeral events (receipts, typing, etc.)
     if (roomData.ephemeral?.events) {
-      roomData.ephemeral.events.forEach((event) => {
+      roomData.ephemeral.events.forEach(event => {
         if (event.type === 'm.receipt') {
           this.processReceiptEvent(room!, event);
         }
@@ -403,7 +420,7 @@ export class SyncEngine {
 
     // Process room account data
     if (roomData.account_data?.events) {
-      roomData.account_data.events.forEach((event) => {
+      roomData.account_data.events.forEach(event => {
         room!.accountData.set(event.type, event.content);
       });
     }
@@ -415,10 +432,7 @@ export class SyncEngine {
   /**
    * Process an invited room from sync response
    */
-  private processInvitedRoom(
-    roomId: string,
-    roomData: InvitedRoomSync
-  ): void {
+  private processInvitedRoom(roomId: string, roomData: InvitedRoomSync): void {
     // Get or create room state
     let room = this.rooms.get(roomId);
     if (!room) {
@@ -428,7 +442,7 @@ export class SyncEngine {
 
     // Process stripped state events (limited info for invites)
     if (roomData.invite_state?.events) {
-      roomData.invite_state.events.forEach((event) => {
+      roomData.invite_state.events.forEach(event => {
         // Convert stripped state to full event format
         const fullEvent: MatrixEvent = {
           type: event.type,
@@ -457,14 +471,14 @@ export class SyncEngine {
 
     // Process state events
     if (roomData.state?.events) {
-      roomData.state.events.forEach((event) => {
+      roomData.state.events.forEach(event => {
         this.processStateEvent(room!, event);
       });
     }
 
     // Process timeline events
     if (roomData.timeline?.events) {
-      roomData.timeline.events.forEach((event) => {
+      roomData.timeline.events.forEach(event => {
         // Skip if event already exists in timeline (prevent duplicates from incremental syncs)
         const exists = room!.timeline.some(e => e.event_id === event.event_id);
         if (exists) {
@@ -505,7 +519,8 @@ export class SyncEngine {
       case 'm.room.member':
         if (event.state_key) {
           const userId = event.state_key;
-          const membership = event.content.membership as MemberInfo['membership'];
+          const membership = event.content
+            .membership as MemberInfo['membership'];
 
           const member: MemberInfo = {
             userId,
@@ -551,7 +566,7 @@ export class SyncEngine {
         }
 
         // Add user IDs who read this event
-        Object.keys(readReceipts).forEach((userId) => {
+        Object.keys(readReceipts).forEach(userId => {
           receipts!.add(userId);
         });
 
@@ -596,11 +611,15 @@ export class SyncEngine {
     }
 
     if (!room.prevBatch) {
-      this.logger.log(`[SyncEngine] No prev_batch token for room ${roomId}, cannot backfill`);
+      this.logger.log(
+        `[SyncEngine] No prev_batch token for room ${roomId}, cannot backfill`,
+      );
       return 0;
     }
 
-    this.logger.log(`[SyncEngine] Backfilling room ${roomId} from ${room.prevBatch.slice(-12)} (limit: ${limit})`);
+    this.logger.log(
+      `[SyncEngine] Backfilling room ${roomId} from ${room.prevBatch.slice(-12)} (limit: ${limit})`,
+    );
 
     try {
       const response = await this.api.getMessages(roomId, {
@@ -609,7 +628,9 @@ export class SyncEngine {
         limit,
       });
 
-      this.logger.log(`[SyncEngine] Backfill response: ${response.chunk.length} events`);
+      this.logger.log(
+        `[SyncEngine] Backfill response: ${response.chunk.length} events`,
+      );
 
       // Track how many new events were added
       let newEventsCount = 0;
@@ -625,7 +646,9 @@ export class SyncEngine {
         // Skip if event already exists in timeline
         const exists = room.timeline.some(e => e.event_id === event.event_id);
         if (exists) {
-          this.logger.log(`[SyncEngine] Skipping duplicate backfilled event ${event.event_id?.slice(-12)}`);
+          this.logger.log(
+            `[SyncEngine] Skipping duplicate backfilled event ${event.event_id?.slice(-12)}`,
+          );
           continue;
         }
 
@@ -650,7 +673,9 @@ export class SyncEngine {
       // Update prev_batch for further pagination
       room.prevBatch = response.end || null;
 
-      this.logger.log(`[SyncEngine] Backfill complete: ${newEventsCount} new events added, new prev_batch: ${room.prevBatch?.slice(-12) || 'none'}`);
+      this.logger.log(
+        `[SyncEngine] Backfill complete: ${newEventsCount} new events added, new prev_batch: ${room.prevBatch?.slice(-12) || 'none'}`,
+      );
 
       // Emit room updated event
       this.emit('roomUpdated', roomId, room);
@@ -658,7 +683,9 @@ export class SyncEngine {
       return newEventsCount;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.error(`[SyncEngine] Backfill error for room ${roomId}: ${err.message}`);
+      this.logger.error(
+        `[SyncEngine] Backfill error for room ${roomId}: ${err.message}`,
+      );
       throw err;
     }
   }

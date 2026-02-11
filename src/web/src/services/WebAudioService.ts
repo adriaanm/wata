@@ -222,8 +222,12 @@ export class WebAudioService {
     this.stopTimeUpdate();
     this.timeUpdateInterval = window.setInterval(() => {
       if (this.playbackState === 'playing') {
-        const currentTime = this.playbackOffset + (performance.now() - this.playbackStartTime) / 1000;
-        this.playbackCallbacks.onTimeUpdate?.(Math.min(currentTime, this.playbackDuration));
+        const currentTime =
+          this.playbackOffset +
+          (performance.now() - this.playbackStartTime) / 1000;
+        this.playbackCallbacks.onTimeUpdate?.(
+          Math.min(currentTime, this.playbackDuration),
+        );
       }
     }, 100); // Update every 100ms
   }
@@ -281,7 +285,8 @@ export class WebAudioService {
       this.sourceNode.onended = () => {
         if (this.playbackState === 'playing') {
           // Only call onEnded if we weren't manually stopped
-          const playedDuration = (performance.now() - this.playbackStartTime) / 1000;
+          const playedDuration =
+            (performance.now() - this.playbackStartTime) / 1000;
           // Check if we played to the end (within 100ms)
           if (this.playbackDuration - playedDuration < 0.1) {
             this.playbackState = 'ended';
@@ -334,7 +339,8 @@ export class WebAudioService {
       // Set up ended event
       this.sourceNode.onended = () => {
         if (this.playbackState === 'playing') {
-          const playedDuration = (performance.now() - this.playbackStartTime) / 1000;
+          const playedDuration =
+            (performance.now() - this.playbackStartTime) / 1000;
           if (this.playbackDuration - playedDuration < 0.1) {
             this.playbackState = 'ended';
             this.playbackCallbacks.onEnded?.();
@@ -384,7 +390,8 @@ export class WebAudioService {
   getCurrentTime(): number {
     if (this.playbackState === 'playing') {
       return Math.min(
-        this.playbackOffset + (performance.now() - this.playbackStartTime) / 1000,
+        this.playbackOffset +
+          (performance.now() - this.playbackStartTime) / 1000,
         this.playbackDuration,
       );
     }
@@ -428,7 +435,8 @@ export class WebAudioService {
 
       this.sourceNode.onended = () => {
         if (this.playbackState === 'playing') {
-          const playedDuration = (performance.now() - this.playbackStartTime) / 1000;
+          const playedDuration =
+            (performance.now() - this.playbackStartTime) / 1000;
           if (this.playbackDuration - playedDuration < 0.1) {
             this.playbackState = 'ended';
             this.playbackCallbacks.onEnded?.();

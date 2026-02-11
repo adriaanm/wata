@@ -13,9 +13,15 @@ import type {
   MatrixRoom,
   VoiceMessage as BaseVoiceMessage,
 } from '@shared/services';
-import { setHomeserverUrl, type WataService } from '@shared/services/WataService';
+import {
+  setHomeserverUrl,
+  type WataService,
+} from '@shared/services/WataService';
 
-import { createTestService, createTestCredentialStorage } from './test-service-factory';
+import {
+  createTestService,
+  createTestCredentialStorage,
+} from './test-service-factory';
 
 export interface MessageFilter {
   sender?: string;
@@ -60,7 +66,10 @@ export class TestClient {
     setHomeserverUrl(this.homeserverUrl);
 
     // Create service using the WataService
-    this.service = createTestService(this.homeserverUrl, this.credentialStorage);
+    this.service = createTestService(
+      this.homeserverUrl,
+      this.credentialStorage,
+    );
 
     // Login through WataService (same as production)
     await this.service.login(this.username, this.password);
@@ -89,7 +98,7 @@ export class TestClient {
     }
 
     // Log sync state changes for debugging
-    const unsubscribe = this.service.onSyncStateChange((state) => {
+    const unsubscribe = this.service.onSyncStateChange(state => {
       console.log(`[TestClient:${this.username}] Sync state: ${state}`);
     });
 
@@ -119,7 +128,10 @@ export class TestClient {
 
     // Check if room already exists (in direct rooms list or as a member)
     const existingRooms = this.service.getDirectRooms();
-    if (existingRooms.some(r => r.roomId === roomId) || this.service.isRoomMember(roomId)) {
+    if (
+      existingRooms.some(r => r.roomId === roomId) ||
+      this.service.isRoomMember(roomId)
+    ) {
       console.log(`[TestClient:${this.username}] Room already available`);
       return;
     }
@@ -147,7 +159,10 @@ export class TestClient {
 
       const checkRoom = () => {
         const rooms = service.getDirectRooms();
-        if (rooms.some(r => r.roomId === roomId) || service.isRoomMember(roomId)) {
+        if (
+          rooms.some(r => r.roomId === roomId) ||
+          service.isRoomMember(roomId)
+        ) {
           if (!resolved) {
             resolved = true;
             cleanup();
@@ -226,7 +241,9 @@ export class TestClient {
         if (!resolved) {
           resolved = true;
           cleanup();
-          console.log(`[TestClient:${this.username}] Message received (${Date.now() - startTime}ms)`);
+          console.log(
+            `[TestClient:${this.username}] Message received (${Date.now() - startTime}ms)`,
+          );
           resolve(msg);
         }
       };
@@ -277,7 +294,9 @@ export class TestClient {
   async createDMRoom(otherUserId: string): Promise<string> {
     if (!this.service) throw new Error('Not logged in');
 
-    console.log(`[TestClient:${this.username}] Creating DM room with ${otherUserId}...`);
+    console.log(
+      `[TestClient:${this.username}] Creating DM room with ${otherUserId}...`,
+    );
 
     // Use WataService's getOrCreateDmRoom which delegates to DMRoomService
     const roomId = await this.service.getOrCreateDmRoom(otherUserId);
@@ -326,9 +345,7 @@ export class TestClient {
       audioBuffer.length,
     );
 
-    console.log(
-      `[TestClient:${this.username}] Voice message sent: ${eventId}`,
-    );
+    console.log(`[TestClient:${this.username}] Voice message sent: ${eventId}`);
 
     return eventId;
   }
@@ -505,7 +522,9 @@ export class TestClient {
       await new Promise(resolve => setTimeout(resolve, pollMs));
     }
 
-    throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
+    throw new Error(
+      `Timed out waiting for: ${description} (after ${timeoutMs}ms)`,
+    );
   }
 
   /**

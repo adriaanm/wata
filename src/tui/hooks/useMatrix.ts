@@ -66,7 +66,10 @@ export function useVoiceMessages(roomId: string) {
   const log = LogService.getInstance();
 
   useEffect(() => {
-    log.addEntry('log', `[useVoiceMessages] Subscribing to room ${roomId.slice(-8)}`);
+    log.addEntry(
+      'log',
+      `[useVoiceMessages] Subscribing to room ${roomId.slice(-8)}`,
+    );
 
     // Get initial messages
     const initialMessages = matrixService.getVoiceMessages(roomId);
@@ -82,7 +85,10 @@ export function useVoiceMessages(roomId: string) {
       (msgRoomId, message) => {
         if (msgRoomId === roomId) {
           const newId = message.eventId.slice(-8);
-          log.addEntry('log', `[useVoiceMessages] Adding msg ${newId} to room ${roomId.slice(-8)}, size: ${messages.length} -> ${messages.length + 1}`);
+          log.addEntry(
+            'log',
+            `[useVoiceMessages] Adding msg ${newId} to room ${roomId.slice(-8)}, size: ${messages.length} -> ${messages.length + 1}`,
+          );
           setMessages(prev => [...prev, message]);
         }
       },

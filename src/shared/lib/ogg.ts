@@ -174,9 +174,7 @@ export class OggDemuxer {
     const segmentTable: number[] = [];
     let dataSize = 0;
     for (let i = 0; i < numSegments; i++) {
-      const segmentSize = buffer.readUInt8(
-        offset + OggDemuxer.HEADER_SIZE + i,
-      );
+      const segmentSize = buffer.readUInt8(offset + OggDemuxer.HEADER_SIZE + i);
       segmentTable.push(segmentSize);
       dataSize += segmentSize;
     }
@@ -185,9 +183,7 @@ export class OggDemuxer {
 
     // Check if we have enough bytes for page data
     if (dataOffset + dataSize > buffer.length) {
-      this.logger?.warn(
-        `Ogg demuxer: Truncated page data at offset ${offset}`,
-      );
+      this.logger?.warn(`Ogg demuxer: Truncated page data at offset ${offset}`);
       return null;
     }
 

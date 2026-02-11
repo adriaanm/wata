@@ -27,7 +27,9 @@ describe('resample', () => {
 
       // Last sample should be within input range
       expect(output[output.length - 1]).toBeGreaterThanOrEqual(inputSamples[0]);
-      expect(output[output.length - 1]).toBeLessThanOrEqual(inputSamples[inputSamples.length - 1]);
+      expect(output[output.length - 1]).toBeLessThanOrEqual(
+        inputSamples[inputSamples.length - 1],
+      );
     });
 
     test('resample 48000 Hz -> 16000 Hz (3:1 downsampling)', () => {
@@ -78,7 +80,10 @@ describe('resample', () => {
 
       // First and last samples should match
       expect(output[0]).toBe(inputSamples[0]);
-      expect(output[output.length - 1]).toBeCloseTo(inputSamples[inputSamples.length - 1], 5);
+      expect(output[output.length - 1]).toBeCloseTo(
+        inputSamples[inputSamples.length - 1],
+        5,
+      );
     });
   });
 
@@ -125,14 +130,22 @@ describe('resample', () => {
 
     test('throws on invalid fromRate', () => {
       const inputSamples = new Float32Array([0, 1, 2]);
-      expect(() => resample(inputSamples, 0, 16000)).toThrow('Invalid sample rates');
-      expect(() => resample(inputSamples, -44100, 16000)).toThrow('Invalid sample rates');
+      expect(() => resample(inputSamples, 0, 16000)).toThrow(
+        'Invalid sample rates',
+      );
+      expect(() => resample(inputSamples, -44100, 16000)).toThrow(
+        'Invalid sample rates',
+      );
     });
 
     test('throws on invalid toRate', () => {
       const inputSamples = new Float32Array([0, 1, 2]);
-      expect(() => resample(inputSamples, 44100, 0)).toThrow('Invalid sample rates');
-      expect(() => resample(inputSamples, 44100, -16000)).toThrow('Invalid sample rates');
+      expect(() => resample(inputSamples, 44100, 0)).toThrow(
+        'Invalid sample rates',
+      );
+      expect(() => resample(inputSamples, 44100, -16000)).toThrow(
+        'Invalid sample rates',
+      );
     });
   });
 
@@ -283,7 +296,9 @@ describe('resample', () => {
       const inputSamples = new Float32Array(0);
       resample(inputSamples, 44100, 16000, mockLogger);
 
-      expect(mockLogger.warn).toHaveBeenCalledWith('resample: empty input array, returning empty output');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'resample: empty input array, returning empty output',
+      );
     });
 
     test('same rate triggers log on custom logger', () => {
@@ -296,7 +311,9 @@ describe('resample', () => {
       const inputSamples = new Float32Array([0, 1, 2, 3, 4]);
       resample(inputSamples, 44100, 44100, mockLogger);
 
-      expect(mockLogger.log).toHaveBeenCalledWith('resample: rates are equal (44100 Hz), returning copy');
+      expect(mockLogger.log).toHaveBeenCalledWith(
+        'resample: rates are equal (44100 Hz), returning copy',
+      );
     });
   });
 

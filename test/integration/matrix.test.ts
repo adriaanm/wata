@@ -33,7 +33,9 @@ async function waitForCondition(
     delay = Math.min(delay * 1.3, 2000);
   }
 
-  throw new Error(`Timed out waiting for: ${description} (after ${timeoutMs}ms)`);
+  throw new Error(
+    `Timed out waiting for: ${description} (after ${timeoutMs}ms)`,
+  );
 }
 
 const TEST_HOMESERVER = 'http://localhost:8008';
@@ -113,9 +115,7 @@ describe('Matrix Integration Tests', () => {
       const storage = createTestCredentialStorage();
       const service = createTestService(TEST_HOMESERVER, storage);
 
-      await expect(
-        service.login('nonexistent', 'password'),
-      ).rejects.toThrow();
+      await expect(service.login('nonexistent', 'password')).rejects.toThrow();
     });
   });
 
@@ -128,7 +128,10 @@ describe('Matrix Integration Tests', () => {
       aliceService = createTestService(TEST_HOMESERVER, aliceStorage);
       bobService = createTestService(TEST_HOMESERVER, bobStorage);
 
-      await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
       await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
 
       // Wait for both to sync
@@ -156,15 +159,16 @@ describe('Matrix Integration Tests', () => {
       // Find the DM room with Bob (name could be the user ID or display name)
       const bobDm = rooms.find(
         (room: { roomId: string; name: string; isDirect: boolean }) =>
-          room.isDirect && (
-            room.name.includes('bob') ||
+          room.isDirect &&
+          (room.name.includes('bob') ||
             room.name.includes('Bob') ||
-            room.name.includes('@bob:localhost')
-          )
+            room.name.includes('@bob:localhost')),
       );
 
       // If we didn't find by name, at least verify we have a direct room
-      const hasDirectRoom = rooms.some((room: { isDirect: boolean }) => room.isDirect);
+      const hasDirectRoom = rooms.some(
+        (room: { isDirect: boolean }) => room.isDirect,
+      );
       expect(hasDirectRoom).toBe(true);
     });
   });
@@ -180,7 +184,10 @@ describe('Matrix Integration Tests', () => {
       aliceService = createTestService(TEST_HOMESERVER, aliceStorage);
       bobService = createTestService(TEST_HOMESERVER, bobStorage);
 
-      await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
       await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
 
       await aliceService.waitForSync();
@@ -190,9 +197,8 @@ describe('Matrix Integration Tests', () => {
       testRoomId = await aliceService.getOrCreateDmRoom('@bob:localhost');
 
       // Wait for room to propagate
-      await waitForCondition(
-        'test room visible to alice',
-        () => aliceService.isRoomMember(testRoomId),
+      await waitForCondition('test room visible to alice', () =>
+        aliceService.isRoomMember(testRoomId),
       );
     }, 15000);
 
@@ -209,9 +215,10 @@ describe('Matrix Integration Tests', () => {
       );
 
       // Wait for the specific message to appear (by event ID)
-      await waitForCondition(
-        'message with event ID in alice timeline',
-        () => aliceService.getVoiceMessages(testRoomId).some(m => m.eventId === eventId),
+      await waitForCondition('message with event ID in alice timeline', () =>
+        aliceService
+          .getVoiceMessages(testRoomId)
+          .some(m => m.eventId === eventId),
       );
 
       // Verify message was sent by checking local timeline
@@ -225,7 +232,9 @@ describe('Matrix Integration Tests', () => {
 
     test('should receive messages in room timeline', async () => {
       // Send a message from Alice
-      const fakeAudioData = Buffer.from('fake audio content for receiving test');
+      const fakeAudioData = Buffer.from(
+        'fake audio content for receiving test',
+      );
       const initialCount = aliceService.getVoiceMessages(testRoomId).length;
 
       const eventId = await aliceService.sendVoiceMessage(
@@ -237,9 +246,10 @@ describe('Matrix Integration Tests', () => {
       );
 
       // Wait for the specific message to appear (by event ID)
-      await waitForCondition(
-        'message with event ID in alice timeline',
-        () => aliceService.getVoiceMessages(testRoomId).some(m => m.eventId === eventId),
+      await waitForCondition('message with event ID in alice timeline', () =>
+        aliceService
+          .getVoiceMessages(testRoomId)
+          .some(m => m.eventId === eventId),
       );
 
       // Check Alice's timeline
@@ -272,7 +282,9 @@ describe('Matrix Integration Tests', () => {
       // Wait for all messages to appear
       await waitForCondition(
         `${messageCount} messages sent`,
-        () => aliceService.getMessageCount(testRoomId) >= initialCount + messageCount,
+        () =>
+          aliceService.getMessageCount(testRoomId) >=
+          initialCount + messageCount,
       );
 
       // Verify message count increased
@@ -314,7 +326,7 @@ describe('Matrix Integration Tests', () => {
       expect(states.length).toBeGreaterThan(0);
 
       // Should have reached PREPARED or SYNCING
-      expect(states.some((s) => s === 'PREPARED' || s === 'SYNCING')).toBe(true);
+      expect(states.some(s => s === 'PREPARED' || s === 'SYNCING')).toBe(true);
 
       await service.logout();
     });
@@ -362,7 +374,10 @@ describe('Matrix Integration Tests', () => {
       aliceService = createTestService(TEST_HOMESERVER, aliceStorage);
       bobService = createTestService(TEST_HOMESERVER, bobStorage);
 
-      await aliceService.login(TEST_USERS.alice.username, TEST_USERS.alice.password);
+      await aliceService.login(
+        TEST_USERS.alice.username,
+        TEST_USERS.alice.password,
+      );
       await bobService.login(TEST_USERS.bob.username, TEST_USERS.bob.password);
 
       await aliceService.waitForSync();

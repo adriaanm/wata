@@ -95,7 +95,7 @@ export interface Decoder {
 export type EncoderFactory = (
   sampleRate: 8000 | 12000 | 16000 | 24000 | 48000,
   channels: 1 | 2,
-  application: 'voip' | 'audio' | 'restricted_lowdelay'
+  application: 'voip' | 'audio' | 'restricted_lowdelay',
 ) => Encoder;
 
 /**
@@ -105,7 +105,7 @@ export type EncoderFactory = (
  */
 export type DecoderFactory = (
   sampleRate: 8000 | 12000 | 16000 | 24000 | 48000,
-  channels: 1 | 2
+  channels: 1 | 2,
 ) => Decoder;
 
 // ============================================================================
@@ -138,7 +138,9 @@ export class OpusEncoder {
 
     const { sampleRate, channels = 1, application = 'voip' } = options;
 
-    this.logger?.log(`Creating Opus encoder: ${sampleRate}Hz, ${channels}ch, ${application}`);
+    this.logger?.log(
+      `Creating Opus encoder: ${sampleRate}Hz, ${channels}ch, ${application}`,
+    );
 
     this.encoder = mkEncoder(sampleRate, channels, application);
 
@@ -242,7 +244,7 @@ export class OpusDecoder {
       const pcmData = new Int16Array(
         decodedBytes.buffer,
         decodedBytes.byteOffset,
-        decodedBytes.byteLength / 2
+        decodedBytes.byteLength / 2,
       );
 
       this.logger?.log(`Decoded to ${pcmData.length} samples`);

@@ -5,7 +5,7 @@
  * the platform-agnostic audio-codec.ts in shared.
  *
  * @module opus-factories
-*/
+ */
 
 import { Encoder, Decoder } from '@evan/wasm/target/opus/deno.js';
 import type { EncoderFactory, DecoderFactory } from '@shared/lib/opus.js';
@@ -15,11 +15,10 @@ import type { EncoderFactory, DecoderFactory } from '@shared/lib/opus.js';
  */
 export const mkEncoder: EncoderFactory = (sampleRate, channels, application) =>
   new Encoder({
-      sample_rate: sampleRate,
-      channels,
-      application,
-   });
-
+    sample_rate: sampleRate,
+    channels,
+    application,
+  });
 
 /**
  * Create an Opus decoder for the Web (Deno/browser) environment
@@ -29,4 +28,3 @@ export const mkDecoder: DecoderFactory = (sampleRate, channels) =>
     sample_rate: sampleRate,
     channels,
   });
-

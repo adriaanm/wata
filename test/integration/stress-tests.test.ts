@@ -91,7 +91,12 @@ describe('Stress Tests', () => {
       console.log(`[STRESS] Sent 30 messages in ${sendDuration}ms`);
 
       // Wait for all specific messages by event ID (robust approach)
-      await orchestrator.waitForEventIds('bob', roomId, new Set(eventIds), 90000);
+      await orchestrator.waitForEventIds(
+        'bob',
+        roomId,
+        new Set(eventIds),
+        90000,
+      );
 
       // Verify bob received all messages (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(
@@ -151,7 +156,12 @@ describe('Stress Tests', () => {
       console.log(`[STRESS] Sent 50 messages in ${sendDuration}ms`);
 
       // Wait for all specific messages by event ID
-      await orchestrator.waitForEventIds('bob', roomId, new Set(eventIds), 120000);
+      await orchestrator.waitForEventIds(
+        'bob',
+        roomId,
+        new Set(eventIds),
+        120000,
+      );
 
       // Verify (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(
@@ -295,7 +305,12 @@ describe('Stress Tests', () => {
 
       // Wait for all messages by event ID
       const allEventIds = [...burst1EventIds, ...burst2EventIds];
-      await orchestrator.waitForEventIds('bob', roomId, new Set(allEventIds), 60000);
+      await orchestrator.waitForEventIds(
+        'bob',
+        roomId,
+        new Set(allEventIds),
+        60000,
+      );
 
       // Verify bob received all 20 messages (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(
@@ -345,7 +360,12 @@ describe('Stress Tests', () => {
       console.log(`[STRESS] Sustained load completed in ${totalTime}ms`);
 
       // Wait for all messages by event ID
-      await orchestrator.waitForEventIds('bob', roomId, new Set(eventIds), 60000);
+      await orchestrator.waitForEventIds(
+        'bob',
+        roomId,
+        new Set(eventIds),
+        60000,
+      );
 
       // Verify (use pagination to fetch all)
       const messages = await orchestrator.getAllVoiceMessages(

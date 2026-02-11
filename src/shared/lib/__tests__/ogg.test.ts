@@ -91,12 +91,11 @@ describe('oggCrc32', () => {
   it('should handle larger inputs (1KB)', () => {
     const input = new Uint8Array(1024);
     for (let i = 0; i < 1024; i++) {
-       
       input[i] = i & 0xff;
     }
     const result = oggCrc32(input);
     expect(result).toBeGreaterThan(0);
-     
+
     expect(result).toBeLessThan(2 ** 32);
   });
 });
@@ -240,9 +239,15 @@ describe('createOggPage', () => {
   });
 
   it('should encode serial number', () => {
-    const page = createOggPage(new Uint8Array([1]), BigInt(0), 0xDEADBEEF, 0, 0);
+    const page = createOggPage(
+      new Uint8Array([1]),
+      BigInt(0),
+      0xdeadbeef,
+      0,
+      0,
+    );
     const view = new DataView(page.buffer);
-    expect(view.getUint32(14, true)).toBe(0xDEADBEEF);
+    expect(view.getUint32(14, true)).toBe(0xdeadbeef);
   });
 
   it('should encode page sequence number', () => {
@@ -304,13 +309,13 @@ describe('createOggPage', () => {
   });
 
   it('should place payload after segment table', () => {
-    const payload = new Uint8Array([0xAB, 0xCD, 0xEF]);
+    const payload = new Uint8Array([0xab, 0xcd, 0xef]);
     const page = createOggPage(payload, BigInt(0), 1, 0, 0);
     const numSegments = page[26];
     const headerSize = 27 + numSegments;
-    expect(page[headerSize]).toBe(0xAB);
-    expect(page[headerSize + 1]).toBe(0xCD);
-    expect(page[headerSize + 2]).toBe(0xEF);
+    expect(page[headerSize]).toBe(0xab);
+    expect(page[headerSize + 1]).toBe(0xcd);
+    expect(page[headerSize + 2]).toBe(0xef);
   });
 });
 
@@ -355,12 +360,14 @@ describe('OggDemuxer', () => {
     it('should gracefully handle invalid magic', () => {
       const demuxer = new OggDemuxer(logger);
       // Create a buffer that's at least HEADER_SIZE (27) bytes but has invalid magic
-      const invalidBuffer = Buffer.alloc(30, 0xFF);
+      const invalidBuffer = Buffer.alloc(30, 0xff);
 
       const packets = demuxer.demux(invalidBuffer);
 
       expect(packets).toEqual([]);
-      expect(logger.warnings.some((w) => w.includes('Invalid magic at offset'))).toBe(true);
+      expect(
+        logger.warnings.some(w => w.includes('Invalid magic at offset')),
+      ).toBe(true);
     });
 
     it('should handle pages with multiple segments', () => {
@@ -387,7 +394,7 @@ describe('OggDemuxer', () => {
       const tagsPage = createOggPage(opusTags, BigInt(0), 1, 1, 0);
 
       // Create audio data page
-      const audioData = new Uint8Array([0xFF, 0xFE, 0xFD]);
+      const audioData = new Uint8Array([0xff, 0xfe, 0xfd]);
       const audioPage = createOggPage(audioData, BigInt(960), 1, 2, 0x04);
 
       // Concatenate all pages
@@ -402,7 +409,7 @@ describe('OggDemuxer', () => {
       // Should get 1 audio packet (skipping OpusHead and OpusTags)
       expect(packets.length).toBe(1);
       expect(Buffer.from(packets[0])).toEqual(Buffer.from(audioData));
-      expect(logger.logs.some((l) => l.includes('1 audio packets'))).toBe(true);
+      expect(logger.logs.some(l => l.includes('1 audio packets'))).toBe(true);
     });
 
     it('should handle empty buffer', () => {
@@ -422,7 +429,9 @@ describe('OggDemuxer', () => {
 
       expect(packets).toEqual([]);
       expect(
-        logger.warnings.some((w) => w.includes('Expected at least 2 header packets')),
+        logger.warnings.some(w =>
+          w.includes('Expected at least 2 header packets'),
+        ),
       ).toBe(true);
     });
   });
@@ -500,7 +509,9 @@ describe('OggOpusMuxer', () => {
       const headerSize = 27 + numSegments;
 
       // Check OpusHead magic
-      expect(buffer.toString('ascii', headerSize, headerSize + 8)).toBe('OpusHead');
+      expect(buffer.toString('ascii', headerSize, headerSize + 8)).toBe(
+        'OpusHead',
+      );
     });
 
     it('should create OpusTags with vendor string', () => {
@@ -524,7 +535,11 @@ describe('OggOpusMuxer', () => {
 
       // Check OpusTags magic
       expect(
-        buffer.toString('ascii', offset + secondHeaderSize, offset + secondHeaderSize + 8),
+        buffer.toString(
+          'ascii',
+          offset + secondHeaderSize,
+          offset + secondHeaderSize + 8,
+        ),
       ).toBe('OpusTags');
     });
   });
@@ -736,7 +751,7 @@ describe('Integration: Mux/Demux Roundtrip', () => {
 
   it('should mux and demux single packet', () => {
     const muxer = new OggOpusMuxer(16000, 1, 312);
-    const originalPacket = new Uint8Array([0x12, 0x34, 0x56, 0x78, 0x9A]);
+    const originalPacket = new Uint8Array([0x12, 0x34, 0x56, 0x78, 0x9a]);
 
     const oggData = muxer.muxPackets([{ data: originalPacket, samples: 320 }]);
 
@@ -756,7 +771,7 @@ describe('Integration: Mux/Demux Roundtrip', () => {
     ];
 
     const oggData = muxer.muxPackets(
-      originalPackets.map((data) => ({ data, samples: 320 })),
+      originalPackets.map(data => ({ data, samples: 320 })),
     );
 
     const demuxer = new OggDemuxer(logger);
@@ -764,7 +779,9 @@ describe('Integration: Mux/Demux Roundtrip', () => {
 
     expect(demuxedPackets.length).toBe(3);
     for (let i = 0; i < originalPackets.length; i++) {
-      expect(Buffer.from(demuxedPackets[i])).toEqual(Buffer.from(originalPackets[i]));
+      expect(Buffer.from(demuxedPackets[i])).toEqual(
+        Buffer.from(originalPackets[i]),
+      );
     }
   });
 
@@ -774,7 +791,6 @@ describe('Integration: Mux/Demux Roundtrip', () => {
     // Create a 500-byte packet (will create [255, 245] segment table)
     const largePacket = new Uint8Array(500);
     for (let i = 0; i < 500; i++) {
-       
       largePacket[i] = i & 0xff;
     }
 
@@ -797,7 +813,9 @@ describe('Integration: Mux/Demux Roundtrip', () => {
       new Uint8Array(10).fill(0x44),
     ];
 
-    const oggData = muxer.muxPackets(packets.map((data) => ({ data, samples: 160 })));
+    const oggData = muxer.muxPackets(
+      packets.map(data => ({ data, samples: 160 })),
+    );
 
     const demuxer = new OggDemuxer(logger);
     const demuxedPackets = demuxer.demux(Buffer.from(oggData));
@@ -814,8 +832,9 @@ describe('Integration: Mux/Demux Roundtrip', () => {
 
     // Simulate encoded Opus data (realistic-looking bytes)
     const encodedData = new Uint8Array([
-      0x00, 0xff, 0x42, 0x12, 0x80, 0x01, 0x00, 0x84, 0xfe, 0x18, 0x20, 0x40, 0x9c,
-      0x00, 0x08, 0x00, 0x5c, 0x00, 0x00, 0x22, 0xf4, 0x20, 0x00, 0x00, 0x00,
+      0x00, 0xff, 0x42, 0x12, 0x80, 0x01, 0x00, 0x84, 0xfe, 0x18, 0x20, 0x40,
+      0x9c, 0x00, 0x08, 0x00, 0x5c, 0x00, 0x00, 0x22, 0xf4, 0x20, 0x00, 0x00,
+      0x00,
     ]);
 
     const oggData = muxer.muxPackets([{ data: encodedData, samples: 960 }]);
