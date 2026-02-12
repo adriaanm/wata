@@ -1,13 +1,15 @@
 #!/bin/bash
 # Quick iteration workflow for wata-server development
 #
+# TDD Mode: Run one test at a time, iterate until green, move to next
+#
 # Usage:
-#   ./scripts/test-wata-server.sh [test-filter]
+#   ./scripts/test-wata-server.sh [--tdd] [test-filter]
 #
 # Examples:
-#   ./scripts/test-wata-server.sh              # Run all integration tests
-#   ./scripts/test-wata-server.sh matrix       # Run only matrix.test.ts
-#   ./scripts/test-wata-server.sh voice-message  # Run only voice-message tests
+#   ./scripts/test-wata-server.sh              # Interactive mode
+#   ./scripts/test-wata-server.sh --tdd         # TDD mode (auto-advance)
+#   ./scripts/test-wata-server.sh --tdd matrix    # TDD mode starting with specific test
 
 set -e
 
@@ -15,23 +17,35 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-
 cd "$PROJECT_ROOT"
 
-# Parse test filter
-TEST_FILTER="$1"
+# Mode flags
+TDD_MODE=false
+TEST_FILTER=""
 
-echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║${NC}           ${YELLOW}Wata Server Development Workflow${NC}           ${GREEN}║${NC}"
-echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║${NC}  Quick iteration: server → tests → fix → repeat         ${GREEN}║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
-echo ""
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --tdd)
+      TDD_MODE=true
+      shift
+      ;;
+    *)
+      if [ -z "$TEST_FILTER" ]; then
+        TEST_FILTER="$1"
+      fi
+      shift
+      ;;
+  esac
+done
 
 # Function to check if wata-server is running
 check_wata_server() {
@@ -86,6 +100,178 @@ start_wata_server() {
   return 1
 }
 
+# Function to list all available tests
+list_all_tests() {
+  echo -e "${CYAN}Available tests:${NC}"
+  echo ""
+
+  # Use jest to list all tests
+  NODE_OPTIONS='--experimental-vm-modules' npx jest --config test/integration/jest.config.js --listTests 2>/dev/null | grep -v "Test Suites" || true
+
+  echo ""
+}
+
+# Function to run a single test and return result
+run_single_test() {
+  local test_name="$1"
+  local test_file="$2"
+
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${BLUE}  ${BOLD}Running:${NC} ${CYAN}$test_name${NC}"
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
+
+  # Build jest command with specific test
+  local jest_cmd="NODE_OPTIONS='--experimental-vm-modules' jest --config test/integration/jest.config.js --forceExit --no-coverage"
+
+  if [ -n "$test_name" ]; then
+    jest_cmd="$jest_cmd --testNamePattern=\"$test_name\""
+  fi
+
+  # Run the test
+  eval "$jest_cmd"
+  local exit_code=$?
+
+  echo ""
+  if [ $exit_code -eq 0 ]; then
+    echo -e "${GREEN}✅ PASSED${NC} - ${CYAN}$test_name${NC}"
+    return 0
+  else
+    echo -e "${RED}❌ FAILED${NC} - ${CYAN}$test_name${NC}"
+    echo ""
+    echo -e "${YELLOW}💡 Fix the issue, then press Enter to retry${NC}"
+    return 1
+  fi
+}
+
+# Function to run tests in TDD mode
+tdd_mode() {
+  local starting_filter="$1"
+
+  echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║${NC}                   ${BOLD}TDD Mode - Test Driven Development${NC}            ${GREEN}║${NC}"
+  echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
+  echo -e "${GREEN}║${NC}  Runs one test at a time, retry until it passes         ${GREEN}║${NC}"
+  echo -e "${GREEN}║${NC}  Auto-advances to next failing test when current passes  ${GREEN}║${NC}"
+  echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+
+  # Check for server
+  if ! check_wata_server; then
+    echo -e "${YELLOW}Starting wata-server...${NC}"
+    if ! start_wata_server; then
+      exit 1
+    fi
+    echo ""
+  else
+    echo -e "${GREEN}✓ wata-server already running${NC}"
+    echo ""
+  fi
+
+  # Get initial test list
+  local all_tests=()
+  while IFS= read -r line; do
+    [[ ! "$line" =~ ^Test\ Suites ]] && [[ -n "$line" ]] && all_tests+=("$line")
+  done < <(NODE_OPTIONS='--experimental-vm-modules' npx jest --config test/integration/jest.config.js --listTests 2>/dev/null | grep -v "Test Suites" || true)
+
+  if [ ${#all_tests[@]} -eq 0 ]; then
+    echo -e "${RED}No tests found!${NC}"
+    exit 1
+  fi
+
+  # Find starting point
+  local current_index=0
+  if [ -n "$starting_filter" ]; then
+    # Find index of starting test
+    for i in "${!all_tests[@]}"; do
+      if [[ "${all_tests[$i]}" == *"$starting_filter"* ]]; then
+        current_index=$i
+        break
+      fi
+    done
+  fi
+
+  # Main TDD loop
+  while [ $current_index -lt ${#all_tests[@]} ]; do
+    local current_test="${all_tests[$current_index]}"
+    local remaining=$((${#all_tests[@]} - current_index - 1))
+
+    echo -e "${BOLD}═════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}║${NC}   Test ${YELLOW}$((current_index + 1))${NC}/${#all_tests[@]}: ${CYAN}$current_test${NC}      ${BOLD}║${NC}"
+    echo -e "${BOLD}║${NC}   Remaining: ${YELLOW}$remaining${NC} tests                                 ${BOLD}║${NC}"
+    echo -e "${BOLD}╠══════════════════════════════════════════════════════════╣${NC}"
+    echo ""
+    echo -e "${YELLOW}Commands:${NC}  ${CYAN}r${NC}=run  ${CYAN}s${NC}=skip  ${CYAN}l${NC}=logs  ${CYAN}q${NC}=quit  ${CYAN}j${NC}=jump to test"
+    echo ""
+
+    while true; do
+      echo -n -e "${BLUE}➤${NC} "
+      read -n 1 -p "" cmd
+
+      case $cmd in
+        r)
+          echo ""
+          if run_single_test "$current_test"; then
+            # Test passed - move to next
+            current_index=$((current_index + 1))
+            break
+          fi
+          ;;
+        s)
+          echo -e "${YELLOW}Skipping: $current_test${NC}"
+          echo ""
+          current_index=$((current_index + 1))
+          break
+          ;;
+        l)
+          echo ""
+          show_logs
+          echo ""
+          ;;
+        q)
+          echo ""
+          echo -e "${YELLOW}Stopping wata-server...${NC}"
+          pkill -f "tsx src/server/index.ts" 2>/dev/null
+          echo -e "${GREEN}✓ Server stopped${NC}"
+          exit 0
+          ;;
+        j)
+          echo ""
+          echo -e "${CYAN}Jump to test (1-${#all_tests[@]}):${NC}"
+          read -p "> "  " jump_index
+          if [[ "$jump_index" =~ ^[0-9]+$ ]] && [ $jump_index -ge 1 ] && [ $jump_index -le ${#all_tests[@]} ]; then
+            current_index=$((jump_index - 1))
+            echo -e "${GREEN}Jumped to: ${all_tests[$current_index]}${NC}"
+          else
+            echo -e "${RED}Invalid test number${NC}"
+          fi
+          echo ""
+          ;;
+        "")
+          # Run test by default
+          echo ""
+          if run_single_test "$current_test"; then
+            current_index=$((current_index + 1))
+            break
+          fi
+          ;;
+        *)
+          echo -e "${RED}Unknown command. Press Enter to run test.${NC}"
+          ;;
+      esac
+    done
+  done
+
+  echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║${NC}                    ${BOLD}${GREEN}All tests passed!${NC}                    ${GREEN}║${NC}"
+  echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "${YELLOW}🎉 TDD cycle complete!${NC}"
+
+  # Stop server
+  pkill -f "tsx src/server/index.ts" 2>/dev/null
+}
+
 # Function to run integration tests
 run_tests() {
   local filter=""
@@ -116,7 +302,7 @@ show_logs() {
   if [ -f /tmp/wata-server.log ]; then
     echo -e "${YELLOW}📋 Recent server logs:${NC}"
     echo ""
-    tail -n 30 /tmp/wata-server.log
+    tail -n 50 /tmp/wata-server.log
     echo ""
     echo -e "${YELLOW}Follow live logs with: tail -f /tmp/wata-server.log${NC}"
   else
@@ -124,18 +310,29 @@ show_logs() {
   fi
 }
 
+# Function to restart server
+restart_server() {
+  echo -e "${YELLOW}Restarting wata-server...${NC}"
+  pkill -f "tsx src/server/index.ts" 2>/dev/null || true
+  sleep 1
+  start_wata_server || return 1
+  echo ""
+}
+
 # Function for interactive loop
 interactive_loop() {
   echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
   echo -e "${GREEN}║${NC}                    ${YELLOW}Interactive Mode${NC}                    ${GREEN}║${NC}"
-  echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
+  echo -e "${GREEN}╠════════════════════════════════════════════════════════╣${NC}"
   echo -e "${GREEN}║${NC} Commands:                                             ${GREEN}║${NC}"
   echo -e "${GREEN}║${NC}   ${YELLOW}t${NC} - Run tests              ${GREEN}║${NC}"
+  echo -e "${GREEN}║${NC}   ${YELLOW}o${NC} - Run one test (prompt for name) ${GREEN}║${NC}"
   echo -e "${GREEN}║${NC}   ${YELLOW}l${NC} - Show recent server logs  ${GREEN}║${NC}"
   echo -e "${GREEN}║${NC}   ${YELLOW}r${NC} - Restart wata-server      ${GREEN}║${NC}"
   echo -e "${GREEN}║${NC}   ${YELLOW}s${NC} - Stop wata-server         ${GREEN}║${NC}"
+  echo -e "${GREEN}║${NC}   ${YELLOW}--${NC} - List all available tests ${GREEN}║${NC}"
   echo -e "${GREEN}║${NC}   ${YELLOW}q${NC} - Quit                    ${GREEN}║${NC}"
-  echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
   echo ""
 
   while true; do
@@ -146,14 +343,21 @@ interactive_loop() {
       t)
         run_tests
         ;;
+      o)
+        echo ""
+        echo -e "${CYAN}Enter test name or pattern:${NC}"
+        read -p "> "  " test_pattern
+        echo ""
+        run_single_test "$test_pattern"
+        ;;
+      --)
+        list_all_tests
+        ;;
       l)
         show_logs
         ;;
       r)
-        echo -e "${YELLOW}Restarting wata-server...${NC}"
-        pkill -f "tsx src/server/index.ts" 2>/dev/null || true
-        sleep 1
-        start_wata_server || continue
+        restart_server
         ;;
       s)
         echo -e "${YELLOW}Stopping wata-server...${NC}"
@@ -178,6 +382,27 @@ interactive_loop() {
 
 # Main execution flow
 main() {
+  # TDD mode
+  if [ "$TDD_MODE" = true ]; then
+    # Check for Conduit
+    if check_conduit; then
+      echo -e "${YELLOW}⚠ Conduit is running${NC}"
+      echo -e "${YELLOW}  wata-server also uses port 8008, so they can't both run.${NC}"
+      echo ""
+      read -p "Stop Conduit and start wata-server? [Y/n] " -n 1 -r
+      echo ""
+      if [[ $REPLY =~ ^[Yy]$ ]]; then
+        stop_conduit
+      else
+        echo -e "${RED}Conduit is still running. wata-server may fail to start.${NC}"
+        exit 1
+      fi
+    fi
+
+    tdd_mode "$TEST_FILTER"
+    exit $?
+  fi
+
   # Check for Conduit and offer to stop it
   if check_conduit; then
     echo -e "${YELLOW}⚠ Conduit is running (detected wata-matrix container)${NC}"
@@ -195,13 +420,18 @@ main() {
   fi
 
   # Start wata-server
-  if ! start_wata_server; then
-    exit 1
+  if ! check_wata_server; then
+    if ! start_wata_server; then
+      exit 1
+    fi
+  fi
   fi
 
-  # Check if TEST_FILTER is provided - if so, run tests once and exit
+  # Check if TEST_FILTER is provided - if so, run one test and exit
   if [ -n "$TEST_FILTER" ]; then
-    run_tests
+    echo -e "${YELLOW}▶ Running single test: ${TEST_FILTER}${NC}"
+    echo ""
+    run_single_test "$TEST_FILTER"
     exit_code=$?
 
     # Stop server on test completion
