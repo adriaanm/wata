@@ -62,11 +62,12 @@ function buildSyncResponse(
   store: Store,
   userId: string,
   sinceSeq: number | undefined,
+  fullState: boolean,
 ): Record<string, unknown> {
   const join: Record<string, unknown> = {};
   const invite: Record<string, unknown> = {};
 
-  if (sinceSeq === undefined) {
+  if (sinceSeq === undefined || fullState) {
     // Initial sync
     const joinedRooms = store.getRoomsForUser(userId, 'join');
     for (const room of joinedRooms) {
@@ -120,13 +121,22 @@ function buildSyncResponse(
   const joinedRooms = store.getRoomsForUser(userId, 'join');
   for (const room of joinedRooms) {
     const newEvents = store.getTimelineEvents(room.roomId, sinceSeq);
-    const newReceipts = store.getReceiptsSince(room.roomId, sinceSeq);
+    // Get ALL current receipts, not just new ones - receipts should always be included
+    // in ephemeral events even if unchanged, per spec
+    const allReceipts = store.getReceipts(room.roomId);
 
-    if (newEvents.length === 0 && newReceipts.length === 0) continue;
+    if (newEvents.length === 0 && allReceipts.length === 0) continue;
 
-    const stateEvents = newEvents
-      .filter((e) => e.state_key !== undefined)
-      .map(stripSeqAndAddAge);
+    // For full_state, include all state events; otherwise only state events that changed
+    let stateEvents: ReturnType<typeof stripSeqAndAddAge>[];
+    if (fullState) {
+      const roomState = store.getRoom(room.roomId);
+      stateEvents = roomState ? Array.from(roomState.state.values()).map(stripSeqAndAddAge) : [];
+    } else {
+      stateEvents = newEvents
+        .filter((e) => e.state_key !== undefined)
+        .map(stripSeqAndAddAge);
+    }
     const timelineEvents = newEvents.map(stripSeqAndAddAge);
     const counts = getMemberCounts(store, room.roomId);
     const heroes = getHeroes(store, room.roomId, userId);
@@ -143,7 +153,7 @@ function buildSyncResponse(
         limited: false,
         prev_batch: 's' + sinceSeq,
       },
-      ephemeral: { events: formatReceipts(newReceipts) },
+      ephemeral: { events: formatReceipts(allReceipts) },
       account_data: { events: [] },
       unread_notifications: { highlight_count: 0, notification_count: 0 },
     };
@@ -206,21 +216,21 @@ export async function handleSync(
   const url = new URL(request.url);
   const since = url.searchParams.get('since') ?? undefined;
   const timeout = parseInt(url.searchParams.get('timeout') ?? '0', 10) || 0;
-  const _fullState = url.searchParams.get('full_state') === 'true';
+  const fullState = url.searchParams.get('full_state') === 'true';
   const _setPresence = url.searchParams.get('set_presence') ?? undefined;
   const _filter = url.searchParams.get('filter') ?? undefined;
 
   const sinceSeq = since !== undefined ? parseInt(since.replace(/^s/, ''), 10) : undefined;
 
-  Debug.log('SYNC', `Sync request for ${userId}, since: ${since}, timeout: ${timeout}`);
+  Debug.log('SYNC', `Sync request for ${userId}, since: ${since}, timeout: ${timeout}, full_state: ${fullState}`);
 
-  let response = buildSyncResponse(store, userId, sinceSeq);
+  let response = buildSyncResponse(store, userId, sinceSeq, fullState);
 
   // Long-poll: if incremental sync with no changes and timeout > 0
   if (sinceSeq !== undefined && !hasChanges(response) && timeout > 0) {
     Debug.log('SYNC', `Long-polling for ${userId}, timeout: ${timeout}ms`);
     await store.waitForEvents(userId, timeout);
-    response = buildSyncResponse(store, userId, sinceSeq);
+    response = buildSyncResponse(store, userId, sinceSeq, fullState);
   }
 
   const joinedRooms = Object.keys((response.rooms as Record<string, unknown>)?.join as Record<string, unknown> ?? {});

@@ -55,6 +55,9 @@ export async function handleSetDisplayName(
   profile.displayname = body.displayname;
   profiles.set(userId, profile);
 
+  // Update m.room.member events in all rooms where this user is a member
+  store.updateMemberProfile(userId, { displayname: body.displayname });
+
   return jsonResponse({});
 }
 
@@ -76,6 +79,9 @@ export async function handleSetAvatarUrl(
   const profile = profiles.get(userId) ?? { displayname: '' };
   profile.avatar_url = body.avatar_url;
   profiles.set(userId, profile);
+
+  // Update m.room.member events in all rooms where this user is a member
+  store.updateMemberProfile(userId, { avatar_url: body.avatar_url });
 
   return jsonResponse({});
 }

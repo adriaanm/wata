@@ -35,6 +35,8 @@ export interface Device {
   userId: string;
   accessToken: string;
   displayName?: string;
+  /** Per-device txnId deduplication map: txnId → event_id */
+  txnIdMap: Map<string, string>;
 }
 
 export interface MediaItem {
@@ -99,7 +101,7 @@ export class Store {
     // extract localpart from userId
     const localpart = userId.split(':')[0].slice(1);
     const accessToken = generateAccessToken(localpart);
-    const device: Device = { deviceId, userId, accessToken, displayName };
+    const device: Device = { deviceId, userId, accessToken, displayName, txnIdMap: new Map() };
     this.devices.set(deviceId, device);
     this.tokenIndex.set(accessToken, device);
     return device;
@@ -113,8 +115,23 @@ export class Store {
     const device = this.devices.get(deviceId);
     if (device) {
       this.tokenIndex.delete(device.accessToken);
+      device.txnIdMap.clear();
       this.devices.delete(deviceId);
     }
+  }
+
+  // ── TxnId deduplication ───────────────────────────────────────────
+
+  setDeviceTxnId(deviceId: string, txnId: string, eventId: string): void {
+    const device = this.devices.get(deviceId);
+    if (device) {
+      device.txnIdMap.set(txnId, eventId);
+    }
+  }
+
+  getDeviceTxnId(deviceId: string, txnId: string): string | undefined {
+    const device = this.devices.get(deviceId);
+    return device?.txnIdMap.get(txnId);
   }
 
   // ── Room ops ───────────────────────────────────────────────────
@@ -250,6 +267,9 @@ export class Store {
     } else {
       this.accountData.push(item);
     }
+
+    // Wake up any long-polling /sync requests for this user
+    this.notifyUser(userId);
   }
 
   getAccountData(
@@ -357,11 +377,78 @@ export class Store {
   notifyUser(userId: string): void {
     const list = this.waiters.get(userId);
     if (list) {
-      const callbacks = [...list];
-      list.length = 0;
+      // Capture callbacks, then clear list *before* iterating to prevent
+      // a newly pushed waiter from being cleared without being notified.
+      const callbacks = list;
+      this.waiters.set(userId, []);
       for (const cb of callbacks) {
         cb();
       }
     }
+  }
+
+  // ── Profile updates ───────────────────────────────────────────────
+
+  /**
+   * Update a user's profile in all rooms they are a member of.
+   * This adds new m.room.member state events with updated displayname/avatar_url
+   * and notifies all room members so they see the change in sync.
+   */
+  updateMemberProfile(
+    userId: string,
+    profile: { displayname?: string; avatar_url?: string },
+  ): void {
+    const rooms = this.getRoomsForUser(userId, 'join');
+
+    for (const room of rooms) {
+      // Get the current member state to preserve membership and other fields
+      const memberKey = `m.room.member\0${userId}`;
+      const currentEvent = room.state.get(memberKey);
+
+      if (currentEvent) {
+        // Preserve existing membership and other fields, only update displayname/avatar_url
+        const updatedContent: Record<string, unknown> = {
+          ...currentEvent.content,
+        };
+
+        if (profile.displayname !== undefined) {
+          updatedContent.displayname = profile.displayname;
+        }
+        if (profile.avatar_url !== undefined) {
+          updatedContent.avatar_url = profile.avatar_url;
+        }
+
+        // Add the updated member event
+        this.addEvent(room.roomId, {
+          type: 'm.room.member',
+          sender: userId,
+          room_id: room.roomId,
+          origin_server_ts: Date.now(),
+          content: updatedContent,
+          state_key: userId,
+        });
+
+        // Notify all members of the room so they get the update in sync
+        const members = this.getRoomMembers(room.roomId);
+        for (const memberId of members) {
+          this.notifyUser(memberId);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get all joined members of a room.
+   */
+  getRoomMembers(roomId: string): string[] {
+    const room = this.rooms.get(roomId);
+    if (!room) return [];
+    const members: string[] = [];
+    for (const [_key, ev] of room.state) {
+      if (ev.type === 'm.room.member' && ev.content.membership === 'join') {
+        members.push(ev.state_key!);
+      }
+    }
+    return members;
   }
 }

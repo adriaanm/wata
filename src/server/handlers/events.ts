@@ -6,9 +6,6 @@ import {
   jsonResponse,
 } from '../utils.js';
 
-// Module-level txnId deduplication map: `${deviceId}:${txnId}` → event_id
-const txnIdMap = new Map<string, string>();
-
 function notifyRoomMembers(store: Store, roomId: string): void {
   const room = store.getRoom(roomId);
   if (!room) return;
@@ -41,8 +38,7 @@ export function handleSendEvent(
   }
 
   // Check txnId idempotency
-  const txnKey = `${deviceId}:${txnId}`;
-  const existing = txnIdMap.get(txnKey);
+  const existing = store.getDeviceTxnId(deviceId, txnId);
   if (existing) {
     return Promise.resolve(jsonResponse({ event_id: existing }));
   }
@@ -58,7 +54,7 @@ export function handleSendEvent(
     });
 
     notifyRoomMembers(store, roomId);
-    txnIdMap.set(txnKey, event.event_id);
+    store.setDeviceTxnId(deviceId, txnId, event.event_id);
 
     return jsonResponse({ event_id: event.event_id });
   });
