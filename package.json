@@ -15,6 +15,7 @@
     "wata-server:debug": "WATA_SERVER_DEBUG=1 exec tsx src/server/index.ts",
     "test:server": "python3 scripts/test-wata-server.py",
     "dev:server": "cd test/docker && ./setup.sh",
+    "dev:srv": "./scripts/dev-server.sh",
     "dev:deploy": "./scripts/dev-deploy.sh",
     "dev:deploy:quick": "./scripts/dev-deploy.sh no",
     "dev:logs": "./scripts/dev-logs.sh",

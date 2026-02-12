@@ -181,7 +181,10 @@ export const handleCreateRoom: Handler = async (request, store, config) => {
     }
   }
 
-  // 9. Notify invited users
+  // 9. Notify creator (so they see the new room in sync)
+  store.notifyUser(userId);
+
+  // 10. Notify invited users
   if (invite) {
     for (const invitedUserId of invite) {
       store.notifyUser(invitedUserId);

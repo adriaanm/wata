@@ -63,7 +63,8 @@ function matchRoute(
     const pp = patternParts[i];
     const actual = pathParts[i];
     if (pp.startsWith(':')) {
-      params[pp.slice(1)] = actual;
+      // URL-decode path parameters (room IDs contain ':', event IDs contain '$')
+      params[pp.slice(1)] = decodeURIComponent(actual);
     } else if (pp !== actual) {
       return null;
     }

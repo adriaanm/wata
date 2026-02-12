@@ -119,6 +119,7 @@ function buildSyncResponse(
 
   // Incremental sync
   const joinedRooms = store.getRoomsForUser(userId, 'join');
+
   for (const room of joinedRooms) {
     const newEvents = store.getTimelineEvents(room.roomId, sinceSeq);
     // Get ALL current receipts, not just new ones - receipts should always be included

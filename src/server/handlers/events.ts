@@ -22,7 +22,7 @@ function notifyRoomMembers(store: Store, roomId: string): void {
 export function handleSendEvent(
   request: Request,
   store: Store,
-  _config: ServerConfig,
+  config: ServerConfig,
   params: Record<string, string>,
 ): Promise<Response> {
   const auth = authenticate(request, store);
@@ -31,9 +31,11 @@ export function handleSendEvent(
 
   const { roomId, eventType, txnId } = params;
 
-  if (store.getMembership(roomId, userId) !== 'join') {
+  const membership = store.getMembership(roomId, userId);
+
+  if (membership !== 'join') {
     return Promise.resolve(
-      matrixError('M_FORBIDDEN', 'User is not in the room', 403),
+      matrixError('M_FORBIDDEN', `User ${userId} is not in the room (${membership})`, 403),
     );
   }
 

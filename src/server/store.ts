@@ -191,7 +191,9 @@ export class Store {
     room.timeline.push(fullEvent);
 
     // Update state map if this is a state event
-    if (fullEvent.state_key !== undefined) {
+    // state_key can be empty string (e.g., m.room.create, m.room.join_rules)
+    // Only skip if state_key is undefined or null
+    if (fullEvent.state_key !== undefined && fullEvent.state_key !== null) {
       const key = `${fullEvent.type}\0${fullEvent.state_key}`;
       room.state.set(key, fullEvent);
     }
