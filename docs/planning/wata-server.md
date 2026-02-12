@@ -280,27 +280,48 @@ Account data changes should notify the user's wake channel (so incremental sync 
 A rapid iteration workflow has been added to speed up server development:
 
 ```bash
-# Start wata-server with interactive test loop
-pnpm test:server
+# TDD Mode: Run one test at a time, iterate until green, move to next
+pnpm test:server --tdd
 
-# Start wata-server and run specific test(s) once
-pnpm test:server matrix
+# TDD Mode starting at a specific test
+pnpm test:server --tdd "should login with valid"
+
+# Interactive mode with full control
+pnpm test:server
 
 # Run with debug logging enabled
 pnpm wata-server:debug
 ```
 
-**Workflow commands** (in interactive mode):
-- `t` - Run integration tests
+**TDD Mode Commands**:
+- `r` - Run current test (auto-retry on failure until it passes)
+- `s` - Skip current test and move to next
+- `l` - Show recent server logs
+- `j` - Jump to specific test number (1-N)
+- `q` - Quit
+
+**Interactive Mode Commands**:
+- `t` - Run all integration tests
+- `o` - Run one test (prompt for name)
 - `l` - Show recent server logs
 - `r` - Restart wata-server
 - `s` - Stop wata-server
+- `--` - List all available tests
 - `q` - Quit
+
+**Recommended Starting Point**:
+Begin with the authentication tests (`matrix.test.ts`) as they're the simplest:
+1. `should login with valid credentials`
+2. `should fail login with invalid password`
+3. `should fail login with non-existent user`
+
+Then move to room operations, messaging, etc.
 
 **Benefits**:
 - No need to manage Docker/Conduit
 - Server auto-detects port conflicts
-- Single command for server + tests
+- Single test focus with instant retry loop
+- Progress tracking (test N of M, remaining)
 - Logs at `/tmp/wata-server.log`
 
 **Switching from Conduit**:
