@@ -414,13 +414,22 @@ export class WataClient {
    */
   async getConversation(contact: Contact): Promise<Conversation> {
     const roomId = await this.getOrCreateDMRoom(contact.user.id);
-    const room = this.syncEngine.getRoom(roomId);
 
-    if (!room) {
-      throw new Error(`Room ${roomId} not found in sync state`);
+    // After room creation, wait for it to appear in sync state
+    // The sync engine needs to process the new room from the server
+    const waitStart = Date.now();
+    const waitTimeout = 15000; // 15 seconds timeout
+
+    while (Date.now() - waitStart < waitTimeout) {
+      const room = this.syncEngine.getRoom(roomId);
+      if (room) {
+        return this.roomToConversation(room, 'dm', contact);
+      }
+      // Wait a bit before checking again (sync engine polls periodically)
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    return this.roomToConversation(room, 'dm', contact);
+    throw new Error(`Room ${roomId} not found in sync state after ${waitTimeout}ms`);
   }
 
   /**
@@ -1101,6 +1110,7 @@ export class WataClient {
   ): Promise<void> {
     // Auto-join invites (trusted family environment)
     if (userId === this.userId && membership === 'invite') {
+      this.logger.log(`[WataClient] Auto-joining room ${roomId} (invite for ${userId})`);
       try {
         await this.api.joinRoom(roomId);
 
