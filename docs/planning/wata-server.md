@@ -275,6 +275,37 @@ Account data changes should notify the user's wake channel (so incremental sync 
 
 **No new files.** Fix issues found when running the full test suite.
 
+**Development Workflow**
+
+A rapid iteration workflow has been added to speed up server development:
+
+```bash
+# Start wata-server with interactive test loop
+pnpm test:server
+
+# Start wata-server and run specific test(s) once
+pnpm test:server matrix
+
+# Run with debug logging enabled
+pnpm wata-server:debug
+```
+
+**Workflow commands** (in interactive mode):
+- `t` - Run integration tests
+- `l` - Show recent server logs
+- `r` - Restart wata-server
+- `s` - Stop wata-server
+- `q` - Quit
+
+**Benefits**:
+- No need to manage Docker/Conduit
+- Server auto-detects port conflicts
+- Single command for server + tests
+- Logs at `/tmp/wata-server.log`
+
+**Switching from Conduit**:
+The workflow will detect if Conduit is running and offer to stop it. If Conduit is already stopped, the workflow starts wata-server directly on port 8008 (drop-in compatible).
+
 **Expected issues to address**:
 - `matrix-js-sdk` sends requests to endpoints we haven't explicitly handled (e.g., `GET /pushrules/`, `PUT /presence/{userId}/status`, `POST /user/{userId}/filter`, `GET /capabilities`). Return sensible defaults or empty 200 responses for these.
 - Timing issues in tests that expect eventual consistency (Conduit) vs immediate consistency (wata-server). Our server is synchronous, so events appear instantly — tests should pass faster.

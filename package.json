@@ -12,6 +12,8 @@
     "dev:forward": "./scripts/setup-adb-forward.sh",
     "dev:ip": "node scripts/get-local-ip.js",
     "wata-server": "exec tsx src/server/index.ts",
+    "wata-server:debug": "WATA_SERVER_DEBUG=1 exec tsx src/server/index.ts",
+    "test:server": "./scripts/test-wata-server.sh",
     "dev:server": "cd test/docker && ./setup.sh",
     "dev:deploy": "./scripts/dev-deploy.sh",
     "dev:deploy:quick": "./scripts/dev-deploy.sh no",
