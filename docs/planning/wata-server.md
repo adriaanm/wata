@@ -2,9 +2,80 @@
 
 A minimal Matrix Client-Server API server for Wata. One family per server, all state in memory, zero external dependencies. Replaces Conduit for development and browser demos.
 
+## AGENT INSTRUCTIONS
+We are currently improving the wata-server implementation by using the wata-client integration tests as an oracle. The test suite MUST NOT be altered. (Exceptionally, you may add retries to existing test logic. You may also add logging anywhere to confirm theories.)
+
+When tests fail, always assume the bug is in the server prototype. Remember that the client-side of things is working perfectly with conduit, and we are building a drop-in replacement. If the tests are failing, more than likely the problem lies in our server prototype.
+
+Before changing server logic, use a subagent to ask relevant questions about the matrix spec in ~/g/matrix-spec.
+
+**Development Workflow**
+
+A rapid iteration workflow has been added to speed up server development:
+
+```bash
+# TDD Mode: Run one test at a time, iterate until green, move to next
+pnpm test:server --tdd
+
+# TDD Mode starting at a specific test
+pnpm test:server --tdd "should login with valid"
+
+# Interactive mode with full control
+pnpm test:server
+
+# Run with debug logging enabled
+pnpm wata-server:debug
+```
+
+**TDD Mode Commands**:
+- `r` - Run current test (auto-retry on failure until it passes)
+- `s` - Skip current test and move to next
+- `l` - Show recent server logs
+- `j` - Jump to specific test number (1-N)
+- `q` - Quit
+
+**Interactive Mode Commands**:
+- `t` - Run all integration tests
+- `o` - Run one test (prompt for name)
+- `l` - Show recent server logs
+- `r` - Restart wata-server
+- `s` - Stop wata-server
+- `--` - List all available tests
+- `q` - Quit
+
+**Recommended Starting Point**:
+Begin with the authentication tests (`matrix.test.ts`) as they're the simplest:
+Then move to room operations, messaging, etc.
+
+**Test targets**: All test files should pass:
+- `matrix.test.ts` (8 tests)
+- `auto-login.test.ts` (7 tests)
+- `voice-message-flow.test.ts` (6 tests)
+- `family-room.test.ts`
+- `contacts.test.ts` (8 tests)
+- `message-ordering.test.ts` (6 tests)
+- `e2e-flow.test.ts` (7 tests)
+- `edge-cases.test.ts` (18 tests)
+- `read-receipts.test.ts`
+
+**Benefits**:
+- Logs at `/tmp/wata-server.log`
+
+
+**Expected issues to address**:
+- Timing issues in tests that expect eventual consistency (Conduit) vs immediate consistency (wata-server). Our server is synchronous, so events appear instantly — tests should pass faster.
+- URL encoding edge cases: room IDs contain `!`, event IDs contain `$`, aliases contain `#`. Router must handle percent-encoded path segments.
+- The SDK may call `GET /rooms/{roomId}/messages` for pagination (used by `scrollback()`). Implement as: return timeline events in reverse chronological order with `start`/`end` pagination tokens.
+
+
+
+# Server prototype
+The remainder of this document is the original plan for the server prototype. Use it as a reference when checking implementation for correctness.
+Also consult docs/wata-matrix-spec.md.
+
 ## Goals
 
-1. **Drop-in Conduit replacement**: The existing `wata-client` and `matrix-js-sdk` based tests must work against this server without any client-side changes.
+1. **Drop-in Conduit replacement**: The existing `wata-client` tests must work against this server without any client-side changes.
 2. **Spec-correct enough for other clients (v2)**: Don't take shortcuts that would break standard Matrix clients (e.g., Element) on the supported endpoint surface.
 3. **Browser-demoable**: Server runs in one browser tab, clients in others. No hosted infrastructure.
 4. **Low footprint**: All state in memory. No database, no background workers.
@@ -18,7 +89,7 @@ Federation, E2EE, multitenancy, persistence, user registration, push notificatio
 
 The existing integration tests (`test/integration/*.test.ts`) currently run against Conduit on `http://localhost:8008`. These tests are the acceptance criteria. The server is done when all existing tests pass against wata-server instead of Conduit.
 
-**Test harness**: Tests use `TestClient` (wraps `matrix-js-sdk`) and `TestOrchestrator`. They expect server name `localhost`, users `alice`/`bob` with password `testpass123`.
+**Test harness**: Tests use `TestOrchestrator`. They expect server name `localhost`, users `alice`/`bob` with password `testpass123`.
 
 **How to run**: `node src/server/index.ts` on port 8008, then `pnpm test:integration`.
 
@@ -113,7 +184,7 @@ None. Only Web Platform APIs: `Request`, `Response`, `crypto.randomUUID()`, `Tex
 - `GET /_matrix/client/v3/account/whoami` → return `{user_id, device_id}`
 
 **Details**:
-- Login accepts `identifier.type: "m.id.user"` format (used by both wata-client and matrix-js-sdk)
+- Login accepts `identifier.type: "m.id.user"` format
 - Also accept deprecated `user` field at top level for SDK compatibility
 - Access token format: `syt_<localpart>_<random>`
 - Device ID: random uppercase string
@@ -189,7 +260,7 @@ None. Only Web Platform APIs: `Request`, `Response`, `crypto.randomUUID()`, `Tex
 - Wake channel is notified whenever events are added to rooms the user is in, or account data changes
 
 **Important SDK compatibility notes**:
-- `matrix-js-sdk` calls `/sync` immediately on `startClient()`. The initial sync must return enough state for the SDK to consider itself "PREPARED".
+- the client calls `/sync` immediately on `startClient()`. The initial sync must return enough state for the SDK to consider itself "PREPARED".
 - The SDK also fetches push rules via `/pushrules/`. We need to handle `GET /_matrix/client/v3/pushrules/` returning `{"global":{"override":[],"underride":[],"sender":[],"room":[],"content":[]}}` (empty rules). This is what Conduit returns and the SDK expects it.
 - The `unsigned.age` field should be set to `Date.now() - origin_server_ts`.
 - The `unsigned.transaction_id` should be included for events sent by the requesting user's device (echo back the txnId).
@@ -271,79 +342,8 @@ Account data changes should notify the user's wake channel (so incremental sync 
 
 **Test targets**: `read-receipts.test.ts` (mark as played, receipt callback).
 
-### Task 9: Integration Hardening
 
-**No new files.** Fix issues found when running the full test suite.
 
-**Development Workflow**
-
-A rapid iteration workflow has been added to speed up server development:
-
-```bash
-# TDD Mode: Run one test at a time, iterate until green, move to next
-pnpm test:server --tdd
-
-# TDD Mode starting at a specific test
-pnpm test:server --tdd "should login with valid"
-
-# Interactive mode with full control
-pnpm test:server
-
-# Run with debug logging enabled
-pnpm wata-server:debug
-```
-
-**TDD Mode Commands**:
-- `r` - Run current test (auto-retry on failure until it passes)
-- `s` - Skip current test and move to next
-- `l` - Show recent server logs
-- `j` - Jump to specific test number (1-N)
-- `q` - Quit
-
-**Interactive Mode Commands**:
-- `t` - Run all integration tests
-- `o` - Run one test (prompt for name)
-- `l` - Show recent server logs
-- `r` - Restart wata-server
-- `s` - Stop wata-server
-- `--` - List all available tests
-- `q` - Quit
-
-**Recommended Starting Point**:
-Begin with the authentication tests (`matrix.test.ts`) as they're the simplest:
-1. `should login with valid credentials`
-2. `should fail login with invalid password`
-3. `should fail login with non-existent user`
-
-Then move to room operations, messaging, etc.
-
-**Benefits**:
-- No need to manage Docker/Conduit
-- Server auto-detects port conflicts
-- Single test focus with instant retry loop
-- Progress tracking (test N of M, remaining)
-- Logs at `/tmp/wata-server.log`
-
-**Switching from Conduit**:
-The workflow will detect if Conduit is running and offer to stop it. If Conduit is already stopped, the workflow starts wata-server directly on port 8008 (drop-in compatible).
-
-**Expected issues to address**:
-- `matrix-js-sdk` sends requests to endpoints we haven't explicitly handled (e.g., `GET /pushrules/`, `PUT /presence/{userId}/status`, `POST /user/{userId}/filter`, `GET /capabilities`). Return sensible defaults or empty 200 responses for these.
-- Timing issues in tests that expect eventual consistency (Conduit) vs immediate consistency (wata-server). Our server is synchronous, so events appear instantly — tests should pass faster.
-- URL encoding edge cases: room IDs contain `!`, event IDs contain `$`, aliases contain `#`. Router must handle percent-encoded path segments.
-- `matrix-js-sdk`'s `uploadContent()` may send multipart form data or raw bytes depending on version. Handle both.
-- The SDK may call `GET /rooms/{roomId}/messages` for pagination (used by `scrollback()`). Implement as: return timeline events in reverse chronological order with `start`/`end` pagination tokens.
-
-**Test targets**: All test files should pass:
-- `matrix.test.ts` (8 tests)
-- `auto-login.test.ts` (7 tests)
-- `voice-message-flow.test.ts` (6 tests)
-- `family-room.test.ts`
-- `contacts.test.ts` (8 tests)
-- `message-ordering.test.ts` (6 tests)
-- `e2e-flow.test.ts` (7 tests)
-- `edge-cases.test.ts` (18 tests)
-- `read-receipts.test.ts`
 
 ### Task 10: Browser Transport (Service Worker)
 
@@ -385,7 +385,7 @@ The server tab registers a Service Worker scoped to its origin. The SW intercept
 
 ## v2 Considerations
 
-- **Go rewrite**: Handler logic ports directly. Replace `Map`/`Array` with Go maps/slices. Transport → `net/http`.
+- **Go/Rust rewrite**: Handler logic ports directly. Replace `Map`/`Array` with Go maps/slices. Transport → `net/http`.
 - **SQLite persistence**: Replace in-memory store with three databases: `users.db`, `rooms.db`, `media.db`.
 - **WASM**: Go compiles to WASM. SW adapter works identically. Media storage via IndexedDB/OPFS.
 - **Cloudflare Workers**: Durable Objects for room state, R2 for media.
