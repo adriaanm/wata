@@ -148,6 +148,8 @@ export const handleCreateRoom: Handler = async (request, store, config) => {
   addStateEvent(store, roomId, userId, 'm.room.member', userId, {
     membership: 'join',
     displayname: userConfig?.displayName ?? localpart,
+    // Include is_direct flag for creator if room is created as direct
+    ...(isDirect ? { is_direct: true } : {}),
   });
 
   // 5. Room name

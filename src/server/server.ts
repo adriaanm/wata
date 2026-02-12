@@ -16,7 +16,8 @@ import {
   handleWhoami,
 } from './handlers/auth.js';
 import { handleSendEvent, handleRedactEvent } from './handlers/events.js';
-import { handleUpload, handleDownload } from './handlers/media.js';
+import { handleMessages } from './handlers/messages.js';
+import { handleUpload, handleDownload, handleClientDownload } from './handlers/media.js';
 import {
   handleGetProfile,
   handleSetDisplayName,
@@ -182,6 +183,16 @@ export function createRouter(
       pattern: '/_matrix/client/v3/rooms/:roomId/redact/:eventId/:txnId',
       handler: handleRedactEvent,
     },
+    {
+      method: 'GET',
+      pattern: '/_matrix/client/v3/rooms/:roomId/messages',
+      handler: handleMessages,
+    },
+    {
+      method: 'GET',
+      pattern: '/_matrix/client/v1/rooms/:roomId/messages',
+      handler: handleMessages,
+    },
 
     // ── Media ──────────────────────────────────────────────────
     {
@@ -198,6 +209,11 @@ export function createRouter(
       method: 'GET',
       pattern: '/_matrix/media/v1/download/:serverName/:mediaId',
       handler: handleDownload,
+    },
+    {
+      method: 'GET',
+      pattern: '/_matrix/client/v1/media/download/:serverName/:mediaId',
+      handler: handleClientDownload,
     },
 
     // ── Profile ────────────────────────────────────────────────

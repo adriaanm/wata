@@ -48,3 +48,33 @@ export async function handleDownload(
     },
   });
 }
+
+/**
+ * Handle media download via /_matrix/client/v1/media/download/:serverName/:mediaId
+ * This is an alternate path used by some clients
+ */
+export async function handleClientDownload(
+  request: Request,
+  store: Store,
+  _config: ServerConfig,
+  params: Record<string, string>,
+): Promise<Response> {
+  const auth = authenticate(request, store);
+  if (auth instanceof Response) return auth;
+
+  const mediaId = params.mediaId;
+  const media = store.getMedia(mediaId);
+  if (!media) {
+    return matrixError('M_NOT_FOUND', 'Media not found', 404);
+  }
+
+  return new Response(media.data, {
+    status: 200,
+    headers: {
+      'Content-Type': media.contentType,
+      ...(media.filename
+        ? { 'Content-Disposition': `inline; filename="${media.filename}"` }
+        : {}),
+    },
+  });
+}
