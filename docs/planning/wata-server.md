@@ -2,6 +2,15 @@
 
 A minimal Matrix Client-Server API server for Wata. One family per server, all state in memory, zero external dependencies. Replaces Conduit for development and browser demos.
 
+## Status: COMPLETE ✅
+
+All 84 integration tests now pass against wata-server. The server is a functional drop-in replacement for Conduit.
+
+**Test Results** (2025-02-12):
+- 10 test suites, all passing
+- 84 tests total, all passing
+- Test files: `matrix.test.ts`, `auto-login.test.ts`, `voice-message-flow.test.ts`, `family-room.test.ts`, `contacts.test.ts`, `message-ordering.test.ts`, `e2e-flow.test.ts`, `edge-cases.test.ts`, `read-receipts.test.ts`, `stress-tests.test.ts`
+
 ## AGENT INSTRUCTIONS
 We are currently improving the wata-server implementation by using the wata-client integration tests as an oracle. The test suite MUST NOT be altered. (Exceptionally, you may add retries to existing test logic. You may also add logging anywhere to confirm theories.)
 
@@ -9,20 +18,102 @@ When tests fail, always assume the bug is in the server prototype. Remember that
 
 Before changing server logic, use a subagent to ask relevant questions about the matrix spec in ~/g/matrix-spec.
 
-**Development Workflow**
+## Development Workflow
 
-A rapid iteration workflow has been added to speed up server development:
+**Scripts for rapid iteration**:
 
 ```bash
-# Run with debug logging enabled
-pnpm wata-server:debug
+# Helper script for server management (start/stop/restart/logs/status/test)
+pnpm dev:srv [command] [args]
+
+# Commands:
+#   start              Start the server
+#   stop               Stop the server
+#   restart, reload     Restart the server
+#   logs [lines]      Show last N lines of logs (default: 50)
+#   tail, follow      Follow logs in real-time
+#   search <pattern>   Search logs for pattern
+#   status             Show server status
+#   test <file>        Run a single test file
+
+# Examples:
+pnpm dev:srv restart              # Restart server
+pnpm dev:srv logs 100            # Show last 100 log lines
+pnpm dev:srv test matrix          # Run matrix.test.ts
 ```
 
-**Recommended Starting Point**:
-Begin with the authentication tests (`matrix.test.ts`) as they're the simplest:
-Then move to room operations, messaging, etc.
+**Run all tests**:
+```bash
+npx jest -c test/integration/jest.config.js test/integration/
+```
 
 **Test targets**: All test files should pass:
+- `matrix.test.ts` (8 tests) ✅
+- `auto-login.test.ts` (7 tests) ✅
+- `voice-message-flow.test.ts` (6 tests) ✅
+- `family-room.test.ts` ✅
+- `contacts.test.ts` (8 tests) ✅
+- `message-ordering.test.ts` (6 tests) ✅
+- `e2e-flow.test.ts` (7 tests) ✅
+- `edge-cases.test.ts` (18 tests) ✅
+- `read-receipts.test.ts` ✅
+- `stress-tests.test.ts` ✅
+
+---
+
+## Lessons Learned
+
+### Critical Fixes
+
+1. **URL Decoding for Path Parameters**
+   - Room IDs contain `:` (e.g., `!abc123:localhost`)
+   - Event IDs contain `$` (e.g., `$event:localhost`)
+   - These are URL-encoded as `%3A` and `%24`
+   - **Fix**: Added `decodeURIComponent()` to path parameters in `matchRoute()`
+   - Without this, room lookups failed because encoded ID didn't match stored ID
+
+2. **is_direct Flag on Member Events**
+   - DM rooms require `is_direct: true` on ANY member event to be recognized
+   - Original code only set this on invite events
+   - **Fix**: Added `is_direct: true` to creator's join event when `is_direct` is set in createRoom
+   - This allows DM rooms to be properly tracked by the DM room service
+
+3. **Messages Pagination Endpoint**
+   - Client calls `GET /rooms/{roomId}/messages` for scrollback
+   - Returns timeline events in reverse chronological order with pagination tokens
+   - **Fix**: Implemented full pagination with `from`/`to`/`dir`/`limit` parameters
+   - `dir=b` returns older events (backward pagination)
+   - Returns chunk format with `start`/`end` tokens
+
+4. **Alternate Media Download Path**
+   - Some clients use `/_matrix/client/v1/media/download/` instead of `/_matrix/media/v*/download/`
+   - **Fix**: Added `handleClientDownload` for the alternate path
+   - Same handler, different route pattern
+
+### Testing Workflow
+
+1. **Use `pnpm dev:srv` helper script** for server management
+   - Faster than manual pkill/start commands
+   - Built-in log viewing and test running
+
+2. **Fix one test file at a time**
+   - Each fix is committed independently
+   - Easier to identify what broke if tests fail
+   - Run single test: `npx jest -c test/integration/jest.config.js test/integration/matrix.test.ts`
+
+3. **Manual API testing with curl**
+   - Quick verification without full test run
+   - Example: Login → create room → send message → check sync
+
+4. **Debug logging in server handlers**
+   - Add `console.log` temporarily to trace request flow
+   - Remove after confirming fix
+   - Check logs with `pnpm dev:srv logs`
+
+5. **Server restart between test runs**
+   - In-memory state gets stale
+   - Always restart after code changes
+   - Use `pnpm dev:srv restart` before running tests
 - `matrix.test.ts` (8 tests)
 - `auto-login.test.ts` (7 tests)
 - `voice-message-flow.test.ts` (6 tests)
