@@ -14,34 +14,9 @@ Before changing server logic, use a subagent to ask relevant questions about the
 A rapid iteration workflow has been added to speed up server development:
 
 ```bash
-# TDD Mode: Run one test at a time, iterate until green, move to next
-pnpm test:server --tdd
-
-# TDD Mode starting at a specific test
-pnpm test:server --tdd "should login with valid"
-
-# Interactive mode with full control
-pnpm test:server
-
 # Run with debug logging enabled
 pnpm wata-server:debug
 ```
-
-**TDD Mode Commands**:
-- `r` - Run current test (auto-retry on failure until it passes)
-- `s` - Skip current test and move to next
-- `l` - Show recent server logs
-- `j` - Jump to specific test number (1-N)
-- `q` - Quit
-
-**Interactive Mode Commands**:
-- `t` - Run all integration tests
-- `o` - Run one test (prompt for name)
-- `l` - Show recent server logs
-- `r` - Restart wata-server
-- `s` - Stop wata-server
-- `--` - List all available tests
-- `q` - Quit
 
 **Recommended Starting Point**:
 Begin with the authentication tests (`matrix.test.ts`) as they're the simplest:

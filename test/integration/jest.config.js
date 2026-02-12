@@ -18,6 +18,10 @@ module.exports = {
   },
   // Longer timeout for integration tests
   testTimeout: 30000,
+  // Force exit after tests complete (cleanup doesn't stop sync loops)
+  forceExit: true,
+  // Detect open handles that might prevent clean exit
+  detectOpenHandles: false,
   // Don't transform node_modules (they're already ESM)
   transformIgnorePatterns: [],
   // Setup file to configure logging and other test globals
