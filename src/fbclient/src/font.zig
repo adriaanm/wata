@@ -16,9 +16,11 @@
 /// while we use MSB-first — mirror each byte's bits when transcribing).
 const display = @import("display.zig");
 
-pub const glyph_w: u32 = 6;
+/// Cell: 7px wide (6px glyph + 1px spacing gap), 8px tall.
+pub const glyph_w: u32 = 7;
 pub const glyph_h: u32 = 8;
-pub const cols: u32 = display.width / glyph_w; // 21
+const glyph_data_w: u32 = 6; // columns of actual glyph bitmap data
+pub const cols: u32 = display.width / glyph_w; // 18
 pub const rows: u32 = (display.height - 1) / glyph_h; // 19 (1px status line)
 
 /// Draw a single character at pixel position (px, py).
@@ -28,13 +30,17 @@ pub fn drawChar(fb: *display.Framebuffer, ch: u8, px: i32, py: i32, fg: display.
     while (row < glyph_h) : (row += 1) {
         const bits = glyph[row];
         var col: u32 = 0;
-        while (col < glyph_w) : (col += 1) {
+        while (col < glyph_data_w) : (col += 1) {
             const on = (bits >> @intCast(7 - col)) & 1 == 1;
             if (on) {
                 fb.setPixel(px + @as(i32, @intCast(col)), py + @as(i32, @intCast(row)), fg);
             } else if (bg) |bg_color| {
                 fb.setPixel(px + @as(i32, @intCast(col)), py + @as(i32, @intCast(row)), bg_color);
             }
+        }
+        // Spacing column: always background
+        if (bg) |bg_color| {
+            fb.setPixel(px + @as(i32, glyph_data_w), py + @as(i32, @intCast(row)), bg_color);
         }
     }
 }
