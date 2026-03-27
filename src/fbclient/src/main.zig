@@ -13,17 +13,29 @@ const sync_thread = @import("matrix/sync_thread.zig");
 
 const sdl = if (build_options.use_sdl) @import("sdl.zig").c else struct {};
 
+const ct = @cImport({
+    @cInclude("time.h");
+    @cInclude("stdio.h");
+    @cInclude("string.h");
+});
+
+var debug_mode: bool = false;
+
+fn debugLog(comptime fmt: []const u8, args: anytype) void {
+    if (!debug_mode) return;
+    var buf: [512]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, fmt ++ "\n", args) catch return;
+    _ = std.c.write(2, msg.ptr, msg.len);
+}
+
 pub fn main() !void {
+    debug_mode = build_options.debug_mode;
+
     var da = std.heap.DebugAllocator(.{}){};
     defer _ = da.deinit();
     const allocator = da.allocator();
 
-    // Init platform backends
-    var disp = try display.Backend.init();
-    defer disp.deinit();
-
-    var inp = try input.Backend.init();
-    defer inp.deinit();
+    debugLog("[main] wata-fb starting in debug mode", .{});
 
     // Inter-thread communication
     var ui_queue: queue.BoundedQueue(types.UiEvent, 256) = .{};
@@ -39,6 +51,8 @@ pub fn main() !void {
         .allocator = allocator,
     };
 
+    debugLog("[main] connecting to {s} as {s}", .{ sync_ctx.config.homeserver, sync_ctx.config.username });
+
     // Spawn sync thread
     const sync_handle = std.Thread.spawn(.{}, sync_thread.syncThreadMain, .{&sync_ctx}) catch null;
     defer {
@@ -46,7 +60,58 @@ pub fn main() !void {
         if (sync_handle) |h| h.join();
     }
 
-    // Register applets — wata first (default)
+    if (debug_mode) {
+        // Headless debug mode — just log events, no UI
+        debugLog("[main] running headless (no display)", .{});
+        var connection: types.ConnectionState = .disconnected;
+        var snapshot_count: u32 = 0;
+
+        while (!should_stop.load(.acquire)) {
+            // Drain events
+            while (ui_queue.pop()) |ev| {
+                switch (ev) {
+                    .connection_state => |cs| {
+                        if (cs != connection) {
+                            debugLog("[main] connection: {s}", .{@tagName(cs)});
+                            connection = cs;
+                        }
+                    },
+                    .snapshot_ready => {
+                        if (state_store.acquire()) |snap| {
+                            snapshot_count += 1;
+                            debugLog("[main] snapshot #{d}: {d} contacts, {d} conversations", .{
+                                snapshot_count,
+                                snap.contacts.len,
+                                snap.conversations.len,
+                            });
+                            for (snap.contacts) |contact| {
+                                debugLog("[main]   contact: {s}", .{contact.user.display_name});
+                            }
+                            for (snap.conversations) |conv| {
+                                const name = if (conv.contact) |c| c.user.display_name else "?";
+                                debugLog("[main]   conv: {s} ({d} msgs, {d} unplayed)", .{
+                                    name, conv.messages.len, conv.unplayed_count,
+                                });
+                            }
+                        }
+                    },
+                    else => {},
+                }
+            }
+            // Sleep 100ms
+            const ts = ct.struct_timespec{ .tv_sec = 0, .tv_nsec = 100_000_000 };
+            _ = ct.nanosleep(&ts, null);
+        }
+        return;
+    }
+
+    // Normal UI mode
+    var disp = try display.Backend.init();
+    defer disp.deinit();
+
+    var inp = try input.Backend.init();
+    defer inp.deinit();
+
     const applets = [_]shell_mod.Applet{
         wata_applet.applet,
         snake.applet,
@@ -57,34 +122,29 @@ pub fn main() !void {
     var sh = try shell_mod.Shell.init(allocator, &applets);
     defer sh.deinit();
 
-    // Main loop
     var last_ticks: u32 = if (build_options.use_sdl) sdl.SDL_GetTicks() else 0;
     var event_buf: [32]input.InputEvent = undefined;
     var connection: types.ConnectionState = .disconnected;
     var current_snapshot: ?*const types.StateSnapshot = null;
 
     while (true) {
-        // Compute dt
         const now_ticks: u32 = if (build_options.use_sdl) sdl.SDL_GetTicks() else 0;
         const dt_ms = now_ticks -% last_ticks;
         last_ticks = now_ticks;
         const dt: f32 = @as(f32, @floatFromInt(dt_ms)) / 1000.0;
 
-        // Pick up new snapshot if available
+        // Pick up new snapshot
         if (state_store.acquire()) |new_snap| {
             current_snapshot = new_snap;
             sh.updateContext(new_snap);
         }
 
-        // Drain UI event queue
+        // Drain UI events
         while (ui_queue.pop()) |ev| {
             switch (ev) {
                 .connection_state => |cs| {
                     connection = cs;
                     sh.status = shell_mod.Status.fromConnection(cs);
-                },
-                .snapshot_ready => {
-                    // Snapshot already acquired above
                 },
                 else => {},
             }
@@ -104,16 +164,13 @@ pub fn main() !void {
             if (action == .quit) break;
         }
 
-        // Update
         sh.update(dt);
 
-        // Render
         var fb = disp.framebuffer();
         fb.clear(display.colors.black);
         sh.render(&fb);
         disp.present();
 
-        // ~60fps target (SDL vsync may also throttle)
         if (build_options.use_sdl) {
             sdl.SDL_Delay(16);
         }

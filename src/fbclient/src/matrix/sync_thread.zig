@@ -52,18 +52,38 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
     _ = ctx.ui_queue.push(.{ .connection_state = .connecting });
 
     var client = http.MatrixHttpClient.init(allocator, ctx.config.homeserver);
-    const login_response = client.login(ctx.config.username, ctx.config.password) catch {
+    var login_resp = client.login(ctx.config.username, ctx.config.password) catch {
         _ = ctx.ui_queue.push(.{ .connection_state = .err });
         return;
     };
 
-    client.access_token = login_response.access_token;
+    // Parse login response and dupe strings before freeing
+    const parsed_login = std.json.parseFromSlice(
+        json_types.LoginResponse,
+        allocator,
+        login_resp.body,
+        .{ .ignore_unknown_fields = true },
+    ) catch {
+        login_resp.deinit();
+        _ = ctx.ui_queue.push(.{ .connection_state = .err });
+        return;
+    };
+
+    const access_token = allocator.dupe(u8, parsed_login.value.access_token) catch return;
+    defer allocator.free(access_token);
+    const user_id = allocator.dupe(u8, parsed_login.value.user_id) catch return;
+    defer allocator.free(user_id);
+
+    parsed_login.deinit();
+    login_resp.deinit();
+
+    client.access_token = access_token;
     _ = ctx.ui_queue.push(.{ .connection_state = .connected });
 
     // Init processor
     var processor = sync_engine.SyncProcessor.init(allocator);
     defer processor.deinit();
-    processor.self_user_id = login_response.user_id;
+    processor.self_user_id = user_id;
 
     // Sync loop
     var retry_delay_ms: u64 = 1000;
@@ -89,7 +109,7 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
             sync_result.body,
             .{ .ignore_unknown_fields = true },
         ) catch {
-            allocator.free(sync_result.body);
+            allocator.free(sync_result.full_buf);
             _ = ctx.ui_queue.push(.{ .connection_state = .err });
             continue;
         };

@@ -21,10 +21,12 @@ pub const HttpError = error{
 
 pub const RawResponse = struct {
     body: []const u8,
+    /// The full buffer (may be larger than body due to pre-allocation).
+    full_buf: []u8,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *RawResponse) void {
-        self.allocator.free(self.body);
+        self.allocator.free(self.full_buf);
     }
 };
 
@@ -37,11 +39,13 @@ pub const MatrixHttpClient = struct {
         return .{ .allocator = allocator, .base_url = base_url };
     }
 
-    /// POST /_matrix/client/v3/login
-    pub fn login(self: *MatrixHttpClient, username: []const u8, password: []const u8) HttpError!json_types.LoginResponse {
+    /// POST /_matrix/client/v3/login — returns raw response for caller to parse
+    pub fn login(self: *MatrixHttpClient, username: []const u8, password: []const u8) HttpError!RawResponse {
         var buf: [1024]u8 = undefined;
-        const body = std.fmt.bufPrint(&buf, "{{\"type\":\"m.login.password\",\"user\":\"{s}\",\"password\":\"{s}\"}}", .{ username, password }) catch return HttpError.OutOfMemory;
-        return self.requestJson(json_types.LoginResponse, "POST", "/_matrix/client/v3/login", body);
+        const body = std.fmt.bufPrint(&buf,
+            \\{{"type":"m.login.password","identifier":{{"type":"m.id.user","user":"{s}"}},"password":"{s}"}}
+        , .{ username, password }) catch return HttpError.OutOfMemory;
+        return self.curlRequest("POST", "/_matrix/client/v3/login", body);
     }
 
     /// GET /_matrix/client/v3/sync
@@ -62,13 +66,13 @@ pub const MatrixHttpClient = struct {
     pub fn sendReadReceipt(self: *MatrixHttpClient, room_id: []const u8, event_id: []const u8) HttpError!void {
         var path_buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/rooms/{s}/receipt/m.read/{s}", .{ room_id, event_id }) catch return HttpError.OutOfMemory;
-        const resp = try self.curlRequest("POST", path, "{}");
-        self.allocator.free(resp.body);
+        var resp = try self.curlRequest("POST", path, "{}");
+        resp.deinit();
     }
 
     fn requestJson(self: *MatrixHttpClient, comptime T: type, method: []const u8, path: []const u8, body: ?[]const u8) HttpError!T {
-        const resp = try self.curlRequest(method, path, body);
-        defer self.allocator.free(resp.body);
+        var resp = try self.curlRequest(method, path, body);
+        defer resp.deinit();
 
         const parsed = std.json.parseFromSlice(T, self.allocator, resp.body, .{ .ignore_unknown_fields = true }) catch return HttpError.JsonParseFailed;
         defer parsed.deinit();
@@ -125,7 +129,7 @@ pub const MatrixHttpClient = struct {
         // Perform
         const res = c.curl_easy_perform(curl_handle);
         if (res != c.CURLE_OK) {
-            if (response_data.buf) |b| self.allocator.free(b);
+            if (response_data.buf) |b| self.allocator.free(b[0..response_data.capacity]);
             return HttpError.ConnectionFailed;
         }
 
@@ -133,13 +137,18 @@ pub const MatrixHttpClient = struct {
         var http_code: c_long = 0;
         _ = c.curl_easy_getinfo(curl_handle, c.CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code != 200) {
-            if (response_data.buf) |b| self.allocator.free(b);
+            if (response_data.buf) |b| self.allocator.free(b[0..response_data.capacity]);
             return HttpError.MatrixError;
         }
 
-        const result_body = if (response_data.buf) |b| b[0..response_data.len] else "";
-
-        return .{ .body = result_body, .allocator = self.allocator };
+        if (response_data.buf) |b| {
+            return .{
+                .body = b[0..response_data.len],
+                .full_buf = b[0..response_data.capacity],
+                .allocator = self.allocator,
+            };
+        }
+        return HttpError.InvalidResponse;
     }
 };
 

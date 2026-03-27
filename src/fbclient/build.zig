@@ -9,9 +9,12 @@ pub fn build(b: *std.Build) void {
     // Platform selection: SDL on macOS (dev), fbdev on ARM Linux (device)
     const use_sdl = resolved.os.tag == .macos or resolved.os.tag == .windows;
 
-    // Build options module (must be created before the root module)
+    // Build options
+    const debug_mode = b.option(bool, "debug", "Run in headless debug mode (log to stderr)") orelse false;
+
     const options = b.addOptions();
     options.addOption(bool, "use_sdl", use_sdl);
+    options.addOption(bool, "debug_mode", debug_mode);
 
     // Create root module
     const root_mod = b.createModule(.{
