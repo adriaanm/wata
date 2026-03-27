@@ -3,9 +3,13 @@ const build_options = @import("build_options");
 const display = @import("display.zig");
 const input = @import("input.zig");
 const shell_mod = @import("shell.zig");
+const types = @import("types.zig");
+const queue = @import("queue.zig");
 const snake = @import("applets/snake.zig");
 const clock_applet = @import("applets/clock.zig");
 const charmap = @import("applets/charmap.zig");
+
+const matrix_http = @import("matrix/http.zig");
 
 const sdl = if (build_options.use_sdl) @import("sdl.zig").c else struct {};
 
