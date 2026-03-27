@@ -18,12 +18,14 @@ pub const icon = struct {
     pub const sig1: u8 = 0x81; // cellular 1 bar
     pub const sig2: u8 = 0x82; // cellular 2 bars
     pub const sig3: u8 = 0x83; // cellular 3 bars
-    pub const wifi: u8 = 0x84; // wifi arcs
-    pub const bat_full: u8 = 0x85; // battery 4/4
-    pub const bat_high: u8 = 0x86; // battery 3/4
-    pub const bat_mid: u8 = 0x87; // battery 2/4
-    pub const bat_low: u8 = 0x88; // battery 1/4
-    pub const bat_empty: u8 = 0x89; // battery 0/4
+    pub const wifi3: u8 = 0x84; // wifi full (3 arcs)
+    pub const wifi2: u8 = 0x85; // wifi medium (2 arcs)
+    pub const wifi1: u8 = 0x86; // wifi weak (dot only)
+    pub const bat_full: u8 = 0x87; // battery 4/4
+    pub const bat_high: u8 = 0x88; // battery 3/4
+    pub const bat_mid: u8 = 0x89; // battery 2/4
+    pub const bat_low: u8 = 0x8A; // battery 1/4
+    pub const bat_empty: u8 = 0x8B; // battery 0/4
 };
 
 /// Cell: 6px wide (5px glyph + 1px spacing gap), 8px tall.
@@ -167,21 +169,47 @@ const font_data: [256][8]u8 = blk: {
     //  X.X.X
     data[0x83] = .{ 0x00, 0x00, 0x08, 0x08, 0x28, 0x28, 0xA8, 0xA8 };
 
-    //  0x84: wifi — concentric arcs + dot
+    //  WiFi: outer arc is single-pixel corners, inner arc is just
+    //  two dots, then a center dot at the base. Levels remove arcs
+    //  from the top down.
+
+    //  0x84: wifi full (3 levels)
+    //  .....
     //  .XXX.
     //  X...X
-    //  .XXX.
+    //  .....
+    //  ..X..
     //  .X.X.
+    //  .....
+    //  ..x..
+    data[0x84] = .{ 0x00, 0x70, 0x88, 0x00, 0x20, 0x50, 0x00, 0x20 };
+
+    //  0x85: wifi medium (no outer arc)
+    //  .....
+    //  .....
+    //  .....
+    //  .....
     //  ..X..
+    //  .X.X.
+    //  .....
+    //  ..X..
+    data[0x85] = .{ 0x00, 0x00, 0x00, 0x00, 0x20, 0x50, 0x00, 0x20 };
+
+    //  0x86: wifi weak (dot only)
+    //  .....
+    //  .....
+    //  .....
+    //  .....
+    //  .....
     //  .....
     //  ..X..
     //  .....
-    data[0x84] = .{ 0x70, 0x88, 0x70, 0x50, 0x20, 0x00, 0x20, 0x00 };
+    data[0x86] = .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20 };
 
     //  Battery: .XXX. cap on top, XXXXX walls, 4 fill rows, XXXXX base
     //  The 4 rows (rows 2–5) fill from bottom to top.
 
-    //  0x85: battery full (4/4)
+    //  0x87: battery full (4/4)
     //  .XXX.
     //  XXXXX
     //  XXXXX   ← fill
@@ -190,9 +218,9 @@ const font_data: [256][8]u8 = blk: {
     //  XXXXX   ← fill
     //  XXXXX
     //  .....
-    data[0x85] = .{ 0x70, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0x00 };
+    data[0x87] = .{ 0x70, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0x00 };
 
-    //  0x86: battery high (3/4)
+    //  0x88: battery high (3/4)
     //  .XXX.
     //  XXXXX
     //  X...X   ← empty
@@ -201,9 +229,9 @@ const font_data: [256][8]u8 = blk: {
     //  XXXXX   ← fill
     //  XXXXX
     //  .....
-    data[0x86] = .{ 0x70, 0xF8, 0x88, 0xF8, 0xF8, 0xF8, 0xF8, 0x00 };
+    data[0x88] = .{ 0x70, 0xF8, 0x88, 0xF8, 0xF8, 0xF8, 0xF8, 0x00 };
 
-    //  0x87: battery mid (2/4)
+    //  0x89: battery mid (2/4)
     //  .XXX.
     //  XXXXX
     //  X...X   ← empty
@@ -212,9 +240,9 @@ const font_data: [256][8]u8 = blk: {
     //  XXXXX   ← fill
     //  XXXXX
     //  .....
-    data[0x87] = .{ 0x70, 0xF8, 0x88, 0x88, 0xF8, 0xF8, 0xF8, 0x00 };
+    data[0x89] = .{ 0x70, 0xF8, 0x88, 0x88, 0xF8, 0xF8, 0xF8, 0x00 };
 
-    //  0x88: battery low (1/4)
+    //  0x8A: battery low (1/4)
     //  .XXX.
     //  XXXXX
     //  X...X   ← empty
@@ -223,9 +251,9 @@ const font_data: [256][8]u8 = blk: {
     //  XXXXX   ← fill
     //  XXXXX
     //  .....
-    data[0x88] = .{ 0x70, 0xF8, 0x88, 0x88, 0x88, 0xF8, 0xF8, 0x00 };
+    data[0x8A] = .{ 0x70, 0xF8, 0x88, 0x88, 0x88, 0xF8, 0xF8, 0x00 };
 
-    //  0x89: battery empty (0/4)
+    //  0x8B: battery empty (0/4)
     //  .XXX.
     //  XXXXX
     //  X...X   ← empty
@@ -234,7 +262,7 @@ const font_data: [256][8]u8 = blk: {
     //  X...X   ← empty
     //  XXXXX
     //  .....
-    data[0x89] = .{ 0x70, 0xF8, 0x88, 0x88, 0x88, 0x88, 0xF8, 0x00 };
+    data[0x8B] = .{ 0x70, 0xF8, 0x88, 0x88, 0x88, 0x88, 0xF8, 0x00 };
 
     break :blk data;
 };
