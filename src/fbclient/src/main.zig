@@ -5,6 +5,7 @@ const input = @import("input.zig");
 const shell_mod = @import("shell.zig");
 const snake = @import("applets/snake.zig");
 const clock_applet = @import("applets/clock.zig");
+const charmap = @import("applets/charmap.zig");
 
 const sdl = if (build_options.use_sdl) @import("sdl.zig").c else struct {};
 
@@ -24,6 +25,7 @@ pub fn main() !void {
     const applets = [_]shell_mod.Applet{
         snake.applet,
         clock_applet.applet,
+        charmap.applet,
     };
 
     var sh = try shell_mod.Shell.init(allocator, &applets);
