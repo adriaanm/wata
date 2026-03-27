@@ -11,6 +11,21 @@
 /// different bit orders via reverseBits).
 const display = @import("display.zig");
 
+/// Custom glyph codes (0x80–0x8F range).
+/// For double-check (read receipt), draw two 0x80 glyphs adjacent.
+pub const icon = struct {
+    pub const check: u8 = 0x80; // ✓  delivered / read
+    pub const sig1: u8 = 0x81; // cellular 1 bar
+    pub const sig2: u8 = 0x82; // cellular 2 bars
+    pub const sig3: u8 = 0x83; // cellular 3 bars
+    pub const wifi: u8 = 0x84; // wifi arcs
+    pub const bat_full: u8 = 0x85; // battery 4/4
+    pub const bat_high: u8 = 0x86; // battery 3/4
+    pub const bat_mid: u8 = 0x87; // battery 2/4
+    pub const bat_low: u8 = 0x88; // battery 1/4
+    pub const bat_empty: u8 = 0x89; // battery 0/4
+};
+
 /// Cell: 6px wide (5px glyph + 1px spacing gap), 8px tall.
 pub const glyph_w: u32 = 6;
 pub const glyph_h: u32 = 8;
@@ -102,6 +117,124 @@ const font_data: [256][8]u8 = blk: {
     data[0xB0] = .{ 0x88, 0x00, 0x22, 0x00, 0x88, 0x00, 0x22, 0x00 }; // ░
     data[0xB1] = .{ 0xA8, 0x50, 0xA8, 0x50, 0xA8, 0x50, 0xA8, 0x50 }; // ▒
     data[0xB2] = .{ 0xD8, 0xF8, 0x68, 0xF8, 0xD8, 0xF8, 0x68, 0xF8 }; // ▓
+
+    // -----------------------------------------------------------------
+    // Custom wata glyphs (0x80–0x8F)
+    // MSB-first, 5px wide: bit7=col0 .. bit3=col4
+    // -----------------------------------------------------------------
+
+    //  0x80: ✓ check (delivered/read — draw two for read receipt)
+    //  .....
+    //  .....
+    //  ....X
+    //  ...X.
+    //  X.X..
+    //  .X...
+    //  .....
+    //  .....
+    data[0x80] = .{ 0x00, 0x00, 0x08, 0x10, 0xA0, 0x40, 0x00, 0x00 };
+
+    //  0x81: signal 1 bar (weak)
+    //  .....
+    //  .....
+    //  .....
+    //  .....
+    //  .....
+    //  .....
+    //  X....
+    //  X....
+    data[0x81] = .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80 };
+
+    //  0x82: signal 2 bars (medium)
+    //  .....
+    //  .....
+    //  .....
+    //  .....
+    //  ..X..
+    //  ..X..
+    //  X.X..
+    //  X.X..
+    data[0x82] = .{ 0x00, 0x00, 0x00, 0x00, 0x20, 0x20, 0xA0, 0xA0 };
+
+    //  0x83: signal 3 bars (strong)
+    //  .....
+    //  .....
+    //  ....X
+    //  ....X
+    //  ..X.X
+    //  ..X.X
+    //  X.X.X
+    //  X.X.X
+    data[0x83] = .{ 0x00, 0x00, 0x08, 0x08, 0x28, 0x28, 0xA8, 0xA8 };
+
+    //  0x84: wifi — concentric arcs + dot
+    //  .XXX.
+    //  X...X
+    //  .XXX.
+    //  .X.X.
+    //  ..X..
+    //  .....
+    //  ..X..
+    //  .....
+    data[0x84] = .{ 0x70, 0x88, 0x70, 0x50, 0x20, 0x00, 0x20, 0x00 };
+
+    //  Battery: .XXX. cap on top, XXXXX walls, 4 fill rows, XXXXX base
+    //  The 4 rows (rows 2–5) fill from bottom to top.
+
+    //  0x85: battery full (4/4)
+    //  .XXX.
+    //  XXXXX
+    //  XXXXX   ← fill
+    //  XXXXX   ← fill
+    //  XXXXX   ← fill
+    //  XXXXX   ← fill
+    //  XXXXX
+    //  .....
+    data[0x85] = .{ 0x70, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0xF8, 0x00 };
+
+    //  0x86: battery high (3/4)
+    //  .XXX.
+    //  XXXXX
+    //  X...X   ← empty
+    //  XXXXX   ← fill
+    //  XXXXX   ← fill
+    //  XXXXX   ← fill
+    //  XXXXX
+    //  .....
+    data[0x86] = .{ 0x70, 0xF8, 0x88, 0xF8, 0xF8, 0xF8, 0xF8, 0x00 };
+
+    //  0x87: battery mid (2/4)
+    //  .XXX.
+    //  XXXXX
+    //  X...X   ← empty
+    //  X...X   ← empty
+    //  XXXXX   ← fill
+    //  XXXXX   ← fill
+    //  XXXXX
+    //  .....
+    data[0x87] = .{ 0x70, 0xF8, 0x88, 0x88, 0xF8, 0xF8, 0xF8, 0x00 };
+
+    //  0x88: battery low (1/4)
+    //  .XXX.
+    //  XXXXX
+    //  X...X   ← empty
+    //  X...X   ← empty
+    //  X...X   ← empty
+    //  XXXXX   ← fill
+    //  XXXXX
+    //  .....
+    data[0x88] = .{ 0x70, 0xF8, 0x88, 0x88, 0x88, 0xF8, 0xF8, 0x00 };
+
+    //  0x89: battery empty (0/4)
+    //  .XXX.
+    //  XXXXX
+    //  X...X   ← empty
+    //  X...X   ← empty
+    //  X...X   ← empty
+    //  X...X   ← empty
+    //  XXXXX
+    //  .....
+    data[0x89] = .{ 0x70, 0xF8, 0x88, 0x88, 0x88, 0x88, 0xF8, 0x00 };
 
     break :blk data;
 };
