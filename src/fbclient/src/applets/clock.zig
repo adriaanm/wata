@@ -50,22 +50,23 @@ fn render(_: *anyopaque, fb: *display.Framebuffer) void {
     var time_buf: [8]u8 = undefined;
     const time_text = std.fmt.bufPrint(&time_buf, "{d:0>2}:{d:0>2}:{d:0>2}", .{ hours, minutes, secs }) catch "??:??:??";
 
-    // Draw each character 2× size (12×16 pixels each) for visibility
-    const text_w = time_text.len * 12;
+    // Draw each character 2× size (10×16 pixels each, +2px gap) for visibility
+    const char_2x_w: usize = 12; // 10px glyph + 2px gap
+    const text_w = time_text.len * char_2x_w;
     const start_x: i32 = @intCast((display.width - text_w) / 2);
     const start_y: i32 = @intCast(1 + (display.height - 1 - 16) / 2); // centered vertically
 
     for (time_text, 0..) |ch, i| {
-        drawChar2x(fb, ch, start_x + @as(i32, @intCast(i * 12)), start_y, col.green);
+        drawChar2x(fb, ch, start_x + @as(i32, @intCast(i * char_2x_w)), start_y, col.green);
     }
 }
 
-/// Draw a character at 2× scale (12×16 pixels).
+/// Draw a character at 2× scale (10×16 pixels).
 fn drawChar2x(fb: *display.Framebuffer, ch: u8, px: i32, py: i32, fg: display.Color) void {
     var row: u32 = 0;
     while (row < font.glyph_h) : (row += 1) {
         var col: u32 = 0;
-        while (col < 6) : (col += 1) {
+        while (col < 5) : (col += 1) {
             if (font.getPixel(ch, col, row)) {
                 const x = px + @as(i32, @intCast(col * 2));
                 const y = py + @as(i32, @intCast(row * 2));
