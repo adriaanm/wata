@@ -21,9 +21,12 @@ pub fn build(b: *std.Build) void {
     });
     root_mod.addOptions("build_options", options);
 
+    // Always need libc for libcurl (Matrix HTTP client)
+    root_mod.link_libc = true;
+    root_mod.linkSystemLibrary("curl", .{});
+
     if (use_sdl) {
         root_mod.linkSystemLibrary("SDL2", .{});
-        root_mod.link_libc = true;
     }
 
     const exe = b.addExecutable(.{

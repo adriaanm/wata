@@ -10,11 +10,12 @@ pub fn BoundedQueue(comptime T: type, comptime capacity: usize) type {
         buf: [capacity]T = undefined,
         head: std.atomic.Value(usize) = std.atomic.Value(usize).init(0), // next write position
         tail: std.atomic.Value(usize) = std.atomic.Value(usize).init(0), // next read position
-        push_mutex: std.Thread.Mutex = .{}, // serialize producers
+        push_mutex: std.atomic.Mutex = .unlocked, // serialize producers
 
         /// Push an item. Returns false if the queue is full.
         pub fn push(self: *Self, item: T) bool {
-            self.push_mutex.lock();
+            // Spin-lock for producer serialization (critical section is ~3 instructions)
+            while (!self.push_mutex.tryLock()) {}
             defer self.push_mutex.unlock();
 
             const h = self.head.load(.monotonic);
