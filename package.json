@@ -33,7 +33,10 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx}\" \"test/**/*.{ts,tsx,js,jsx}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx}\" \"test/**/*.{ts,tsx,js,jsx}\"",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check"
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+    "fb": "cd src/fbclient && zig build run",
+    "fb:build": "cd src/fbclient && zig build",
+    "fb:device": "cd src/fbclient && zig build -Dtarget=arm-linux-musleabihf -Doptimize=ReleaseSafe"
   },
   "devDependencies": {
     "@babel/core": "^7.28.6",
