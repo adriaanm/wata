@@ -39,4 +39,19 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run wata-fb");
     run_step.dependOn(&run_cmd.step);
+
+    // Test step — test runner that imports all test-bearing modules
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("src/test_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const unit_tests = b.addTest(.{
+        .root_module = test_mod,
+    });
+
+    const run_tests = b.addRunArtifact(unit_tests);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_tests.step);
 }
