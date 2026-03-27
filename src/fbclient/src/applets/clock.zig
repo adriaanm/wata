@@ -62,23 +62,18 @@ fn render(_: *anyopaque, fb: *display.Framebuffer) void {
 
 /// Draw a character at 2× scale (12×16 pixels).
 fn drawChar2x(fb: *display.Framebuffer, ch: u8, px: i32, py: i32, fg: display.Color) void {
-    // Access font data through drawChar by drawing each pixel scaled
-    // We'll draw directly using the font module's internal understanding
-    const glyph_w = font.glyph_w;
-    const glyph_h = font.glyph_h;
-
-    // Render at 1x to a temp position, then we just use drawChar with the character
-    // Actually, let's just render 2x manually by calling setPixel
     var row: u32 = 0;
-    while (row < glyph_h) : (row += 1) {
+    while (row < font.glyph_h) : (row += 1) {
         var col: u32 = 0;
-        while (col < glyph_w) : (col += 1) {
-            // Check if this pixel is set by drawing to a known position and reading back
-            // Simpler: just duplicate the font lookup here
-            font.drawChar(fb, ch, px + @as(i32, @intCast(col * 2)), py + @as(i32, @intCast(row * 2)), fg, null);
-            fb.setPixel(px + @as(i32, @intCast(col * 2 + 1)), py + @as(i32, @intCast(row * 2)), fg);
-            fb.setPixel(px + @as(i32, @intCast(col * 2)), py + @as(i32, @intCast(row * 2 + 1)), fg);
-            fb.setPixel(px + @as(i32, @intCast(col * 2 + 1)), py + @as(i32, @intCast(row * 2 + 1)), fg);
+        while (col < 6) : (col += 1) {
+            if (font.getPixel(ch, col, row)) {
+                const x = px + @as(i32, @intCast(col * 2));
+                const y = py + @as(i32, @intCast(row * 2));
+                fb.setPixel(x, y, fg);
+                fb.setPixel(x + 1, y, fg);
+                fb.setPixel(x, y + 1, fg);
+                fb.setPixel(x + 1, y + 1, fg);
+            }
         }
     }
 }
