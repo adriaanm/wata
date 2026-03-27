@@ -24,6 +24,7 @@
 | [device-automation](docs/device-automation.md) | Physical device testing workflow |
 | [matrix-servers](docs/matrix-servers.md) | Matrix server comparison |
 | [coding-rules](docs/coding-rules.md) | TUI logging guidelines |
+| [framebuffer-client](docs/planning/framebuffer-client.md) | Zig framebuffer client design |
 
 ---
 
@@ -31,12 +32,13 @@
 
 **Walkie-talkie voice messaging app** on Matrix protocol.
 
-**Frontends:** Android (native Kotlin), TUI (Ink/terminal), Web (Vite).
-**Target:** ABBREE Zello handhelds (1.77" screen, D-pad, PTT button).
+**Frontends:** Android (native Kotlin), TUI (Ink/terminal), Web (Vite), Framebuffer (Zig).
+**Target:** BQ268 handhelds (128×160 SPI display, D-pad, PTT button).
 
 **Stack:**
 - Android: Kotlin + Jetpack Compose + OkHttp
 - TUI/Web: TypeScript + matrix-js-sdk
+- Framebuffer: Zig 0.16-dev + SDL2 (dev) / fbdev (device)
 - Audio: Ogg Opus at 16kHz
 
 ---
@@ -55,6 +57,11 @@ pnpm tui:dev                  # Watch mode
 # Web
 pnpm web                      # Dev server
 pnpm web:build                # Production build
+
+# Framebuffer client (Zig)
+pnpm fb                       # Build + run with SDL2 (dev)
+pnpm fb:build                 # Build only
+pnpm fb:device                # Cross-compile for ARM device
 
 # Dev helpers
 pnpm dev:server               # Start Conduit Matrix server
@@ -96,8 +103,9 @@ Edit `src/android/app/src/main/java/com/wata/client/MatrixConfig.kt` to change u
 ```
 src/
 ├── android/          # Native Kotlin (Gradle)
+├── fbclient/         # Zig framebuffer client (SDL2 dev / fbdev device)
 ├── shared/           # TS code shared by TUI/Web
-└── tui/              # Terminal UI (Ink)
+├── tui/              # Terminal UI (Ink)
 └── web/              # Web app (Vite)
 ```
 
