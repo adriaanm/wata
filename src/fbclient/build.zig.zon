@@ -1,0 +1,11 @@
+.{
+    .name = .wata_fb,
+    .version = "0.1.0",
+    .fingerprint = 0xf389e95535d04a3,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
