@@ -3,6 +3,8 @@ const std = @import("std");
 const display = @import("display.zig");
 const font = @import("font.zig");
 const input = @import("input.zig");
+const types = @import("types.zig");
+const queue = @import("queue.zig");
 
 pub const Applet = struct {
     name: []const u8,
@@ -15,7 +17,15 @@ pub const Applet = struct {
 
 pub const Action = enum { none, quit };
 
-/// Connection status for status line color
+/// Shared context available to applets that need it (wata).
+/// Simple applets (snake, clock) can ignore this.
+pub const AppContext = struct {
+    state: ?*const types.StateSnapshot = null,
+    connection: types.ConnectionState = .disconnected,
+    action_queue: ?*queue.BoundedQueue(types.Action, 64) = null,
+};
+
+/// Connection status for status line color.
 pub const Status = enum {
     idle,
     connected,
@@ -34,6 +44,16 @@ pub const Status = enum {
             .disconnected => display.colors.red,
         };
     }
+
+    pub fn fromConnection(conn: types.ConnectionState) Status {
+        return switch (conn) {
+            .disconnected => .disconnected,
+            .connecting => .idle,
+            .connected => .connected,
+            .syncing => .syncing,
+            .err => .err,
+        };
+    }
 };
 
 pub const Shell = struct {
@@ -41,6 +61,7 @@ pub const Shell = struct {
     states: []?*anyopaque,
     active: usize,
     status: Status,
+    ctx: AppContext,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, applets: []const Applet) !Shell {
@@ -53,6 +74,7 @@ pub const Shell = struct {
             .states = states,
             .active = 0,
             .status = .idle,
+            .ctx = .{},
             .allocator = allocator,
         };
     }
@@ -64,6 +86,15 @@ pub const Shell = struct {
             }
         }
         self.allocator.free(self.states);
+    }
+
+    /// Update the context from a new state snapshot.
+    pub fn updateContext(self: *Shell, snapshot: ?*const types.StateSnapshot) void {
+        self.ctx.state = snapshot;
+        if (snapshot) |s| {
+            self.ctx.connection = s.connection;
+            self.status = Status.fromConnection(s.connection);
+        }
     }
 
     pub fn handleInput(self: *Shell, key: input.Key, state: input.KeyState) Action {
