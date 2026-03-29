@@ -1,10 +1,18 @@
 /// Classic snake game. First applet — validates the full rendering + input stack.
 const std = @import("std");
+const Io = std.Io;
 const build_options = @import("build_options");
 const display = @import("../display.zig");
 const font = @import("../font.zig");
 const input = @import("../input.zig");
 const shell = @import("../shell.zig");
+
+var g_io: ?Io = null;
+
+/// Set the Io instance for RNG seeding. Called once from main.
+pub fn setIo(io: Io) void {
+    g_io = io;
+}
 
 const grid_w: u32 = font.cols; // 21
 const grid_h: u32 = font.rows - 1; // 18 (leave bottom row for score)
@@ -44,14 +52,16 @@ const State = struct {
     }
 
     fn reset(self: *State) void {
-        // Seed RNG — use SDL ticks on dev, clock on device
+        // Seed RNG from wall clock
         const seed: u64 = blk: {
-            if (build_options.use_sdl) {
+            if (g_io) |io| {
+                const ts = Io.Clock.real.now(io);
+                break :blk @intCast(@as(i128, ts.nanoseconds) & 0xFFFFFFFFFFFFFFFF);
+            } else if (build_options.use_sdl) {
                 const sdl = @import("../sdl.zig").c;
                 break :blk @as(u64, sdl.SDL_GetTicks());
             } else {
-                const ct = @cImport(@cInclude("time.h"));
-                break :blk @as(u64, @intCast(ct.time(null)));
+                break :blk 0;
             }
         };
         self.rng = std.Random.DefaultPrng.init(seed);

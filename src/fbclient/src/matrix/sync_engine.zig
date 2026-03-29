@@ -1,11 +1,8 @@
 /// Sync engine: processes Matrix /sync responses and maintains room state.
 ///
-/// Split into two layers for testability:
-/// - SyncProcessor: pure state machine. Takes parsed SyncResponse, updates
-///   internal room state, returns a list of emitted events. No I/O, no threads.
-///   Fully testable with constructed input data.
-/// - syncLoop(): thin thread entry point that calls HTTP sync, feeds responses
-///   to the processor, and publishes snapshots. Lives in main.zig.
+/// All strings from parsed JSON are duped into an internal arena so they
+/// outlive the parse buffer. This is critical — std.json.parseFromSlice
+/// returns slices into the source, which become dangling after parsed.deinit().
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const json_types = @import("json_types.zig");
@@ -103,6 +100,9 @@ pub const SyncProcessor = struct {
     /// m.direct account data: user_id → list of room_ids
     m_direct: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged([]const u8)),
     gpa: Allocator,
+    /// Arena for all string data stored in the processor. Strings from parsed
+    /// JSON are duped here so they outlive the parse buffer.
+    strings: std.heap.ArenaAllocator,
 
     pub fn init(gpa: Allocator) SyncProcessor {
         return .{
@@ -111,6 +111,7 @@ pub const SyncProcessor = struct {
             .next_batch = null,
             .m_direct = .empty,
             .gpa = gpa,
+            .strings = std.heap.ArenaAllocator.init(gpa),
         };
     }
 
@@ -129,6 +130,12 @@ pub const SyncProcessor = struct {
             }
         }
         self.m_direct.deinit(self.gpa);
+        self.strings.deinit();
+    }
+
+    /// Dupe a string into the processor's arena so it outlives the JSON parse.
+    fn dupe(self: *SyncProcessor, s: []const u8) ![]const u8 {
+        return self.strings.allocator().dupe(u8, s);
     }
 
     /// Process a parsed sync response. Returns emitted events.
@@ -140,8 +147,8 @@ pub const SyncProcessor = struct {
     ) ![]const SyncEvent {
         var events: std.ArrayListUnmanaged(SyncEvent) = .empty;
 
-        // Update next_batch
-        self.next_batch = response.next_batch;
+        // Update next_batch (dupe — source is JSON parse buffer)
+        self.next_batch = try self.dupe(response.next_batch);
 
         // Global account data
         if (response.account_data) |ad| {
@@ -168,7 +175,9 @@ pub const SyncProcessor = struct {
     fn getOrCreateRoom(self: *SyncProcessor, room_id: []const u8) !*RoomState {
         const result = try self.rooms.getOrPut(self.gpa, room_id);
         if (!result.found_existing) {
-            result.value_ptr.* = RoomState.init(room_id);
+            const owned_id = try self.dupe(room_id);
+            result.key_ptr.* = owned_id;
+            result.value_ptr.* = RoomState.init(owned_id);
         }
         return result.value_ptr;
     }
@@ -186,7 +195,7 @@ pub const SyncProcessor = struct {
         if (data.state) |state| {
             if (state.events) |state_events| {
                 for (state_events) |event| {
-                    try self.processStateEvent(room, room_id, event, events, arena);
+                    try self.processStateEvent(room, event, events, arena);
                 }
             }
         }
@@ -194,7 +203,7 @@ pub const SyncProcessor = struct {
         // Timeline events
         if (data.timeline) |timeline| {
             if (timeline.prev_batch) |pb| {
-                room.prev_batch = pb;
+                room.prev_batch = try self.dupe(pb);
             }
 
             if (timeline.events) |tl_events| {
@@ -203,17 +212,19 @@ pub const SyncProcessor = struct {
                     if (event.event_id) |eid| {
                         const dup = try room.timeline_event_ids.getOrPut(self.gpa, eid);
                         if (dup.found_existing) continue;
+                        // Dupe the key for the dedup map
+                        dup.key_ptr.* = try self.dupe(eid);
                     }
 
                     // State events in timeline
                     if (event.state_key != null) {
-                        try self.processStateEvent(room, room_id, event, events, arena);
+                        try self.processStateEvent(room, event, events, arena);
                     }
 
                     // Extract voice messages (m.room.message with msgtype m.audio)
                     if (event.type) |evt_type| {
                         if (std.mem.eql(u8, evt_type, "m.room.message")) {
-                            if (extractVoiceMessage(event)) |vm| {
+                            if (try self.extractVoiceMessageOwned(event)) |vm| {
                                 try room.voice_messages.append(self.gpa, vm);
                             }
                         }
@@ -221,7 +232,7 @@ pub const SyncProcessor = struct {
 
                     if (event.event_id) |eid| {
                         try events.append(arena, .{ .timeline_event = .{
-                            .room_id = room_id,
+                            .room_id = room.room_id,
                             .event_id = eid,
                         } });
                     }
@@ -235,20 +246,19 @@ pub const SyncProcessor = struct {
                 for (eph_events) |event| {
                     if (event.type) |t| {
                         if (std.mem.eql(u8, t, "m.receipt")) {
-                            try self.processReceiptEvent(room, room_id, event, events, arena);
+                            try self.processReceiptEvent(room, event, events, arena);
                         }
                     }
                 }
             }
         }
 
-        try events.append(arena, .{ .room_updated = room_id });
+        try events.append(arena, .{ .room_updated = room.room_id });
     }
 
     fn processStateEvent(
         self: *SyncProcessor,
         room: *RoomState,
-        room_id: []const u8,
         event: json_types.MatrixEvent,
         events: *std.ArrayListUnmanaged(SyncEvent),
         arena: Allocator,
@@ -258,12 +268,16 @@ pub const SyncProcessor = struct {
         if (std.mem.eql(u8, event_type, "m.room.name")) {
             if (event.content) |content| {
                 if (getJsonString(content, "name")) |name| {
-                    room.name = name;
+                    room.name = try self.dupe(name);
                 }
             }
         } else if (std.mem.eql(u8, event_type, "m.room.canonical_alias")) {
             if (event.content) |content| {
-                room.canonical_alias = getJsonString(content, "alias");
+                if (getJsonString(content, "alias")) |alias| {
+                    room.canonical_alias = try self.dupe(alias);
+                } else {
+                    room.canonical_alias = null;
+                }
             }
         } else if (std.mem.eql(u8, event_type, "m.room.member")) {
             const user_id = event.state_key orelse return;
@@ -272,17 +286,26 @@ pub const SyncProcessor = struct {
                 const display_name = getJsonString(content, "displayname") orelse user_id;
                 const is_direct = getJsonBool(content, "is_direct") orelse false;
 
-                try room.members.put(self.gpa, user_id, .{
-                    .user_id = user_id,
-                    .display_name = display_name,
-                    .membership = membership,
+                const owned_uid = try self.dupe(user_id);
+                const owned_membership = try self.dupe(membership);
+                const owned_display = try self.dupe(display_name);
+
+                // Overwrite key if new entry
+                const result = try room.members.getOrPut(self.gpa, user_id);
+                if (!result.found_existing) {
+                    result.key_ptr.* = owned_uid;
+                }
+                result.value_ptr.* = .{
+                    .user_id = owned_uid,
+                    .display_name = owned_display,
+                    .membership = owned_membership,
                     .is_direct = is_direct,
-                });
+                };
 
                 try events.append(arena, .{ .membership_changed = .{
-                    .room_id = room_id,
-                    .user_id = user_id,
-                    .membership = membership,
+                    .room_id = room.room_id,
+                    .user_id = owned_uid,
+                    .membership = owned_membership,
                 } });
             }
         }
@@ -291,7 +314,6 @@ pub const SyncProcessor = struct {
     fn processReceiptEvent(
         self: *SyncProcessor,
         room: *RoomState,
-        room_id: []const u8,
         event: json_types.MatrixEvent,
         events: *std.ArrayListUnmanaged(SyncEvent),
         arena: Allocator,
@@ -308,17 +330,19 @@ pub const SyncProcessor = struct {
                             if (read_obj.get("m.read")) |read_val| {
                                 switch (read_val) {
                                     .object => |users_obj| {
+                                        const owned_eid = try self.dupe(event_id);
                                         const result = try room.receipt_user_ids.getOrPut(self.gpa, event_id);
                                         if (!result.found_existing) {
+                                            result.key_ptr.* = owned_eid;
                                             result.value_ptr.* = .empty;
                                         }
                                         var user_it = users_obj.iterator();
                                         while (user_it.next()) |user_entry| {
-                                            try result.value_ptr.append(self.gpa, user_entry.key_ptr.*);
+                                            try result.value_ptr.append(self.gpa, try self.dupe(user_entry.key_ptr.*));
                                         }
                                         try events.append(arena, .{ .receipt_updated = .{
-                                            .room_id = room_id,
-                                            .event_id = event_id,
+                                            .room_id = room.room_id,
+                                            .event_id = owned_eid,
                                         } });
                                     },
                                     else => {},
@@ -346,7 +370,7 @@ pub const SyncProcessor = struct {
             if (event.content) |content| {
                 switch (content) {
                     .object => |obj| {
-                        // Clear and rebuild
+                        // Clear and rebuild (old strings live in the arena, no per-item free needed)
                         var md_it = self.m_direct.iterator();
                         while (md_it.next()) |entry| {
                             entry.value_ptr.deinit(self.gpa);
@@ -355,13 +379,13 @@ pub const SyncProcessor = struct {
 
                         var user_it = obj.iterator();
                         while (user_it.next()) |entry| {
-                            const user_id = entry.key_ptr.*;
+                            const user_id = try self.dupe(entry.key_ptr.*);
                             switch (entry.value_ptr.*) {
                                 .array => |arr| {
                                     var room_list: std.ArrayListUnmanaged([]const u8) = .empty;
                                     for (arr.items) |item| {
                                         switch (item) {
-                                            .string => |s| try room_list.append(self.gpa, s),
+                                            .string => |s| try room_list.append(self.gpa, try self.dupe(s)),
                                             else => {},
                                         }
                                     }
@@ -376,6 +400,33 @@ pub const SyncProcessor = struct {
             }
             try events.append(arena, .{ .account_data_updated = .{ .data_type = "m.direct" } });
         }
+    }
+
+    /// Extract a voice message with all strings duped into the processor's arena.
+    fn extractVoiceMessageOwned(self: *SyncProcessor, event: json_types.MatrixEvent) !?VoiceMessageRaw {
+        const content = event.content orelse return null;
+        const msgtype = getJsonString(content, "msgtype") orelse return null;
+        if (!std.mem.eql(u8, msgtype, "m.audio")) return null;
+
+        const mxc_url = getJsonString(content, "url") orelse return null;
+        const event_id = event.event_id orelse return null;
+        const sender = event.sender orelse return null;
+        const timestamp = event.origin_server_ts orelse 0;
+
+        var duration_ms: u64 = 0;
+        if (getJsonValue(content, "info")) |info| {
+            if (getJsonInt(info, "duration")) |d| {
+                duration_ms = if (d > 0) @intCast(d) else 0;
+            }
+        }
+
+        return .{
+            .event_id = try self.dupe(event_id),
+            .sender = try self.dupe(sender),
+            .mxc_url = try self.dupe(mxc_url),
+            .duration_ms = duration_ms,
+            .timestamp = timestamp,
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -550,32 +601,6 @@ fn getJsonInt(value: std.json.Value, key: []const u8) ?i64 {
     }
 }
 
-fn extractVoiceMessage(event: json_types.MatrixEvent) ?VoiceMessageRaw {
-    const content = event.content orelse return null;
-    const msgtype = getJsonString(content, "msgtype") orelse return null;
-    if (!std.mem.eql(u8, msgtype, "m.audio")) return null;
-
-    const mxc_url = getJsonString(content, "url") orelse return null;
-    const event_id = event.event_id orelse return null;
-    const sender = event.sender orelse return null;
-    const timestamp = event.origin_server_ts orelse 0;
-
-    var duration_ms: u64 = 0;
-    if (getJsonValue(content, "info")) |info| {
-        if (getJsonInt(info, "duration")) |d| {
-            duration_ms = if (d > 0) @intCast(d) else 0;
-        }
-    }
-
-    return .{
-        .event_id = event_id,
-        .sender = sender,
-        .mxc_url = mxc_url,
-        .duration_ms = duration_ms,
-        .timestamp = timestamp,
-    };
-}
-
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -718,7 +743,7 @@ test "buildSnapshot produces contacts from m.direct" {
     defer proc.deinit();
     proc.self_user_id = "@alice:test";
 
-    // Set up m.direct
+    // Set up m.direct (using string literals — static lifetime, no dupe needed)
     var bob_rooms: std.ArrayListUnmanaged([]const u8) = .empty;
     try bob_rooms.append(allocator, "!dm1:test");
     try proc.m_direct.put(allocator, "@bob:test", bob_rooms);
@@ -773,4 +798,37 @@ test "timeline event dedup" {
 
     const room = proc.getRoom("!room1:test").?;
     try std.testing.expectEqual(1, room.voice_messages.items.len);
+}
+
+test "strings survive after JSON parse is freed" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    // Process a sync, then free the parsed JSON
+    {
+        const json_str =
+            \\{"next_batch":"batch_survive","rooms":{"join":{"!room1:test":{
+            \\  "state":{"events":[
+            \\    {"type":"m.room.name","state_key":"","content":{"name":"Survived"}},
+            \\    {"type":"m.room.member","state_key":"@bob:test","sender":"@bob:test",
+            \\     "content":{"membership":"join","displayname":"Bob"}}
+            \\  ]}
+            \\}}}}
+        ;
+
+        const parsed = try parseSyncResponse(allocator, json_str);
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        _ = try proc.process(parsed.value, arena.allocator());
+        parsed.deinit(); // Free JSON — strings must survive in processor
+    }
+
+    // Verify strings are still valid after JSON parse freed
+    try std.testing.expectEqualStrings("batch_survive", proc.next_batch.?);
+    const room = proc.getRoom("!room1:test").?;
+    try std.testing.expectEqualStrings("Survived", room.name);
+    const bob = room.members.get("@bob:test").?;
+    try std.testing.expectEqualStrings("Bob", bob.display_name);
 }

@@ -1,12 +1,7 @@
-/// HTTP client for Matrix API.
-/// Uses libcurl via C interop — simpler and more robust than fighting
-/// Zig 0.16-dev's rapidly-changing std.http.Client API.
+/// HTTP client for Matrix API using std.http.Client (Zig 0.16 std.Io).
 const std = @import("std");
+const Io = std.Io;
 const json_types = @import("json_types.zig");
-
-const c = @cImport({
-    @cInclude("curl/curl.h");
-});
 
 pub const HttpError = error{
     ConnectionFailed,
@@ -16,7 +11,6 @@ pub const HttpError = error{
     JsonParseFailed,
     OutOfMemory,
     UriParseFailed,
-    CurlInitFailed,
 };
 
 pub const RawResponse = struct {
@@ -34,9 +28,10 @@ pub const MatrixHttpClient = struct {
     base_url: []const u8,
     access_token: ?[]const u8 = null,
     allocator: std.mem.Allocator,
+    io: Io,
 
-    pub fn init(allocator: std.mem.Allocator, base_url: []const u8) MatrixHttpClient {
-        return .{ .allocator = allocator, .base_url = base_url };
+    pub fn init(allocator: std.mem.Allocator, io: Io, base_url: []const u8) MatrixHttpClient {
+        return .{ .allocator = allocator, .io = io, .base_url = base_url };
     }
 
     /// POST /_matrix/client/v3/login — returns raw response for caller to parse
@@ -45,7 +40,7 @@ pub const MatrixHttpClient = struct {
         const body = std.fmt.bufPrint(&buf,
             \\{{"type":"m.login.password","identifier":{{"type":"m.id.user","user":"{s}"}},"password":"{s}"}}
         , .{ username, password }) catch return HttpError.OutOfMemory;
-        return self.curlRequest("POST", "/_matrix/client/v3/login", body);
+        return self.doRequest(.POST, "/_matrix/client/v3/login", body);
     }
 
     /// GET /_matrix/client/v3/sync
@@ -59,126 +54,71 @@ pub const MatrixHttpClient = struct {
         var path_buf: [600]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/sync{s}", .{query}) catch return HttpError.OutOfMemory;
 
-        return self.curlRequest("GET", path, null);
+        return self.doRequest(.GET, path, null);
     }
 
     /// POST receipt
     pub fn sendReadReceipt(self: *MatrixHttpClient, room_id: []const u8, event_id: []const u8) HttpError!void {
         var path_buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/rooms/{s}/receipt/m.read/{s}", .{ room_id, event_id }) catch return HttpError.OutOfMemory;
-        var resp = try self.curlRequest("POST", path, "{}");
+        var resp = try self.doRequest(.POST, path, "{}");
         resp.deinit();
     }
 
-    fn requestJson(self: *MatrixHttpClient, comptime T: type, method: []const u8, path: []const u8, body: ?[]const u8) HttpError!T {
-        var resp = try self.curlRequest(method, path, body);
-        defer resp.deinit();
-
-        const parsed = std.json.parseFromSlice(T, self.allocator, resp.body, .{ .ignore_unknown_fields = true }) catch return HttpError.JsonParseFailed;
-        defer parsed.deinit();
-        return parsed.value;
-    }
-
-    fn curlRequest(self: *MatrixHttpClient, method: []const u8, path: []const u8, body: ?[]const u8) HttpError!RawResponse {
+    fn doRequest(self: *MatrixHttpClient, method: std.http.Method, path: []const u8, body: ?[]const u8) HttpError!RawResponse {
         // Build URL
         var url_buf: [1024]u8 = undefined;
         const url = std.fmt.bufPrint(&url_buf, "{s}{s}", .{ self.base_url, path }) catch return HttpError.OutOfMemory;
 
-        const curl_handle = c.curl_easy_init() orelse return HttpError.CurlInitFailed;
-        defer c.curl_easy_cleanup(curl_handle);
+        var client: std.http.Client = .{ .allocator = self.allocator, .io = self.io };
+        defer client.deinit();
 
-        // URL (null-terminate)
-        var url_z: [1025]u8 = undefined;
-        if (url.len >= url_z.len) return HttpError.OutOfMemory;
-        @memcpy(url_z[0..url.len], url);
-        url_z[url.len] = 0;
-        _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_URL, @as([*:0]const u8, url_z[0..url.len :0]));
+        // Build extra headers
+        var auth_buf: [512]u8 = undefined;
+        var extra_headers_buf: [2]std.http.Header = undefined;
+        var header_count: usize = 0;
 
-        // Method
-        if (std.mem.eql(u8, method, "POST")) {
-            _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_POST, @as(c_long, 1));
-        } else if (std.mem.eql(u8, method, "PUT")) {
-            _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_CUSTOMREQUEST, @as([*:0]const u8, "PUT"));
-        }
+        extra_headers_buf[header_count] = .{ .name = "Content-Type", .value = "application/json" };
+        header_count += 1;
 
-        // Body
-        if (body) |b| {
-            _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_POSTFIELDS, @as([*]const u8, b.ptr));
-            _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_POSTFIELDSIZE, @as(c_long, @intCast(b.len)));
-        }
-
-        // Headers
-        var headers: ?*c.curl_slist = null;
-        headers = c.curl_slist_append(headers, "Content-Type: application/json");
         if (self.access_token) |token| {
-            var auth_buf: [512]u8 = undefined;
-            const auth = std.fmt.bufPrint(&auth_buf, "Authorization: Bearer {s}", .{token}) catch return HttpError.OutOfMemory;
-            var auth_z: [513]u8 = undefined;
-            @memcpy(auth_z[0..auth.len], auth);
-            auth_z[auth.len] = 0;
-            headers = c.curl_slist_append(headers, @as([*:0]const u8, auth_z[0..auth.len :0]));
+            const auth = std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{token}) catch return HttpError.OutOfMemory;
+            extra_headers_buf[header_count] = .{ .name = "Authorization", .value = auth };
+            header_count += 1;
         }
-        _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_HTTPHEADER, headers);
-        defer c.curl_slist_free_all(headers);
 
-        // Response body callback
-        var response_data = ResponseData{ .allocator = self.allocator };
-        _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_WRITEFUNCTION, writeCallback);
-        _ = c.curl_easy_setopt(curl_handle, c.CURLOPT_WRITEDATA, @as(*anyopaque, @ptrCast(&response_data)));
+        // Set up response body writer (Allocating collects into a growable buffer)
+        var response_writer: Io.Writer.Allocating = .init(self.allocator);
+        // Don't defer deinit — we transfer ownership on success
 
-        // Perform
-        const res = c.curl_easy_perform(curl_handle);
-        if (res != c.CURLE_OK) {
-            if (response_data.buf) |b| self.allocator.free(b[0..response_data.capacity]);
+        const result = client.fetch(.{
+            .location = .{ .url = url },
+            .method = method,
+            .payload = body,
+            .response_writer = &response_writer.writer,
+            .extra_headers = extra_headers_buf[0..header_count],
+        }) catch {
+            response_writer.deinit();
             return HttpError.ConnectionFailed;
-        }
+        };
 
         // Check HTTP status
-        var http_code: c_long = 0;
-        _ = c.curl_easy_getinfo(curl_handle, c.CURLINFO_RESPONSE_CODE, &http_code);
-        if (http_code != 200) {
-            if (response_data.buf) |b| self.allocator.free(b[0..response_data.capacity]);
+        if (result.status != .ok) {
+            response_writer.deinit();
             return HttpError.MatrixError;
         }
 
-        if (response_data.buf) |b| {
-            return .{
-                .body = b[0..response_data.len],
-                .full_buf = b[0..response_data.capacity],
-                .allocator = self.allocator,
-            };
+        // Transfer ownership of the response buffer
+        var list = response_writer.toArrayList();
+        const buf_slice = list.allocatedSlice();
+        if (buf_slice.len == 0) {
+            return HttpError.InvalidResponse;
         }
-        return HttpError.InvalidResponse;
+
+        return .{
+            .body = list.items,
+            .full_buf = buf_slice,
+            .allocator = self.allocator,
+        };
     }
 };
-
-const ResponseData = struct {
-    allocator: std.mem.Allocator,
-    buf: ?[]u8 = null,
-    len: usize = 0,
-    capacity: usize = 0,
-};
-
-fn writeCallback(contents: [*]const u8, size: usize, nmemb: usize, userdata: *anyopaque) callconv(.c) usize {
-    const total = size * nmemb;
-    const data: *ResponseData = @ptrCast(@alignCast(userdata));
-
-    // Grow buffer if needed
-    const needed = data.len + total;
-    if (needed > data.capacity) {
-        const new_cap = @max(needed * 2, 4096);
-        if (data.buf) |old| {
-            const new_buf = data.allocator.realloc(old[0..data.capacity], new_cap) catch return 0;
-            data.buf = new_buf;
-            data.capacity = new_cap;
-        } else {
-            const new_buf = data.allocator.alloc(u8, new_cap) catch return 0;
-            data.buf = new_buf;
-            data.capacity = new_cap;
-        }
-    }
-
-    @memcpy(data.buf.?[data.len .. data.len + total], contents[0..total]);
-    data.len += total;
-    return total;
-}

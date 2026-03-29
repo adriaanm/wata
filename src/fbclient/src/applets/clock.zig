@@ -1,12 +1,18 @@
 /// Simple clock display — idle screen / placeholder applet.
 const std = @import("std");
+const Io = std.Io;
 const build_options = @import("build_options");
 const display = @import("../display.zig");
 const font = @import("../font.zig");
 const input = @import("../input.zig");
 const shell = @import("../shell.zig");
 
-const ct = @cImport(@cInclude("time.h"));
+var g_io: ?Io = null;
+
+/// Set the Io instance for clock time. Called once from main.
+pub fn setIo(io: Io) void {
+    g_io = io;
+}
 
 const State = struct {
     elapsed: f32,
@@ -31,7 +37,9 @@ fn update(ptr: *anyopaque, dt: f32) void {
 }
 
 fn getEpochSeconds() i64 {
-    return @intCast(ct.time(null));
+    const io = g_io orelse return 0;
+    const ts = Io.Clock.real.now(io);
+    return @intCast(@divFloor(ts.nanoseconds, std.time.ns_per_s));
 }
 
 fn render(_: *anyopaque, fb: *display.Framebuffer) void {

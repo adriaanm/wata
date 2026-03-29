@@ -39,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-**Our workaround:** We use form 1 with `DebugAllocator` created manually and `std.c.*` for I/O. To adopt `std.Io` properly, switch to form 3 and thread `init.io` through to `std.http.Client`.
+**Our approach:** We use form 3 (`std.process.Init`) with `init.gpa` for allocation and `init.io` threaded through to `std.http.Client`, sleep, clock, and stderr.
 
 ## std.http.Client
 
@@ -64,7 +64,7 @@ const result = try client.fetch(.{
 
 **Gotcha:** If `response_writer` is null, the response body is **discarded**. You must provide a writer. The writer type is `std.Io.Writer`, not the old `std.io.Writer`. Creating one that writes to an ArrayList requires `std.Io.Writer.Allocating`.
 
-**Our workaround:** We use libcurl via `@cImport` instead. The std.http.Client API is correct but requires threading `std.Io` through the entire call chain, which we haven't done yet. Libcurl is pragmatic for now.
+**Our approach:** We use `std.http.Client` with `Io.Writer.Allocating` to collect response bodies. The `fetch()` high-level API handles the request lifecycle.
 
 ## Removed / Moved APIs
 
@@ -83,23 +83,39 @@ const result = try client.fetch(.{
 | `std.fs.File` | `std.Io.File` | |
 | `std.fs.Dir` | `std.Io.Dir` | |
 
-## Our C Workarounds (when std.Io isn't threaded through)
+## C Workarounds — RESOLVED
+
+All C workarounds have been replaced with proper `std.Io` APIs:
 
 ```zig
-// Sleep (instead of std.time.sleep):
-const c = @cImport(@cInclude("time.h"));
-const ts = c.struct_timespec{ .tv_sec = secs, .tv_nsec = nanos };
-_ = c.nanosleep(&ts, null);
+// Sleep:
+io.sleep(.fromMilliseconds(100), .awake) catch {};
 
-// Write to stderr (instead of std.io.getStdErr):
-_ = std.c.write(2, msg.ptr, msg.len);
+// Write to stderr:
+var stderr_buf: [1024]u8 = undefined;
+var file_writer = Io.File.Writer.initStreaming(Io.File.stderr(), io, &stderr_buf);
+file_writer.interface.writeAll(msg) catch {};
+file_writer.interface.flush() catch {};
 
-// Get wall clock time (instead of std.time.timestamp):
-const ct = @cImport(@cInclude("time.h"));
-const epoch: i64 = @intCast(ct.time(null));
+// Wall clock time (epoch seconds):
+const ts = Io.Clock.real.now(io);
+const epoch: i64 = @intCast(@divFloor(ts.nanoseconds, std.time.ns_per_s));
+
+// HTTP via std.http.Client (replaces libcurl):
+var client: std.http.Client = .{ .allocator = allocator, .io = io };
+var response_writer: Io.Writer.Allocating = .init(allocator);
+const result = try client.fetch(.{
+    .location = .{ .url = url },
+    .method = .POST,
+    .payload = body,
+    .response_writer = &response_writer.writer,
+    .extra_headers = headers,
+});
+var list = response_writer.toArrayList();
+// list.items contains the response body
 ```
 
-These work because we link libc anyway (for libcurl and SDL2).
+Only remaining C interop is SDL2 (display/input backend), which is inherently a C library.
 
 ## ArrayList (Unmanaged by Default)
 
@@ -241,18 +257,18 @@ fn getToken(alloc: Allocator) []const u8 {
 
 This bit us with the Matrix login response and sync processor — any string stored beyond the parse lifetime must be duped.
 
-## Migration Path: Current State → Proper std.Io
+## Migration Path — COMPLETED
 
-Our current approach uses `pub fn main() !void` with manual DebugAllocator and C workarounds for I/O. To adopt std.Io properly:
+Migration from C workarounds to proper `std.Io` is done:
 
-1. Switch main to `pub fn main(init: std.process.Init) !void`
-2. Use `init.io` for `std.http.Client`, sleep, clock, stdout/stderr
-3. Use `init.gpa` instead of manual DebugAllocator
-4. Parse args via `init.minimal.args.iterate()`
-5. Drop libcurl, use `std.http.Client` with `init.io`
-6. Drop C `nanosleep`/`write` workarounds
+1. ✅ Main uses `pub fn main(init: std.process.Init) !void`
+2. ✅ `init.io` threaded to HTTP client, sleep, clock, stderr
+3. ✅ `init.gpa` replaces manual DebugAllocator
+4. ✅ libcurl replaced with `std.http.Client` + `Io.Writer.Allocating`
+5. ✅ C `nanosleep`/`write`/`time` workarounds removed
+6. ✅ libc only linked when SDL2 is used (not unconditionally)
 
-This is a clean migration but touches every file. Worth doing once the 0.16 API stabilizes.
+Applets that need `io` receive it via module-level `setIo()` functions called from main, matching the existing `setSnapshot()` pattern.
 
 ## Useful References
 

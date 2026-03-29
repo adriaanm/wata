@@ -1,6 +1,7 @@
 /// Sync thread: login, then long-poll /sync in a loop.
 /// Publishes StateSnapshots for the UI thread via atomic swap.
 const std = @import("std");
+const Io = std.Io;
 const http = @import("http.zig");
 const json_types = @import("json_types.zig");
 const sync_engine = @import("sync_engine.zig");
@@ -26,15 +27,11 @@ pub const SyncThreadContext = struct {
     state_store: *types.StateStore,
     should_stop: *std.atomic.Value(bool),
     allocator: std.mem.Allocator,
+    io: Io,
 };
 
-fn sleepMs(ms: u64) void {
-    const c = @cImport(@cInclude("time.h"));
-    const ts = c.struct_timespec{
-        .tv_sec = @intCast(ms / 1000),
-        .tv_nsec = @intCast((ms % 1000) * 1_000_000),
-    };
-    _ = c.nanosleep(&ts, null);
+fn sleepMs(io: Io, ms: u64) void {
+    io.sleep(.fromMilliseconds(@intCast(ms)), .awake) catch {};
 }
 
 pub fn syncThreadMain(ctx_ptr: *SyncThreadContext) void {
@@ -51,7 +48,7 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
     // Login
     _ = ctx.ui_queue.push(.{ .connection_state = .connecting });
 
-    var client = http.MatrixHttpClient.init(allocator, ctx.config.homeserver);
+    var client = http.MatrixHttpClient.init(allocator, ctx.io, ctx.config.homeserver);
     var login_resp = client.login(ctx.config.username, ctx.config.password) catch {
         _ = ctx.ui_queue.push(.{ .connection_state = .err });
         return;
@@ -97,19 +94,20 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
             if (ctx.should_stop.load(.acquire)) break;
 
             // Exponential backoff
-            sleepMs(retry_delay_ms);
+            sleepMs(ctx.io, retry_delay_ms);
             retry_delay_ms = @min(retry_delay_ms * 2, max_retry_delay_ms);
             continue;
         };
 
         // Parse sync response
+        var sync_resp = sync_result;
         const parsed = std.json.parseFromSlice(
             json_types.SyncResponse,
             allocator,
-            sync_result.body,
+            sync_resp.body,
             .{ .ignore_unknown_fields = true },
         ) catch {
-            allocator.free(sync_result.full_buf);
+            sync_resp.deinit();
             _ = ctx.ui_queue.push(.{ .connection_state = .err });
             continue;
         };
@@ -120,7 +118,7 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
         event_arena.deinit();
 
         parsed.deinit();
-        allocator.free(sync_result.body);
+        sync_resp.deinit();
 
         // Build and publish snapshot
         var snapshot_arena = std.heap.ArenaAllocator.init(allocator);

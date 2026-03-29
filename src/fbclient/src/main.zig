@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const build_options = @import("build_options");
 const display = @import("display.zig");
 const input = @import("input.zig");
@@ -13,27 +14,27 @@ const sync_thread = @import("matrix/sync_thread.zig");
 
 const sdl = if (build_options.use_sdl) @import("sdl.zig").c else struct {};
 
-const ct = @cImport({
-    @cInclude("time.h");
-    @cInclude("stdio.h");
-    @cInclude("string.h");
-});
-
 var debug_mode: bool = false;
+var g_io: Io = undefined;
 
 fn debugLog(comptime fmt: []const u8, args: anytype) void {
     if (!debug_mode) return;
     var buf: [512]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt ++ "\n", args) catch return;
-    _ = std.c.write(2, msg.ptr, msg.len);
+    var stderr_buf: [1024]u8 = undefined;
+    var file_writer = Io.File.Writer.initStreaming(Io.File.stderr(), g_io, &stderr_buf);
+    file_writer.interface.writeAll(msg) catch return;
+    file_writer.interface.flush() catch return;
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     debug_mode = build_options.debug_mode;
+    g_io = init.io;
+    const allocator = init.gpa;
 
-    var da = std.heap.DebugAllocator(.{}){};
-    defer _ = da.deinit();
-    const allocator = da.allocator();
+    // Share io with applets that need it
+    clock_applet.setIo(init.io);
+    snake.setIo(init.io);
 
     debugLog("[main] wata-fb starting in debug mode", .{});
 
@@ -49,6 +50,7 @@ pub fn main() !void {
         .state_store = &state_store,
         .should_stop = &should_stop,
         .allocator = allocator,
+        .io = init.io,
     };
 
     debugLog("[main] connecting to {s} as {s}", .{ sync_ctx.config.homeserver, sync_ctx.config.username });
@@ -99,8 +101,7 @@ pub fn main() !void {
                 }
             }
             // Sleep 100ms
-            const ts = ct.struct_timespec{ .tv_sec = 0, .tv_nsec = 100_000_000 };
-            _ = ct.nanosleep(&ts, null);
+            init.io.sleep(.fromMilliseconds(100), .awake) catch {};
         }
         return;
     }
