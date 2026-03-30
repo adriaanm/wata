@@ -1,12 +1,24 @@
 /// Wata voice messaging applet — contact list and conversation views.
+/// Uses FreeType-rendered font for legibility on the small display.
 const std = @import("std");
 const display = @import("../display.zig");
-const font = @import("../font.zig");
+const font = @import("../font.zig"); // bitmap font — used only for status icons
+const ft_font = @import("../ft_font.zig");
 const input = @import("../input.zig");
 const shell = @import("../shell.zig");
 const types = @import("../types.zig");
 
 const View = enum { contacts, conversation };
+
+const FONT_SIZE = 12; // pixels — good legibility on 128×160
+const HEADER_H = 14; // header area height
+const FOOTER_H = 12; // footer area height
+const LINE_H = 14; // per-row height for list items
+
+/// How many visible rows fit between header and footer.
+fn visibleRows() u32 {
+    return (display.height - HEADER_H - FOOTER_H) / LINE_H;
+}
 
 const State = struct {
     view: View = .contacts,
@@ -18,9 +30,9 @@ const State = struct {
     conv_contact_idx: usize = 0,
     msg_selected: usize = 0,
     msg_scroll: usize = 0,
+    // Font (initialized lazily on first render)
+    ft: ?ft_font.Font = null,
 };
-
-const visible_rows: u32 = font.rows - 2; // header + footer
 
 fn initApplet() *anyopaque {
     const S = struct {
@@ -29,7 +41,19 @@ fn initApplet() *anyopaque {
     return @ptrCast(&S.state);
 }
 
-fn deinitApplet(_: *anyopaque) void {}
+fn deinitApplet(ptr: *anyopaque) void {
+    const s: *State = @ptrCast(@alignCast(ptr));
+    if (s.ft) |*f| f.deinit();
+}
+
+fn getFont(s: *State) ?*ft_font.Font {
+    if (s.ft != null) return &s.ft.?;
+    // Lazy init — needs allocator but we don't have one in the applet interface.
+    // Use a page allocator as fallback (font init is a one-time cost).
+    const ttf_data = @embedFile("../fonts/Inter.ttf");
+    s.ft = ft_font.Font.init(std.heap.page_allocator, ttf_data, FONT_SIZE) catch return null;
+    return &s.ft.?;
+}
 
 fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell.Action {
     const s: *State = @ptrCast(@alignCast(ptr));
@@ -45,13 +69,13 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
 fn handleContactsInput(s: *State, key: input.Key) void {
     const count = if (s.snapshot) |snap| snap.contacts.len else 0;
     if (count == 0) return;
+    const vis = visibleRows();
 
     switch (key) {
         .down => {
             if (s.selected < count - 1) s.selected += 1;
-            // Scroll if needed
-            if (s.selected >= s.scroll_offset + visible_rows) {
-                s.scroll_offset = s.selected - visible_rows + 1;
+            if (s.selected >= s.scroll_offset + vis) {
+                s.scroll_offset = s.selected - vis + 1;
             }
         },
         .up => {
@@ -71,6 +95,7 @@ fn handleContactsInput(s: *State, key: input.Key) void {
 }
 
 fn handleConversationInput(s: *State, key: input.Key) void {
+    const vis = visibleRows();
     switch (key) {
         .back => {
             s.view = .contacts;
@@ -79,8 +104,8 @@ fn handleConversationInput(s: *State, key: input.Key) void {
             const count = msgCount(s);
             if (count > 0 and s.msg_selected < count - 1) {
                 s.msg_selected += 1;
-                if (s.msg_selected >= s.msg_scroll + visible_rows) {
-                    s.msg_scroll = s.msg_selected - visible_rows + 1;
+                if (s.msg_selected >= s.msg_scroll + vis) {
+                    s.msg_scroll = s.msg_selected - vis + 1;
                 }
             }
         },
@@ -103,10 +128,7 @@ fn msgCount(s: *const State) usize {
 }
 
 fn update(ptr: *anyopaque, _: f32) void {
-    const s: *State = @ptrCast(@alignCast(ptr));
-    // Pick up latest snapshot from shell context (set by main loop)
-    // This is a read of a pointer that main.zig updates each frame
-    _ = s;
+    _ = ptr;
 }
 
 fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
@@ -122,57 +144,60 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
 // Contacts view
 // ---------------------------------------------------------------------------
 
-fn renderContacts(s: *const State, fb: *display.Framebuffer) void {
+fn renderContacts(s: *State, fb: *display.Framebuffer) void {
     const c = display.colors;
+    const f = getFont(s) orelse {
+        // Fallback to bitmap font if FreeType failed
+        font.drawText(fb, "Font error", 0, 2, c.red, null);
+        return;
+    };
     const snap = s.snapshot orelse {
-        renderConnecting(s.connection, fb);
+        renderConnecting(s, fb, f);
         return;
     };
 
     // Header
-    font.drawText(fb, "WATA", 0, 0, c.cyan, c.black);
-    // Connection indicator on the right
+    f.drawText(fb, "WATA", 2, 0, c.cyan, null);
+    // Connection indicator
     const conn_str = switch (s.connection) {
         .syncing => "ok",
-        .connected => "..",
-        .connecting => "..",
+        .connected, .connecting => "..",
         .err => "ERR",
         .disconnected => "off",
     };
-    const conn_col = font.cols - @as(u32, @intCast(conn_str.len));
     const conn_color: display.Color = switch (s.connection) {
         .syncing => c.green,
         .err => c.red,
         else => c.mid_gray,
     };
-    font.drawText(fb, conn_str, conn_col, 0, conn_color, c.black);
+    f.drawTextRight(fb, conn_str, display.width - 2, 0, conn_color);
 
     if (snap.contacts.len == 0) {
-        font.drawTextCentered(fb, "No contacts", 5, c.mid_gray, null);
-        font.drawTextCentered(fb, "Waiting for sync", 7, c.mid_gray, null);
+        f.drawTextCentered(fb, "No contacts", 40, c.mid_gray);
+        f.drawTextCentered(fb, "Waiting for sync", 56, c.mid_gray);
         return;
     }
 
     // Contact list
-    const end = @min(snap.contacts.len, s.scroll_offset + visible_rows);
+    const vis = visibleRows();
+    const end = @min(snap.contacts.len, s.scroll_offset + vis);
     for (s.scroll_offset..end) |i| {
-        const row: u32 = @intCast(i - s.scroll_offset + 1); // +1 for header
+        const row_y: i32 = @intCast(HEADER_H + (i - s.scroll_offset) * LINE_H);
         const contact = snap.contacts[i];
         const selected = i == s.selected;
 
         const fg: display.Color = if (selected) c.black else c.green;
         const bg: display.Color = if (selected) c.green else c.black;
 
-        // Clear row background if selected
         if (selected) {
-            fb.fillRect(0, @intCast(1 + row * font.glyph_h), display.width, font.glyph_h, bg);
+            fb.fillRect(0, row_y, display.width, LINE_H, bg);
         }
 
-        // Name (truncate to fit)
-        const max_name_len = font.cols - 3; // leave room for badge
+        // Name (truncated to fit)
         const name = contact.user.display_name;
-        const display_len = @min(name.len, max_name_len);
-        font.drawText(fb, name[0..display_len], 0, row, fg, bg);
+        const max_chars = 18;
+        const display_len = @min(name.len, max_chars);
+        f.drawText(fb, name[0..display_len], 2, row_y, fg, null);
 
         // Unplayed count badge
         if (i < snap.conversations.len) {
@@ -180,38 +205,38 @@ fn renderContacts(s: *const State, fb: *display.Framebuffer) void {
             if (unplayed > 0) {
                 var badge_buf: [4]u8 = undefined;
                 const badge = std.fmt.bufPrint(&badge_buf, "{d}", .{unplayed}) catch "?";
-                const badge_col = font.cols - @as(u32, @intCast(badge.len));
-                font.drawText(fb, badge, badge_col, row, c.yellow, if (selected) bg else null);
+                f.drawTextRight(fb, badge, display.width - 2, row_y, c.yellow);
             }
         }
     }
 
-    // Footer hint
-    font.drawText(fb, "\x18\x19 select  OK open", 0, font.rows - 1, c.mid_gray, c.black);
+    // Footer
+    f.drawText(fb, "\x18\x19 select  OK open", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
 }
 
-fn renderConnecting(connection: types.ConnectionState, fb: *display.Framebuffer) void {
+fn renderConnecting(s: *const State, fb: *display.Framebuffer, f: *ft_font.Font) void {
     const c = display.colors;
-    const msg: []const u8 = switch (connection) {
+    const msg: []const u8 = switch (s.connection) {
         .disconnected => "Disconnected",
         .connecting => "Connecting...",
         .connected => "Logging in...",
         .syncing => "Syncing...",
         .err => "Connection error",
     };
-    font.drawTextCentered(fb, msg, 5, c.mid_gray, null);
+    f.drawTextCentered(fb, msg, 60, c.mid_gray);
 }
 
 // ---------------------------------------------------------------------------
 // Conversation view
 // ---------------------------------------------------------------------------
 
-fn renderConversation(s: *const State, fb: *display.Framebuffer) void {
+fn renderConversation(s: *State, fb: *display.Framebuffer) void {
     const c = display.colors;
+    const f = getFont(s) orelse return;
     const snap = s.snapshot orelse return;
 
     if (s.conv_contact_idx >= snap.conversations.len) {
-        font.drawTextCentered(fb, "No conversation", 5, c.mid_gray, null);
+        f.drawTextCentered(fb, "No conversation", 60, c.mid_gray);
         return;
     }
 
@@ -219,19 +244,20 @@ fn renderConversation(s: *const State, fb: *display.Framebuffer) void {
 
     // Header — contact name
     const header_name = if (conv.contact) |contact| contact.user.display_name else "Chat";
-    const header_len = @min(header_name.len, font.cols);
-    font.drawText(fb, header_name[0..header_len], 0, 0, c.cyan, c.black);
+    const header_len = @min(header_name.len, 20);
+    f.drawText(fb, header_name[0..header_len], 2, 0, c.cyan, null);
 
     if (conv.messages.len == 0) {
-        font.drawTextCentered(fb, "No messages", 5, c.mid_gray, null);
-        font.drawText(fb, "ESC back", 0, font.rows - 1, c.mid_gray, c.black);
+        f.drawTextCentered(fb, "No messages", 60, c.mid_gray);
+        f.drawText(fb, "ESC back", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
         return;
     }
 
-    // Message list (newest at bottom, scroll from bottom)
-    const end = @min(conv.messages.len, s.msg_scroll + visible_rows);
+    // Message list
+    const vis = visibleRows();
+    const end = @min(conv.messages.len, s.msg_scroll + vis);
     for (s.msg_scroll..end) |i| {
-        const row: u32 = @intCast(i - s.msg_scroll + 1);
+        const row_y: i32 = @intCast(HEADER_H + (i - s.msg_scroll) * LINE_H);
         const msg = conv.messages[i];
         const selected = i == s.msg_selected;
 
@@ -239,32 +265,36 @@ fn renderConversation(s: *const State, fb: *display.Framebuffer) void {
         const bg: display.Color = if (selected) c.green else c.black;
 
         if (selected) {
-            fb.fillRect(0, @intCast(1 + row * font.glyph_h), display.width, font.glyph_h, bg);
+            fb.fillRect(0, row_y, display.width, LINE_H, bg);
         }
 
-        // Check mark for played
+        // Check mark for played (use bitmap font icon)
         if (msg.is_played) {
-            font.drawChar(fb, font.icon.check, 0, @intCast(1 + row * font.glyph_h), fg, bg);
+            font.drawChar(fb, font.icon.check, 0, row_y + 2, fg, null);
         }
 
         // Duration
         const dur_secs: u32 = @intFromFloat(msg.duration);
         var dur_buf: [6]u8 = undefined;
         const dur_str = std.fmt.bufPrint(&dur_buf, "{d}:{d:0>2}", .{ dur_secs / 60, dur_secs % 60 }) catch "?:??";
-        font.drawText(fb, dur_str, 1, row, fg, bg);
+        const x_offset: i32 = if (msg.is_played) 8 else 2;
+        f.drawText(fb, dur_str, x_offset, row_y, fg, null);
 
         // Sender (short)
         const sender = msg.sender.display_name;
-        const sender_col: u32 = 1 + @as(u32, @intCast(dur_str.len)) + 1;
-        const avail = if (sender_col < font.cols) font.cols - sender_col else 0;
-        const sender_len = @min(sender.len, avail);
-        if (sender_len > 0) {
-            font.drawText(fb, sender[0..sender_len], sender_col, row, fg, bg);
+        const dur_w = f.measureText(dur_str);
+        const sender_x = x_offset + dur_w + 4;
+        const avail = @as(i32, display.width) - sender_x - 2;
+        if (avail > 0) {
+            const max_sender = @min(sender.len, @as(usize, @intCast(@divTrunc(avail, 7))));
+            if (max_sender > 0) {
+                f.drawText(fb, sender[0..max_sender], sender_x, row_y, fg, null);
+            }
         }
     }
 
     // Footer
-    font.drawText(fb, "ESC back", 0, font.rows - 1, c.mid_gray, c.black);
+    f.drawText(fb, "ESC back", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
 }
 
 pub const applet = shell.Applet{

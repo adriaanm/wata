@@ -25,6 +25,7 @@
 | [matrix-servers](docs/matrix-servers.md) | Matrix server comparison |
 | [coding-rules](docs/coding-rules.md) | TUI logging guidelines |
 | [framebuffer-client](docs/planning/framebuffer-client.md) | Zig framebuffer client design |
+| [freetype-font-rendering](docs/planning/freetype-font-rendering.md) | FreeType font rendering for wata applet |
 
 ---
 
@@ -38,7 +39,7 @@
 **Stack:**
 - Android: Kotlin + Jetpack Compose + OkHttp
 - TUI/Web: TypeScript + matrix-js-sdk
-- Framebuffer: Zig 0.16-dev + SDL2 (dev) / fbdev (device)
+- Framebuffer: Zig 0.16-dev + SDL2 (dev) / fbdev (device) + FreeType (font rendering)
 - Audio: Ogg Opus at 16kHz
 
 ---

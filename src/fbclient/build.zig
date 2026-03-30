@@ -24,8 +24,11 @@ pub fn build(b: *std.Build) void {
     });
     root_mod.addOptions("build_options", options);
 
+    // FreeType (font rendering for wata applet)
+    root_mod.link_libc = true;
+    root_mod.linkSystemLibrary("freetype2", .{});
+
     if (use_sdl) {
-        root_mod.link_libc = true;
         root_mod.linkSystemLibrary("SDL2", .{});
     }
 
