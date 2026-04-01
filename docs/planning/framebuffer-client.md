@@ -280,12 +280,28 @@ Zig cross-compiles C dependencies (libopus, ALSA headers) using its bundled clan
 | Snake applet | Done | |
 | Clock applet | Done | |
 | Charmap applet | Done | |
-| Wata applet | Done | Contact list + conversation views |
-| Audio (tinyalsa+opus+ogg) | Done | 48kHz S16_LE mono, PTT record, Ogg/Opus codec |
-| Settings applet | Done | Audio echo test, brightness, device info |
+| Wata applet | Done | Contact list, conversations, PTT, DM room creation, auto-join |
+| Audio (tinyalsa+opus+ogg) | Done | 48kHz S16_LE mono, PTT record, Ogg/Opus codec, echo test |
+| Settings applet | Done | End-to-end echo test (Opus codec), brightness, device info |
 
-## Next Steps
+## Implementation Log
 
-1. **Test on device** — deploy binary, verify display + input + rotation + audio echo
-2. Polish: session persistence (store access_token), display name management
-3. Family room support (group voice messages)
+### 2026-04-01: Audio + Matrix completeness
+
+**Audio echo test fix**: The MSM Q6 ADSP requires auto-start and full period-sized writes. Fill-then-start deadlocks (DSP needs stream RUNNING before pcm_writei works). period_count must be 2 (4+ fails silently). Fixed stutter by writing entire buffer in one pcm_writei call + ioctl drain. Echo test now runs full Opus codec pipeline (record → encode → Ogg → decode → playback). See `docs/voice.md` for constraint table.
+
+**DM room creation**: Family members without existing DM rooms now appear in the contact list (with empty room_id). First PTT to such a contact creates the room (POST /createRoom with is_direct), updates m.direct account data, then sends. Mirrors TUI's `ensureDMRoom` pattern.
+
+**Auto-join invites**: All invited rooms are auto-joined during sync processing (trusted family environment). New family members appear after the next sync cycle.
+
+**DM room deduplication**: Primary DM room selected by finding the first joined room in m.direct (skips stale/left rooms). Matches TUI behavior (oldest room wins via insertion order).
+
+**Deployment**: `just fb-deploy` builds ARM cross-compile, scp to bq268:/opt/wata, restarts via start.sh.
+
+### Remaining work
+
+See `TASKS.md` for current task list. Key items:
+- Streaming playback stutter (blocked on end-to-end testing, then investigate 500ms partial pre-buffer)
+- Event buffering for out-of-order sync
+- Sync gap handling
+- Rate limit retries

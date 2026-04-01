@@ -8,7 +8,7 @@
 - [ ] Streaming playback stutter — audio_thread.zig writes period-at-a-time, causing underruns on BQ268. Echo test fixed (single large pcm_writei). **Blocked on**: getting the fbclient wata applet fully working end-to-end first. **When ready**: investigate partial buffering — decode N ms of audio before starting playback, stream the rest. Start with 500ms pre-buffer and tune down to find the minimum the hardware needs for smooth playback.
 - [x] DM room creation — create room with `is_direct: true`, update `m.direct`. Lazy creation on first send.
 - [x] Auto-join invites — auto-join all invited rooms during sync (trusted family environment).
-- [ ] DM room deduplication — Matrix allows multiple DM rooms between two users. Android/TUI pick the oldest by creation timestamp. Fbclient sync_engine doesn't deduplicate — may show duplicate conversations or route messages to wrong room.
+- [x] DM room deduplication — skip stale/left rooms, use first joined room from m.direct.
 
 ### Backlog
 - [ ] Event buffering for out-of-order sync — messages can arrive before their room is classified as a DM (m.direct update lags). TUI/Android have 300ms retry buffer. Fbclient may drop or misroute early messages.
