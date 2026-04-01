@@ -192,13 +192,12 @@ const FbdevBackend = struct {
     pub fn present(self: *FbdevBackend) void {
         const fb: [*]Color = @ptrCast(self.fb_mem.ptr);
 
-        // The fb is 160×128 in memory but the panel displays it as 128×160
-        // portrait via MADCTL scan direction swap. This means:
-        //   app(x, y) → fb[x * fb_w + y]  (transpose)
-        // x ∈ [0,128) maps to fb rows [0,128), y ∈ [0,160) maps to fb cols [0,160)
+        // FB is 160×128 in memory, panel rotation=90° via MADCTL (MV=1, MX=1).
+        // Panel mapping: physical(x,y) ← fb_row=(127-x), fb_col=y
+        // So: app(x,y) → fb[(127-x) * 160 + y]
         for (0..height) |y| {
             for (0..width) |x| {
-                fb[x * fb_w + y] = self.buf[y * width + x];
+                fb[(width - 1 - x) * fb_w + y] = self.buf[y * width + x];
             }
         }
     }
