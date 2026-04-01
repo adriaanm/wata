@@ -258,12 +258,15 @@ fn doEchoTest(s: *State) void {
         return;
     };
 
-    var play_offset: u32 = 0;
-    while (play_offset + alsa.PERIOD_BYTES <= rec_offset) {
-        playback.writeFrames(pcm_buf[play_offset..][0..alsa.PERIOD_BYTES]) catch break;
-        play_offset += alsa.PERIOD_BYTES;
-    }
+    // Write entire buffer in one call — the kernel handles blocking/chunking
+    // internally with less scheduling overhead than a userspace loop.
+    playback.writeFrames(pcm_buf[0..rec_offset]) catch {
+        s.echo = .err;
+        playback.close();
+        return;
+    };
 
+    // Wait for the last buffered audio to finish playing.
     playback.drain();
     playback.close();
 

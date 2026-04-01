@@ -196,6 +196,7 @@ fn doPlayback(ctx: *Context, ogg_data: []const u8, data_allocator: std.mem.Alloc
     var frame_buf: [opus_mod.MAX_FRAME_BYTES]u8 = undefined;
     var pcm_buf: [alsa.PERIOD_BYTES]u8 = undefined;
 
+    // Stream decoded frames — auto-starts after first period is written.
     while (!ctx.should_stop.load(.acquire)) {
         // Check for stop command
         if (ctx.cmd_queue.pop()) |cmd| {
@@ -216,5 +217,7 @@ fn doPlayback(ctx: *Context, ogg_data: []const u8, data_allocator: std.mem.Alloc
         playback.writeFrames(&pcm_buf) catch break;
     }
 
+    // Wait for buffered audio to finish playing.
+    playback.drain();
     _ = ctx.event_queue.push(.playback_done);
 }

@@ -198,6 +198,61 @@ The WASM-based Opus decoder works on all browsers including Safari, which doesn'
 - `src/shared/lib/opus.ts` - Opus encoder/decoder wrapper
 - `src/shared/lib/ogg.ts` - Ogg muxer/demuxer
 
+## Framebuffer Client Audio Stack (BQ268 / MSM8909)
+
+### Hardware
+
+The BQ268 uses a Qualcomm MSM8909 SoC with a Q6 ADSP handling audio via
+tinyalsa. PCM device is `hw:0,0`, 48 kHz, S16_LE, mono.
+
+### ALSA Configuration
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Sample rate | 48 kHz | Fixed by ADSP |
+| Period size | 1920 frames (40ms) | ADSP prefers 6000 but accepts 1920 |
+| Period count | 2 | **Only reliable value** — 4+ fails silently |
+| Start threshold | 1920 (1 period) | Auto-start required (see below) |
+
+### MSM Q6 ADSP Constraints (hard-won lessons)
+
+The Qualcomm MSM PCM driver behaves differently from standard ALSA:
+
+1. **Auto-start is mandatory.** The `msm_pcm_playback_copy` kernel function
+   requires the stream to be in RUNNING state before `pcm_writei` works.
+   Setting `start_threshold > buffer_size` to disable auto-start causes
+   `pcm_writei` to block forever (the DSP never signals buffer availability)
+   and eventually times out with `msm_pcm_playback_copy: wait_event_timeout`.
+
+2. **`period_count` must be 2.** Values of 4+ cause silent failure — `pcm_open`
+   succeeds but no audio is produced. Likely a DMA buffer size limit in the
+   ADSP firmware.
+
+3. **No `pcm_drain` in tinyalsa v2.** Use `ioctl(fd, SNDRV_PCM_IOCTL_DRAIN)`
+   directly (ioctl `0x4144`) instead of the previous `nanosleep` hack.
+
+4. **Single large `pcm_writei` is smoother** than a period-at-a-time loop.
+   The kernel handles chunking internally with less scheduling overhead,
+   reducing underrun risk with the small (80ms) buffer.
+
+### What we tried and why it failed
+
+| Approach | Result | Why |
+|----------|--------|-----|
+| `period_count=2`, `start_threshold=1 period`, per-period write loop | Stutters | 80ms buffer, userspace loop gaps cause underruns |
+| `period_count=4`, `start_threshold=1 period` | Slight stutter | Hardware may negotiate smaller buffer than requested |
+| `period_count=4+`, `start_threshold=2-3 periods` | Silent | ADSP rejects or ignores large buffers |
+| `period_count=8` | Silent | DMA buffer too large for hardware |
+| `openBuffered(total_frames)` with 51 periods | Error | Way beyond DMA limits |
+| `start_threshold > buffer_size` (fill-then-start) | Silent, then timeout | MSM driver requires RUNNING state for writes |
+| `period_count=2`, single large `pcm_writei`, ioctl drain | **Works** | Kernel handles chunking, proper drain |
+
+### Files
+
+- `src/fbclient/src/alsa.zig` — tinyalsa wrapper (PCM + mixer)
+- `src/fbclient/src/applets/settings.zig` — echo test (record/playback)
+- `src/fbclient/src/audio_thread.zig` — Ogg Opus streaming playback
+
 ## Playback Considerations
 
 ### Download vs Streaming
