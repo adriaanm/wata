@@ -11,9 +11,9 @@ pub const c = if (build_options.use_audio) @cImport({
 pub const SAMPLE_RATE: u32 = 48000;
 pub const CHANNELS: u32 = 1;
 pub const FRAME_SIZE: u32 = 2; // S16_LE = 2 bytes per sample per channel
-/// Q6 ADSP native period: 6000 frames (125ms). Using this avoids rate
-/// negotiation issues where tinyalsa silently rounds to a different config.
-pub const FRAMES_PER_PERIOD: u32 = 6000;
+/// Period size for ALSA. The Q6 ADSP prefers 6000 but accepts smaller.
+/// Using 1920 (40ms) for lower latency — still a multiple of 960 (Opus frame).
+pub const FRAMES_PER_PERIOD: u32 = 1920;
 pub const PERIOD_BYTES: u32 = FRAMES_PER_PERIOD * CHANNELS * FRAME_SIZE;
 
 pub const PcmError = error{ OpenFailed, WriteFailed, ReadFailed };
@@ -25,7 +25,7 @@ fn makeConfig() c.pcm_config {
         .channels = CHANNELS,
         .rate = SAMPLE_RATE,
         .period_size = FRAMES_PER_PERIOD,
-        .period_count = 4,
+        .period_count = 2,
         .format = c.PCM_FORMAT_S16_LE,
         .start_threshold = 0,
         .stop_threshold = 0,

@@ -257,8 +257,8 @@ fn doEchoRecord(s: *State) void {
         }
     }
 
-    // 2 seconds at 48kHz with 6000-frame periods (125ms each) = 16 periods
-    const num_periods: u32 = 16;
+    // 2 seconds at 48kHz with 1920-frame periods (40ms each) = 50 periods
+    const num_periods: u32 = 50;
     const total_bytes = num_periods * alsa.PERIOD_BYTES;
 
     const buf = std.heap.page_allocator.alloc(u8, total_bytes) catch {
