@@ -11,6 +11,15 @@
 - [x] DM room deduplication — skip stale/left rooms, use first joined room from m.direct.
 - [x] Send status feedback — show "SENT" / "SEND FAILED" overlay so errors aren't silent.
 
+### Testing — port from TypeScript test suite
+Existing Zig tests: 7 in sync_engine.zig (sync state machine). Run with `cd src/fbclient && zig build test`. Test entry point: `src/test_main.zig`.
+
+- [ ] **Ogg container tests** — port from `src/shared/lib/__tests__/ogg.test.ts`. CRC32 validation, OpusHead/OpusTags structure, page creation with segment tables, mux→demux roundtrip. Pure Zig, no external deps — highest value.
+- [ ] **Queue tests** — BoundedQueue (queue.zig) has zero test coverage. Test push/pop, full buffer, drain, MPSC ordering.
+- [ ] **Sync engine tests (expand)** — extend existing 7 tests. Port coverage from `matrix.test.ts`: m.direct dedup (multiple rooms per contact), family room detection by alias, roomless family member conversations, invite processing.
+- [ ] **HTTP helpers tests** — parseRetryAfterMs, parseMxcUrl, parseRoomId, updateMDirect JSON manipulation. Pure string logic, easy to test.
+- [ ] **Opus codec roundtrip** — port from `audio-codec.test.ts`. Encode PCM→Opus→Ogg→decode→PCM, verify sample count and basic signal preservation. Requires `use_audio` build flag.
+
 ### Backlog
 - [ ] Event buffering for out-of-order sync — messages can arrive before their room is classified as a DM (m.direct update lags). TUI/Android have 300ms retry buffer. Fbclient may drop or misroute early messages.
 - [x] Sync gap handling — backfill via GET /messages when timeline is limited.
