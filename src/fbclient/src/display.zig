@@ -192,9 +192,8 @@ const FbdevBackend = struct {
     pub fn present(self: *FbdevBackend) void {
         const fb: [*]Color = @ptrCast(self.fb_mem.ptr);
 
-        // FB is 160×128 in memory, panel rotation=90° via MADCTL (MV=1, MX=1).
-        // Panel mapping: physical(x,y) ← fb_row=(127-x), fb_col=y
-        // So: app(x,y) → fb[(127-x) * 160 + y]
+        // FB is 160×128 in memory, panel rotation=90°.
+        // 90° CCW: app(x,y) → fb_row=(127-x), fb_col=y
         for (0..height) |y| {
             for (0..width) |x| {
                 fb[(width - 1 - x) * fb_w + y] = self.buf[y * width + x];
