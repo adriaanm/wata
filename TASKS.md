@@ -9,6 +9,7 @@
 - [x] DM room creation — create room with `is_direct: true`, update `m.direct`. Lazy creation on first send.
 - [x] Auto-join invites — auto-join all invited rooms during sync (trusted family environment).
 - [x] DM room deduplication — skip stale/left rooms, use first joined room from m.direct.
+- [x] Send status feedback — show "SENT" / "SEND FAILED" overlay so errors aren't silent.
 
 ### Backlog
 - [ ] Event buffering for out-of-order sync — messages can arrive before their room is classified as a DM (m.direct update lags). TUI/Android have 300ms retry buffer. Fbclient may drop or misroute early messages.
