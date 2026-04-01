@@ -158,24 +158,55 @@ pub const AudioCommand = enum {
 };
 
 // ---------------------------------------------------------------------------
+// OwnedSnapshot — snapshot bundled with its arena for proper lifecycle
+// ---------------------------------------------------------------------------
+
+pub const OwnedSnapshot = struct {
+    snapshot: StateSnapshot,
+    arena: std.heap.ArenaAllocator,
+    alloc: std.mem.Allocator, // parent allocator (for freeing this struct)
+
+    /// Release the snapshot and all its arena-allocated data.
+    pub fn release(self: *OwnedSnapshot) void {
+        const a = self.alloc;
+        self.arena.deinit();
+        a.destroy(self);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // StateStore — atomic snapshot exchange between sync and UI threads
 // ---------------------------------------------------------------------------
 
 pub const StateStore = struct {
-    /// Pointer to the current snapshot, or null.
-    /// Sync thread stores (release), UI thread swaps to null (acquire).
+    /// Pointer to the current OwnedSnapshot, or null (0).
+    /// Sync thread swaps in new (acq_rel), UI thread swaps to null (acquire).
     current: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
-    /// Publish a new snapshot. Called by sync thread.
-    pub fn publish(self: *StateStore, snapshot: *const StateSnapshot) void {
-        self.current.store(@intFromPtr(snapshot), .release);
+    /// Publish a new snapshot. Frees any unconsumed previous snapshot.
+    /// Called by sync thread.
+    pub fn publish(self: *StateStore, owned: *OwnedSnapshot) void {
+        const old = self.current.swap(@intFromPtr(owned), .acq_rel);
+        if (old != 0) {
+            var old_snap: *OwnedSnapshot = @ptrFromInt(old);
+            old_snap.release();
+        }
     }
 
-    /// Acquire the latest snapshot, if any. Called by UI thread.
-    /// Returns null if no new snapshot since last acquire.
-    pub fn acquire(self: *StateStore) ?*const StateSnapshot {
+    /// Acquire the latest snapshot, if any. Caller owns it and must call release().
+    /// Called by UI thread.
+    pub fn acquire(self: *StateStore) ?*OwnedSnapshot {
         const ptr = self.current.swap(0, .acquire);
         if (ptr == 0) return null;
         return @ptrFromInt(ptr);
+    }
+
+    /// Clean up on shutdown (free any unconsumed snapshot).
+    pub fn deinit(self: *StateStore) void {
+        const ptr = self.current.swap(0, .monotonic);
+        if (ptr != 0) {
+            var snap: *OwnedSnapshot = @ptrFromInt(ptr);
+            snap.release();
+        }
     }
 };

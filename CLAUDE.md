@@ -42,6 +42,7 @@ Prefer tmux (zsh).
 | [coding-rules](docs/coding-rules.md) | TUI logging guidelines |
 | [framebuffer-client](docs/planning/framebuffer-client.md) | Zig framebuffer client design |
 | [freetype-font-rendering](docs/planning/freetype-font-rendering.md) | FreeType font rendering for wata applet |
+| [concurrency-redesign](docs/planning/concurrency-redesign.md) | Mailbox-based actor model for fbclient threads |
 
 ---
 

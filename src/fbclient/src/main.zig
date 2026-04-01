@@ -93,6 +93,7 @@ pub fn main(init: std.process.Init) !void {
             }
         }
         if (sync_handle) |h| h.join();
+        state_store.deinit();
     }
 
     if (debug_mode) {
@@ -100,6 +101,8 @@ pub fn main(init: std.process.Init) !void {
         debugLog("[main] running headless (no display)", .{});
         var connection: types.ConnectionState = .disconnected;
         var snapshot_count: u32 = 0;
+        var current_owned: ?*types.OwnedSnapshot = null;
+        defer if (current_owned) |o| o.release();
 
         while (!should_stop.load(.acquire)) {
             // Drain events
@@ -112,7 +115,10 @@ pub fn main(init: std.process.Init) !void {
                         }
                     },
                     .snapshot_ready => {
-                        if (state_store.acquire()) |snap| {
+                        if (state_store.acquire()) |new_owned| {
+                            if (current_owned) |old| old.release();
+                            current_owned = new_owned;
+                            const snap = &new_owned.snapshot;
                             snapshot_count += 1;
                             debugLog("[main] snapshot #{d}: {d} contacts, {d} conversations", .{
                                 snapshot_count,
@@ -172,7 +178,9 @@ pub fn main(init: std.process.Init) !void {
     var last_ms: i64 = if (build_options.use_sdl) @intCast(sdl.SDL_GetTicks()) else clockMs();
     var event_buf: [32]input.InputEvent = undefined;
     var connection: types.ConnectionState = .disconnected;
+    var current_owned: ?*types.OwnedSnapshot = null;
     var current_snapshot: ?*const types.StateSnapshot = null;
+    defer if (current_owned) |o| o.release();
 
     while (true) {
         const now_ms: i64 = if (build_options.use_sdl) @intCast(sdl.SDL_GetTicks()) else clockMs();
@@ -181,10 +189,12 @@ pub fn main(init: std.process.Init) !void {
         const dt_clamped: u32 = @intCast(@min(@max(dt_raw, 0), 1000));
         const dt: f32 = @as(f32, @floatFromInt(dt_clamped)) / 1000.0;
 
-        // Pick up new snapshot
-        if (state_store.acquire()) |new_snap| {
-            current_snapshot = new_snap;
-            sh.updateContext(new_snap);
+        // Pick up new snapshot (release previous owned snapshot)
+        if (state_store.acquire()) |new_owned| {
+            if (current_owned) |old| old.release();
+            current_owned = new_owned;
+            current_snapshot = &new_owned.snapshot;
+            sh.updateContext(current_snapshot);
         }
 
         // Drain UI events

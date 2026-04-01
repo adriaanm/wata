@@ -20,6 +20,16 @@ Existing Zig tests: 7 in sync_engine.zig (sync state machine). Run with `cd src/
 - [x] **Sync engine tests (expand)** (7 new, 14 total) — m.direct dedup, family room detection, roomless members, self-exclusion, read receipts, unplayed count.
 - [ ] **Opus codec roundtrip** — port from `audio-codec.test.ts`. Encode PCM→Opus→Ogg→decode→PCM, verify sample count and basic signal preservation. Requires `use_audio` build flag.
 
+### Concurrency redesign
+Planning doc: [docs/planning/concurrency-redesign.md](docs/planning/concurrency-redesign.md) — treat as a working document.
+- [ ] Step 1: Fix snapshot arena leak (`OwnedSnapshot` + swap-and-free in `StateStore`)
+- [ ] Step 2: Add `Mailbox` primitive (blocking bounded queue with condition variable)
+- [ ] Step 3: Migrate action thread to `Mailbox` (remove 50ms sleep-poll)
+- [ ] Step 4: Migrate audio thread to `Mailbox` (remove 10ms sleep-poll, route echo test through it)
+- [ ] Step 5: Separate stop signals (disconnect stops network only, audio keeps running)
+- [ ] Step 6: Flatten thread hierarchy (spawn all threads from main, not nested in sync thread)
+- [ ] Step 7: Reuse HTTP clients (one per thread instead of per-request)
+
 ### Backlog
 - [ ] Event buffering for out-of-order sync — messages can arrive before their room is classified as a DM (m.direct update lags). TUI/Android have 300ms retry buffer. Fbclient may drop or misroute early messages.
 - [x] Sync gap handling — backfill via GET /messages when timeline is limited.

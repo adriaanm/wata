@@ -216,16 +216,19 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
         parsed.deinit();
         sync_resp.deinit();
 
-        // Build and publish snapshot
+        // Build and publish snapshot (OwnedSnapshot bundles arena for proper lifecycle)
         var snapshot_arena = std.heap.ArenaAllocator.init(allocator);
         if (processor.buildSnapshot(snapshot_arena.allocator())) |snapshot| {
-            // Allocate snapshot struct itself in the arena
-            const snap_ptr = snapshot_arena.allocator().create(types.StateSnapshot) catch {
+            const owned = allocator.create(types.OwnedSnapshot) catch {
                 snapshot_arena.deinit();
                 continue;
             };
-            snap_ptr.* = snapshot;
-            ctx.state_store.publish(snap_ptr);
+            owned.* = .{
+                .snapshot = snapshot,
+                .arena = snapshot_arena,
+                .alloc = allocator,
+            };
+            ctx.state_store.publish(owned);
             _ = ctx.ui_queue.push(.{ .connection_state = .syncing });
             _ = ctx.ui_queue.push(.snapshot_ready);
         } else |_| {
