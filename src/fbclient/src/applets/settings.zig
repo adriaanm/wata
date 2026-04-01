@@ -245,7 +245,6 @@ fn doEchoRecord(s: *State) void {
         s.echo = .err;
         return;
     };
-    defer capture.close();
 
     // Log actual rate to /tmp/wata-audio.log
     if (build_options.use_audio) {
@@ -264,6 +263,7 @@ fn doEchoRecord(s: *State) void {
     const total_bytes = num_periods * alsa.PERIOD_BYTES;
 
     const buf = std.heap.page_allocator.alloc(u8, total_bytes) catch {
+        capture.close();
         s.echo = .err;
         return;
     };
@@ -272,6 +272,7 @@ fn doEchoRecord(s: *State) void {
     var periods: u32 = 0;
     while (periods < num_periods) : (periods += 1) {
         _ = capture.readFrames(buf[offset .. offset + alsa.PERIOD_BYTES]) catch {
+            capture.close();
             std.heap.page_allocator.free(buf);
             s.echo = .err;
             return;
@@ -279,10 +280,12 @@ fn doEchoRecord(s: *State) void {
         offset += alsa.PERIOD_BYTES;
     }
 
+    // Close capture before playback to prevent mic picking up speaker
+    capture.close();
+
     s.echo_buf = buf;
     s.echo_frames = num_periods * alsa.FRAMES_PER_PERIOD;
 
-    // Immediately play back
     doEchoPlayback(s);
 }
 
