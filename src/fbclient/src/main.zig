@@ -206,6 +206,11 @@ pub fn main(init: std.process.Init) !void {
                         wata_applet.notifySendStatus(wata_state, false);
                     }
                 },
+                .playback_error => {
+                    if (sh.states[0]) |wata_state| {
+                        wata_applet.notifyPlayError(wata_state);
+                    }
+                },
                 else => {},
             }
         }

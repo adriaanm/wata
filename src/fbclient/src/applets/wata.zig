@@ -60,9 +60,10 @@ const State = struct {
     ptt_hold_time: f32 = 0, // seconds held
     // Playback state
     playing: bool = false,
-    // Send status feedback (shown briefly then cleared)
+    // Status feedback (shown briefly then cleared)
     send_error: bool = false,
     send_ok: bool = false,
+    play_error: bool = false,
     status_timer: f32 = 0, // seconds remaining for status display
     // Font (initialized lazily on first render)
     ft: ?ft_font.Font = null,
@@ -91,12 +92,18 @@ fn getFont(s: *State) ?*ft_font.Font {
 }
 
 /// Called from main.zig when a send_complete or send_failed UI event arrives.
-/// Shows a brief status indicator (checkmark or error) on the wata applet.
 pub fn notifySendStatus(ptr: *anyopaque, is_error: bool) void {
     const s: *State = @ptrCast(@alignCast(ptr));
     s.send_error = is_error;
     s.send_ok = !is_error;
     s.status_timer = if (is_error) 2.0 else 1.5;
+}
+
+/// Called from main.zig when a playback_error UI event arrives (download failed).
+pub fn notifyPlayError(ptr: *anyopaque) void {
+    const s: *State = @ptrCast(@alignCast(ptr));
+    s.play_error = true;
+    s.status_timer = 2.0;
 }
 
 fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell.Action {
@@ -290,6 +297,7 @@ fn update(ptr: *anyopaque, dt: f32) void {
         if (s.status_timer <= 0) {
             s.send_error = false;
             s.send_ok = false;
+            s.play_error = false;
         }
     }
 
@@ -311,7 +319,7 @@ fn update(ptr: *anyopaque, dt: f32) void {
                     },
                     .playback_error => {
                         s.playing = false;
-                        s.send_error = true;
+                        s.play_error = true;
                         s.status_timer = 2.0;
                     },
                 }
@@ -365,6 +373,8 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
         const c = display.colors;
         if (s.send_error) {
             drawText(fb, getFont(s), "SEND FAILED", 16, 74, c.red);
+        } else if (s.play_error) {
+            drawText(fb, getFont(s), "PLAY FAILED", 16, 74, c.red);
         } else if (s.send_ok) {
             drawText(fb, getFont(s), "SENT", 46, 74, c.green);
         }
