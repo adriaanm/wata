@@ -21,8 +21,8 @@ const Config = struct {
 };
 
 pub const DEFAULT_CONFIG = Config{
-    .homeserver = "http://localhost:8008",
-    .username = "alice",
+    .homeserver = "http://192.168.179.38:8008",
+    .username = "bob",
     .password = "testpass123",
 };
 
@@ -380,7 +380,8 @@ fn backfillRoom(allocator: std.mem.Allocator, client: *http.MatrixHttpClient, pr
     }
 }
 
-fn parseMxcUrl(json_body: []const u8) ?[]const u8 {
+// Make parse helpers accessible to tests within this file
+pub fn parseMxcUrl(json_body: []const u8) ?[]const u8 {
     // Simple extraction of "content_uri":"mxc://..."
     const key = "\"content_uri\":\"";
     const start = std.mem.indexOf(u8, json_body, key) orelse return null;
@@ -389,7 +390,7 @@ fn parseMxcUrl(json_body: []const u8) ?[]const u8 {
     return json_body[val_start..end];
 }
 
-fn parseRoomId(json_body: []const u8) ?[]const u8 {
+pub fn parseRoomId(json_body: []const u8) ?[]const u8 {
     const key = "\"room_id\":\"";
     const start = std.mem.indexOf(u8, json_body, key) orelse return null;
     const val_start = start + key.len;
@@ -446,4 +447,37 @@ fn updateMDirect(client: *http.MatrixHttpClient, self_user_id: []const u8, conta
     if (body) |b| {
         client.setAccountData(self_user_id, "m.direct", b) catch {};
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tests — JSON parse helpers
+// ---------------------------------------------------------------------------
+
+const testing = std.testing;
+
+test "parseMxcUrl: extracts mxc URL from upload response" {
+    const body =
+        \\{"content_uri":"mxc://wata.local/abc123"}
+    ;
+    const url = parseMxcUrl(body);
+    try testing.expect(url != null);
+    try testing.expectEqualStrings("mxc://wata.local/abc123", url.?);
+}
+
+test "parseMxcUrl: returns null for missing key" {
+    try testing.expect(parseMxcUrl("{}") == null);
+    try testing.expect(parseMxcUrl("") == null);
+}
+
+test "parseRoomId: extracts room ID from createRoom response" {
+    const body =
+        \\{"room_id":"!abc123:wata.local"}
+    ;
+    const id = parseRoomId(body);
+    try testing.expect(id != null);
+    try testing.expectEqualStrings("!abc123:wata.local", id.?);
+}
+
+test "parseRoomId: returns null for missing key" {
+    try testing.expect(parseRoomId("{}") == null);
 }

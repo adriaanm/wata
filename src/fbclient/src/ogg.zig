@@ -173,13 +173,19 @@ pub const Reader = struct {
 // Ogg CRC-32 (polynomial 0x04C11DB7)
 // ---------------------------------------------------------------------------
 
-fn crc32Update(crc_in: u32, in_data: []const u8) u32 {
+/// Ogg CRC-32 update (exposed for testing).
+pub fn crc32Update(crc_in: u32, in_data: []const u8) u32 {
     var crc = crc_in;
     for (in_data) |byte| {
         crc = (crc << 8) ^ crc_table[@intCast((crc >> 24) ^ byte)];
     }
     return crc;
 }
+
+// Expose constants for tests
+pub const HDR_SIZE = PAGE_HEADER_SIZE;
+pub const FLAG_BOS = BOS;
+pub const FLAG_EOS = EOS;
 
 const crc_table: [256]u32 = blk: {
     @setEvalBranchQuota(10000);
@@ -197,3 +203,241 @@ const crc_table: [256]u32 = blk: {
     }
     break :blk table;
 };
+
+// ---------------------------------------------------------------------------
+// Tests — ported from src/shared/lib/__tests__/ogg.test.ts
+// ---------------------------------------------------------------------------
+
+const testing = std.testing;
+
+test "crc32: empty input returns zero" {
+    try testing.expectEqual(@as(u32, 0), crc32Update(0, &.{}));
+}
+
+test "crc32: consistent for same input" {
+    const data = "Hello, Ogg!";
+    const crc1 = crc32Update(0, data);
+    const crc2 = crc32Update(0, data);
+    try testing.expectEqual(crc1, crc2);
+}
+
+test "crc32: different inputs produce different results" {
+    const crc1 = crc32Update(0, "abc");
+    const crc2 = crc32Update(0, "def");
+    try testing.expect(crc1 != crc2);
+}
+
+test "crc32: incremental matches single-pass" {
+    const data = "Hello, Ogg!";
+    const single = crc32Update(0, data);
+    var incremental: u32 = 0;
+    incremental = crc32Update(incremental, data[0..6]);
+    incremental = crc32Update(incremental, data[6..]);
+    try testing.expectEqual(single, incremental);
+}
+
+test "OpusHead: correct structure (19 bytes, magic, version, channels, pre-skip, rate)" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+
+    const d = w.data();
+    // OggS magic
+    try testing.expectEqualSlices(u8, "OggS", d[0..4]);
+    // BOS flag
+    try testing.expectEqual(BOS, d[5]);
+
+    // Payload starts after header (27) + 1 segment byte
+    const payload = d[28..];
+    try testing.expectEqualSlices(u8, "OpusHead", payload[0..8]);
+    try testing.expectEqual(@as(u8, 1), payload[8]); // version
+    try testing.expectEqual(@as(u8, 1), payload[9]); // mono
+    // Pre-skip = 312 (little-endian)
+    try testing.expectEqual(@as(u16, 312), std.mem.readInt(u16, payload[10..12], .little));
+    // Sample rate = 48000
+    try testing.expectEqual(@as(u32, 48000), std.mem.readInt(u32, payload[12..16], .little));
+    // Output gain = 0
+    try testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, payload[16..18], .little));
+    // Channel mapping family = 0 (mono)
+    try testing.expectEqual(@as(u8, 0), payload[18]);
+}
+
+test "OpusTags: correct structure (magic, vendor, no comments)" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+    try w.writeOpusTags();
+
+    const d = w.data();
+    // Second page starts after first page
+    const seg_count_1 = d[26];
+    var payload_1: usize = 0;
+    for (d[27..][0..seg_count_1]) |s| payload_1 += s;
+    const page2_start = 27 + seg_count_1 + payload_1;
+
+    const p2 = d[page2_start..];
+    try testing.expectEqualSlices(u8, "OggS", p2[0..4]);
+    // Not BOS (second page)
+    try testing.expectEqual(@as(u8, 0), p2[5] & BOS);
+
+    const seg_count_2 = p2[26];
+    const tags_payload = p2[27 + seg_count_2 ..];
+    try testing.expectEqualSlices(u8, "OpusTags", tags_payload[0..8]);
+    // Vendor string length = 4 ("wata")
+    try testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, tags_payload[8..12], .little));
+    try testing.expectEqualSlices(u8, "wata", tags_payload[12..16]);
+    // Comment count = 0
+    try testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, tags_payload[16..20], .little));
+}
+
+test "page CRC: valid CRC in header (bytes 22..26)" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+
+    const d = w.data();
+    const stored_crc = std.mem.readInt(u32, d[22..26], .little);
+
+    // Recompute CRC with CRC field zeroed
+    var hdr_copy: [27]u8 = undefined;
+    @memcpy(&hdr_copy, d[0..27]);
+    std.mem.writeInt(u32, hdr_copy[22..26], 0, .little);
+
+    const seg_count = d[26];
+    var payload_size: usize = 0;
+    for (d[27..][0..seg_count]) |s| payload_size += s;
+
+    var crc: u32 = 0;
+    crc = crc32Update(crc, &hdr_copy);
+    crc = crc32Update(crc, d[27..][0..seg_count]);
+    crc = crc32Update(crc, d[27 + seg_count ..][0..payload_size]);
+
+    try testing.expectEqual(stored_crc, crc);
+}
+
+test "audio frame: granule position increments by sample count" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+    try w.writeOpusTags();
+
+    // Write two audio frames with 960 samples each
+    var fake_opus: [100]u8 = undefined;
+    @memset(&fake_opus, 0xAB);
+    try w.writeAudioFrame(&fake_opus, 960);
+    try w.writeAudioFrame(&fake_opus, 960);
+
+    // Read back with Reader and verify we get 2 frames
+    var reader = Reader.init(w.data());
+    var frame_buf: [4000]u8 = undefined;
+    const f1 = reader.nextFrame(&frame_buf);
+    try testing.expect(f1 != null);
+    try testing.expectEqual(@as(usize, 100), f1.?.len);
+
+    const f2 = reader.nextFrame(&frame_buf);
+    try testing.expect(f2 != null);
+
+    // No more frames
+    const f3 = reader.nextFrame(&frame_buf);
+    try testing.expect(f3 == null);
+}
+
+test "mux/demux roundtrip: data integrity preserved" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+    try w.writeOpusTags();
+
+    // Write 5 frames with distinct data
+    var frames: [5][50]u8 = undefined;
+    for (&frames, 0..) |*f, i| {
+        @memset(f, @intCast(i + 1)); // frame 0 = all 0x01, etc.
+    }
+    for (&frames) |*f| {
+        try w.writeAudioFrame(f, 960);
+    }
+    try w.finish();
+
+    // Read back and verify each frame's content
+    var reader = Reader.init(w.data());
+    var buf: [4000]u8 = undefined;
+    for (0..5) |i| {
+        const frame = reader.nextFrame(&buf) orelse {
+            return error.TestUnexpectedResult;
+        };
+        try testing.expectEqual(@as(usize, 50), frame.len);
+        // Each byte should match the fill value
+        try testing.expectEqual(@as(u8, @intCast(i + 1)), frame[0]);
+        try testing.expectEqual(@as(u8, @intCast(i + 1)), frame[49]);
+    }
+    // Stream exhausted
+    try testing.expect(reader.nextFrame(&buf) == null);
+}
+
+test "finish: EOS page written" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+    try w.writeOpusTags();
+    try w.finish();
+
+    // Find the last page and check EOS flag
+    const d = w.data();
+    // Walk pages to find the last one
+    var pos: usize = 0;
+    var last_flags: u8 = 0;
+    while (pos + PAGE_HEADER_SIZE <= d.len) {
+        if (!std.mem.eql(u8, d[pos..][0..4], "OggS")) break;
+        last_flags = d[pos + 5];
+        const ns = d[pos + 26];
+        var ps: usize = 0;
+        for (d[pos + 27 ..][0..ns]) |s| ps += s;
+        pos = pos + 27 + ns + ps;
+    }
+    try testing.expect(last_flags & EOS != 0);
+}
+
+test "reader: skips BOS and OpusTags pages" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+    try w.writeOpusTags();
+
+    var payload: [10]u8 = undefined;
+    @memset(&payload, 0x42);
+    try w.writeAudioFrame(&payload, 960);
+
+    var reader = Reader.init(w.data());
+    var buf: [4000]u8 = undefined;
+    // First call should skip OpusHead and OpusTags, return audio frame
+    const frame = reader.nextFrame(&buf);
+    try testing.expect(frame != null);
+    try testing.expectEqual(@as(u8, 0x42), frame.?[0]);
+}
+
+test "reader: empty stream returns null" {
+    var reader = Reader.init(&.{});
+    var buf: [4000]u8 = undefined;
+    try testing.expect(reader.nextFrame(&buf) == null);
+}
+
+test "segment table: large payload (>255 bytes) spans multiple segments" {
+    var w = Writer.init(testing.allocator);
+    defer w.deinit();
+    try w.writeOpusHead();
+    try w.writeOpusTags();
+
+    // Write a 600-byte payload (needs 3 segments: 255 + 255 + 90)
+    var big: [600]u8 = undefined;
+    @memset(&big, 0xCC);
+    try w.writeAudioFrame(&big, 960);
+
+    // Read back
+    var reader = Reader.init(w.data());
+    var buf: [4000]u8 = undefined;
+    const frame = reader.nextFrame(&buf);
+    try testing.expect(frame != null);
+    try testing.expectEqual(@as(usize, 600), frame.?.len);
+    try testing.expectEqual(@as(u8, 0xCC), frame.?[0]);
+    try testing.expectEqual(@as(u8, 0xCC), frame.?[599]);
+}

@@ -288,7 +288,7 @@ pub const MatrixHttpClient = struct {
 
 /// Parse "retry_after_ms" from a Matrix 429 response body.
 /// Returns the value in milliseconds, or a 1-second default if unparseable.
-fn parseRetryAfterMs(body: []const u8) u64 {
+pub fn parseRetryAfterMs(body: []const u8) u64 {
     const key = "\"retry_after_ms\":";
     const start = std.mem.indexOf(u8, body, key) orelse return 1000;
     const val_start = start + key.len;
@@ -300,4 +300,35 @@ fn parseRetryAfterMs(body: []const u8) u64 {
     while (end < body.len and body[end] >= '0' and body[end] <= '9') end += 1;
     if (end == pos) return 1000;
     return std.fmt.parseInt(u64, body[pos..end], 10) catch 1000;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+const testing = std.testing;
+
+test "parseRetryAfterMs: parses integer value" {
+    const body =
+        \\{"retry_after_ms":5000,"errcode":"M_LIMIT_EXCEEDED"}
+    ;
+    try testing.expectEqual(@as(u64, 5000), parseRetryAfterMs(body));
+}
+
+test "parseRetryAfterMs: handles whitespace after colon" {
+    const body =
+        \\{"retry_after_ms": 2500}
+    ;
+    try testing.expectEqual(@as(u64, 2500), parseRetryAfterMs(body));
+}
+
+test "parseRetryAfterMs: returns 1000 default for missing key" {
+    try testing.expectEqual(@as(u64, 1000), parseRetryAfterMs("{}"));
+    try testing.expectEqual(@as(u64, 1000), parseRetryAfterMs(""));
+}
+
+test "parseRetryAfterMs: returns 1000 for non-numeric value" {
+    try testing.expectEqual(@as(u64, 1000), parseRetryAfterMs(
+        \\{"retry_after_ms":"not_a_number"}
+    ));
 }
