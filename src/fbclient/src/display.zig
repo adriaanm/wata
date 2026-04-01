@@ -141,14 +141,13 @@ const SdlBackend = struct {
 // ---------------------------------------------------------------------------
 
 const FbdevBackend = struct {
-    /// BQ268 framebuffer: 160×128 RGB565 (from HARDWARE.md).
-    /// The app renders at 128×160 (portrait), so we rotate when blitting.
-    /// If the kernel DTS configures `rotation = <90>`, the fb may already
-    /// be 128×160 — in that case, set `rotate` to false.
-    const fb_w: usize = 160;
-    const fb_h: usize = 128;
+    /// BQ268 framebuffer: 128×160 RGB565.
+    /// HW rotation is handled by the ST7735S panel driver, so the fb
+    /// matches the app's portrait orientation — direct blit, no rotation.
+    const fb_w: usize = width; // 128
+    const fb_h: usize = height; // 160
     const fb_len: usize = fb_w * fb_h * @sizeOf(Color); // 40960 bytes
-    const rotate = true; // 90° CW: app 128×160 → fb 160×128
+    const rotate = false;
 
     const linux = std.os.linux;
 

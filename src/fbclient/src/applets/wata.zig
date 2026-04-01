@@ -294,7 +294,6 @@ fn update(ptr: *anyopaque, dt: f32) void {
 }
 
 /// Upload recorded audio and send as a voice message to the current conversation.
-/// Upload recorded audio and send as a voice message to the current conversation.
 fn uploadRecording(s: *State, ogg_data: []const u8, duration_ms: u64, data_allocator: std.mem.Allocator) void {
     _ = data_allocator;
     const aq = s.action_queue orelse return;
@@ -337,38 +336,41 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
 
 fn renderContacts(s: *State, fb: *display.Framebuffer) void {
     const c = display.colors;
-    const f = getFont(s) orelse {
-        // Fallback to bitmap font if FreeType failed
-        font.drawText(fb, "Font error", 0, 2, c.red, null);
-        return;
-    };
+    const f = getFont(s);
     const snap = s.snapshot orelse {
-        renderConnecting(s, fb, f);
+        if (f) |fnt| {
+            renderConnecting(s, fb, fnt);
+        } else {
+            renderConnectingBitmap(s, fb);
+        }
         return;
     };
 
     // Header
-    f.drawText(fb, "WATA", 2, 0, c.cyan, null);
-    // Connection indicator
-    const conn_str = switch (s.connection) {
-        .syncing => "ok",
-        .connected, .connecting => "..",
-        .err => "ERR",
-        .disconnected => "off",
-    };
-    const conn_color: display.Color = switch (s.connection) {
-        .syncing => c.green,
-        .err => c.red,
-        else => c.mid_gray,
-    };
-    f.drawTextRight(fb, conn_str, display.width - 2, 0, conn_color);
+    if (f) |fnt| {
+        fnt.drawText(fb, "WATA", 2, 0, c.cyan, null);
+        const conn_str = switch (s.connection) {
+            .syncing => "ok",
+            .connected, .connecting => "..",
+            .err => "ERR",
+            .disconnected => "off",
+        };
+        const conn_color: display.Color = switch (s.connection) {
+            .syncing => c.green,
+            .err => c.red,
+            else => c.mid_gray,
+        };
+        fnt.drawTextRight(fb, conn_str, display.width - 2, 0, conn_color);
+    } else {
+        font.drawText(fb, "WATA", 0, 1, c.cyan, null);
+    }
 
     // Build combined list: family group (if exists) + DM contacts
     // The conversations list has family at index 0 (if present), then DMs.
     const total = snap.conversations.len;
     if (total == 0) {
-        f.drawTextCentered(fb, "No contacts", 40, c.mid_gray);
-        f.drawTextCentered(fb, "Waiting for sync", 56, c.mid_gray);
+        drawText(fb, f, "No contacts", 20, 40, c.mid_gray);
+        drawText(fb, f, "Waiting for sync", 8, 56, c.mid_gray);
         return;
     }
 
@@ -398,18 +400,55 @@ fn renderContacts(s: *State, fb: *display.Framebuffer) void {
 
         // Family gets a different color accent
         const name_color: display.Color = if (conv.conv_type == .family and !selected) c.cyan else fg;
-        f.drawText(fb, name[0..display_len], 2, row_y, name_color, null);
-
-        // Unplayed count badge
-        if (conv.unplayed_count > 0) {
-            var badge_buf: [4]u8 = undefined;
-            const badge = std.fmt.bufPrint(&badge_buf, "{d}", .{conv.unplayed_count}) catch "?";
-            f.drawTextRight(fb, badge, display.width - 2, row_y, c.yellow);
+        if (f) |fnt| {
+            fnt.drawText(fb, name[0..display_len], 2, row_y, name_color, null);
+            if (conv.unplayed_count > 0) {
+                var badge_buf: [4]u8 = undefined;
+                const badge = std.fmt.bufPrint(&badge_buf, "{d}", .{conv.unplayed_count}) catch "?";
+                fnt.drawTextRight(fb, badge, display.width - 2, row_y, c.yellow);
+            }
+        } else {
+            // Bitmap font fallback (grid coordinates)
+            const grid_row: u32 = @intCast(@divTrunc(@as(u32, @intCast(row_y)), font.glyph_h));
+            font.drawText(fb, name[0..display_len], 0, grid_row, name_color, null);
+            if (conv.unplayed_count > 0) {
+                var badge_buf: [4]u8 = undefined;
+                const badge = std.fmt.bufPrint(&badge_buf, "{d}", .{conv.unplayed_count}) catch "?";
+                font.drawText(fb, badge, font.cols - @as(u32, @intCast(badge.len)), grid_row, c.yellow, null);
+            }
         }
     }
 
     // Footer
-    f.drawText(fb, "\x18\x19 select  OK open", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
+    if (f) |fnt| {
+        fnt.drawText(fb, "\x18\x19 select  OK open", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
+    } else {
+        font.drawText(fb, "UP/DN sel OK open", 0, font.rows - 1, c.mid_gray, null);
+    }
+}
+
+/// Draw text using FreeType if available, bitmap font otherwise.
+/// x/y are pixel coordinates.
+fn drawText(fb: *display.Framebuffer, f: ?*ft_font.Font, text: []const u8, x: i32, y: i32, fg: display.Color) void {
+    if (f) |fnt| {
+        fnt.drawText(fb, text, x, y, fg, null);
+    } else {
+        const col: u32 = @intCast(@max(0, @divTrunc(x, @as(i32, font.glyph_w))));
+        const row: u32 = @intCast(@max(0, @divTrunc(y, @as(i32, font.glyph_h))));
+        font.drawText(fb, text, col, row, fg, null);
+    }
+}
+
+fn renderConnectingBitmap(s: *const State, fb: *display.Framebuffer) void {
+    const c = display.colors;
+    const msg: []const u8 = switch (s.connection) {
+        .disconnected => "Disconnected",
+        .connecting => "Connecting...",
+        .connected => "Logging in...",
+        .syncing => "Syncing...",
+        .err => "Connection error",
+    };
+    font.drawText(fb, msg, 1, 8, c.mid_gray, null);
 }
 
 fn renderConnecting(s: *const State, fb: *display.Framebuffer, f: *ft_font.Font) void {
@@ -430,11 +469,11 @@ fn renderConnecting(s: *const State, fb: *display.Framebuffer, f: *ft_font.Font)
 
 fn renderConversation(s: *State, fb: *display.Framebuffer) void {
     const c = display.colors;
-    const f = getFont(s) orelse return;
+    const f = getFont(s);
     const snap = s.snapshot orelse return;
 
     if (s.conv_contact_idx >= snap.conversations.len) {
-        f.drawTextCentered(fb, "No conversation", 60, c.mid_gray);
+        drawText(fb, f, "No conversation", 20, 60, c.mid_gray);
         return;
     }
 
@@ -443,11 +482,11 @@ fn renderConversation(s: *State, fb: *display.Framebuffer) void {
     // Header — contact name
     const header_name = if (conv.contact) |contact| contact.user.display_name else "Chat";
     const header_len = @min(header_name.len, 20);
-    f.drawText(fb, header_name[0..header_len], 2, 0, c.cyan, null);
+    drawText(fb, f, header_name[0..header_len], 2, 0, c.cyan);
 
     if (conv.messages.len == 0) {
-        f.drawTextCentered(fb, "No messages", 60, c.mid_gray);
-        f.drawText(fb, "ESC back", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
+        drawText(fb, f, "No messages", 20, 60, c.mid_gray);
+        drawText(fb, f, "ESC back", 2, @intCast(display.height - FOOTER_H), c.mid_gray);
         return;
     }
 
@@ -476,23 +515,23 @@ fn renderConversation(s: *State, fb: *display.Framebuffer) void {
         var dur_buf: [6]u8 = undefined;
         const dur_str = std.fmt.bufPrint(&dur_buf, "{d}:{d:0>2}", .{ dur_secs / 60, dur_secs % 60 }) catch "?:??";
         const x_offset: i32 = if (msg.is_played) 8 else 2;
-        f.drawText(fb, dur_str, x_offset, row_y, fg, null);
+        drawText(fb, f, dur_str, x_offset, row_y, fg);
 
         // Sender (short)
         const sender = msg.sender.display_name;
-        const dur_w = f.measureText(dur_str);
+        const dur_w: i32 = if (f) |fnt| fnt.measureText(dur_str) else @intCast(dur_str.len * font.glyph_w);
         const sender_x = x_offset + dur_w + 4;
         const avail = @as(i32, display.width) - sender_x - 2;
         if (avail > 0) {
             const max_sender = @min(sender.len, @as(usize, @intCast(@divTrunc(avail, 7))));
             if (max_sender > 0) {
-                f.drawText(fb, sender[0..max_sender], sender_x, row_y, fg, null);
+                drawText(fb, f, sender[0..max_sender], sender_x, row_y, fg);
             }
         }
     }
 
     // Footer
-    f.drawText(fb, "OK play F2 del", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
+    drawText(fb, f, "OK play F2 del", 2, @intCast(display.height - FOOTER_H), c.mid_gray);
 }
 
 // ---------------------------------------------------------------------------
