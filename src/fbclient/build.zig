@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
     const debug_mode = b.option(bool, "debug", "Run in headless debug mode (log to stderr)") orelse false;
     const use_freetype = b.option(bool, "freetype", "Enable FreeType font rendering (default: true)") orelse true;
     const use_audio = b.option(bool, "audio", "Enable audio capture/playback (default: non-SDL)") orelse !use_sdl;
+    const offline = b.option(bool, "offline", "Disable Matrix sync/network (UI + audio only)") orelse false;
 
     // Git version
     const git_sha = b.option([]const u8, "version", "Version string (default: git short SHA)") orelse blk: {
@@ -26,6 +27,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "debug_mode", debug_mode);
     options.addOption(bool, "use_freetype", use_freetype);
     options.addOption(bool, "use_audio", use_audio);
+    options.addOption(bool, "offline", offline);
     options.addOption([]const u8, "version", git_sha);
 
     // Create root module

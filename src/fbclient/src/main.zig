@@ -63,10 +63,14 @@ pub fn main(init: std.process.Init) !void {
         .io = init.io,
     };
 
-    debugLog("[main] connecting to {s} as {s}", .{ sync_ctx.config.homeserver, sync_ctx.config.username });
-
-    // Spawn sync thread
-    const sync_handle = std.Thread.spawn(.{}, sync_thread.syncThreadMain, .{&sync_ctx}) catch null;
+    // Spawn sync thread (unless offline mode — UI + audio only, no network)
+    const sync_handle = if (!build_options.offline) blk: {
+        debugLog("[main] connecting to {s} as {s}", .{ sync_ctx.config.homeserver, sync_ctx.config.username });
+        break :blk std.Thread.spawn(.{}, sync_thread.syncThreadMain, .{&sync_ctx}) catch null;
+    } else blk: {
+        debugLog("[main] offline mode — network disabled", .{});
+        break :blk @as(?std.Thread, null);
+    };
 
     // Spawn audio thread (device only)
     var audio_ctx: if (build_options.use_audio) audio_thread.Context else void = if (build_options.use_audio) .{
