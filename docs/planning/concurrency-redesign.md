@@ -1,6 +1,6 @@
 # Concurrency Redesign: Mailbox-based Actor Model
 
-## Status: Draft
+## Status: Complete
 
 ## Problem
 

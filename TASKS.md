@@ -22,13 +22,13 @@ Existing Zig tests: 7 in sync_engine.zig (sync state machine). Run with `cd src/
 
 ### Concurrency redesign
 Planning doc: [docs/planning/concurrency-redesign.md](docs/planning/concurrency-redesign.md) — treat as a working document.
-- [ ] Step 1: Fix snapshot arena leak (`OwnedSnapshot` + swap-and-free in `StateStore`)
-- [ ] Step 2: Add `Mailbox` primitive (blocking bounded queue with condition variable)
-- [ ] Step 3: Migrate action thread to `Mailbox` (remove 50ms sleep-poll)
-- [ ] Step 4: Migrate audio thread to `Mailbox` (remove 10ms sleep-poll, route echo test through it)
-- [ ] Step 5: Separate stop signals (disconnect stops network only, audio keeps running)
-- [ ] Step 6: Flatten thread hierarchy (spawn all threads from main, not nested in sync thread)
-- [ ] Step 7: Reuse HTTP clients (one per thread instead of per-request)
+- [x] Step 1: Fix snapshot arena leak (`OwnedSnapshot` + swap-and-free in `StateStore`)
+- [x] Step 2: Add `Mailbox` primitive (blocking bounded queue with futex)
+- [x] Step 3: Migrate action thread to `Mailbox` (remove 50ms sleep-poll)
+- [x] Step 4: Migrate audio thread to `Mailbox` (remove 10ms sleep-poll, route echo test through it)
+- [x] Step 5: Separate stop signals (disconnect stops network only, audio keeps running)
+- [x] Step 6: Flatten thread hierarchy (spawn all threads from main, not nested in sync thread)
+- [x] Step 7: Reuse HTTP clients (one per thread instead of per-request)
 
 ### Backlog
 - [ ] Event buffering for out-of-order sync — messages can arrive before their room is classified as a DM (m.direct update lags). TUI/Android have 300ms retry buffer. Fbclient may drop or misroute early messages.
