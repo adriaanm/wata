@@ -13,9 +13,10 @@ const led = if (!build_options.use_sdl) @import("../led.zig") else struct {
     pub fn readBatteryPercent() ?u8 { return null; }
     pub fn setBacklight(_: u8) void {}
 };
-const alsa = if (build_options.use_audio) @import("../alsa.zig") else struct {};
-const opus_mod = if (build_options.use_audio) @import("../opus.zig") else struct {};
-const ogg = if (build_options.use_audio) @import("../ogg.zig") else struct {};
+const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig") else struct {
+    pub const CommandQueue = void;
+    pub const EventQueue = void;
+};
 
 const MenuItem = enum {
     echo_test,
@@ -36,6 +37,8 @@ const State = struct {
     brightness: u8 = 40,
     echo: EchoState = .idle,
     action_queue: ?*mailbox_mod.Mailbox(types.Action, 64) = null,
+    audio_cmd: ?*audio_thread.CommandQueue = null,
+    audio_evt: ?*audio_thread.EventQueue = null,
     snapshot: ?*const types.StateSnapshot = null,
     name_idx: usize = 0, // index into DISPLAY_NAMES
     should_stop: ?*std.atomic.Value(bool) = null,
@@ -112,7 +115,21 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
 }
 
 fn update(ptr: *anyopaque, _: f32) void {
-    _ = ptr;
+    const s: *State = @ptrCast(@alignCast(ptr));
+    // Drain echo test events from audio thread
+    if (build_options.use_audio) {
+        if (s.audio_evt) |evt_q| {
+            while (evt_q.tryReceive()) |evt| {
+                switch (evt) {
+                    .echo_recording => s.echo = .recording,
+                    .echo_playing => s.echo = .playing,
+                    .echo_done => s.echo = .done,
+                    .echo_error => s.echo = .err,
+                    else => {}, // other events handled by wata applet
+                }
+            }
+        }
+    }
 }
 
 fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
@@ -227,138 +244,39 @@ pub fn setContext(
     snapshot: ?*const types.StateSnapshot,
     action_q: *mailbox_mod.Mailbox(types.Action, 64),
     should_stop: *std.atomic.Value(bool),
+    audio_cmd_q: ?*audio_thread.CommandQueue,
+    audio_evt_q: ?*audio_thread.EventQueue,
 ) void {
     const s: *State = @ptrCast(@alignCast(applet_state));
     s.snapshot = snapshot;
     s.action_queue = action_q;
     s.should_stop = should_stop;
+    if (build_options.use_audio) {
+        s.audio_cmd = audio_cmd_q;
+        s.audio_evt = audio_evt_q;
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Audio echo test — record 2s of raw PCM, play back through speaker.
-// Dead simple: pre-allocated buffer, no Opus, no threading complexity.
+// Audio echo test — sends command to audio thread (no ad-hoc thread spawn).
+// Audio thread sends back echo_recording/echo_playing/echo_done/echo_error
+// events which are consumed in update().
 // ---------------------------------------------------------------------------
-
-/// 2 seconds at 48kHz mono S16_LE = 192000 bytes
-const ECHO_BUF_FRAMES: u32 = alsa.SAMPLE_RATE * 2;
-const ECHO_BUF_BYTES: u32 = ECHO_BUF_FRAMES * alsa.FRAME_SIZE;
 
 fn startEchoRecord(s: *State) void {
     if (!build_options.use_audio) {
         s.echo = .err;
         return;
     }
-    s.echo = .recording;
-
-    const S = struct {
-        fn thread(state: *State) void {
-            doEchoTest(state);
+    if (s.audio_cmd) |cmd_q| {
+        if (cmd_q.send(.echo_test)) {
+            s.echo = .recording;
+        } else {
+            s.echo = .err;
         }
-    };
-    _ = std.Thread.spawn(.{}, S.thread, .{s}) catch {
+    } else {
         s.echo = .err;
-    };
-}
-
-fn doEchoTest(s: *State) void {
-    const OPUS_FRAME_BYTES: u32 = opus_mod.FRAME_SAMPLES * alsa.FRAME_SIZE * alsa.CHANNELS;
-
-    // --- RECORD + ENCODE ---
-    alsa.setupCaptureMixer();
-
-    var capture = alsa.Capture.open() catch {
-        s.echo = .err;
-        return;
-    };
-
-    var encoder = opus_mod.Encoder.init() catch {
-        capture.close();
-        s.echo = .err;
-        return;
-    };
-
-    var writer = ogg.Writer.init(std.heap.page_allocator);
-    writer.writeOpusHead() catch {
-        encoder.deinit();
-        capture.close();
-        writer.deinit();
-        s.echo = .err;
-        return;
-    };
-    writer.writeOpusTags() catch {
-        encoder.deinit();
-        capture.close();
-        writer.deinit();
-        s.echo = .err;
-        return;
-    };
-
-    var pcm_buf: [alsa.PERIOD_BYTES]u8 = undefined;
-    var opus_buf: [opus_mod.MAX_FRAME_BYTES]u8 = undefined;
-    var total_samples: u32 = 0;
-
-    while (total_samples < ECHO_BUF_FRAMES) {
-        _ = capture.readFrames(&pcm_buf) catch break;
-
-        // Each ALSA period = 2 Opus frames (1920 samples = 2 × 960)
-        var off: u32 = 0;
-        while (off + OPUS_FRAME_BYTES <= alsa.PERIOD_BYTES) {
-            const encoded = encoder.encode(pcm_buf[off..][0..OPUS_FRAME_BYTES], &opus_buf) catch break;
-            writer.writeAudioFrame(opus_buf[0..encoded], opus_mod.FRAME_SAMPLES) catch break;
-            total_samples += opus_mod.FRAME_SAMPLES;
-            off += OPUS_FRAME_BYTES;
-        }
     }
-
-    capture.close();
-    encoder.deinit();
-    writer.finish() catch {};
-
-    const ogg_data = writer.data();
-
-    s.echo = .playing;
-
-    // --- DECODE + PLAY BACK ---
-    alsa.setupPlaybackMixer();
-
-    var decoder = opus_mod.Decoder.init() catch {
-        writer.deinit();
-        s.echo = .err;
-        return;
-    };
-
-    var playback = alsa.Playback.open() catch {
-        decoder.deinit();
-        writer.deinit();
-        s.echo = .err;
-        return;
-    };
-
-    // Decode all frames into a contiguous buffer, then write in one call
-    // to avoid per-period write loop stutter (see docs/voice.md).
-    var pcm_out: [ECHO_BUF_BYTES]u8 = undefined;
-    var decode_off: u32 = 0;
-    var reader = ogg.Reader.init(ogg_data);
-    var frame_buf: [opus_mod.MAX_FRAME_BYTES]u8 = undefined;
-
-    while (reader.nextFrame(&frame_buf)) |frame| {
-        if (decode_off + OPUS_FRAME_BYTES > ECHO_BUF_BYTES) break;
-        _ = decoder.decode(frame, pcm_out[decode_off..][0..OPUS_FRAME_BYTES]) catch break;
-        decode_off += OPUS_FRAME_BYTES;
-    }
-
-    // Round down to full period boundary for MSM ADSP
-    const playback_bytes = decode_off - (decode_off % alsa.PERIOD_BYTES);
-    if (playback_bytes > 0) {
-        playback.writeFrames(pcm_out[0..playback_bytes]) catch {};
-    }
-
-    playback.drain();
-    playback.close();
-    decoder.deinit();
-    writer.deinit();
-
-    s.echo = .done;
 }
 
 fn stopEchoAndPlay(s: *State) void {

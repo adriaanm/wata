@@ -349,7 +349,7 @@ fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, act
             resp.deinit();
             if (build_options.use_audio) {
                 if (actx.audio_cmd_queue) |acq| {
-                    _ = acq.push(.{ .play = .{
+                    _ = acq.send(.{ .play = .{
                         .ogg_data = ogg_copy,
                         .allocator = actx.allocator,
                     } });

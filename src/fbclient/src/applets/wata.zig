@@ -116,12 +116,12 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
             s.ptt_held = true;
             s.ptt_hold_time = 0;
             if (build_options.use_audio) {
-                if (s.audio_cmd) |cmd_q| _ = cmd_q.push(.start_recording);
+                if (s.audio_cmd) |cmd_q| _ = cmd_q.send(.start_recording);
             }
         } else if (key_state == .released and s.ptt_held) {
             s.ptt_held = false;
             if (build_options.use_audio) {
-                if (s.audio_cmd) |cmd_q| _ = cmd_q.push(.stop_recording);
+                if (s.audio_cmd) |cmd_q| _ = cmd_q.send(.stop_recording);
             }
         }
         return .none;
@@ -305,7 +305,7 @@ fn update(ptr: *anyopaque, dt: f32) void {
     // Drain audio events
     if (build_options.use_audio) {
         if (s.audio_evt) |evt_q| {
-            while (evt_q.pop()) |evt| {
+            while (evt_q.tryReceive()) |evt| {
                 switch (evt) {
                     .recording_done => |rec| {
                         // Upload and send the recorded voice message

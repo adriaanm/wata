@@ -77,7 +77,6 @@ pub fn main(init: std.process.Init) !void {
     var audio_ctx: if (build_options.use_audio) audio_thread.Context else void = if (build_options.use_audio) .{
         .cmd_queue = &audio_cmd_queue,
         .event_queue = &audio_evt_queue,
-        .should_stop = &should_stop,
         .allocator = allocator,
     } else {};
     const audio_handle = if (build_options.use_audio)
@@ -89,10 +88,8 @@ pub fn main(init: std.process.Init) !void {
         should_stop.store(true, .release);
         action_queue.close(); // wake action thread from blocking receive
         if (build_options.use_audio) {
-            if (audio_handle) |h| {
-                _ = audio_cmd_queue.push(.quit);
-                h.join();
-            }
+            audio_cmd_queue.close(); // wake audio thread from blocking receive
+            if (audio_handle) |h| h.join();
         }
         if (sync_handle) |h| h.join();
         state_store.deinit();
@@ -236,7 +233,7 @@ pub fn main(init: std.process.Init) !void {
             wata_applet.setContext(wata_state, current_snapshot, connection, &action_queue, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
         }
         if (sh.states[1]) |settings_state| {
-            settings_applet.setContext(settings_state, current_snapshot, &action_queue, &should_stop);
+            settings_applet.setContext(settings_state, current_snapshot, &action_queue, &should_stop, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
         }
 
         // Poll input
