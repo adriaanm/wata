@@ -109,45 +109,34 @@ pub const Playback = struct {
 };
 
 /// Set up both playback and capture mixer routes (one-time after boot).
+/// Called once at startup — no per-recording switching to avoid ADSP churn
+/// that was causing hard crashes (PS_HOLD reset → fastboot).
 pub fn setupMixer() void {
-    setupCaptureMixer();
-    setupPlaybackMixer();
-}
-
-/// Enable microphone capture route. Disables speaker to prevent feedback.
-pub fn setupCaptureMixer() void {
     const mixer = c.mixer_open(0) orelse return;
     defer c.mixer_close(mixer);
 
-    // Mute speaker completely
-    setEnum(mixer, "RX2 MIX1 INP1", "ZERO");
-    setEnum(mixer, "Ext Spk Switch", "Off");
-
-    // Enable mic capture route
-    setInt(mixer, "MultiMedia1 Mixer TERT_MI2S_TX", 1);
-    setEnum(mixer, "DEC1 MUX", "ADC1");
-    setInt(mixer, "ADC1 Volume", 6);
-    setInt(mixer, "DEC1 Volume", 104);
-
-    // Verify with amixer (diagnostic — writes to /tmp/wata-mixer.log)
-    verifyMixer();
-}
-
-/// Enable speaker playback route.
-pub fn setupPlaybackMixer() void {
-    const mixer = c.mixer_open(0) orelse return;
-    defer c.mixer_close(mixer);
-
+    // Playback route: speaker on
     setEnum(mixer, "RX2 MIX1 INP1", "RX1");
     setEnum(mixer, "RDAC2 MUX", "RX2");
     setEnum(mixer, "HPHR", "Switch");
     setEnum(mixer, "Ext Spk Switch", "On");
     setInt(mixer, "RX2 Digital Volume", 84);
+
+    // Capture route: mic on
+    setInt(mixer, "MultiMedia1 Mixer TERT_MI2S_TX", 1);
+    setEnum(mixer, "DEC1 MUX", "ADC1");
+    setInt(mixer, "ADC1 Volume", 6);
+    setInt(mixer, "DEC1 Volume", 104);
 }
 
-fn verifyMixer() void {
-    const sys = @cImport(@cInclude("stdlib.h"));
-    _ = sys.system("amixer cget name='Ext Spk Switch' > /tmp/wata-mixer.log 2>&1; amixer cget name='RX2 MIX1 INP1' >> /tmp/wata-mixer.log 2>&1");
+/// Legacy per-mode switching (kept for echo test, but no longer used
+/// in the main audio thread to avoid ADSP crashes).
+pub fn setupCaptureMixer() void {
+    setupMixer();
+}
+
+pub fn setupPlaybackMixer() void {
+    // No-op — mixer is already set up with both routes.
 }
 
 fn setEnum(mixer: anytype, name: [*:0]const u8, value: [*:0]const u8) void {

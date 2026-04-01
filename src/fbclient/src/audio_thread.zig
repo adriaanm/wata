@@ -83,7 +83,8 @@ pub fn audioThreadMain(ctx: *Context) void {
 // ---------------------------------------------------------------------------
 
 fn doRecord(ctx: *Context) void {
-    alsa.setupCaptureMixer(); // speaker off during recording
+    // Mixer is set up once at startup — no per-recording switching
+    // to avoid ADSP churn that caused hard crashes.
     var capture = alsa.Capture.open() catch {
         _ = ctx.event_queue.push(.recording_error);
         return;
@@ -160,9 +161,6 @@ fn doRecord(ctx: *Context) void {
     };
 
     const duration_ms = (total_samples * 1000) / alsa.SAMPLE_RATE;
-
-    // Re-enable speaker after recording
-    alsa.setupPlaybackMixer();
 
     // Transfer ownership of the Ogg data to the UI thread
     _ = ctx.event_queue.push(.{ .recording_done = .{
