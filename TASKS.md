@@ -12,8 +12,8 @@
 
 ### Backlog
 - [ ] Event buffering for out-of-order sync — messages can arrive before their room is classified as a DM (m.direct update lags). TUI/Android have 300ms retry buffer. Fbclient may drop or misroute early messages.
-- [ ] Sync gap handling — after disconnect, sync may return `limited: true` with a `prev_batch` token. Fbclient doesn't paginate backward to fill gaps — messages sent during offline window are lost.
-- [ ] Rate limit handling — Matrix homeservers return 429 with `retry_after_ms`. Fbclient HTTP layer doesn't retry on rate limits.
+- [x] Sync gap handling — backfill via GET /messages when timeline is limited.
+- [x] Rate limit handling — retry up to 3× on HTTP 429 with retry_after_ms sleep.
 
 ## Android App (Kotlin)
 
