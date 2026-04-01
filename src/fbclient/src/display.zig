@@ -3,8 +3,8 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
-pub const width: u32 = 128;
-pub const height: u32 = 160;
+pub const width: u32 = 160;
+pub const height: u32 = 128;
 pub const scale: u32 = 4; // SDL window scale factor
 
 /// RGB565 color — matches the ST7735S hardware format.
@@ -192,12 +192,7 @@ const FbdevBackend = struct {
     pub fn present(self: *FbdevBackend) void {
         const fb: [*]Color = @ptrCast(self.fb_mem.ptr);
 
-        // FB is 160×128 in memory, panel rotation=90°.
-        // 90° CCW: app(x,y) → fb_row=(127-x), fb_col=y
-        for (0..height) |y| {
-            for (0..width) |x| {
-                fb[(width - 1 - x) * fb_w + y] = self.buf[y * width + x];
-            }
-        }
+        // App and fb are both 160×128 — direct blit
+        @memcpy(fb[0 .. width * height], &self.buf);
     }
 };
