@@ -165,6 +165,17 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
         _ = processor.process(parsed.value, event_arena.allocator()) catch {};
         event_arena.deinit();
 
+        // Auto-join invited rooms (trusted family environment — accept all invites).
+        // Must happen after process() so the next sync picks up the joined room state.
+        if (parsed.value.rooms) |rooms| {
+            if (rooms.invite) |invite_map| {
+                var invite_it = invite_map.map.iterator();
+                while (invite_it.next()) |entry| {
+                    client.joinRoom(entry.key_ptr.*) catch {};
+                }
+            }
+        }
+
         parsed.deinit();
         sync_resp.deinit();
 

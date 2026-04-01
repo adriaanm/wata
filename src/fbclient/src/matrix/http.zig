@@ -105,6 +105,15 @@ pub const MatrixHttpClient = struct {
         return self.doRequest(.GET, path, null);
     }
 
+    /// POST /_matrix/client/v3/join/{roomId} — accept an invite or join a room.
+    /// Used for auto-joining room invites in the trusted family environment.
+    pub fn joinRoom(self: *MatrixHttpClient, room_id: []const u8) HttpError!void {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/join/{s}", .{room_id}) catch return HttpError.OutOfMemory;
+        var resp = try self.doRequest(.POST, path, "{}");
+        resp.deinit();
+    }
+
     /// Send a voice message to a room. `mxc_url` is the uploaded media URL.
     pub fn sendVoiceMessage(
         self: *MatrixHttpClient,
