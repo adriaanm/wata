@@ -68,6 +68,7 @@ pub const Capture = struct {
 pub const Playback = struct {
     pcm: PcmPtr,
 
+    /// Open for streaming playback (starts after first period).
     pub fn open() PcmError!Playback {
         var config = makeConfig();
         config.start_threshold = FRAMES_PER_PERIOD;
@@ -79,10 +80,36 @@ pub const Playback = struct {
         return .{ .pcm = pcm };
     }
 
-    /// Write one period of S16_LE mono audio.
+    /// Open with large start_threshold — ALSA won't play until all data
+    /// is buffered. Use for pre-buffered playback (echo test, short clips).
+    pub fn openBuffered(total_frames: u32) PcmError!Playback {
+        var config = makeConfig();
+        // Buffer must hold all the data: need enough periods
+        config.period_count = (total_frames + FRAMES_PER_PERIOD - 1) / FRAMES_PER_PERIOD + 1;
+        config.start_threshold = total_frames;
+        config.stop_threshold = total_frames + FRAMES_PER_PERIOD;
+        const pcm = c.pcm_open(0, 0, c.PCM_OUT, &config);
+        if (pcm == null or c.pcm_is_ready(pcm) == 0) {
+            if (pcm != null) _ = c.pcm_close(pcm);
+            return error.OpenFailed;
+        }
+        return .{ .pcm = pcm };
+    }
+
+    /// Write frames. `buf` length determines frame count.
     pub fn writeFrames(self: *Playback, buf: []const u8) PcmError!void {
-        const ret = c.pcm_writei(self.pcm, buf.ptr, FRAMES_PER_PERIOD);
+        const frames: c_uint = @intCast(buf.len / (FRAME_SIZE * CHANNELS));
+        const ret = c.pcm_writei(self.pcm, buf.ptr, frames);
         if (ret < 0) return error.WriteFailed;
+    }
+
+    /// Wait for all buffered audio to finish playing.
+    pub fn drain(self: *Playback) void {
+        _ = c.pcm_start(self.pcm);
+        const buf_frames = c.pcm_get_buffer_size(self.pcm);
+        const ms = (buf_frames * 1000) / SAMPLE_RATE + 200;
+        var ts = std.os.linux.timespec{ .sec = @intCast(ms / 1000), .nsec = @intCast((ms % 1000) * 1_000_000) };
+        _ = std.os.linux.nanosleep(&ts, null);
     }
 
     pub fn close(self: *Playback) void {

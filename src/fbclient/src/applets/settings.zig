@@ -292,40 +292,34 @@ fn doEchoRecord(s: *State) void {
 fn doEchoPlayback(s: *State) void {
     s.echo = .playing;
 
-    var playback = alsa.Playback.open() catch {
+    const buf = s.echo_buf orelse {
+        s.echo = .err;
+        return;
+    };
+    const total_frames = s.echo_frames;
+
+    // Open playback with start_threshold = total buffer so ALSA doesn't
+    // start playing until all data is written (avoids underrun stutter).
+    var playback = alsa.Playback.openBuffered(total_frames) catch {
         s.echo = .err;
         return;
     };
     defer playback.close();
 
-    // Append playback rate to log
-    if (build_options.use_audio) {
-        const rate = alsa.getRate(playback.pcm);
-        const log_fd = std.posix.openatZ(std.posix.AT.FDCWD, "/tmp/wata-audio.log", .{ .ACCMODE = .WRONLY, .APPEND = true }, 0) catch null;
-        if (log_fd) |fd| {
-            var lbuf: [64]u8 = undefined;
-            const msg = std.fmt.bufPrint(&lbuf, "playback rate: {d}\n", .{rate}) catch "";
-            _ = std.os.linux.write(fd, msg.ptr, msg.len);
-            _ = std.os.linux.close(fd);
-        }
-    }
-
-    const buf = s.echo_buf orelse {
-        s.echo = .err;
-        return;
-    };
-    const num_periods = s.echo_frames / alsa.FRAMES_PER_PERIOD;
-
+    // Write all data, then ALSA starts playing automatically
+    const total_bytes = total_frames * alsa.FRAME_SIZE * alsa.CHANNELS;
     var offset: u32 = 0;
-    var periods: u32 = 0;
-    while (periods < num_periods) : (periods += 1) {
-        playback.writeFrames(buf[offset .. offset + alsa.PERIOD_BYTES]) catch {
+    while (offset < total_bytes) {
+        const chunk = @min(alsa.PERIOD_BYTES, total_bytes - offset);
+        playback.writeFrames(buf[offset..][0..chunk]) catch {
             s.echo = .err;
             return;
         };
-        offset += alsa.PERIOD_BYTES;
+        offset += @intCast(chunk);
     }
 
+    // Wait for playback to drain
+    playback.drain();
     s.echo = .done;
 }
 
