@@ -17,7 +17,7 @@ Existing Zig tests: 7 in sync_engine.zig (sync state machine). Run with `cd src/
 - [x] **Ogg container tests** (13 tests) — CRC32, OpusHead/OpusTags structure, page CRC integrity, mux/demux roundtrip, large payloads, EOS, reader skip logic.
 - [x] **Queue tests** (6 tests) — push/pop, FIFO ordering, full buffer, wraparound, drain.
 - [x] **HTTP helpers tests** (4 tests) — parseRetryAfterMs, parseMxcUrl, parseRoomId.
-- [ ] **Sync engine tests (expand)** — extend existing 7 tests. Port coverage from `matrix.test.ts`: m.direct dedup (multiple rooms per contact), family room detection by alias, roomless family member conversations, invite processing.
+- [x] **Sync engine tests (expand)** (7 new, 14 total) — m.direct dedup, family room detection, roomless members, self-exclusion, read receipts, unplayed count.
 - [ ] **Opus codec roundtrip** — port from `audio-codec.test.ts`. Encode PCM→Opus→Ogg→decode→PCM, verify sample count and basic signal preservation. Requires `use_audio` build flag.
 
 ### Backlog
