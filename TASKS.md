@@ -14,10 +14,10 @@
 ### Testing — port from TypeScript test suite
 Existing Zig tests: 7 in sync_engine.zig (sync state machine). Run with `cd src/fbclient && zig build test`. Test entry point: `src/test_main.zig`.
 
-- [ ] **Ogg container tests** — port from `src/shared/lib/__tests__/ogg.test.ts`. CRC32 validation, OpusHead/OpusTags structure, page creation with segment tables, mux→demux roundtrip. Pure Zig, no external deps — highest value.
-- [ ] **Queue tests** — BoundedQueue (queue.zig) has zero test coverage. Test push/pop, full buffer, drain, MPSC ordering.
+- [x] **Ogg container tests** (13 tests) — CRC32, OpusHead/OpusTags structure, page CRC integrity, mux/demux roundtrip, large payloads, EOS, reader skip logic.
+- [x] **Queue tests** (6 tests) — push/pop, FIFO ordering, full buffer, wraparound, drain.
+- [x] **HTTP helpers tests** (4 tests) — parseRetryAfterMs, parseMxcUrl, parseRoomId.
 - [ ] **Sync engine tests (expand)** — extend existing 7 tests. Port coverage from `matrix.test.ts`: m.direct dedup (multiple rooms per contact), family room detection by alias, roomless family member conversations, invite processing.
-- [ ] **HTTP helpers tests** — parseRetryAfterMs, parseMxcUrl, parseRoomId, updateMDirect JSON manipulation. Pure string logic, easy to test.
 - [ ] **Opus codec roundtrip** — port from `audio-codec.test.ts`. Encode PCM→Opus→Ogg→decode→PCM, verify sample count and basic signal preservation. Requires `use_audio` build flag.
 
 ### Backlog
