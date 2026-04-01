@@ -134,7 +134,7 @@ pub const SyncProcessor = struct {
     }
 
     /// Dupe a string into the processor's arena so it outlives the JSON parse.
-    fn dupe(self: *SyncProcessor, s: []const u8) ![]const u8 {
+    pub fn dupe(self: *SyncProcessor, s: []const u8) ![]const u8 {
         return self.strings.allocator().dupe(u8, s);
     }
 
@@ -403,7 +403,7 @@ pub const SyncProcessor = struct {
     }
 
     /// Extract a voice message with all strings duped into the processor's arena.
-    fn extractVoiceMessageOwned(self: *SyncProcessor, event: json_types.MatrixEvent) !?VoiceMessageRaw {
+    pub fn extractVoiceMessageOwned(self: *SyncProcessor, event: json_types.MatrixEvent) !?VoiceMessageRaw {
         const content = event.content orelse return null;
         const msgtype = getJsonString(content, "msgtype") orelse return null;
         if (!std.mem.eql(u8, msgtype, "m.audio")) return null;

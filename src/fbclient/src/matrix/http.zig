@@ -139,6 +139,14 @@ pub const MatrixHttpClient = struct {
         resp.deinit();
     }
 
+    /// GET /_matrix/client/v3/rooms/{roomId}/messages — paginate room messages.
+    /// Used to backfill missed messages when sync returns limited: true.
+    pub fn getMessages(self: *MatrixHttpClient, room_id: []const u8, from: []const u8, limit: u32) HttpError!RawResponse {
+        var path_buf: [1024]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/rooms/{s}/messages?from={s}&dir=b&limit={d}", .{ room_id, from, limit }) catch return HttpError.OutOfMemory;
+        return self.doRequest(.GET, path, null);
+    }
+
     /// Send a voice message to a room. `mxc_url` is the uploaded media URL.
     pub fn sendVoiceMessage(
         self: *MatrixHttpClient,

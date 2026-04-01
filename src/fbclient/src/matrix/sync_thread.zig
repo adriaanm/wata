@@ -176,6 +176,22 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
             }
         }
 
+        // Backfill rooms with limited timelines (sync gap — missed messages).
+        // Uses prev_batch token stored by the processor to paginate backward.
+        if (parsed.value.rooms) |rooms| {
+            if (rooms.join) |join_map| {
+                var join_it = join_map.map.iterator();
+                while (join_it.next()) |entry| {
+                    const joined = entry.value_ptr;
+                    if (joined.timeline) |tl| {
+                        if (tl.limited != null and tl.limited.?) {
+                            backfillRoom(allocator, &client, &processor, entry.key_ptr.*);
+                        }
+                    }
+                }
+            }
+        }
+
         parsed.deinit();
         sync_resp.deinit();
 
@@ -317,6 +333,49 @@ fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient, self_us
                 S.txn_counter += 1;
                 client.redactEvent(room_id, event_id, S.txn_counter) catch {};
             },
+        }
+    }
+}
+
+/// Backfill missed messages for a room with a limited timeline.
+/// Fetches older messages using GET /messages with the room's prev_batch token,
+/// then feeds them through the sync processor for dedup and extraction.
+fn backfillRoom(allocator: std.mem.Allocator, client: *http.MatrixHttpClient, processor: *sync_engine.SyncProcessor, room_id: []const u8) void {
+    const room = processor.rooms.getPtr(room_id) orelse return;
+    const prev_batch = room.prev_batch orelse return;
+
+    var resp = client.getMessages(room_id, prev_batch, 50) catch return;
+    defer resp.deinit();
+
+    // Parse the /messages response — we only need the chunk (array of events)
+    // Response format: {"chunk":[...], "end":"token", "start":"token"}
+    const parsed = std.json.parseFromSlice(
+        struct { chunk: ?[]const json_types.MatrixEvent = null },
+        allocator,
+        resp.body,
+        .{ .ignore_unknown_fields = true },
+    ) catch return;
+    defer parsed.deinit();
+
+    const chunk = parsed.value.chunk orelse return;
+
+    // Process backfilled events (oldest first — API returns newest first with dir=b,
+    // but we iterate forward since dedup handles ordering)
+    for (chunk) |event| {
+        // Dedup against existing timeline
+        if (event.event_id) |eid| {
+            const dup = room.timeline_event_ids.getOrPut(processor.gpa, eid) catch continue;
+            if (dup.found_existing) continue;
+            dup.key_ptr.* = processor.dupe(eid) catch continue;
+        }
+
+        // Extract voice messages
+        if (event.type) |evt_type| {
+            if (std.mem.eql(u8, evt_type, "m.room.message")) {
+                if (processor.extractVoiceMessageOwned(event) catch null) |vm| {
+                    room.voice_messages.append(processor.gpa, vm) catch {};
+                }
+            }
         }
     }
 }
