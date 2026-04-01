@@ -470,13 +470,24 @@ pub const SyncProcessor = struct {
                 if (std.mem.eql(u8, user_id, self_id)) continue;
             }
             if (entry.value_ptr.items.len == 0) continue;
-            const room_id = entry.value_ptr.items[0]; // primary room
-            const room = self.rooms.get(room_id) orelse continue;
+            // Use the first joined room from m.direct as the primary DM room.
+            // m.direct preserves insertion order (oldest first), matching TUI behavior.
+            // Skip rooms we haven't joined (stale entries from left/rejected rooms).
+            // Use the first joined room from m.direct as the primary DM room.
+            // m.direct preserves insertion order (oldest first), matching TUI behavior.
+            // Skip rooms we haven't joined (stale entries from left/rejected rooms).
+            const rid = blk: {
+                for (entry.value_ptr.items) |candidate| {
+                    if (self.rooms.contains(candidate)) break :blk candidate;
+                }
+                continue; // no joined room found for this contact
+            };
+            const rm = self.rooms.getPtr(rid) orelse continue;
 
             var messages: std.ArrayListUnmanaged(types.VoiceMessage) = .empty;
-            for (room.voice_messages.items) |vm| {
-                const sender_name = if (room.members.get(vm.sender)) |m| m.display_name else vm.sender;
-                const is_played = if (room.receipt_user_ids.get(vm.event_id)) |users| blk: {
+            for (rm.voice_messages.items) |vm| {
+                const sender_name = if (rm.members.get(vm.sender)) |m| m.display_name else vm.sender;
+                const is_played = if (rm.receipt_user_ids.get(vm.event_id)) |users| blk: {
                     if (self.self_user_id) |self_id| {
                         for (users.items) |uid| {
                             if (std.mem.eql(u8, uid, self_id)) break :blk true;
@@ -511,7 +522,7 @@ pub const SyncProcessor = struct {
             }
 
             try conversations.append(arena, .{
-                .room_id = room_id,
+                .room_id = rid,
                 .conv_type = .dm,
                 .contact = contact,
                 .messages = messages.items,
