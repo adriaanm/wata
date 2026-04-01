@@ -117,8 +117,29 @@ pub const Playback = struct {
     }
 };
 
-/// Set up the audio mixer routes for the BQ268 (one-time after boot).
+/// Set up both playback and capture mixer routes (one-time after boot).
 pub fn setupMixer() void {
+    setupCaptureMixer();
+    setupPlaybackMixer();
+}
+
+/// Enable microphone capture route. Disables speaker to prevent feedback.
+pub fn setupCaptureMixer() void {
+    const mixer = c.mixer_open(0) orelse return;
+    defer c.mixer_close(mixer);
+
+    // Disable speaker during capture to prevent feedback
+    setSwitch(mixer, "Ext Spk Switch", false);
+
+    // Microphone capture route
+    setSwitch(mixer, "MultiMedia1 Mixer TERT_MI2S_TX", true);
+    setEnum(mixer, "DEC1 MUX", "ADC1");
+    setInt(mixer, "ADC1 Volume", 6);
+    setInt(mixer, "DEC1 Volume", 104);
+}
+
+/// Enable speaker playback route.
+pub fn setupPlaybackMixer() void {
     const mixer = c.mixer_open(0) orelse return;
     defer c.mixer_close(mixer);
 
@@ -128,12 +149,6 @@ pub fn setupMixer() void {
     setSwitch(mixer, "HPHR", true);
     setSwitch(mixer, "Ext Spk Switch", true);
     setInt(mixer, "RX2 Digital Volume", 84);
-
-    // Microphone capture route
-    setSwitch(mixer, "MultiMedia1 Mixer TERT_MI2S_TX", true);
-    setEnum(mixer, "DEC1 MUX", "ADC1");
-    setInt(mixer, "ADC1 Volume", 6);
-    setInt(mixer, "DEC1 Volume", 104);
 }
 
 fn setEnum(mixer: anytype, name: [*:0]const u8, value: [*:0]const u8) void {

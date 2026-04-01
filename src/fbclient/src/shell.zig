@@ -143,9 +143,5 @@ pub const Shell = struct {
             self.applets[self.active].render_fn(applet_state, fb);
         }
 
-        // Applet name indicator — bottom-right, subtle
-        const name = self.applets[self.active].name;
-        const name_col: u32 = if (name.len >= font.cols) 0 else font.cols - @as(u32, @intCast(name.len));
-        font.drawText(fb, name, name_col, font.rows - 1, display.colors.mid_gray, null);
     }
 };

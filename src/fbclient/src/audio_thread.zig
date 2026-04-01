@@ -57,8 +57,8 @@ pub const Context = struct {
 pub fn audioThreadMain(ctx: *Context) void {
     if (!build_options.use_audio) return;
 
-    // Set up mixer routes (idempotent, safe to call multiple times)
-    alsa.setupMixer();
+    // Set up playback mixer by default (speaker on)
+    alsa.setupPlaybackMixer();
 
     while (!ctx.should_stop.load(.acquire)) {
         const cmd = ctx.cmd_queue.pop() orelse {
@@ -83,6 +83,7 @@ pub fn audioThreadMain(ctx: *Context) void {
 // ---------------------------------------------------------------------------
 
 fn doRecord(ctx: *Context) void {
+    alsa.setupCaptureMixer(); // speaker off during recording
     var capture = alsa.Capture.open() catch {
         _ = ctx.event_queue.push(.recording_error);
         return;
@@ -159,6 +160,9 @@ fn doRecord(ctx: *Context) void {
     };
 
     const duration_ms = (total_samples * 1000) / alsa.SAMPLE_RATE;
+
+    // Re-enable speaker after recording
+    alsa.setupPlaybackMixer();
 
     // Transfer ownership of the Ogg data to the UI thread
     _ = ctx.event_queue.push(.{ .recording_done = .{

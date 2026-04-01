@@ -152,15 +152,14 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
     const detail_row: u32 = 3 + ITEMS.len * 2 + 1;
     switch (ITEMS[s.selected]) {
         .info => {
-            font.drawText(fb, "BQ268 MSM8909", 1, detail_row, c.mid_gray, null);
-            font.drawText(fb, "128x160 ST7735S", 1, detail_row + 1, c.mid_gray, null);
-            font.drawText(fb, "48kHz ADSP audio", 1, detail_row + 2, c.mid_gray, null);
             const bat = led.readBatteryPercent();
             if (bat) |pct| {
-                var buf: [12]u8 = undefined;
-                const str = std.fmt.bufPrint(&buf, "Battery: {d}%", .{pct}) catch "Battery: ?";
-                font.drawText(fb, str, 1, detail_row + 3, c.mid_gray, null);
+                var bbuf: [12]u8 = undefined;
+                const bstr = std.fmt.bufPrint(&bbuf, "Battery: {d}%", .{pct}) catch "Battery: ?";
+                font.drawText(fb, bstr, 1, detail_row, c.mid_gray, null);
             }
+            const ver = "v0.1-" ++ build_options.version;
+            font.drawText(fb, ver, 1, detail_row + 1, c.mid_gray, null);
         },
         .echo_test => {
             font.drawText(fb, "Records 2s, plays", 1, detail_row, c.mid_gray, null);
@@ -239,7 +238,7 @@ fn startEchoRecord(s: *State) void {
 }
 
 fn doEchoRecord(s: *State) void {
-    alsa.setupMixer();
+    alsa.setupCaptureMixer(); // speaker off during recording
 
     var capture = alsa.Capture.open() catch {
         s.echo = .err;
@@ -293,6 +292,7 @@ fn doEchoRecord(s: *State) void {
 
 fn doEchoPlayback(s: *State) void {
     s.echo = .playing;
+    alsa.setupPlaybackMixer(); // speaker on for playback
 
     const buf = s.echo_buf orelse {
         s.echo = .err;

@@ -14,11 +14,19 @@ pub fn build(b: *std.Build) void {
     const use_freetype = b.option(bool, "freetype", "Enable FreeType font rendering (default: true)") orelse true;
     const use_audio = b.option(bool, "audio", "Enable audio capture/playback (default: non-SDL)") orelse !use_sdl;
 
+    // Git version
+    const git_sha = b.option([]const u8, "version", "Version string (default: git short SHA)") orelse blk: {
+        var code: u8 = 0;
+        const result = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &code, .inherit);
+        break :blk if (result) |output| std.mem.trimEnd(u8, output, "\n \r") else |_| "unknown";
+    };
+
     const options = b.addOptions();
     options.addOption(bool, "use_sdl", use_sdl);
     options.addOption(bool, "debug_mode", debug_mode);
     options.addOption(bool, "use_freetype", use_freetype);
     options.addOption(bool, "use_audio", use_audio);
+    options.addOption([]const u8, "version", git_sha);
 
     // Create root module
     const root_mod = b.createModule(.{
