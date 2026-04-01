@@ -114,6 +114,31 @@ pub const MatrixHttpClient = struct {
         resp.deinit();
     }
 
+    /// POST /_matrix/client/v3/createRoom — create a DM room with a contact.
+    /// Returns the new room_id as a slice into the response buffer.
+    pub fn createRoom(self: *MatrixHttpClient, contact_user_id: []const u8) HttpError!RawResponse {
+        var body_buf: [512]u8 = undefined;
+        const body = std.fmt.bufPrint(&body_buf,
+            \\{{"is_direct":true,"invite":["{s}"],"preset":"trusted_private_chat","visibility":"private"}}
+        , .{contact_user_id}) catch return HttpError.OutOfMemory;
+        return self.doRequest(.POST, "/_matrix/client/v3/createRoom", body);
+    }
+
+    /// GET /_matrix/client/v3/user/{userId}/account_data/{type}
+    pub fn getAccountData(self: *MatrixHttpClient, user_id: []const u8, data_type: []const u8) HttpError!RawResponse {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/user/{s}/account_data/{s}", .{ user_id, data_type }) catch return HttpError.OutOfMemory;
+        return self.doRequest(.GET, path, null);
+    }
+
+    /// PUT /_matrix/client/v3/user/{userId}/account_data/{type}
+    pub fn setAccountData(self: *MatrixHttpClient, user_id: []const u8, data_type: []const u8, data: []const u8) HttpError!void {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/user/{s}/account_data/{s}", .{ user_id, data_type }) catch return HttpError.OutOfMemory;
+        var resp = try self.doRequest(.PUT, path, data);
+        resp.deinit();
+    }
+
     /// Send a voice message to a room. `mxc_url` is the uploaded media URL.
     pub fn sendVoiceMessage(
         self: *MatrixHttpClient,

@@ -218,11 +218,44 @@ fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient, self_us
             },
             .upload_and_send_voice => |msg| {
                 const ogg_data = msg.ogg_data[0..msg.ogg_len];
-
-                const room_id = msg.room_id_buf[0..msg.room_id_len];
+                var room_id = msg.room_id_buf[0..msg.room_id_len];
 
                 S.txn_counter += 1;
                 const txn_id = S.txn_counter;
+
+                // If no room yet, create a DM room for this contact first.
+                // This handles the case where a family member hasn't been
+                // messaged before (no DM room exists in m.direct).
+                var create_resp: ?http.RawResponse = null;
+                if (room_id.len == 0) {
+                    const contact_id = msg.contact_id_buf[0..msg.contact_id_len];
+                    if (contact_id.len == 0) {
+                        _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                        continue;
+                    }
+
+                    // Create DM room
+                    var cr = client.createRoom(contact_id) catch {
+                        _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                        continue;
+                    };
+
+                    // Parse room_id from {"room_id":"!abc:server"}
+                    room_id = parseRoomId(cr.body) orelse {
+                        cr.deinit();
+                        _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                        continue;
+                    };
+
+                    // Update m.direct account data so the room is recognized as a DM.
+                    // Best-effort: if this fails, the next sync will still pick up the room.
+                    if (self_user_id) |uid| {
+                        updateMDirect(client, uid, contact_id, room_id);
+                    }
+
+                    create_resp = cr;
+                }
+                defer if (create_resp) |*cr| cr.deinit();
 
                 // Upload media
                 var upload_resp = client.uploadMedia(ogg_data) catch {
@@ -295,4 +328,63 @@ fn parseMxcUrl(json_body: []const u8) ?[]const u8 {
     const val_start = start + key.len;
     const end = std.mem.indexOfPos(u8, json_body, val_start, "\"") orelse return null;
     return json_body[val_start..end];
+}
+
+fn parseRoomId(json_body: []const u8) ?[]const u8 {
+    const key = "\"room_id\":\"";
+    const start = std.mem.indexOf(u8, json_body, key) orelse return null;
+    const val_start = start + key.len;
+    const end = std.mem.indexOfPos(u8, json_body, val_start, "\"") orelse return null;
+    return json_body[val_start..end];
+}
+
+/// Update m.direct account data to include a new DM room for a contact.
+/// GET current m.direct → append room → PUT back. Best-effort (errors ignored).
+fn updateMDirect(client: *http.MatrixHttpClient, self_user_id: []const u8, contact_id: []const u8, room_id: []const u8) void {
+    // GET current m.direct (may 404 if no DMs exist yet — that's fine)
+    var existing: []const u8 = "{}";
+    var get_resp: ?http.RawResponse = null;
+    if (client.getAccountData(self_user_id, "m.direct")) |resp| {
+        get_resp = resp;
+        existing = resp.body;
+    } else |_| {}
+    defer if (get_resp) |*r| r.deinit();
+
+    // Build updated m.direct JSON. Insert the new mapping before the closing '}'.
+    // If contact already has rooms: {"@contact":[..."!existing"],...} → inject ,"!new" before ']'
+    // If contact is new: inject "@contact":["!room"] before '}'
+    var buf: [4096]u8 = undefined;
+
+    // Check if this contact already has an entry
+    var search_buf: [256]u8 = undefined;
+    const contact_key = std.fmt.bufPrint(&search_buf, "\"{s}\":", .{contact_id}) catch return;
+
+    const body = if (std.mem.indexOf(u8, existing, contact_key)) |_| blk: {
+        // Contact exists — find their array's closing ']' and insert the new room_id
+        const key_pos = std.mem.indexOf(u8, existing, contact_key).?;
+        const after_key = key_pos + contact_key.len;
+        const bracket = std.mem.indexOfPos(u8, existing, after_key, "]") orelse break :blk @as(?[]const u8, null);
+        break :blk std.fmt.bufPrint(&buf, "{s}\"{s}\"{s}", .{
+            existing[0..bracket],
+            room_id,
+            existing[bracket..],
+        }) catch null;
+    } else blk: {
+        // Contact is new — insert before closing '}'
+        const close = std.mem.lastIndexOf(u8, existing, "}") orelse break :blk @as(?[]const u8, null);
+        const prefix = existing[0..close];
+        // Add comma if there's existing content (not just "{}")
+        const needs_comma = close > 1;
+        break :blk std.fmt.bufPrint(&buf, "{s}{s}\"{s}\":[\"{s}\"]{s}", .{
+            prefix,
+            if (needs_comma) "," else "",
+            contact_id,
+            room_id,
+            existing[close..],
+        }) catch null;
+    };
+
+    if (body) |b| {
+        client.setAccountData(self_user_id, "m.direct", b) catch {};
+    }
 }

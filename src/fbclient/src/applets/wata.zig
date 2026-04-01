@@ -302,17 +302,26 @@ fn uploadRecording(s: *State, ogg_data: []const u8, duration_ms: u64, data_alloc
     // Send to the conversation we're currently viewing (or the selected contact)
     const conv_idx = if (s.view == .conversation) s.conv_contact_idx else s.selected;
     if (conv_idx >= snap.conversations.len) return;
-    const room_id = snap.conversations[conv_idx].room_id;
+    const conv = snap.conversations[conv_idx];
+    const room_id = conv.room_id;
     if (room_id.len > 128) return;
+
+    // For contacts without a DM room yet, include the contact ID so the
+    // sync thread can create the room before sending (ensureDMRoom pattern).
+    const contact_id = if (conv.contact) |ct| ct.user.id else "";
+    if (contact_id.len > 128) return;
 
     var action = types.Action{ .upload_and_send_voice = .{
         .room_id_buf = undefined,
         .room_id_len = @intCast(room_id.len),
+        .contact_id_buf = undefined,
+        .contact_id_len = @intCast(contact_id.len),
         .ogg_data = ogg_data.ptr,
         .ogg_len = @intCast(ogg_data.len),
         .duration_ms = duration_ms,
     } };
     @memcpy(action.upload_and_send_voice.room_id_buf[0..room_id.len], room_id);
+    @memcpy(action.upload_and_send_voice.contact_id_buf[0..contact_id.len], contact_id);
     _ = aq.push(action);
 }
 

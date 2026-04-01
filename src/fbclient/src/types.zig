@@ -117,9 +117,12 @@ pub const Action = union(enum) {
         event_id_len: u8,
     },
     /// Upload Ogg audio and send as voice message.
+    /// If room_id_len is 0, creates a DM room for contact_id first.
     upload_and_send_voice: struct {
         room_id_buf: [128]u8,
         room_id_len: u8,
+        contact_id_buf: [128]u8,
+        contact_id_len: u8,
         ogg_data: [*]const u8,
         ogg_len: u32,
         duration_ms: u64,

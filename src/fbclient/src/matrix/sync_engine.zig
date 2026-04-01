@@ -588,6 +588,33 @@ pub const SyncProcessor = struct {
             }
         }
 
+        // Add conversation entries for family members who don't have DM rooms yet.
+        // These appear in the contact list so the user can send them a first message.
+        // The room_id is empty — the sync thread will create a DM room on first send.
+        if (family) |fam| {
+            for (fam.members) |member| {
+                // Skip if this member already has a conversation (from m.direct)
+                var has_conv = false;
+                for (conversations.items) |conv| {
+                    if (conv.contact) |ct| {
+                        if (std.mem.eql(u8, ct.user.id, member.user.id)) {
+                            has_conv = true;
+                            break;
+                        }
+                    }
+                }
+                if (!has_conv) {
+                    try conversations.append(arena, .{
+                        .room_id = "", // no DM room yet — created on first send
+                        .conv_type = .dm,
+                        .contact = member,
+                        .messages = &.{},
+                        .unplayed_count = 0,
+                    });
+                }
+            }
+        }
+
         // Resolve self display name from family room membership or any room
         var self_display_name: []const u8 = if (self.self_user_id) |uid| uid else "";
         if (self.self_user_id) |self_id| {
