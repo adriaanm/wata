@@ -1,5 +1,7 @@
 # Tasks
 
+**Current focus: Framebuffer client (Zig).** Planning doc: [docs/planning/framebuffer-client.md](docs/planning/framebuffer-client.md) — treat as a working document, update as things change. The **TUI is the most complete frontend** — use it as the reference implementation when docs are incomplete (read the TUI source, not just the docs).
+
 ## Framebuffer Client (Zig)
 
 ### Active
