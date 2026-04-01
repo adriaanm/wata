@@ -32,8 +32,6 @@ const State = struct {
     selected: usize = 0,
     brightness: u8 = 40,
     echo: EchoState = .idle,
-    echo_buf: ?[]u8 = null,
-    echo_frames: u32 = 0,
     action_queue: ?*queue_mod.BoundedQueue(types.Action, 64) = null,
     snapshot: ?*const types.StateSnapshot = null,
     name_idx: usize = 0, // index into DISPLAY_NAMES
@@ -46,10 +44,7 @@ fn initApplet() *anyopaque {
     return @ptrCast(&S.state);
 }
 
-fn deinitApplet(ptr: *anyopaque) void {
-    const s: *State = @ptrCast(@alignCast(ptr));
-    if (s.echo_buf) |buf| std.heap.page_allocator.free(buf);
-}
+fn deinitApplet(_: *anyopaque) void {}
 
 fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell.Action {
     const s: *State = @ptrCast(@alignCast(ptr));
@@ -209,124 +204,73 @@ pub fn setContext(
 }
 
 // ---------------------------------------------------------------------------
-// Audio echo test — record 2 seconds, play back immediately
+// Audio echo test — record 2s of raw PCM, play back through speaker.
+// Dead simple: pre-allocated buffer, no Opus, no threading complexity.
 // ---------------------------------------------------------------------------
+
+/// 2 seconds at 48kHz mono S16_LE = 192000 bytes
+const ECHO_BUF_FRAMES: u32 = alsa.SAMPLE_RATE * 2;
+const ECHO_BUF_BYTES: u32 = ECHO_BUF_FRAMES * alsa.FRAME_SIZE;
 
 fn startEchoRecord(s: *State) void {
     if (!build_options.use_audio) {
         s.echo = .err;
         return;
     }
-
     s.echo = .recording;
 
-    // Free previous buffer
-    if (s.echo_buf) |buf| {
-        std.heap.page_allocator.free(buf);
-        s.echo_buf = null;
-    }
-
-    // Record 2 seconds in a background thread
     const S = struct {
-        fn recordThread(state: *State) void {
-            doEchoRecord(state);
+        fn thread(state: *State) void {
+            doEchoTest(state);
         }
     };
-    _ = std.Thread.spawn(.{}, S.recordThread, .{s}) catch {
+    _ = std.Thread.spawn(.{}, S.thread, .{s}) catch {
         s.echo = .err;
     };
 }
 
-fn doEchoRecord(s: *State) void {
-    alsa.setupCaptureMixer(); // speaker off during recording
+fn doEchoTest(s: *State) void {
+    // Pre-allocate the full 2s buffer
+    var pcm_buf: [ECHO_BUF_BYTES]u8 = undefined;
+
+    // --- RECORD ---
+    alsa.setupCaptureMixer();
 
     var capture = alsa.Capture.open() catch {
         s.echo = .err;
         return;
     };
 
-    // Log actual rate to /tmp/wata-audio.log
-    if (build_options.use_audio) {
-        const rate = alsa.getRate(capture.pcm);
-        const log_fd = std.posix.openatZ(std.posix.AT.FDCWD, "/tmp/wata-audio.log", .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644) catch null;
-        if (log_fd) |fd| {
-            var buf: [64]u8 = undefined;
-            const msg = std.fmt.bufPrint(&buf, "capture rate: {d}\n", .{rate}) catch "";
-            _ = std.os.linux.write(fd, msg.ptr, msg.len);
-            _ = std.os.linux.close(fd);
-        }
+    var rec_offset: u32 = 0;
+    while (rec_offset + alsa.PERIOD_BYTES <= ECHO_BUF_BYTES) {
+        _ = capture.readFrames(pcm_buf[rec_offset..][0..alsa.PERIOD_BYTES]) catch break;
+        rec_offset += alsa.PERIOD_BYTES;
     }
-
-    // 2 seconds at 48kHz with 1920-frame periods (40ms each) = 50 periods
-    const num_periods: u32 = 50;
-    const total_bytes = num_periods * alsa.PERIOD_BYTES;
-
-    const buf = std.heap.page_allocator.alloc(u8, total_bytes) catch {
-        capture.close();
-        s.echo = .err;
-        return;
-    };
-
-    var offset: u32 = 0;
-    var periods: u32 = 0;
-    while (periods < num_periods) : (periods += 1) {
-        _ = capture.readFrames(buf[offset .. offset + alsa.PERIOD_BYTES]) catch {
-            capture.close();
-            std.heap.page_allocator.free(buf);
-            s.echo = .err;
-            return;
-        };
-        offset += alsa.PERIOD_BYTES;
-    }
-
-    // Close capture and wait for mic path to fully drain before playback
     capture.close();
-    var ts = std.os.linux.timespec{ .sec = 1, .nsec = 0 };
-    _ = std.os.linux.nanosleep(&ts, null);
 
-    s.echo_buf = buf;
-    s.echo_frames = num_periods * alsa.FRAMES_PER_PERIOD;
-
-    doEchoPlayback(s);
-}
-
-fn doEchoPlayback(s: *State) void {
     s.echo = .playing;
-    alsa.setupPlaybackMixer(); // speaker on for playback
 
-    const buf = s.echo_buf orelse {
-        s.echo = .err;
-        return;
-    };
-    const total_bytes: u32 = s.echo_frames * alsa.FRAME_SIZE * alsa.CHANNELS;
+    // --- PLAY BACK ---
+    alsa.setupPlaybackMixer();
 
-    // Use normal open — pcm_writei blocks when the buffer is full,
-    // which naturally paces playback without underruns.
     var playback = alsa.Playback.open() catch {
         s.echo = .err;
         return;
     };
-    defer playback.close();
 
-    var offset: u32 = 0;
-    while (offset < total_bytes) {
-        const chunk = @min(alsa.PERIOD_BYTES, total_bytes - offset);
-        playback.writeFrames(buf[offset..][0..chunk]) catch {
-            s.echo = .err;
-            return;
-        };
-        offset += chunk;
+    var play_offset: u32 = 0;
+    while (play_offset + alsa.PERIOD_BYTES <= rec_offset) {
+        playback.writeFrames(pcm_buf[play_offset..][0..alsa.PERIOD_BYTES]) catch break;
+        play_offset += alsa.PERIOD_BYTES;
     }
 
-    // Wait for last buffer to play out
     playback.drain();
+    playback.close();
+
     s.echo = .done;
 }
 
 fn stopEchoAndPlay(s: *State) void {
-    // The recording thread runs for a fixed duration, so "stop" just means
-    // wait for it to finish — it auto-plays when done.
-    // If the user presses Enter during recording, we do nothing extra.
     _ = s;
 }
 
