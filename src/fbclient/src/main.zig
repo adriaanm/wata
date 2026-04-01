@@ -41,6 +41,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Inter-thread communication
     var ui_queue: queue.BoundedQueue(types.UiEvent, 256) = .{};
+    var action_queue: queue.BoundedQueue(types.Action, 64) = .{};
     var state_store: types.StateStore = .{};
     var should_stop = std.atomic.Value(bool).init(false);
 
@@ -48,6 +49,7 @@ pub fn main(init: std.process.Init) !void {
     var sync_ctx = sync_thread.SyncThreadContext{
         .config = sync_thread.DEFAULT_CONFIG,
         .ui_queue = &ui_queue,
+        .action_queue = &action_queue,
         .state_store = &state_store,
         .should_stop = &should_stop,
         .allocator = allocator,
@@ -170,9 +172,9 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
-        // Push snapshot to wata applet
+        // Push snapshot + action queue to wata applet
         if (sh.states[0]) |wata_state| {
-            wata_applet.setSnapshot(wata_state, current_snapshot, connection);
+            wata_applet.setContext(wata_state, current_snapshot, connection, &action_queue);
         }
 
         // Poll input

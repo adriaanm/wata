@@ -113,6 +113,14 @@ pub const Shell = struct {
             }
         }
 
+        // PTT always routes to wata (applet 0), regardless of active applet
+        if (key == .ptt) {
+            if (self.states[0]) |wata_state| {
+                return self.applets[0].handle_input_fn(wata_state, key, state);
+            }
+            return .none;
+        }
+
         // Route to active applet
         if (self.states[self.active]) |applet_state| {
             return self.applets[self.active].handle_input_fn(applet_state, key, state);

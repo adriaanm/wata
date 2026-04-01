@@ -8,6 +8,7 @@ const ft_font = if (build_options.use_freetype) @import("../ft_font.zig") else F
 const input = @import("../input.zig");
 const shell = @import("../shell.zig");
 const types = @import("../types.zig");
+const queue = @import("../queue.zig");
 
 /// Stub for when FreeType is not available (cross-compile without freetype2).
 /// Font.init always fails → wata applet falls back to bitmap font rendering.
@@ -43,10 +44,14 @@ const State = struct {
     scroll_offset: usize = 0,
     snapshot: ?*const types.StateSnapshot = null,
     connection: types.ConnectionState = .disconnected,
+    action_queue: ?*queue.BoundedQueue(types.Action, 64) = null,
     // For conversation view
     conv_contact_idx: usize = 0,
     msg_selected: usize = 0,
     msg_scroll: usize = 0,
+    // PTT recording state
+    ptt_held: bool = false,
+    ptt_hold_time: f32 = 0, // seconds held
     // Font (initialized lazily on first render)
     ft: ?ft_font.Font = null,
 };
@@ -75,6 +80,20 @@ fn getFont(s: *State) ?*ft_font.Font {
 
 fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell.Action {
     const s: *State = @ptrCast(@alignCast(ptr));
+
+    // PTT: track press/release (always, regardless of view)
+    if (key == .ptt) {
+        if (key_state == .pressed) {
+            s.ptt_held = true;
+            s.ptt_hold_time = 0;
+            // TODO: start audio recording when ALSA/LPASS is available
+        } else if (key_state == .released) {
+            s.ptt_held = false;
+            // TODO: stop recording, encode, upload, send
+        }
+        return .none;
+    }
+
     if (key_state != .pressed) return .none;
 
     switch (s.view) {
@@ -107,6 +126,8 @@ fn handleContactsInput(s: *State, key: input.Key) void {
             s.msg_selected = 0;
             s.msg_scroll = 0;
             s.view = .conversation;
+            // Send read receipt for the latest message in this conversation
+            sendReadReceiptForConversation(s);
         },
         else => {},
     }
@@ -135,8 +156,48 @@ fn handleConversationInput(s: *State, key: input.Key) void {
                 }
             }
         },
+        .enter => {
+            // "Play" the selected message — send read receipt to mark as played
+            // TODO: actual audio playback when ALSA/LPASS is available
+            const snap = s.snapshot orelse return;
+            if (s.conv_contact_idx >= snap.conversations.len) return;
+            const conv = snap.conversations[s.conv_contact_idx];
+            if (s.msg_selected >= conv.messages.len) return;
+            const msg = conv.messages[s.msg_selected];
+            if (!msg.is_played) {
+                pushReadReceipt(s, conv.room_id, msg.id);
+            }
+        },
         else => {},
     }
+}
+
+/// Send a read receipt for the latest unplayed message in the current conversation.
+fn sendReadReceiptForConversation(s: *State) void {
+    const snap = s.snapshot orelse return;
+    if (s.conv_contact_idx >= snap.conversations.len) return;
+    const conv = snap.conversations[s.conv_contact_idx];
+    if (conv.messages.len == 0) return;
+
+    // Find the latest message (they're in chronological order)
+    const last_msg = conv.messages[conv.messages.len - 1];
+    pushReadReceipt(s, conv.room_id, last_msg.id);
+}
+
+/// Push a read receipt action to the sync thread's action queue.
+fn pushReadReceipt(s: *State, room_id: []const u8, event_id: []const u8) void {
+    const aq = s.action_queue orelse return;
+    if (room_id.len > 128 or event_id.len > 128) return;
+
+    var action = types.Action{ .send_read_receipt = .{
+        .room_id_buf = undefined,
+        .room_id_len = @intCast(room_id.len),
+        .event_id_buf = undefined,
+        .event_id_len = @intCast(event_id.len),
+    } };
+    @memcpy(action.send_read_receipt.room_id_buf[0..room_id.len], room_id);
+    @memcpy(action.send_read_receipt.event_id_buf[0..event_id.len], event_id);
+    _ = aq.push(action);
 }
 
 fn msgCount(s: *const State) usize {
@@ -145,8 +206,11 @@ fn msgCount(s: *const State) usize {
     return snap.conversations[s.conv_contact_idx].messages.len;
 }
 
-fn update(ptr: *anyopaque, _: f32) void {
-    _ = ptr;
+fn update(ptr: *anyopaque, dt: f32) void {
+    const s: *State = @ptrCast(@alignCast(ptr));
+    if (s.ptt_held) {
+        s.ptt_hold_time += dt;
+    }
 }
 
 fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
@@ -155,6 +219,11 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
     switch (s.view) {
         .contacts => renderContacts(s, fb),
         .conversation => renderConversation(s, fb),
+    }
+
+    // PTT recording overlay (shown on top of any view)
+    if (s.ptt_held) {
+        renderRecordingOverlay(s, fb);
     }
 }
 
@@ -286,7 +355,7 @@ fn renderConversation(s: *State, fb: *display.Framebuffer) void {
             fb.fillRect(0, row_y, display.width, LINE_H, bg);
         }
 
-        // Check mark for played (use bitmap font icon)
+        // Play indicator for played messages
         if (msg.is_played) {
             font.drawChar(fb, font.icon.check, 0, row_y + 2, fg, null);
         }
@@ -312,8 +381,40 @@ fn renderConversation(s: *State, fb: *display.Framebuffer) void {
     }
 
     // Footer
-    f.drawText(fb, "ESC back", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
+    f.drawText(fb, "ESC back  OK play", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
 }
+
+// ---------------------------------------------------------------------------
+// Recording overlay
+// ---------------------------------------------------------------------------
+
+fn renderRecordingOverlay(s: *const State, fb: *display.Framebuffer) void {
+    const c = display.colors;
+    const bar_h: u32 = 24;
+    const bar_y: i32 = @intCast(display.height - bar_h);
+
+    // Red background bar
+    fb.fillRect(0, bar_y, display.width, bar_h, c.red);
+
+    // Duration text
+    const secs: u32 = @intFromFloat(s.ptt_hold_time);
+    const tenths: u32 = @intFromFloat(@mod(s.ptt_hold_time * 10, 10));
+    var dur_buf: [8]u8 = undefined;
+    const dur_str = std.fmt.bufPrint(&dur_buf, "{d}.{d}s", .{ secs, tenths }) catch "?";
+
+    if (getFont(@constCast(s))) |f| {
+        f.drawTextCentered(fb, dur_str, bar_y + 6, c.white);
+    } else {
+        // Bitmap font: convert pixel Y to grid row
+        const grid_row: u32 = @intCast(@divTrunc(@as(u32, @intCast(bar_y + 8)), font.glyph_h));
+        const grid_col: u32 = (font.cols / 2) -| @as(u32, @intCast(dur_str.len / 2));
+        font.drawText(fb, dur_str, grid_col, grid_row, c.white, null);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Applet registration
+// ---------------------------------------------------------------------------
 
 pub const applet = shell.Applet{
     .name = "wata",
@@ -324,9 +425,15 @@ pub const applet = shell.Applet{
     .render_fn = render,
 };
 
-/// Update the wata applet's snapshot pointer. Called by main loop.
-pub fn setSnapshot(applet_state: *anyopaque, snapshot: ?*const types.StateSnapshot, connection: types.ConnectionState) void {
+/// Update the wata applet's context. Called by main loop each frame.
+pub fn setContext(
+    applet_state: *anyopaque,
+    snapshot: ?*const types.StateSnapshot,
+    connection: types.ConnectionState,
+    action_q: *queue.BoundedQueue(types.Action, 64),
+) void {
     const s: *State = @ptrCast(@alignCast(applet_state));
     s.snapshot = snapshot;
     s.connection = connection;
+    s.action_queue = action_q;
 }

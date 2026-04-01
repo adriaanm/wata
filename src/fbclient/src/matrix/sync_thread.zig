@@ -24,6 +24,7 @@ pub const DEFAULT_CONFIG = Config{
 pub const SyncThreadContext = struct {
     config: Config,
     ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
+    action_queue: *queue.BoundedQueue(types.Action, 64),
     state_store: *types.StateStore,
     should_stop: *std.atomic.Value(bool),
     allocator: std.mem.Allocator,
@@ -138,5 +139,21 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
 
         // Reset retry delay on success
         retry_delay_ms = 1000;
+
+        // Execute pending UI actions (read receipts, etc.)
+        drainActions(ctx, &client);
+    }
+}
+
+/// Execute queued actions from the UI thread.
+fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient) void {
+    while (ctx.action_queue.pop()) |action| {
+        switch (action) {
+            .send_read_receipt => |rr| {
+                const room_id = rr.room_id_buf[0..rr.room_id_len];
+                const event_id = rr.event_id_buf[0..rr.event_id_len];
+                client.sendReadReceipt(room_id, event_id) catch {};
+            },
+        }
     }
 }
