@@ -224,7 +224,7 @@ pub fn main(init: std.process.Init) !void {
             wata_applet.setContext(wata_state, current_snapshot, connection, &action_queue, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
         }
         if (sh.states[1]) |settings_state| {
-            settings_applet.setContext(settings_state, current_snapshot, &action_queue);
+            settings_applet.setContext(settings_state, current_snapshot, &action_queue, &should_stop);
         }
 
         // Poll input

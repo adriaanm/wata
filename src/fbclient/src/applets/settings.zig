@@ -20,10 +20,11 @@ const MenuItem = enum {
     echo_test,
     brightness,
     display_name,
+    disconnect,
     info,
 };
 
-const ITEMS = [_]MenuItem{ .echo_test, .brightness, .display_name, .info };
+const ITEMS = [_]MenuItem{ .echo_test, .brightness, .display_name, .disconnect, .info };
 
 const EchoState = enum { idle, recording, playing, done, err };
 
@@ -36,6 +37,8 @@ const State = struct {
     action_queue: ?*queue_mod.BoundedQueue(types.Action, 64) = null,
     snapshot: ?*const types.StateSnapshot = null,
     name_idx: usize = 0, // index into DISPLAY_NAMES
+    should_stop: ?*std.atomic.Value(bool) = null,
+    connected: bool = true,
 };
 
 fn initApplet() *anyopaque {
@@ -70,6 +73,17 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
                 .display_name => {
                     // Confirm the selected display name
                     pushDisplayName(s);
+                },
+                .disconnect => {
+                    // Toggle network connection — stops/starts sync + action threads.
+                    // Useful for isolating hard crashes to network vs audio/UI.
+                    if (s.should_stop) |stop| {
+                        if (s.connected) {
+                            stop.store(true, .release);
+                            s.connected = false;
+                        }
+                        // Reconnect requires app restart (threads can't be respawned)
+                    }
                 },
                 .brightness => {},
                 .info => {},
@@ -138,6 +152,10 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
                 const bar = std.fmt.bufPrint(&bar_buf, "{d}/40", .{s.brightness}) catch "?";
                 font.drawText(fb, bar, 15, row, fg, null);
             },
+            .disconnect => {
+                font.drawText(fb, "Network", 1, row, fg, null);
+                font.drawText(fb, if (s.connected) "ON" else "OFF", 12, row, if (s.connected) c.green else c.red, null);
+            },
             .info => {
                 font.drawText(fb, "Device Info", 1, row, fg, null);
             },
@@ -174,6 +192,15 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
                 }
             }
         },
+        .disconnect => {
+            if (s.connected) {
+                font.drawText(fb, "OK to disconnect", 1, detail_row, c.mid_gray, null);
+                font.drawText(fb, "Stops sync threads", 1, detail_row + 1, c.mid_gray, null);
+            } else {
+                font.drawText(fb, "Disconnected.", 1, detail_row, c.mid_gray, null);
+                font.drawText(fb, "Restart to reconn.", 1, detail_row + 1, c.mid_gray, null);
+            }
+        },
         .brightness => {
             font.drawText(fb, "</>  adjust", 1, detail_row, c.mid_gray, null);
         },
@@ -198,10 +225,12 @@ pub fn setContext(
     applet_state: *anyopaque,
     snapshot: ?*const types.StateSnapshot,
     action_q: *queue_mod.BoundedQueue(types.Action, 64),
+    should_stop: *std.atomic.Value(bool),
 ) void {
     const s: *State = @ptrCast(@alignCast(applet_state));
     s.snapshot = snapshot;
     s.action_queue = action_q;
+    s.should_stop = should_stop;
 }
 
 // ---------------------------------------------------------------------------
