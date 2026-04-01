@@ -230,38 +230,66 @@ pub const MatrixHttpClient = struct {
             header_count += 1;
         }
 
-        // Set up response body writer (Allocating collects into a growable buffer)
-        var response_writer: Io.Writer.Allocating = .init(self.allocator);
-        // Don't defer deinit — we transfer ownership on success
+        // Retry loop for rate limiting (HTTP 429). Matrix homeservers return
+        // {"retry_after_ms": N} — we sleep and retry up to 3 times.
+        const max_retries = 3;
+        var attempt: usize = 0;
+        while (attempt <= max_retries) : (attempt += 1) {
+            var response_writer: Io.Writer.Allocating = .init(self.allocator);
 
-        const result = client.fetch(.{
-            .location = .{ .url = url },
-            .method = method,
-            .payload = body,
-            .response_writer = &response_writer.writer,
-            .extra_headers = extra_headers_buf[0..header_count],
-        }) catch {
-            response_writer.deinit();
-            return HttpError.ConnectionFailed;
-        };
+            const result = client.fetch(.{
+                .location = .{ .url = url },
+                .method = method,
+                .payload = body,
+                .response_writer = &response_writer.writer,
+                .extra_headers = extra_headers_buf[0..header_count],
+            }) catch {
+                response_writer.deinit();
+                return HttpError.ConnectionFailed;
+            };
 
-        // Check HTTP status
-        if (result.status != .ok) {
-            response_writer.deinit();
-            return HttpError.MatrixError;
+            // Rate limited — sleep and retry
+            if (result.status == .too_many_requests and attempt < max_retries) {
+                const wait_ms: i64 = @intCast(parseRetryAfterMs(response_writer.toArrayList().items));
+                response_writer.deinit();
+                self.io.sleep(.fromMilliseconds(wait_ms), .awake) catch {};
+                continue;
+            }
+
+            if (result.status != .ok) {
+                response_writer.deinit();
+                return HttpError.MatrixError;
+            }
+
+            var list = response_writer.toArrayList();
+            const buf_slice = list.allocatedSlice();
+            if (buf_slice.len == 0) {
+                return HttpError.InvalidResponse;
+            }
+
+            return .{
+                .body = list.items,
+                .full_buf = buf_slice,
+                .allocator = self.allocator,
+            };
         }
 
-        // Transfer ownership of the response buffer
-        var list = response_writer.toArrayList();
-        const buf_slice = list.allocatedSlice();
-        if (buf_slice.len == 0) {
-            return HttpError.InvalidResponse;
-        }
-
-        return .{
-            .body = list.items,
-            .full_buf = buf_slice,
-            .allocator = self.allocator,
-        };
+        return HttpError.MatrixError;
     }
 };
+
+/// Parse "retry_after_ms" from a Matrix 429 response body.
+/// Returns the value in milliseconds, or a 1-second default if unparseable.
+fn parseRetryAfterMs(body: []const u8) u64 {
+    const key = "\"retry_after_ms\":";
+    const start = std.mem.indexOf(u8, body, key) orelse return 1000;
+    const val_start = start + key.len;
+    // Skip whitespace
+    var pos = val_start;
+    while (pos < body.len and body[pos] == ' ') pos += 1;
+    // Parse integer
+    var end = pos;
+    while (end < body.len and body[end] >= '0' and body[end] <= '9') end += 1;
+    if (end == pos) return 1000;
+    return std.fmt.parseInt(u64, body[pos..end], 10) catch 1000;
+}
