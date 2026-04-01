@@ -11,30 +11,40 @@ pub const c = if (build_options.use_audio) @cImport({
 pub const SAMPLE_RATE: u32 = 48000;
 pub const CHANNELS: u32 = 1;
 pub const FRAME_SIZE: u32 = 2; // S16_LE = 2 bytes per sample per channel
-/// 20ms of audio at 48kHz = 960 frames
-pub const FRAMES_PER_PERIOD: u32 = 960;
+/// Q6 ADSP native period: 6000 frames (125ms). Using this avoids rate
+/// negotiation issues where tinyalsa silently rounds to a different config.
+pub const FRAMES_PER_PERIOD: u32 = 6000;
 pub const PERIOD_BYTES: u32 = FRAMES_PER_PERIOD * CHANNELS * FRAME_SIZE;
 
 pub const PcmError = error{ OpenFailed, WriteFailed, ReadFailed };
 
 const PcmPtr = if (build_options.use_audio) ?*c.struct_pcm else ?*anyopaque;
 
+fn makeConfig() c.pcm_config {
+    return .{
+        .channels = CHANNELS,
+        .rate = SAMPLE_RATE,
+        .period_size = FRAMES_PER_PERIOD,
+        .period_count = 4,
+        .format = c.PCM_FORMAT_S16_LE,
+        .start_threshold = 0,
+        .stop_threshold = 0,
+        .silence_threshold = 0,
+        .silence_size = 0,
+        .avail_min = 0,
+    };
+}
+
+/// Get the actual rate negotiated by the hardware. For diagnostics.
+pub fn getRate(pcm: PcmPtr) u32 {
+    return c.pcm_get_rate(pcm);
+}
+
 pub const Capture = struct {
     pcm: PcmPtr,
 
     pub fn open() PcmError!Capture {
-        const config = c.pcm_config{
-            .channels = CHANNELS,
-            .rate = SAMPLE_RATE,
-            .period_size = FRAMES_PER_PERIOD,
-            .period_count = 4,
-            .format = c.PCM_FORMAT_S16_LE,
-            .start_threshold = 0,
-            .stop_threshold = 0,
-            .silence_threshold = 0,
-            .silence_size = 0,
-            .avail_min = 0,
-        };
+        var config = makeConfig();
         const pcm = c.pcm_open(0, 0, c.PCM_IN, &config);
         if (pcm == null or c.pcm_is_ready(pcm) == 0) {
             if (pcm != null) _ = c.pcm_close(pcm);
@@ -59,18 +69,8 @@ pub const Playback = struct {
     pcm: PcmPtr,
 
     pub fn open() PcmError!Playback {
-        const config = c.pcm_config{
-            .channels = CHANNELS,
-            .rate = SAMPLE_RATE,
-            .period_size = FRAMES_PER_PERIOD,
-            .period_count = 4,
-            .format = c.PCM_FORMAT_S16_LE,
-            .start_threshold = FRAMES_PER_PERIOD,
-            .stop_threshold = 0,
-            .silence_threshold = 0,
-            .silence_size = 0,
-            .avail_min = 0,
-        };
+        var config = makeConfig();
+        config.start_threshold = FRAMES_PER_PERIOD;
         const pcm = c.pcm_open(0, 0, c.PCM_OUT, &config);
         if (pcm == null or c.pcm_is_ready(pcm) == 0) {
             if (pcm != null) _ = c.pcm_close(pcm);

@@ -247,8 +247,20 @@ fn doEchoRecord(s: *State) void {
     };
     defer capture.close();
 
-    // 2 seconds at 48kHz = 100 periods of 20ms
-    const num_periods: u32 = 100;
+    // Log actual rate to /tmp/wata-audio.log
+    if (build_options.use_audio) {
+        const rate = alsa.getRate(capture.pcm);
+        const log_fd = std.posix.openatZ(std.posix.AT.FDCWD, "/tmp/wata-audio.log", .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644) catch null;
+        if (log_fd) |fd| {
+            var buf: [64]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "capture rate: {d}\n", .{rate}) catch "";
+            _ = std.os.linux.write(fd, msg.ptr, msg.len);
+            _ = std.os.linux.close(fd);
+        }
+    }
+
+    // 2 seconds at 48kHz with 6000-frame periods (125ms each) = 16 periods
+    const num_periods: u32 = 16;
     const total_bytes = num_periods * alsa.PERIOD_BYTES;
 
     const buf = std.heap.page_allocator.alloc(u8, total_bytes) catch {
@@ -282,6 +294,18 @@ fn doEchoPlayback(s: *State) void {
         return;
     };
     defer playback.close();
+
+    // Append playback rate to log
+    if (build_options.use_audio) {
+        const rate = alsa.getRate(playback.pcm);
+        const log_fd = std.posix.openatZ(std.posix.AT.FDCWD, "/tmp/wata-audio.log", .{ .ACCMODE = .WRONLY, .APPEND = true }, 0) catch null;
+        if (log_fd) |fd| {
+            var lbuf: [64]u8 = undefined;
+            const msg = std.fmt.bufPrint(&lbuf, "playback rate: {d}\n", .{rate}) catch "";
+            _ = std.os.linux.write(fd, msg.ptr, msg.len);
+            _ = std.os.linux.close(fd);
+        }
+    }
 
     const buf = s.echo_buf orelse {
         s.echo = .err;
