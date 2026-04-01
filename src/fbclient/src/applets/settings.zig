@@ -280,8 +280,10 @@ fn doEchoRecord(s: *State) void {
         offset += alsa.PERIOD_BYTES;
     }
 
-    // Close capture before playback to prevent mic picking up speaker
+    // Close capture and wait for mic path to fully drain before playback
     capture.close();
+    var ts = std.os.linux.timespec{ .sec = 1, .nsec = 0 };
+    _ = std.os.linux.nanosleep(&ts, null);
 
     s.echo_buf = buf;
     s.echo_frames = num_periods * alsa.FRAMES_PER_PERIOD;
