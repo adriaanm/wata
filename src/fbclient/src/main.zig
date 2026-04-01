@@ -195,6 +195,17 @@ pub fn main(init: std.process.Init) !void {
                         led.setRedLed(cs == .err or cs == .disconnected);
                     }
                 },
+                // Forward send status to wata applet for user feedback
+                .send_failed => {
+                    if (sh.states[0]) |wata_state| {
+                        wata_applet.notifySendStatus(wata_state, true);
+                    }
+                },
+                .send_complete => {
+                    if (sh.states[0]) |wata_state| {
+                        wata_applet.notifySendStatus(wata_state, false);
+                    }
+                },
                 else => {},
             }
         }

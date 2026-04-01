@@ -60,6 +60,10 @@ const State = struct {
     ptt_hold_time: f32 = 0, // seconds held
     // Playback state
     playing: bool = false,
+    // Send status feedback (shown briefly then cleared)
+    send_error: bool = false,
+    send_ok: bool = false,
+    status_timer: f32 = 0, // seconds remaining for status display
     // Font (initialized lazily on first render)
     ft: ?ft_font.Font = null,
 };
@@ -84,6 +88,15 @@ fn getFont(s: *State) ?*ft_font.Font {
     const ttf_data = @embedFile("../fonts/Inter.ttf");
     s.ft = ft_font.Font.init(std.heap.page_allocator, ttf_data, FONT_SIZE) catch return null;
     return &s.ft.?;
+}
+
+/// Called from main.zig when a send_complete or send_failed UI event arrives.
+/// Shows a brief status indicator (checkmark or error) on the wata applet.
+pub fn notifySendStatus(ptr: *anyopaque, is_error: bool) void {
+    const s: *State = @ptrCast(@alignCast(ptr));
+    s.send_error = is_error;
+    s.send_ok = !is_error;
+    s.status_timer = if (is_error) 2.0 else 1.5;
 }
 
 fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell.Action {
@@ -271,6 +284,15 @@ fn update(ptr: *anyopaque, dt: f32) void {
         s.ptt_hold_time += dt;
     }
 
+    // Clear send status feedback after timeout
+    if (s.status_timer > 0) {
+        s.status_timer -= dt;
+        if (s.status_timer <= 0) {
+            s.send_error = false;
+            s.send_ok = false;
+        }
+    }
+
     // Drain audio events
     if (build_options.use_audio) {
         if (s.audio_evt) |evt_q| {
@@ -280,12 +302,17 @@ fn update(ptr: *anyopaque, dt: f32) void {
                         // Upload and send the recorded voice message
                         uploadRecording(s, rec.ogg_data, rec.duration_ms, rec.allocator);
                     },
-                    .recording_error => {},
+                    .recording_error => {
+                        s.send_error = true;
+                        s.status_timer = 2.0;
+                    },
                     .playback_done => {
                         s.playing = false;
                     },
                     .playback_error => {
                         s.playing = false;
+                        s.send_error = true;
+                        s.status_timer = 2.0;
                     },
                 }
             }
@@ -331,6 +358,16 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
     switch (s.view) {
         .contacts => renderContacts(s, fb),
         .conversation => renderConversation(s, fb),
+    }
+
+    // Send status feedback (brief flash after send success/failure)
+    if (s.status_timer > 0) {
+        const c = display.colors;
+        if (s.send_error) {
+            drawText(fb, getFont(s), "SEND FAILED", 16, 74, c.red);
+        } else if (s.send_ok) {
+            drawText(fb, getFont(s), "SENT", 46, 74, c.green);
+        }
     }
 
     // PTT recording overlay (shown on top of any view)
