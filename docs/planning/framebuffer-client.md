@@ -298,10 +298,12 @@ Zig cross-compiles C dependencies (libopus, ALSA headers) using its bundled clan
 
 **Deployment**: `just fb-deploy` builds ARM cross-compile, scp to bq268:/opt/wata, restarts via start.sh.
 
+**Rate limit handling**: HTTP client retries up to 3× on 429, sleeping for `retry_after_ms`.
+
+**Sync gap backfill**: When sync returns `limited: true`, backfills missed messages via `GET /messages` with `prev_batch` token.
+
 ### Remaining work
 
 See `TASKS.md` for current task list. Key items:
 - Streaming playback stutter (blocked on end-to-end testing, then investigate 500ms partial pre-buffer)
-- Event buffering for out-of-order sync
-- Sync gap handling
-- Rate limit retries
+- Event buffering for out-of-order sync (low priority — edge case when another client creates a DM)
