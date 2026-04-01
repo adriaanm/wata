@@ -135,7 +135,6 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
         .ui_queue = ctx.ui_queue,
         .action_queue = ctx.action_queue,
         .audio_cmd_queue = ctx.audio_cmd_queue,
-        .should_stop = ctx.should_stop,
         .allocator = allocator,
         .io = ctx.io,
         .access_token = access_token,
@@ -144,7 +143,7 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
     const action_handle = std.Thread.spawn(.{}, actionThreadMain, .{&action_ctx}) catch null;
     defer {
         if (action_handle) |h| {
-            ctx.should_stop.store(true, .release);
+            ctx.action_queue.close(); // wake action thread from blocking receive
             h.join();
         }
     }
@@ -252,7 +251,6 @@ const ActionThreadContext = struct {
     ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
     action_queue: *ActionQueue,
     audio_cmd_queue: ?*audio_thread.CommandQueue,
-    should_stop: *std.atomic.Value(bool),
     allocator: std.mem.Allocator,
     io: Io,
     access_token: []const u8,

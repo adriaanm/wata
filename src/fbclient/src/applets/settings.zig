@@ -79,13 +79,12 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
                     pushDisplayName(s);
                 },
                 .disconnect => {
-                    // Toggle network connection — stops/starts sync + action threads.
-                    // Useful for isolating hard crashes to network vs audio/UI.
-                    if (s.should_stop) |stop| {
-                        if (s.connected) {
-                            stop.store(true, .release);
-                            s.connected = false;
-                        }
+                    // Disconnect network only — audio thread keeps running.
+                    // Stops sync thread (should_stop) and action thread (mailbox close).
+                    if (s.connected) {
+                        if (s.should_stop) |stop| stop.store(true, .release);
+                        if (s.action_queue) |aq| aq.close();
+                        s.connected = false;
                         // Reconnect requires app restart (threads can't be respawned)
                     }
                 },
