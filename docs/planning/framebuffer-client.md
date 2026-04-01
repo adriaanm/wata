@@ -224,7 +224,9 @@ src/fbclient/
 │   ├── framebuffer.zig    # /dev/fb0 mmap, back buffer, blit, drawing primitives
 │   ├── input.zig          # evdev reader, key mapping
 │   ├── font.zig           # 6×8 bitmap font rendering
-│   ├── led.zig            # GPIO LED control via sysfs
+│   ├── ft_font.zig        # FreeType TTF rendering (wata applet)
+│   ├── freetype.zig       # FreeType C API wrapper
+│   ├── led.zig            # LED + backlight + battery via sysfs
 │   ├── matrix/
 │   │   ├── client.zig     # Matrix client (login, sync, send, upload)
 │   │   ├── types.zig      # Matrix event types, room state
@@ -255,21 +257,34 @@ Zig cross-compiles C dependencies (libopus, ALSA headers) using its bundled clan
 
 ## Open Questions
 
-1. **Display rotation** — the ST7735S has 90° hardware rotation. Does `/dev/fb0` expose the already-rotated 128×160, or the native 160×128? Check with `fbset` on device.
-2. **Framebuffer pixel format** — assumed RGB565 based on the DRM driver. Confirm with `fb_var_screeninfo`.
-3. **Input device path** — which `/dev/input/eventN` is the keypad? Check with `evtest` on device.
+1. **Display rotation** — implemented 90° CW rotation (app 128×160 → fb 160×128) based on HARDWARE.md. Set `FbdevBackend.rotate = false` if the kernel DTS already applies rotation. May also need to try 90° CCW if the image appears mirrored — swap `height - 1 - y` to `y` in the rotation loop.
+2. **Framebuffer pixel format** — assumed RGB565 based on HARDWARE.md. The mmap uses hardcoded 160×128×2 = 40960 bytes.
+3. **Input device paths** — resolved from HARDWARE.md: event0 (PMIC PON), event1 (matrix keypad), event2 (GPIO side keys). All three opened, failures silently skipped.
 4. **Audio timeline** — LPASS bringup is the critical blocker. Until then, develop with audio stubbed.
 5. **0.16-dev stability** — async I/O is landing incrementally. May need to pin a specific dev build if things break. `zig version` snapshots are available by date.
+6. **FreeType cross-compilation** — `linkSystemLibrary("freetype2")` won't find ARM headers during cross-compile. Options: vendor FreeType source, use a device sysroot, or build natively on the device.
+
+## Implementation Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Framebuffer (SDL2) | Done | Dev backend, 4× scaled window |
+| Framebuffer (fbdev) | Done | mmap /dev/fb0, 90° rotation |
+| Input (SDL2) | Done | Keyboard mapping |
+| Input (evdev) | Done | 3 input devices, non-blocking reads |
+| LED/backlight | Done | sysfs writes, battery read |
+| Shell + applet switching | Done | Status line, F3/F6 switching |
+| Bitmap font (6×8) | Done | Embedded raster font |
+| FreeType font | Done | TTF rendering for wata applet |
+| Matrix client | Done | Login, sync, state snapshots |
+| Snake applet | Done | |
+| Clock applet | Done | |
+| Charmap applet | Done | |
+| Wata applet | Done | Contact list + conversation views |
+| Audio | Blocked | Waiting for LPASS driver |
 
 ## Next Steps
 
-1. Scaffold `src/fbclient/` with `build.zig` targeting `arm-linux-musleabihf`
-2. Implement `framebuffer.zig` — mmap, back buffer, filled rect, glyph blit
-3. Implement `font.zig` — embed 6×8 raster font
-4. Implement `input.zig` — evdev reader
-5. Hello world: draw text on screen, react to keypress
-6. Implement `shell.zig` — status line + applet switching
-7. Implement `snake.zig` — first real applet, validates the whole stack
-8. Implement `matrix/client.zig` — login + sync
-9. Implement `wata.zig` — contact list + chat view
-10. Audio when LPASS lands
+1. **Test on device** — deploy binary, verify display + input + rotation
+2. Cross-compilation: resolve FreeType linking for `arm-linux-musleabihf`
+3. Audio when LPASS lands

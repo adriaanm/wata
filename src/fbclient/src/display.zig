@@ -141,20 +141,67 @@ const SdlBackend = struct {
 // ---------------------------------------------------------------------------
 
 const FbdevBackend = struct {
+    /// BQ268 framebuffer: 160×128 RGB565 (from HARDWARE.md).
+    /// The app renders at 128×160 (portrait), so we rotate when blitting.
+    /// If the kernel DTS configures `rotation = <90>`, the fb may already
+    /// be 128×160 — in that case, set `rotate` to false.
+    const fb_w: usize = 160;
+    const fb_h: usize = 128;
+    const fb_len: usize = fb_w * fb_h * @sizeOf(Color); // 40960 bytes
+    const rotate = true; // 90° CW: app 128×160 → fb 160×128
+
+    const linux = std.os.linux;
+
     buf: [width * height]Color,
-    // TODO: mmap /dev/fb0, ioctl for screen info
+    fd: std.posix.fd_t,
+    fb_mem: []align(std.heap.page_size_min) u8,
 
     pub fn init() !FbdevBackend {
-        return .{ .buf = [_]Color{0} ** (width * height) };
+        const fd = try std.posix.openatZ(std.posix.AT.FDCWD, "/dev/fb0", .{ .ACCMODE = .RDWR }, 0);
+        errdefer _ = linux.close(fd);
+
+        const mem = try std.posix.mmap(
+            null,
+            fb_len,
+            .{ .READ = true, .WRITE = true },
+            .{ .TYPE = .SHARED },
+            fd,
+            0,
+        );
+
+        return .{
+            .buf = [_]Color{0} ** (width * height),
+            .fd = fd,
+            .fb_mem = mem,
+        };
     }
 
-    pub fn deinit(_: *FbdevBackend) void {}
+    pub fn deinit(self: *FbdevBackend) void {
+        // Clear screen on exit
+        @memset(self.fb_mem, 0);
+        std.posix.munmap(self.fb_mem);
+        _ = linux.close(self.fd);
+    }
 
     pub fn framebuffer(self: *FbdevBackend) Framebuffer {
         return .{ .pixels = &self.buf };
     }
 
-    pub fn present(_: *FbdevBackend) void {
-        // TODO: memcpy buf to mmap'd /dev/fb0
+    pub fn present(self: *FbdevBackend) void {
+        const fb: [*]Color = @ptrCast(self.fb_mem.ptr);
+
+        if (rotate) {
+            // 90° CW rotation: app(x, y) → fb(height-1-y, x)
+            for (0..height) |y| {
+                for (0..width) |x| {
+                    const fb_col = height - 1 - y;
+                    const fb_row = x;
+                    fb[fb_row * fb_w + fb_col] = self.buf[y * width + x];
+                }
+            }
+        } else {
+            // Direct blit — fb already matches 128×160
+            @memcpy(fb[0 .. width * height], &self.buf);
+        }
     }
 };

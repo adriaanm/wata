@@ -11,6 +11,7 @@ const clock_applet = @import("applets/clock.zig");
 const charmap = @import("applets/charmap.zig");
 const wata_applet = @import("applets/wata.zig");
 const sync_thread = @import("matrix/sync_thread.zig");
+const led = if (!build_options.use_sdl) @import("led.zig") else struct {};
 
 const sdl = if (build_options.use_sdl) @import("sdl.zig").c else struct {};
 
@@ -110,6 +111,18 @@ pub fn main(init: std.process.Init) !void {
     var disp = try display.Backend.init();
     defer disp.deinit();
 
+    // Device-specific init: backlight + button LEDs
+    if (!build_options.use_sdl) {
+        led.setBacklight(40); // full brightness
+        led.setButtonBacklight(true);
+    }
+    defer if (!build_options.use_sdl) {
+        led.setBacklight(0);
+        led.setButtonBacklight(false);
+        led.setRedLed(false);
+        led.setGreenLed(false);
+    };
+
     var inp = try input.Backend.init();
     defer inp.deinit();
 
@@ -123,16 +136,17 @@ pub fn main(init: std.process.Init) !void {
     var sh = try shell_mod.Shell.init(allocator, &applets);
     defer sh.deinit();
 
-    var last_ticks: u32 = if (build_options.use_sdl) sdl.SDL_GetTicks() else 0;
+    var last_ms: i64 = if (build_options.use_sdl) @intCast(sdl.SDL_GetTicks()) else clockMs();
     var event_buf: [32]input.InputEvent = undefined;
     var connection: types.ConnectionState = .disconnected;
     var current_snapshot: ?*const types.StateSnapshot = null;
 
     while (true) {
-        const now_ticks: u32 = if (build_options.use_sdl) sdl.SDL_GetTicks() else 0;
-        const dt_ms = now_ticks -% last_ticks;
-        last_ticks = now_ticks;
-        const dt: f32 = @as(f32, @floatFromInt(dt_ms)) / 1000.0;
+        const now_ms: i64 = if (build_options.use_sdl) @intCast(sdl.SDL_GetTicks()) else clockMs();
+        const dt_raw = now_ms - last_ms;
+        last_ms = now_ms;
+        const dt_clamped: u32 = @intCast(@min(@max(dt_raw, 0), 1000));
+        const dt: f32 = @as(f32, @floatFromInt(dt_clamped)) / 1000.0;
 
         // Pick up new snapshot
         if (state_store.acquire()) |new_snap| {
@@ -146,6 +160,11 @@ pub fn main(init: std.process.Init) !void {
                 .connection_state => |cs| {
                     connection = cs;
                     sh.status = shell_mod.Status.fromConnection(cs);
+                    // Mirror connection state on hardware LEDs
+                    if (!build_options.use_sdl) {
+                        led.setGreenLed(cs == .syncing or cs == .connected);
+                        led.setRedLed(cs == .err or cs == .disconnected);
+                    }
                 },
                 else => {},
             }
@@ -173,7 +192,18 @@ pub fn main(init: std.process.Init) !void {
         disp.present();
 
         if (build_options.use_sdl) {
-            sdl.SDL_Delay(16);
+            sdl.SDL_Delay(16); // ~60fps for dev
+        } else {
+            // ~30fps for 27Hz display
+            var ts = std.os.linux.timespec{ .sec = 0, .nsec = 33_000_000 };
+            _ = std.os.linux.nanosleep(&ts, null);
         }
     }
+}
+
+/// Monotonic clock in milliseconds (Linux only, used for frame timing).
+fn clockMs() i64 {
+    var ts: std.os.linux.timespec = undefined;
+    _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
 }

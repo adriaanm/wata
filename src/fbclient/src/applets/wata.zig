@@ -1,12 +1,29 @@
 /// Wata voice messaging applet — contact list and conversation views.
 /// Uses FreeType-rendered font for legibility on the small display.
 const std = @import("std");
+const build_options = @import("build_options");
 const display = @import("../display.zig");
 const font = @import("../font.zig"); // bitmap font — used only for status icons
-const ft_font = @import("../ft_font.zig");
+const ft_font = if (build_options.use_freetype) @import("../ft_font.zig") else FtFontStub;
 const input = @import("../input.zig");
 const shell = @import("../shell.zig");
 const types = @import("../types.zig");
+
+/// Stub for when FreeType is not available (cross-compile without freetype2).
+/// Font.init always fails → wata applet falls back to bitmap font rendering.
+const FtFontStub = struct {
+    pub const Font = struct {
+        line_height: i32 = 0,
+        pub fn init(_: std.mem.Allocator, _: []const u8, _: u32) error{NotAvailable}!Font {
+            return error.NotAvailable;
+        }
+        pub fn deinit(_: *Font) void {}
+        pub fn drawText(_: *Font, _: *display.Framebuffer, _: []const u8, _: i32, _: i32, _: display.Color, _: ?display.Color) void {}
+        pub fn drawTextRight(_: *Font, _: *display.Framebuffer, _: []const u8, _: i32, _: i32, _: display.Color) void {}
+        pub fn drawTextCentered(_: *Font, _: *display.Framebuffer, _: []const u8, _: i32, _: display.Color) void {}
+        pub fn measureText(_: *Font, _: []const u8) i32 { return 0; }
+    };
+};
 
 const View = enum { contacts, conversation };
 
@@ -47,6 +64,7 @@ fn deinitApplet(ptr: *anyopaque) void {
 }
 
 fn getFont(s: *State) ?*ft_font.Font {
+    if (!build_options.use_freetype) return null;
     if (s.ft != null) return &s.ft.?;
     // Lazy init — needs allocator but we don't have one in the applet interface.
     // Use a page allocator as fallback (font init is a one-time cost).

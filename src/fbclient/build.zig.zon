@@ -8,4 +8,11 @@
         "build.zig.zon",
         "src",
     },
+    .dependencies = .{
+        .freetype = .{
+            .url = "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz",
+            .hash = "N-V-__8AAK-ZJgGK3AtcJ7nDUwlNM53dDwX6rHJ_YgEhdGqj",
+            .lazy = true,
+        },
+    },
 }
