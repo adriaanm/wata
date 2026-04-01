@@ -921,6 +921,253 @@ test "timeline event dedup" {
     try std.testing.expectEqual(1, room.voice_messages.items.len);
 }
 
+test "m.direct dedup: skips stale rooms, uses first joined room" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    // m.direct has 3 rooms for bob, but only the 2nd is joined
+    var bob_rooms: std.ArrayListUnmanaged([]const u8) = .empty;
+    try bob_rooms.append(allocator, "!stale:test"); // not in rooms map → skipped
+    try bob_rooms.append(allocator, "!active:test"); // joined → selected
+    try bob_rooms.append(allocator, "!also_active:test"); // joined but not first → skipped
+    try proc.m_direct.put(allocator, "@bob:test", bob_rooms);
+
+    // Only add the 2nd and 3rd rooms to the rooms map (1st is stale)
+    var room_active = RoomState.init("!active:test");
+    try room_active.members.put(allocator, "@bob:test", .{
+        .user_id = "@bob:test", .display_name = "Bob",
+        .membership = "join", .is_direct = true,
+    });
+    try proc.rooms.put(allocator, "!active:test", room_active);
+
+    const room_also = RoomState.init("!also_active:test");
+    try proc.rooms.put(allocator, "!also_active:test", room_also);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const snapshot = try proc.buildSnapshot(arena.allocator());
+
+    // Should have exactly 1 conversation using the first joined room
+    try std.testing.expectEqual(1, snapshot.conversations.len);
+    try std.testing.expectEqualStrings("!active:test", snapshot.conversations[0].room_id);
+}
+
+test "m.direct dedup: contact with only stale rooms is excluded" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    // m.direct points to a room not in the rooms map
+    var bob_rooms: std.ArrayListUnmanaged([]const u8) = .empty;
+    try bob_rooms.append(allocator, "!gone:test");
+    try proc.m_direct.put(allocator, "@bob:test", bob_rooms);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const snapshot = try proc.buildSnapshot(arena.allocator());
+
+    // No conversations (stale room skipped, no fallback)
+    try std.testing.expectEqual(0, snapshot.conversations.len);
+}
+
+test "family room detected by #family: canonical alias" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    // Create a room with #family: alias and two members
+    var room = RoomState.init("!fam:test");
+    room.canonical_alias = "#family:test";
+    room.name = "Family";
+    try room.members.put(allocator, "@alice:test", .{
+        .user_id = "@alice:test", .display_name = "Alice",
+        .membership = "join", .is_direct = false,
+    });
+    try room.members.put(allocator, "@bob:test", .{
+        .user_id = "@bob:test", .display_name = "Bob",
+        .membership = "join", .is_direct = false,
+    });
+    try proc.rooms.put(allocator, "!fam:test", room);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const snapshot = try proc.buildSnapshot(arena.allocator());
+
+    // Family should be detected
+    try std.testing.expect(snapshot.family != null);
+    try std.testing.expectEqualStrings("Family", snapshot.family.?.name);
+    // Self excluded from family members
+    try std.testing.expectEqual(1, snapshot.family.?.members.len);
+    try std.testing.expectEqualStrings("Bob", snapshot.family.?.members[0].user.display_name);
+
+    // Family room conversation + roomless DM for Bob (no m.direct entry)
+    try std.testing.expectEqual(2, snapshot.conversations.len);
+    // Family conversation is first (inserted at index 0)
+    try std.testing.expectEqual(types.ConversationType.family, snapshot.conversations[0].conv_type);
+    // Bob gets a roomless DM conversation (empty room_id)
+    try std.testing.expectEqual(types.ConversationType.dm, snapshot.conversations[1].conv_type);
+    try std.testing.expectEqualStrings("", snapshot.conversations[1].room_id);
+}
+
+test "roomless family members get empty room_id conversations" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    // Family room with bob and charlie
+    var room = RoomState.init("!fam:test");
+    room.canonical_alias = "#family:test";
+    try room.members.put(allocator, "@alice:test", .{
+        .user_id = "@alice:test", .display_name = "Alice",
+        .membership = "join", .is_direct = false,
+    });
+    try room.members.put(allocator, "@bob:test", .{
+        .user_id = "@bob:test", .display_name = "Bob",
+        .membership = "join", .is_direct = false,
+    });
+    try room.members.put(allocator, "@charlie:test", .{
+        .user_id = "@charlie:test", .display_name = "Charlie",
+        .membership = "join", .is_direct = false,
+    });
+    try proc.rooms.put(allocator, "!fam:test", room);
+
+    // Only bob has a DM room (charlie doesn't)
+    var bob_rooms: std.ArrayListUnmanaged([]const u8) = .empty;
+    try bob_rooms.append(allocator, "!dm_bob:test");
+    try proc.m_direct.put(allocator, "@bob:test", bob_rooms);
+
+    var dm_room = RoomState.init("!dm_bob:test");
+    try dm_room.members.put(allocator, "@bob:test", .{
+        .user_id = "@bob:test", .display_name = "Bob",
+        .membership = "join", .is_direct = true,
+    });
+    try proc.rooms.put(allocator, "!dm_bob:test", dm_room);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const snapshot = try proc.buildSnapshot(arena.allocator());
+
+    // Should have 3 conversations: family + bob DM + charlie (roomless)
+    try std.testing.expectEqual(3, snapshot.conversations.len);
+
+    // Family conversation is first (index 0)
+    try std.testing.expectEqual(types.ConversationType.family, snapshot.conversations[0].conv_type);
+
+    // Find charlie's conversation — should have empty room_id
+    var found_charlie = false;
+    for (snapshot.conversations) |conv| {
+        if (conv.contact) |ct| {
+            if (std.mem.eql(u8, ct.user.id, "@charlie:test")) {
+                try std.testing.expectEqualStrings("", conv.room_id);
+                try std.testing.expectEqual(types.ConversationType.dm, conv.conv_type);
+                try std.testing.expectEqual(0, conv.messages.len);
+                found_charlie = true;
+            }
+        }
+    }
+    try std.testing.expect(found_charlie);
+}
+
+test "self user excluded from contacts and family members" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    // m.direct with self (shouldn't show as contact)
+    var self_rooms: std.ArrayListUnmanaged([]const u8) = .empty;
+    try self_rooms.append(allocator, "!self_dm:test");
+    try proc.m_direct.put(allocator, "@alice:test", self_rooms);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const snapshot = try proc.buildSnapshot(arena.allocator());
+
+    // Self should not appear in contacts
+    try std.testing.expectEqual(0, snapshot.contacts.len);
+    try std.testing.expectEqual(0, snapshot.conversations.len);
+}
+
+test "voice message is_played tracks read receipts" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    // Set up DM room with a voice message and a receipt from alice
+    var room = RoomState.init("!dm1:test");
+    try room.members.put(allocator, "@bob:test", .{
+        .user_id = "@bob:test", .display_name = "Bob",
+        .membership = "join", .is_direct = true,
+    });
+    try room.voice_messages.append(allocator, .{
+        .event_id = "$msg1",
+        .sender = "@bob:test",
+        .mxc_url = "mxc://test/audio1",
+        .duration_ms = 2000,
+        .timestamp = 1700000000000,
+    });
+    // Add receipt: alice has read $msg1
+    var receipt_users: std.ArrayListUnmanaged([]const u8) = .empty;
+    try receipt_users.append(allocator, "@alice:test");
+    try room.receipt_user_ids.put(allocator, "$msg1", receipt_users);
+    try proc.rooms.put(allocator, "!dm1:test", room);
+
+    var bob_rooms: std.ArrayListUnmanaged([]const u8) = .empty;
+    try bob_rooms.append(allocator, "!dm1:test");
+    try proc.m_direct.put(allocator, "@bob:test", bob_rooms);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const snapshot = try proc.buildSnapshot(arena.allocator());
+
+    try std.testing.expectEqual(1, snapshot.conversations.len);
+    try std.testing.expectEqual(1, snapshot.conversations[0].messages.len);
+    // Message should be marked as played (alice's receipt present)
+    try std.testing.expect(snapshot.conversations[0].messages[0].is_played);
+    try std.testing.expectEqual(@as(u32, 0), snapshot.conversations[0].unplayed_count);
+}
+
+test "unplayed count reflects messages without receipts" {
+    const allocator = std.testing.allocator;
+    var proc = SyncProcessor.init(allocator);
+    defer proc.deinit();
+    proc.self_user_id = "@alice:test";
+
+    var room = RoomState.init("!dm1:test");
+    try room.members.put(allocator, "@bob:test", .{
+        .user_id = "@bob:test", .display_name = "Bob",
+        .membership = "join", .is_direct = true,
+    });
+    // Two messages, no receipts
+    try room.voice_messages.append(allocator, .{
+        .event_id = "$msg1", .sender = "@bob:test",
+        .mxc_url = "mxc://test/a1", .duration_ms = 1000, .timestamp = 1700000000000,
+    });
+    try room.voice_messages.append(allocator, .{
+        .event_id = "$msg2", .sender = "@bob:test",
+        .mxc_url = "mxc://test/a2", .duration_ms = 2000, .timestamp = 1700000001000,
+    });
+    try proc.rooms.put(allocator, "!dm1:test", room);
+
+    var bob_rooms: std.ArrayListUnmanaged([]const u8) = .empty;
+    try bob_rooms.append(allocator, "!dm1:test");
+    try proc.m_direct.put(allocator, "@bob:test", bob_rooms);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const snapshot = try proc.buildSnapshot(arena.allocator());
+
+    try std.testing.expectEqual(@as(u32, 2), snapshot.conversations[0].unplayed_count);
+    try std.testing.expect(!snapshot.conversations[0].messages[0].is_played);
+    try std.testing.expect(!snapshot.conversations[0].messages[1].is_played);
+}
+
 test "strings survive after JSON parse is freed" {
     const allocator = std.testing.allocator;
     var proc = SyncProcessor.init(allocator);
