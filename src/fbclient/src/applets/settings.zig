@@ -296,18 +296,16 @@ fn doEchoPlayback(s: *State) void {
         s.echo = .err;
         return;
     };
-    const total_frames = s.echo_frames;
+    const total_bytes: u32 = s.echo_frames * alsa.FRAME_SIZE * alsa.CHANNELS;
 
-    // Open playback with start_threshold = total buffer so ALSA doesn't
-    // start playing until all data is written (avoids underrun stutter).
-    var playback = alsa.Playback.openBuffered(total_frames) catch {
+    // Use normal open — pcm_writei blocks when the buffer is full,
+    // which naturally paces playback without underruns.
+    var playback = alsa.Playback.open() catch {
         s.echo = .err;
         return;
     };
     defer playback.close();
 
-    // Write all data, then ALSA starts playing automatically
-    const total_bytes = total_frames * alsa.FRAME_SIZE * alsa.CHANNELS;
     var offset: u32 = 0;
     while (offset < total_bytes) {
         const chunk = @min(alsa.PERIOD_BYTES, total_bytes - offset);
@@ -315,10 +313,10 @@ fn doEchoPlayback(s: *State) void {
             s.echo = .err;
             return;
         };
-        offset += @intCast(chunk);
+        offset += chunk;
     }
 
-    // Wait for playback to drain
+    // Wait for last buffer to play out
     playback.drain();
     s.echo = .done;
 }
