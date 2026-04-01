@@ -101,6 +101,7 @@ pub const UiEvent = union(enum) {
     // Audio
     recording_complete,
     playback_complete,
+    playback_error,
     audio_error,
 };
 
@@ -116,13 +117,17 @@ pub const Action = union(enum) {
         event_id_len: u8,
     },
     /// Upload Ogg audio and send as voice message.
-    /// ogg_data points to allocator-owned memory; receiver must free via page_allocator.
     upload_and_send_voice: struct {
         room_id_buf: [128]u8,
         room_id_len: u8,
         ogg_data: [*]const u8,
         ogg_len: u32,
         duration_ms: u64,
+    },
+    /// Download media from mxc:// URL and push to audio thread for playback.
+    download_and_play: struct {
+        mxc_url_buf: [256]u8,
+        mxc_url_len: u16,
     },
 };
 

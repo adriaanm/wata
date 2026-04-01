@@ -260,7 +260,7 @@ Zig cross-compiles C dependencies (libopus, ALSA headers) using its bundled clan
 1. **Display rotation** — implemented 90° CW rotation (app 128×160 → fb 160×128) based on HARDWARE.md. Set `FbdevBackend.rotate = false` if the kernel DTS already applies rotation. May also need to try 90° CCW if the image appears mirrored — swap `height - 1 - y` to `y` in the rotation loop.
 2. **Framebuffer pixel format** — assumed RGB565 based on HARDWARE.md. The mmap uses hardcoded 160×128×2 = 40960 bytes.
 3. **Input device paths** — resolved from HARDWARE.md: event0 (PMIC PON), event1 (matrix keypad), event2 (GPIO side keys). All three opened, failures silently skipped.
-4. **Audio timeline** — LPASS bringup is the critical blocker. Until then, develop with audio stubbed.
+4. **Audio** — LPASS driver landed. Audio pipeline implemented: tinyalsa + Opus + Ogg, 48kHz S16_LE mono on hw:0,0.
 5. **0.16-dev stability** — async I/O is landing incrementally. May need to pin a specific dev build if things break. `zig version` snapshots are available by date.
 6. **FreeType cross-compilation** — `linkSystemLibrary("freetype2")` won't find ARM headers during cross-compile. Options: vendor FreeType source, use a device sysroot, or build natively on the device.
 
@@ -281,10 +281,11 @@ Zig cross-compiles C dependencies (libopus, ALSA headers) using its bundled clan
 | Clock applet | Done | |
 | Charmap applet | Done | |
 | Wata applet | Done | Contact list + conversation views |
-| Audio | Blocked | Waiting for LPASS driver |
+| Audio (tinyalsa+opus+ogg) | Done | 48kHz S16_LE mono, PTT record, Ogg/Opus codec |
+| Settings applet | Done | Audio echo test, brightness, device info |
 
 ## Next Steps
 
-1. **Test on device** — deploy binary, verify display + input + rotation
-2. Cross-compilation: resolve FreeType linking for `arm-linux-musleabihf`
-3. Audio when LPASS lands
+1. **Test on device** — deploy binary, verify display + input + rotation + audio echo
+2. Polish: session persistence (store access_token), display name management
+3. Family room support (group voice messages)

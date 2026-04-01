@@ -25,7 +25,7 @@ pub fn readBatteryPercent() ?u8 {
     defer _ = linux.close(fd);
     var buf: [4]u8 = undefined;
     const n = std.posix.read(fd, &buf) catch return null;
-    const trimmed = std.mem.trimRight(u8, buf[0..n], "\n ");
+    const trimmed = std.mem.trimEnd(u8, buf[0..n], "\n ");
     return std.fmt.parseInt(u8, trimmed, 10) catch null;
 }
 

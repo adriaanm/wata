@@ -9,6 +9,7 @@ const queue = @import("queue.zig");
 const snake = @import("applets/snake.zig");
 const clock_applet = @import("applets/clock.zig");
 const charmap = @import("applets/charmap.zig");
+const settings_applet = @import("applets/settings.zig");
 const wata_applet = @import("applets/wata.zig");
 const sync_thread = @import("matrix/sync_thread.zig");
 const audio_thread = if (build_options.use_audio) @import("audio_thread.zig") else struct {};
@@ -46,11 +47,16 @@ pub fn main(init: std.process.Init) !void {
     var state_store: types.StateStore = .{};
     var should_stop = std.atomic.Value(bool).init(false);
 
+    // Audio queues (created before sync thread so it can reference them)
+    var audio_cmd_queue: if (build_options.use_audio) audio_thread.CommandQueue else void = if (build_options.use_audio) .{} else {};
+    var audio_evt_queue: if (build_options.use_audio) audio_thread.EventQueue else void = if (build_options.use_audio) .{} else {};
+
     // Sync thread context
     var sync_ctx = sync_thread.SyncThreadContext{
         .config = sync_thread.DEFAULT_CONFIG,
         .ui_queue = &ui_queue,
         .action_queue = &action_queue,
+        .audio_cmd_queue = if (build_options.use_audio) &audio_cmd_queue else null,
         .state_store = &state_store,
         .should_stop = &should_stop,
         .allocator = allocator,
@@ -63,8 +69,6 @@ pub fn main(init: std.process.Init) !void {
     const sync_handle = std.Thread.spawn(.{}, sync_thread.syncThreadMain, .{&sync_ctx}) catch null;
 
     // Spawn audio thread (device only)
-    var audio_cmd_queue: if (build_options.use_audio) audio_thread.CommandQueue else void = if (build_options.use_audio) .{} else {};
-    var audio_evt_queue: if (build_options.use_audio) audio_thread.EventQueue else void = if (build_options.use_audio) .{} else {};
     var audio_ctx: if (build_options.use_audio) audio_thread.Context else void = if (build_options.use_audio) .{
         .cmd_queue = &audio_cmd_queue,
         .event_queue = &audio_evt_queue,
@@ -152,6 +156,7 @@ pub fn main(init: std.process.Init) !void {
 
     const applets = [_]shell_mod.Applet{
         wata_applet.applet,
+        settings_applet.applet,
         snake.applet,
         clock_applet.applet,
         charmap.applet,

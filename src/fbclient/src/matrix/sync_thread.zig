@@ -1,12 +1,16 @@
 /// Sync thread: login, then long-poll /sync in a loop.
 /// Publishes StateSnapshots for the UI thread via atomic swap.
 const std = @import("std");
+const build_options = @import("build_options");
 const Io = std.Io;
 const http = @import("http.zig");
 const json_types = @import("json_types.zig");
 const sync_engine = @import("sync_engine.zig");
 const types = @import("../types.zig");
 const queue = @import("../queue.zig");
+const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig") else struct {
+    pub const CommandQueue = void;
+};
 
 const Config = struct {
     homeserver: []const u8,
@@ -25,6 +29,7 @@ pub const SyncThreadContext = struct {
     config: Config,
     ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
     action_queue: *queue.BoundedQueue(types.Action, 64),
+    audio_cmd_queue: ?*audio_thread.CommandQueue,
     state_store: *types.StateStore,
     should_stop: *std.atomic.Value(bool),
     allocator: std.mem.Allocator,
@@ -188,6 +193,32 @@ fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient) void {
 
                 upload_resp.deinit();
                 _ = ctx.ui_queue.push(.{ .send_complete = .{ .txn_id = txn_id } });
+            },
+            .download_and_play => |dl| {
+                const mxc_url = dl.mxc_url_buf[0..dl.mxc_url_len];
+                var resp = client.downloadMedia(mxc_url) catch {
+                    _ = ctx.ui_queue.push(.playback_error);
+                    continue;
+                };
+                // Dupe the data so it outlives the response buffer
+                const ogg_copy = ctx.allocator.dupe(u8, resp.body) catch {
+                    resp.deinit();
+                    _ = ctx.ui_queue.push(.playback_error);
+                    continue;
+                };
+                resp.deinit();
+                // Send to audio thread for playback
+                if (build_options.use_audio) {
+                    if (ctx.audio_cmd_queue) |acq| {
+                        _ = acq.push(.{ .play = .{
+                            .ogg_data = ogg_copy,
+                            .allocator = ctx.allocator,
+                        } });
+                    }
+                } else {
+                    ctx.allocator.free(ogg_copy);
+                    _ = ctx.ui_queue.push(.playback_error);
+                }
             },
         }
     }

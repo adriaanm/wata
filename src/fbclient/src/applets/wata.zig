@@ -218,16 +218,19 @@ fn pushReadReceipt(s: *State, room_id: []const u8, event_id: []const u8) void {
 }
 
 /// Request playback of a voice message by mxc:// URL.
-/// Downloads in the sync thread, then sends Ogg data to the audio thread.
+/// Pushes a download_and_play action to the sync thread, which downloads the
+/// media and hands the Ogg data to the audio thread.
 fn requestPlayback(s: *State, mxc_url: []const u8) void {
-    _ = s;
-    // For now, playback is triggered by downloading the media in the audio thread.
-    // The mxc URL needs to be resolved to an HTTP URL and downloaded.
-    // This requires the HTTP client which lives in the sync thread.
-    // TODO: add a download+play action to the action queue, or download inline.
-    // For v1, the sync thread already has the mxc_url in the snapshot.
-    // We'll need a dedicated download path. Leaving as a stub for now.
-    _ = mxc_url;
+    const aq = s.action_queue orelse return;
+    if (mxc_url.len > 256) return;
+
+    var action = types.Action{ .download_and_play = .{
+        .mxc_url_buf = undefined,
+        .mxc_url_len = @intCast(mxc_url.len),
+    } };
+    @memcpy(action.download_and_play.mxc_url_buf[0..mxc_url.len], mxc_url);
+    _ = aq.push(action);
+    s.playing = true;
 }
 
 fn msgCount(s: *const State) usize {
