@@ -116,7 +116,7 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
 }
 
 fn handleContactsInput(s: *State, key: input.Key) void {
-    const count = if (s.snapshot) |snap| snap.contacts.len else 0;
+    const count = if (s.snapshot) |snap| snap.conversations.len else 0;
     if (count == 0) return;
     const vis = visibleRows();
 
@@ -185,6 +185,10 @@ fn handleConversationInput(s: *State, key: input.Key) void {
                 requestPlayback(s, msg.mxc_url);
             }
         },
+        .f2 => {
+            // Delete the selected message (own messages only)
+            deleteSelectedMessage(s);
+        },
         else => {},
     }
 }
@@ -231,6 +235,28 @@ fn requestPlayback(s: *State, mxc_url: []const u8) void {
     @memcpy(action.download_and_play.mxc_url_buf[0..mxc_url.len], mxc_url);
     _ = aq.push(action);
     s.playing = true;
+}
+
+/// Delete the currently selected message (redact via Matrix API).
+fn deleteSelectedMessage(s: *State) void {
+    const aq = s.action_queue orelse return;
+    const snap = s.snapshot orelse return;
+    if (s.conv_contact_idx >= snap.conversations.len) return;
+    const conv = snap.conversations[s.conv_contact_idx];
+    if (s.msg_selected >= conv.messages.len) return;
+    const msg = conv.messages[s.msg_selected];
+
+    if (conv.room_id.len > 128 or msg.id.len > 128) return;
+
+    var action = types.Action{ .delete_message = .{
+        .room_id_buf = undefined,
+        .room_id_len = @intCast(conv.room_id.len),
+        .event_id_buf = undefined,
+        .event_id_len = @intCast(msg.id.len),
+    } };
+    @memcpy(action.delete_message.room_id_buf[0..conv.room_id.len], conv.room_id);
+    @memcpy(action.delete_message.event_id_buf[0..msg.id.len], msg.id);
+    _ = aq.push(action);
 }
 
 fn msgCount(s: *const State) usize {
@@ -337,18 +363,20 @@ fn renderContacts(s: *State, fb: *display.Framebuffer) void {
     };
     f.drawTextRight(fb, conn_str, display.width - 2, 0, conn_color);
 
-    if (snap.contacts.len == 0) {
+    // Build combined list: family group (if exists) + DM contacts
+    // The conversations list has family at index 0 (if present), then DMs.
+    const total = snap.conversations.len;
+    if (total == 0) {
         f.drawTextCentered(fb, "No contacts", 40, c.mid_gray);
         f.drawTextCentered(fb, "Waiting for sync", 56, c.mid_gray);
         return;
     }
 
-    // Contact list
     const vis = visibleRows();
-    const end = @min(snap.contacts.len, s.scroll_offset + vis);
+    const end = @min(total, s.scroll_offset + vis);
     for (s.scroll_offset..end) |i| {
         const row_y: i32 = @intCast(HEADER_H + (i - s.scroll_offset) * LINE_H);
-        const contact = snap.contacts[i];
+        const conv = snap.conversations[i];
         const selected = i == s.selected;
 
         const fg: display.Color = if (selected) c.black else c.green;
@@ -358,20 +386,25 @@ fn renderContacts(s: *State, fb: *display.Framebuffer) void {
             fb.fillRect(0, row_y, display.width, LINE_H, bg);
         }
 
-        // Name (truncated to fit)
-        const name = contact.user.display_name;
+        // Name: family group or contact DM
+        const name = if (conv.conv_type == .family)
+            (if (snap.family) |fam| fam.name else "Family")
+        else if (conv.contact) |ct|
+            ct.user.display_name
+        else
+            "?";
         const max_chars = 18;
         const display_len = @min(name.len, max_chars);
-        f.drawText(fb, name[0..display_len], 2, row_y, fg, null);
+
+        // Family gets a different color accent
+        const name_color: display.Color = if (conv.conv_type == .family and !selected) c.cyan else fg;
+        f.drawText(fb, name[0..display_len], 2, row_y, name_color, null);
 
         // Unplayed count badge
-        if (i < snap.conversations.len) {
-            const unplayed = snap.conversations[i].unplayed_count;
-            if (unplayed > 0) {
-                var badge_buf: [4]u8 = undefined;
-                const badge = std.fmt.bufPrint(&badge_buf, "{d}", .{unplayed}) catch "?";
-                f.drawTextRight(fb, badge, display.width - 2, row_y, c.yellow);
-            }
+        if (conv.unplayed_count > 0) {
+            var badge_buf: [4]u8 = undefined;
+            const badge = std.fmt.bufPrint(&badge_buf, "{d}", .{conv.unplayed_count}) catch "?";
+            f.drawTextRight(fb, badge, display.width - 2, row_y, c.yellow);
         }
     }
 
@@ -459,7 +492,7 @@ fn renderConversation(s: *State, fb: *display.Framebuffer) void {
     }
 
     // Footer
-    f.drawText(fb, "ESC back  OK play", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
+    f.drawText(fb, "OK play F2 del", 2, @intCast(display.height - FOOTER_H), c.mid_gray, null);
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ const json_types = @import("json_types.zig");
 const sync_engine = @import("sync_engine.zig");
 const types = @import("../types.zig");
 const queue = @import("../queue.zig");
+const config = @import("../config.zig");
 const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig") else struct {
     pub const CommandQueue = void;
 };
@@ -51,34 +52,75 @@ pub fn syncThreadMain(ctx_ptr: *SyncThreadContext) void {
 fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
     const allocator = ctx.allocator;
 
-    // Login
     _ = ctx.ui_queue.push(.{ .connection_state = .connecting });
 
     var client = http.MatrixHttpClient.init(allocator, ctx.io, ctx.config.homeserver);
-    var login_resp = client.login(ctx.config.username, ctx.config.password) catch {
-        _ = ctx.ui_queue.push(.{ .connection_state = .err });
-        return;
-    };
 
-    // Parse login response and dupe strings before freeing
-    const parsed_login = std.json.parseFromSlice(
-        json_types.LoginResponse,
-        allocator,
-        login_resp.body,
-        .{ .ignore_unknown_fields = true },
-    ) catch {
+    // Try to restore session from stored credentials
+    var stored_session = config.loadSession(allocator);
+    var access_token: []const u8 = undefined;
+    var user_id: []const u8 = undefined;
+    var owns_token = false;
+    var owns_uid = false;
+
+    if (stored_session) |*ss| {
+        // Validate the stored token with a test sync (timeout=0)
+        client.access_token = ss.session.access_token;
+        if (client.sync(null, 0)) |test_resp_val| {
+            var test_resp = test_resp_val;
+            test_resp.deinit();
+            // Token works — use stored session
+            access_token = ss.session.access_token;
+            user_id = ss.session.user_id;
+        } else |_| {
+            // Token expired — fall back to password login
+            client.access_token = null;
+            ss.deinit();
+            stored_session = null;
+        }
+    }
+
+    if (stored_session == null) {
+        // Fresh login with password
+        var login_resp = client.login(ctx.config.username, ctx.config.password) catch {
+            _ = ctx.ui_queue.push(.{ .connection_state = .err });
+            return;
+        };
+
+        const parsed_login = std.json.parseFromSlice(
+            json_types.LoginResponse,
+            allocator,
+            login_resp.body,
+            .{ .ignore_unknown_fields = true },
+        ) catch {
+            login_resp.deinit();
+            _ = ctx.ui_queue.push(.{ .connection_state = .err });
+            return;
+        };
+
+        access_token = allocator.dupe(u8, parsed_login.value.access_token) catch return;
+        owns_token = true;
+        user_id = allocator.dupe(u8, parsed_login.value.user_id) catch return;
+        owns_uid = true;
+
+        // Persist the new session
+        config.saveSession(.{
+            .homeserver = ctx.config.homeserver,
+            .username = ctx.config.username,
+            .access_token = access_token,
+            .user_id = user_id,
+            .device_id = parsed_login.value.device_id,
+        });
+
+        parsed_login.deinit();
         login_resp.deinit();
-        _ = ctx.ui_queue.push(.{ .connection_state = .err });
-        return;
-    };
+    }
 
-    const access_token = allocator.dupe(u8, parsed_login.value.access_token) catch return;
-    defer allocator.free(access_token);
-    const user_id = allocator.dupe(u8, parsed_login.value.user_id) catch return;
-    defer allocator.free(user_id);
-
-    parsed_login.deinit();
-    login_resp.deinit();
+    defer {
+        if (owns_token) allocator.free(@constCast(access_token));
+        if (owns_uid) allocator.free(@constCast(user_id));
+        if (stored_session) |*ss| ss.deinit();
+    }
 
     client.access_token = access_token;
     _ = ctx.ui_queue.push(.{ .connection_state = .connected });
@@ -146,12 +188,12 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
         retry_delay_ms = 1000;
 
         // Execute pending UI actions (read receipts, etc.)
-        drainActions(ctx, &client);
+        drainActions(ctx, &client, processor.self_user_id);
     }
 }
 
 /// Execute queued actions from the UI thread.
-fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient) void {
+fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient, self_user_id: ?[]const u8) void {
     const S = struct {
         var txn_counter: u32 = 0;
     };
@@ -219,6 +261,17 @@ fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient) void {
                     ctx.allocator.free(ogg_copy);
                     _ = ctx.ui_queue.push(.playback_error);
                 }
+            },
+            .set_display_name => |dn| {
+                const name = dn.name_buf[0..dn.name_len];
+                const uid = self_user_id orelse continue;
+                client.setDisplayName(uid, name) catch {};
+            },
+            .delete_message => |dm| {
+                const room_id = dm.room_id_buf[0..dm.room_id_len];
+                const event_id = dm.event_id_buf[0..dm.event_id_len];
+                S.txn_counter += 1;
+                client.redactEvent(room_id, event_id, S.txn_counter) catch {};
             },
         }
     }

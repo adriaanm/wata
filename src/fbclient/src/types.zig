@@ -129,6 +129,18 @@ pub const Action = union(enum) {
         mxc_url_buf: [256]u8,
         mxc_url_len: u16,
     },
+    /// Set display name for the logged-in user.
+    set_display_name: struct {
+        name_buf: [64]u8,
+        name_len: u8,
+    },
+    /// Delete (redact) a message.
+    delete_message: struct {
+        room_id_buf: [128]u8,
+        room_id_len: u8,
+        event_id_buf: [128]u8,
+        event_id_len: u8,
+    },
 };
 
 // ---------------------------------------------------------------------------

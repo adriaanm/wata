@@ -199,9 +199,12 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
-        // Push snapshot + queues to wata applet
+        // Push snapshot + queues to applets that need them
         if (sh.states[0]) |wata_state| {
             wata_applet.setContext(wata_state, current_snapshot, connection, &action_queue, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
+        }
+        if (sh.states[1]) |settings_state| {
+            settings_applet.setContext(settings_state, current_snapshot, &action_queue);
         }
 
         // Poll input

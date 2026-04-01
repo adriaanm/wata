@@ -519,15 +519,98 @@ pub const SyncProcessor = struct {
             });
         }
 
+        // Find family room by canonical alias containing "#family:"
+        var family: ?types.Family = null;
+        var room_it = self.rooms.iterator();
+        while (room_it.next()) |room_entry| {
+            const room = room_entry.value_ptr;
+            if (room.canonical_alias) |alias| {
+                if (std.mem.startsWith(u8, alias, "#family:")) {
+                    // Build family members list
+                    var members: std.ArrayListUnmanaged(types.Contact) = .empty;
+                    var mem_it = room.members.iterator();
+                    while (mem_it.next()) |m_entry| {
+                        const member = m_entry.value_ptr;
+                        if (!std.mem.eql(u8, member.membership, "join")) continue;
+                        if (self.self_user_id) |self_id| {
+                            if (std.mem.eql(u8, member.user_id, self_id)) continue;
+                        }
+                        try members.append(arena, .{ .user = .{
+                            .id = member.user_id,
+                            .display_name = member.display_name,
+                        } });
+                    }
+
+                    // Add family conversation
+                    var fam_messages: std.ArrayListUnmanaged(types.VoiceMessage) = .empty;
+                    for (room.voice_messages.items) |vm| {
+                        const sender_name = if (room.members.get(vm.sender)) |m| m.display_name else vm.sender;
+                        const is_played = if (room.receipt_user_ids.get(vm.event_id)) |users| blk: {
+                            if (self.self_user_id) |self_id| {
+                                for (users.items) |uid| {
+                                    if (std.mem.eql(u8, uid, self_id)) break :blk true;
+                                }
+                            }
+                            break :blk false;
+                        } else false;
+                        try fam_messages.append(arena, .{
+                            .id = vm.event_id,
+                            .sender = .{ .id = vm.sender, .display_name = sender_name },
+                            .audio_url = vm.mxc_url,
+                            .mxc_url = vm.mxc_url,
+                            .duration = @as(f64, @floatFromInt(vm.duration_ms)) / 1000.0,
+                            .timestamp = vm.timestamp,
+                            .is_played = is_played,
+                        });
+                    }
+
+                    var fam_unplayed: u32 = 0;
+                    for (fam_messages.items) |m| {
+                        if (!m.is_played) fam_unplayed += 1;
+                    }
+
+                    // Prepend family conversation at index 0
+                    try conversations.insert(arena, 0, .{
+                        .room_id = room.room_id,
+                        .conv_type = .family,
+                        .contact = null,
+                        .messages = fam_messages.items,
+                        .unplayed_count = fam_unplayed,
+                    });
+
+                    family = .{
+                        .id = room.room_id,
+                        .name = if (room.name.len > 0) room.name else "Family",
+                        .members = members.items,
+                    };
+                    break;
+                }
+            }
+        }
+
+        // Resolve self display name from family room membership or any room
+        var self_display_name: []const u8 = if (self.self_user_id) |uid| uid else "";
+        if (self.self_user_id) |self_id| {
+            var r_it = self.rooms.iterator();
+            while (r_it.next()) |r_entry| {
+                if (r_entry.value_ptr.members.get(self_id)) |member| {
+                    if (member.display_name.len > 0 and !std.mem.eql(u8, member.display_name, self_id)) {
+                        self_display_name = member.display_name;
+                        break;
+                    }
+                }
+            }
+        }
+
         return .{
             .connection = .syncing,
             .self_user = if (self.self_user_id) |uid| .{
                 .id = uid,
-                .display_name = uid,
+                .display_name = self_display_name,
             } else null,
             .contacts = contacts.items,
             .conversations = conversations.items,
-            .family = null,
+            .family = family,
         };
     }
 

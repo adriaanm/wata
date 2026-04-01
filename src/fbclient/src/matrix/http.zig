@@ -57,6 +57,31 @@ pub const MatrixHttpClient = struct {
         return self.doRequest(.GET, path, null);
     }
 
+    /// GET display name for a user.
+    pub fn getDisplayName(self: *MatrixHttpClient, user_id: []const u8) HttpError!RawResponse {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/profile/{s}/displayname", .{user_id}) catch return HttpError.OutOfMemory;
+        return self.doRequest(.GET, path, null);
+    }
+
+    /// SET display name for the current user.
+    pub fn setDisplayName(self: *MatrixHttpClient, user_id: []const u8, display_name: []const u8) HttpError!void {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/profile/{s}/displayname", .{user_id}) catch return HttpError.OutOfMemory;
+        var body_buf: [512]u8 = undefined;
+        const body = std.fmt.bufPrint(&body_buf, "{{\"displayname\":\"{s}\"}}", .{display_name}) catch return HttpError.OutOfMemory;
+        var resp = try self.doRequest(.PUT, path, body);
+        resp.deinit();
+    }
+
+    /// PUT redact (delete) an event.
+    pub fn redactEvent(self: *MatrixHttpClient, room_id: []const u8, event_id: []const u8, txn_id: u32) HttpError!void {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/rooms/{s}/redact/{s}/{d}", .{ room_id, event_id, txn_id }) catch return HttpError.OutOfMemory;
+        var resp = try self.doRequest(.PUT, path, "{\"reason\":\"deleted\"}");
+        resp.deinit();
+    }
+
     /// POST receipt
     pub fn sendReadReceipt(self: *MatrixHttpClient, room_id: []const u8, event_id: []const u8) HttpError!void {
         var path_buf: [512]u8 = undefined;
