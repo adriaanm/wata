@@ -141,11 +141,11 @@ const SdlBackend = struct {
 // ---------------------------------------------------------------------------
 
 const FbdevBackend = struct {
-    /// BQ268 framebuffer: 128×160 RGB565.
-    /// HW rotation is handled by the ST7735S panel driver, so the fb
-    /// matches the app's portrait orientation — direct blit, no rotation.
-    const fb_w: usize = width; // 128
-    const fb_h: usize = height; // 160
+    /// BQ268 framebuffer: 160×128 virtual size, stride=320 bytes (160 pixels).
+    /// The panel scans in portrait order so the app's 128×160 maps directly,
+    /// but the fb stride is 160 pixels, not 128. Blit row-by-row.
+    const fb_w: usize = 160;
+    const fb_h: usize = 128;
     const fb_len: usize = fb_w * fb_h * @sizeOf(Color); // 40960 bytes
     const rotate = false;
 
@@ -198,9 +198,17 @@ const FbdevBackend = struct {
                     fb[fb_row * fb_w + fb_col] = self.buf[y * width + x];
                 }
             }
-        } else {
-            // Direct blit — fb already matches 128×160
+        } else if (fb_w == width) {
+            // Strides match — single memcpy
             @memcpy(fb[0 .. width * height], &self.buf);
+        } else {
+            // Strides differ — copy row by row
+            // App: width pixels per row. FB: fb_w pixels per row.
+            for (0..height) |y| {
+                const src_start = y * width;
+                const dst_start = y * fb_w;
+                @memcpy(fb[dst_start..][0..width], self.buf[src_start..][0..width]);
+            }
         }
     }
 };
