@@ -1,11 +1,26 @@
 # Claude Context
 
-## Working with Claude
+## Workflows
 
-- **Commit Policy:** Commit coherent changes as soon as complete. Don't batch unrelated changes.
-- **Keep Docs Updated:** Before committing any non-trivial code change, do a quick check if docs need to be updated.
-- **Planning:** Planning docs go in `docs/planning`. When complete, distill to `docs/` as a guide.
-- **Background Processes:** Prefer tmux (zsh).
+### Reproducibility
+
+All repeated commands go in the `justfile`. Run `just` to list recipes. If you find yourself running a multi-step sequence more than once, capture it as a recipe.
+
+### Task Tracking
+
+`TASKS.md` is the single source of truth for open work. Check it at the start of each session. Mark items `[x]` when done, add new items as discovered. Keep it concise — one line per task, checkbox format. Edit the markdown directly (no tooling needed).
+
+### Commit Granularly
+
+Each logical change gets its own commit — don't batch unrelated work. A "logical change" is one thing you could describe in a single sentence. If you've touched the Zig client, the justfile, and docs in the same session, that's probably 2–3 commits.
+
+### Keep Docs Updated
+
+Before committing any non-trivial code change, do a quick check if docs need to be updated. Planning docs go in `docs/planning`. When complete, distill to `docs/` as a guide.
+
+### Background Processes
+
+Prefer tmux (zsh).
 
 ---
 
@@ -13,6 +28,7 @@
 
 | Doc | When to Read |
 |-----|--------------|
+| [TASKS.md](TASKS.md) | Start of every session — open work items |
 | [quickstart](docs/quickstart.md) | First time setup, daily workflow |
 | [android-development](docs/android-development.md) | Working on native Kotlin Android app |
 | [dm-room-service](docs/dm-room-service.md) | DM room management, m.direct handling |
@@ -63,6 +79,8 @@ pnpm web:build                # Production build
 pnpm fb                       # Build + run with SDL2 (dev)
 pnpm fb:build                 # Build only
 pnpm fb:device                # Cross-compile for ARM device
+just fb-build                 # Cross-compile for ARM (justfile)
+just fb-deploy                # Build + deploy + restart on BQ268
 
 # Dev helpers
 pnpm dev:server               # Start Conduit Matrix server
