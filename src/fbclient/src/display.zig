@@ -168,6 +168,9 @@ const FbdevBackend = struct {
             0,
         );
 
+        // Clear fb to black
+        @memset(mem, 0);
+
         return .{
             .buf = [_]Color{0} ** (width * height),
             .fd = fd,
@@ -189,25 +192,13 @@ const FbdevBackend = struct {
     pub fn present(self: *FbdevBackend) void {
         const fb: [*]Color = @ptrCast(self.fb_mem.ptr);
 
-        if (rotate) {
-            // 90° CW rotation: app(x, y) → fb(height-1-y, x)
-            for (0..height) |y| {
-                for (0..width) |x| {
-                    const fb_col = height - 1 - y;
-                    const fb_row = x;
-                    fb[fb_row * fb_w + fb_col] = self.buf[y * width + x];
-                }
-            }
-        } else if (fb_w == width) {
-            // Strides match — single memcpy
-            @memcpy(fb[0 .. width * height], &self.buf);
-        } else {
-            // Strides differ — copy row by row
-            // App: width pixels per row. FB: fb_w pixels per row.
-            for (0..height) |y| {
-                const src_start = y * width;
-                const dst_start = y * fb_w;
-                @memcpy(fb[dst_start..][0..width], self.buf[src_start..][0..width]);
+        // The fb is 160×128 in memory but the panel displays it as 128×160
+        // portrait via MADCTL scan direction swap. This means:
+        //   app(x, y) → fb[x * fb_w + y]  (transpose)
+        // x ∈ [0,128) maps to fb rows [0,128), y ∈ [0,160) maps to fb cols [0,160)
+        for (0..height) |y| {
+            for (0..width) |x| {
+                fb[x * fb_w + y] = self.buf[y * width + x];
             }
         }
     }
