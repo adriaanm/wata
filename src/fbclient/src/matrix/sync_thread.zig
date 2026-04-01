@@ -91,6 +91,7 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
     _ = ctx.ui_queue.push(.{ .connection_state = .connecting });
 
     var client = http.MatrixHttpClient.init(allocator, ctx.io, ctx.config.homeserver);
+    defer client.deinit();
 
     // Try to restore session from stored credentials
     var stored_session = config.loadSession(allocator);
@@ -284,6 +285,7 @@ pub fn actionThreadMain(actx: *ActionThreadContext) void {
 
     const auth = creds.?;
     var client = http.MatrixHttpClient.init(actx.allocator, actx.io, actx.config.homeserver);
+    defer client.deinit();
     client.access_token = auth.access_token;
 
     // Block on mailbox receive — no polling, no sleep

@@ -29,9 +29,20 @@ pub const MatrixHttpClient = struct {
     access_token: ?[]const u8 = null,
     allocator: std.mem.Allocator,
     io: Io,
+    /// Persistent HTTP client — reused across requests for connection pooling.
+    http_client: std.http.Client,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, base_url: []const u8) MatrixHttpClient {
-        return .{ .allocator = allocator, .io = io, .base_url = base_url };
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .base_url = base_url,
+            .http_client = .{ .allocator = allocator, .io = io },
+        };
+    }
+
+    pub fn deinit(self: *MatrixHttpClient) void {
+        self.http_client.deinit();
     }
 
     /// POST /_matrix/client/v3/login — returns raw response for caller to parse
@@ -171,9 +182,6 @@ pub const MatrixHttpClient = struct {
         var url_buf: [1024]u8 = undefined;
         const url = std.fmt.bufPrint(&url_buf, "{s}{s}", .{ self.base_url, path }) catch return HttpError.OutOfMemory;
 
-        var client: std.http.Client = .{ .allocator = self.allocator, .io = self.io };
-        defer client.deinit();
-
         var auth_buf: [512]u8 = undefined;
         var extra_headers_buf: [2]std.http.Header = undefined;
         var header_count: usize = 0;
@@ -189,7 +197,7 @@ pub const MatrixHttpClient = struct {
 
         var response_writer: Io.Writer.Allocating = .init(self.allocator);
 
-        const result = client.fetch(.{
+        const result = self.http_client.fetch(.{
             .location = .{ .url = url },
             .method = .POST,
             .payload = body,
@@ -221,9 +229,6 @@ pub const MatrixHttpClient = struct {
         var url_buf: [1024]u8 = undefined;
         const url = std.fmt.bufPrint(&url_buf, "{s}{s}", .{ self.base_url, path }) catch return HttpError.OutOfMemory;
 
-        var client: std.http.Client = .{ .allocator = self.allocator, .io = self.io };
-        defer client.deinit();
-
         // Build extra headers
         var auth_buf: [512]u8 = undefined;
         var extra_headers_buf: [2]std.http.Header = undefined;
@@ -245,7 +250,7 @@ pub const MatrixHttpClient = struct {
         while (attempt <= max_retries) : (attempt += 1) {
             var response_writer: Io.Writer.Allocating = .init(self.allocator);
 
-            const result = client.fetch(.{
+            const result = self.http_client.fetch(.{
                 .location = .{ .url = url },
                 .method = method,
                 .payload = body,
