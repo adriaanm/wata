@@ -65,6 +65,90 @@ pub const MatrixHttpClient = struct {
         resp.deinit();
     }
 
+    /// Upload media (Ogg audio). Returns mxc:// URL.
+    pub fn uploadMedia(self: *MatrixHttpClient, ogg_data: []const u8) HttpError!RawResponse {
+        return self.doUpload("/_matrix/media/v3/upload?content_type=audio%2Fogg", ogg_data);
+    }
+
+    /// Download media from an mxc:// URL. Returns raw bytes.
+    pub fn downloadMedia(self: *MatrixHttpClient, mxc_url: []const u8) HttpError!RawResponse {
+        // mxc://server/media_id → /_matrix/client/v1/media/download/server/media_id
+        if (!std.mem.startsWith(u8, mxc_url, "mxc://")) return HttpError.InvalidResponse;
+        const rest = mxc_url[6..]; // "server/media_id"
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v1/media/download/{s}", .{rest}) catch return HttpError.OutOfMemory;
+        return self.doRequest(.GET, path, null);
+    }
+
+    /// Send a voice message to a room. `mxc_url` is the uploaded media URL.
+    pub fn sendVoiceMessage(
+        self: *MatrixHttpClient,
+        room_id: []const u8,
+        mxc_url: []const u8,
+        duration_ms: u64,
+        txn_id: u32,
+    ) HttpError!void {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "/_matrix/client/v3/rooms/{s}/send/m.room.message/{d}", .{ room_id, txn_id }) catch return HttpError.OutOfMemory;
+
+        var body_buf: [1024]u8 = undefined;
+        const body = std.fmt.bufPrint(&body_buf,
+            \\{{"msgtype":"m.audio","body":"voice message","url":"{s}","info":{{"mimetype":"audio/ogg; codecs=opus","duration":{d}}}}}
+        , .{ mxc_url, duration_ms }) catch return HttpError.OutOfMemory;
+
+        var resp = try self.doRequest(.PUT, path, body);
+        resp.deinit();
+    }
+
+    fn doUpload(self: *MatrixHttpClient, path: []const u8, body: []const u8) HttpError!RawResponse {
+        var url_buf: [1024]u8 = undefined;
+        const url = std.fmt.bufPrint(&url_buf, "{s}{s}", .{ self.base_url, path }) catch return HttpError.OutOfMemory;
+
+        var client: std.http.Client = .{ .allocator = self.allocator, .io = self.io };
+        defer client.deinit();
+
+        var auth_buf: [512]u8 = undefined;
+        var extra_headers_buf: [2]std.http.Header = undefined;
+        var header_count: usize = 0;
+
+        extra_headers_buf[header_count] = .{ .name = "Content-Type", .value = "audio/ogg" };
+        header_count += 1;
+
+        if (self.access_token) |token| {
+            const auth = std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{token}) catch return HttpError.OutOfMemory;
+            extra_headers_buf[header_count] = .{ .name = "Authorization", .value = auth };
+            header_count += 1;
+        }
+
+        var response_writer: Io.Writer.Allocating = .init(self.allocator);
+
+        const result = client.fetch(.{
+            .location = .{ .url = url },
+            .method = .POST,
+            .payload = body,
+            .response_writer = &response_writer.writer,
+            .extra_headers = extra_headers_buf[0..header_count],
+        }) catch {
+            response_writer.deinit();
+            return HttpError.ConnectionFailed;
+        };
+
+        if (result.status != .ok) {
+            response_writer.deinit();
+            return HttpError.MatrixError;
+        }
+
+        var list = response_writer.toArrayList();
+        const buf_slice = list.allocatedSlice();
+        if (buf_slice.len == 0) return HttpError.InvalidResponse;
+
+        return .{
+            .body = list.items,
+            .full_buf = buf_slice,
+            .allocator = self.allocator,
+        };
+    }
+
     fn doRequest(self: *MatrixHttpClient, method: std.http.Method, path: []const u8, body: ?[]const u8) HttpError!RawResponse {
         // Build URL
         var url_buf: [1024]u8 = undefined;

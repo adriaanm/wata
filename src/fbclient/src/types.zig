@@ -115,7 +115,15 @@ pub const Action = union(enum) {
         event_id_buf: [128]u8,
         event_id_len: u8,
     },
-    // Future: send_message, upload_and_send, create_dm, join_room
+    /// Upload Ogg audio and send as voice message.
+    /// ogg_data points to allocator-owned memory; receiver must free via page_allocator.
+    upload_and_send_voice: struct {
+        room_id_buf: [128]u8,
+        room_id_len: u8,
+        ogg_data: [*]const u8,
+        ogg_len: u32,
+        duration_ms: u64,
+    },
 };
 
 // ---------------------------------------------------------------------------

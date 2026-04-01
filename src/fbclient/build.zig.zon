@@ -14,5 +14,15 @@
             .hash = "N-V-__8AAK-ZJgGK3AtcJ7nDUwlNM53dDwX6rHJ_YgEhdGqj",
             .lazy = true,
         },
+        .opus = .{
+            .url = "https://github.com/xiph/opus/releases/download/v1.5.2/opus-1.5.2.tar.gz",
+            .hash = "N-V-__8AAADWXwF69u4_iufnV_gwfb3M2ATbbZF-yGFRrEFH",
+            .lazy = true,
+        },
+        .tinyalsa = .{
+            .url = "https://github.com/tinyalsa/tinyalsa/archive/refs/tags/v2.0.0.tar.gz",
+            .hash = "N-V-__8AAIXaBgCxF6eJGl2-u82_CFMzLWeFnRxykudW0Zrt",
+            .lazy = true,
+        },
     },
 }

@@ -11,6 +11,7 @@ const clock_applet = @import("applets/clock.zig");
 const charmap = @import("applets/charmap.zig");
 const wata_applet = @import("applets/wata.zig");
 const sync_thread = @import("matrix/sync_thread.zig");
+const audio_thread = if (build_options.use_audio) @import("audio_thread.zig") else struct {};
 const led = if (!build_options.use_sdl) @import("led.zig") else struct {};
 
 const sdl = if (build_options.use_sdl) @import("sdl.zig").c else struct {};
@@ -60,8 +61,29 @@ pub fn main(init: std.process.Init) !void {
 
     // Spawn sync thread
     const sync_handle = std.Thread.spawn(.{}, sync_thread.syncThreadMain, .{&sync_ctx}) catch null;
+
+    // Spawn audio thread (device only)
+    var audio_cmd_queue: if (build_options.use_audio) audio_thread.CommandQueue else void = if (build_options.use_audio) .{} else {};
+    var audio_evt_queue: if (build_options.use_audio) audio_thread.EventQueue else void = if (build_options.use_audio) .{} else {};
+    var audio_ctx: if (build_options.use_audio) audio_thread.Context else void = if (build_options.use_audio) .{
+        .cmd_queue = &audio_cmd_queue,
+        .event_queue = &audio_evt_queue,
+        .should_stop = &should_stop,
+        .allocator = allocator,
+    } else {};
+    const audio_handle = if (build_options.use_audio)
+        std.Thread.spawn(.{}, audio_thread.audioThreadMain, .{&audio_ctx}) catch null
+    else
+        null;
+
     defer {
         should_stop.store(true, .release);
+        if (build_options.use_audio) {
+            if (audio_handle) |h| {
+                _ = audio_cmd_queue.push(.quit);
+                h.join();
+            }
+        }
         if (sync_handle) |h| h.join();
     }
 
@@ -172,9 +194,9 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
-        // Push snapshot + action queue to wata applet
+        // Push snapshot + queues to wata applet
         if (sh.states[0]) |wata_state| {
-            wata_applet.setContext(wata_state, current_snapshot, connection, &action_queue);
+            wata_applet.setContext(wata_state, current_snapshot, connection, &action_queue, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
         }
 
         // Poll input

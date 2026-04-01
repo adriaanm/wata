@@ -147,6 +147,10 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
 
 /// Execute queued actions from the UI thread.
 fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient) void {
+    const S = struct {
+        var txn_counter: u32 = 0;
+    };
+
     while (ctx.action_queue.pop()) |action| {
         switch (action) {
             .send_read_receipt => |rr| {
@@ -154,6 +158,46 @@ fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient) void {
                 const event_id = rr.event_id_buf[0..rr.event_id_len];
                 client.sendReadReceipt(room_id, event_id) catch {};
             },
+            .upload_and_send_voice => |msg| {
+                const ogg_data = msg.ogg_data[0..msg.ogg_len];
+
+                const room_id = msg.room_id_buf[0..msg.room_id_len];
+
+                S.txn_counter += 1;
+                const txn_id = S.txn_counter;
+
+                // Upload media
+                var upload_resp = client.uploadMedia(ogg_data) catch {
+                    _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                    continue;
+                };
+
+                // Parse mxc:// URL from response: {"content_uri":"mxc://..."}
+                const mxc_url = parseMxcUrl(upload_resp.body) orelse {
+                    upload_resp.deinit();
+                    _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                    continue;
+                };
+
+                // Send voice message event
+                client.sendVoiceMessage(room_id, mxc_url, msg.duration_ms, txn_id) catch {
+                    upload_resp.deinit();
+                    _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                    continue;
+                };
+
+                upload_resp.deinit();
+                _ = ctx.ui_queue.push(.{ .send_complete = .{ .txn_id = txn_id } });
+            },
         }
     }
+}
+
+fn parseMxcUrl(json_body: []const u8) ?[]const u8 {
+    // Simple extraction of "content_uri":"mxc://..."
+    const key = "\"content_uri\":\"";
+    const start = std.mem.indexOf(u8, json_body, key) orelse return null;
+    const val_start = start + key.len;
+    const end = std.mem.indexOfPos(u8, json_body, val_start, "\"") orelse return null;
+    return json_body[val_start..end];
 }

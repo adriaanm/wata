@@ -9,6 +9,10 @@ const input = @import("../input.zig");
 const shell = @import("../shell.zig");
 const types = @import("../types.zig");
 const queue = @import("../queue.zig");
+const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig") else struct {
+    pub const CommandQueue = void;
+    pub const EventQueue = void;
+};
 
 /// Stub for when FreeType is not available (cross-compile without freetype2).
 /// Font.init always fails → wata applet falls back to bitmap font rendering.
@@ -45,6 +49,8 @@ const State = struct {
     snapshot: ?*const types.StateSnapshot = null,
     connection: types.ConnectionState = .disconnected,
     action_queue: ?*queue.BoundedQueue(types.Action, 64) = null,
+    audio_cmd: ?*audio_thread.CommandQueue = null,
+    audio_evt: ?*audio_thread.EventQueue = null,
     // For conversation view
     conv_contact_idx: usize = 0,
     msg_selected: usize = 0,
@@ -52,6 +58,8 @@ const State = struct {
     // PTT recording state
     ptt_held: bool = false,
     ptt_hold_time: f32 = 0, // seconds held
+    // Playback state
+    playing: bool = false,
     // Font (initialized lazily on first render)
     ft: ?ft_font.Font = null,
 };
@@ -83,13 +91,17 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
 
     // PTT: track press/release (always, regardless of view)
     if (key == .ptt) {
-        if (key_state == .pressed) {
+        if (key_state == .pressed and !s.ptt_held) {
             s.ptt_held = true;
             s.ptt_hold_time = 0;
-            // TODO: start audio recording when ALSA/LPASS is available
-        } else if (key_state == .released) {
+            if (build_options.use_audio) {
+                if (s.audio_cmd) |cmd_q| _ = cmd_q.push(.start_recording);
+            }
+        } else if (key_state == .released and s.ptt_held) {
             s.ptt_held = false;
-            // TODO: stop recording, encode, upload, send
+            if (build_options.use_audio) {
+                if (s.audio_cmd) |cmd_q| _ = cmd_q.push(.stop_recording);
+            }
         }
         return .none;
     }
@@ -157,15 +169,20 @@ fn handleConversationInput(s: *State, key: input.Key) void {
             }
         },
         .enter => {
-            // "Play" the selected message — send read receipt to mark as played
-            // TODO: actual audio playback when ALSA/LPASS is available
             const snap = s.snapshot orelse return;
             if (s.conv_contact_idx >= snap.conversations.len) return;
             const conv = snap.conversations[s.conv_contact_idx];
             if (s.msg_selected >= conv.messages.len) return;
             const msg = conv.messages[s.msg_selected];
+
+            // Send read receipt
             if (!msg.is_played) {
                 pushReadReceipt(s, conv.room_id, msg.id);
+            }
+
+            // Download and play audio
+            if (build_options.use_audio) {
+                requestPlayback(s, msg.mxc_url);
             }
         },
         else => {},
@@ -200,6 +217,19 @@ fn pushReadReceipt(s: *State, room_id: []const u8, event_id: []const u8) void {
     _ = aq.push(action);
 }
 
+/// Request playback of a voice message by mxc:// URL.
+/// Downloads in the sync thread, then sends Ogg data to the audio thread.
+fn requestPlayback(s: *State, mxc_url: []const u8) void {
+    _ = s;
+    // For now, playback is triggered by downloading the media in the audio thread.
+    // The mxc URL needs to be resolved to an HTTP URL and downloaded.
+    // This requires the HTTP client which lives in the sync thread.
+    // TODO: add a download+play action to the action queue, or download inline.
+    // For v1, the sync thread already has the mxc_url in the snapshot.
+    // We'll need a dedicated download path. Leaving as a stub for now.
+    _ = mxc_url;
+}
+
 fn msgCount(s: *const State) usize {
     const snap = s.snapshot orelse return 0;
     if (s.conv_contact_idx >= snap.conversations.len) return 0;
@@ -211,6 +241,51 @@ fn update(ptr: *anyopaque, dt: f32) void {
     if (s.ptt_held) {
         s.ptt_hold_time += dt;
     }
+
+    // Drain audio events
+    if (build_options.use_audio) {
+        if (s.audio_evt) |evt_q| {
+            while (evt_q.pop()) |evt| {
+                switch (evt) {
+                    .recording_done => |rec| {
+                        // Upload and send the recorded voice message
+                        uploadRecording(s, rec.ogg_data, rec.duration_ms, rec.allocator);
+                    },
+                    .recording_error => {},
+                    .playback_done => {
+                        s.playing = false;
+                    },
+                    .playback_error => {
+                        s.playing = false;
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// Upload recorded audio and send as a voice message to the current conversation.
+/// Upload recorded audio and send as a voice message to the current conversation.
+fn uploadRecording(s: *State, ogg_data: []const u8, duration_ms: u64, data_allocator: std.mem.Allocator) void {
+    _ = data_allocator;
+    const aq = s.action_queue orelse return;
+    const snap = s.snapshot orelse return;
+
+    // Send to the conversation we're currently viewing (or the selected contact)
+    const conv_idx = if (s.view == .conversation) s.conv_contact_idx else s.selected;
+    if (conv_idx >= snap.conversations.len) return;
+    const room_id = snap.conversations[conv_idx].room_id;
+    if (room_id.len > 128) return;
+
+    var action = types.Action{ .upload_and_send_voice = .{
+        .room_id_buf = undefined,
+        .room_id_len = @intCast(room_id.len),
+        .ogg_data = ogg_data.ptr,
+        .ogg_len = @intCast(ogg_data.len),
+        .duration_ms = duration_ms,
+    } };
+    @memcpy(action.upload_and_send_voice.room_id_buf[0..room_id.len], room_id);
+    _ = aq.push(action);
 }
 
 fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
@@ -431,9 +506,15 @@ pub fn setContext(
     snapshot: ?*const types.StateSnapshot,
     connection: types.ConnectionState,
     action_q: *queue.BoundedQueue(types.Action, 64),
+    audio_cmd_q: ?*audio_thread.CommandQueue,
+    audio_evt_q: ?*audio_thread.EventQueue,
 ) void {
     const s: *State = @ptrCast(@alignCast(applet_state));
     s.snapshot = snapshot;
     s.connection = connection;
     s.action_queue = action_q;
+    if (build_options.use_audio) {
+        s.audio_cmd = audio_cmd_q;
+        s.audio_evt = audio_evt_q;
+    }
 }
