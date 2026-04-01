@@ -6,6 +6,7 @@ const input = @import("input.zig");
 const shell_mod = @import("shell.zig");
 const types = @import("types.zig");
 const queue = @import("queue.zig");
+const mailbox = @import("mailbox.zig");
 const snake = @import("applets/snake.zig");
 const clock_applet = @import("applets/clock.zig");
 const charmap = @import("applets/charmap.zig");
@@ -43,7 +44,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Inter-thread communication
     var ui_queue: queue.BoundedQueue(types.UiEvent, 256) = .{};
-    var action_queue: queue.BoundedQueue(types.Action, 64) = .{};
+    var action_queue: mailbox.Mailbox(types.Action, 64) = .{};
     var state_store: types.StateStore = .{};
     var should_stop = std.atomic.Value(bool).init(false);
 
@@ -86,6 +87,7 @@ pub fn main(init: std.process.Init) !void {
 
     defer {
         should_stop.store(true, .release);
+        action_queue.close(); // wake action thread from blocking receive
         if (build_options.use_audio) {
             if (audio_handle) |h| {
                 _ = audio_cmd_queue.push(.quit);

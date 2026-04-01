@@ -9,6 +9,7 @@ const input = @import("../input.zig");
 const shell = @import("../shell.zig");
 const types = @import("../types.zig");
 const queue = @import("../queue.zig");
+const mailbox_mod = @import("../mailbox.zig");
 const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig") else struct {
     pub const CommandQueue = void;
     pub const EventQueue = void;
@@ -48,7 +49,7 @@ const State = struct {
     scroll_offset: usize = 0,
     snapshot: ?*const types.StateSnapshot = null,
     connection: types.ConnectionState = .disconnected,
-    action_queue: ?*queue.BoundedQueue(types.Action, 64) = null,
+    action_queue: ?*mailbox_mod.Mailbox(types.Action, 64) = null,
     audio_cmd: ?*audio_thread.CommandQueue = null,
     audio_evt: ?*audio_thread.EventQueue = null,
     // For conversation view
@@ -238,7 +239,7 @@ fn pushReadReceipt(s: *State, room_id: []const u8, event_id: []const u8) void {
     } };
     @memcpy(action.send_read_receipt.room_id_buf[0..room_id.len], room_id);
     @memcpy(action.send_read_receipt.event_id_buf[0..event_id.len], event_id);
-    _ = aq.push(action);
+    _ = aq.send(action);
 }
 
 /// Request playback of a voice message by mxc:// URL.
@@ -253,7 +254,7 @@ fn requestPlayback(s: *State, mxc_url: []const u8) void {
         .mxc_url_len = @intCast(mxc_url.len),
     } };
     @memcpy(action.download_and_play.mxc_url_buf[0..mxc_url.len], mxc_url);
-    _ = aq.push(action);
+    _ = aq.send(action);
     s.playing = true;
 }
 
@@ -276,7 +277,7 @@ fn deleteSelectedMessage(s: *State) void {
     } };
     @memcpy(action.delete_message.room_id_buf[0..conv.room_id.len], conv.room_id);
     @memcpy(action.delete_message.event_id_buf[0..msg.id.len], msg.id);
-    _ = aq.push(action);
+    _ = aq.send(action);
 }
 
 fn msgCount(s: *const State) usize {
@@ -357,7 +358,7 @@ fn uploadRecording(s: *State, ogg_data: []const u8, duration_ms: u64, data_alloc
     } };
     @memcpy(action.upload_and_send_voice.room_id_buf[0..room_id.len], room_id);
     @memcpy(action.upload_and_send_voice.contact_id_buf[0..contact_id.len], contact_id);
-    _ = aq.push(action);
+    _ = aq.send(action);
 }
 
 fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
@@ -636,7 +637,7 @@ pub fn setContext(
     applet_state: *anyopaque,
     snapshot: ?*const types.StateSnapshot,
     connection: types.ConnectionState,
-    action_q: *queue.BoundedQueue(types.Action, 64),
+    action_q: *mailbox_mod.Mailbox(types.Action, 64),
     audio_cmd_q: ?*audio_thread.CommandQueue,
     audio_evt_q: ?*audio_thread.EventQueue,
 ) void {

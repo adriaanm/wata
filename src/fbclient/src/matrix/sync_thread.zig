@@ -8,6 +8,7 @@ const json_types = @import("json_types.zig");
 const sync_engine = @import("sync_engine.zig");
 const types = @import("../types.zig");
 const queue = @import("../queue.zig");
+const mailbox_mod = @import("../mailbox.zig");
 const config = @import("../config.zig");
 const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig") else struct {
     pub const CommandQueue = void;
@@ -26,10 +27,12 @@ pub const DEFAULT_CONFIG = Config{
     .password = "testpass123",
 };
 
+pub const ActionQueue = mailbox_mod.Mailbox(types.Action, 64);
+
 pub const SyncThreadContext = struct {
     config: Config,
     ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
-    action_queue: *queue.BoundedQueue(types.Action, 64),
+    action_queue: *ActionQueue,
     audio_cmd_queue: ?*audio_thread.CommandQueue,
     state_store: *types.StateStore,
     should_stop: *std.atomic.Value(bool),
@@ -247,7 +250,7 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
 const ActionThreadContext = struct {
     config: Config,
     ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
-    action_queue: *queue.BoundedQueue(types.Action, 64),
+    action_queue: *ActionQueue,
     audio_cmd_queue: ?*audio_thread.CommandQueue,
     should_stop: *std.atomic.Value(bool),
     allocator: std.mem.Allocator,
@@ -260,140 +263,112 @@ fn actionThreadMain(actx: *ActionThreadContext) void {
     var client = http.MatrixHttpClient.init(actx.allocator, actx.io, actx.config.homeserver);
     client.access_token = actx.access_token;
 
-    // Wrap in SyncThreadContext-shaped struct for drainActions compatibility
-    var compat = SyncThreadContext{
-        .config = actx.config,
-        .ui_queue = actx.ui_queue,
-        .action_queue = actx.action_queue,
-        .audio_cmd_queue = actx.audio_cmd_queue,
-        .state_store = undefined, // not used by drainActions
-        .should_stop = actx.should_stop,
-        .allocator = actx.allocator,
-        .io = actx.io,
-    };
-
-    while (!actx.should_stop.load(.acquire)) {
-        drainActions(&compat, &client, actx.self_user_id);
-        // Sleep briefly to avoid busy-spinning when queue is empty
-        sleepMs(actx.io, 50);
+    // Block on mailbox receive — no polling, no sleep
+    while (actx.action_queue.receive()) |action| {
+        executeAction(actx, &client, action);
     }
+    // receive() returned null → mailbox closed → clean exit
 }
 
-/// Execute queued actions from the UI thread.
-fn drainActions(ctx: *SyncThreadContext, client: *http.MatrixHttpClient, self_user_id: ?[]const u8) void {
+/// Execute a single action from the UI thread.
+fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, action: types.Action) void {
     const S = struct {
         var txn_counter: u32 = 0;
     };
 
-    while (ctx.action_queue.pop()) |action| {
-        switch (action) {
-            .send_read_receipt => |rr| {
-                const room_id = rr.room_id_buf[0..rr.room_id_len];
-                const event_id = rr.event_id_buf[0..rr.event_id_len];
-                client.sendReadReceipt(room_id, event_id) catch {};
-            },
-            .upload_and_send_voice => |msg| {
-                const ogg_data = msg.ogg_data[0..msg.ogg_len];
-                var room_id = msg.room_id_buf[0..msg.room_id_len];
+    switch (action) {
+        .send_read_receipt => |rr| {
+            const room_id = rr.room_id_buf[0..rr.room_id_len];
+            const event_id = rr.event_id_buf[0..rr.event_id_len];
+            client.sendReadReceipt(room_id, event_id) catch {};
+        },
+        .upload_and_send_voice => |msg| {
+            const ogg_data = msg.ogg_data[0..msg.ogg_len];
+            var room_id = msg.room_id_buf[0..msg.room_id_len];
 
-                S.txn_counter += 1;
-                const txn_id = S.txn_counter;
+            S.txn_counter += 1;
+            const txn_id = S.txn_counter;
 
-                // If no room yet, create a DM room for this contact first.
-                // This handles the case where a family member hasn't been
-                // messaged before (no DM room exists in m.direct).
-                var create_resp: ?http.RawResponse = null;
-                if (room_id.len == 0) {
-                    const contact_id = msg.contact_id_buf[0..msg.contact_id_len];
-                    if (contact_id.len == 0) {
-                        _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                        continue;
-                    }
-
-                    // Create DM room
-                    var cr = client.createRoom(contact_id) catch {
-                        _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                        continue;
-                    };
-
-                    // Parse room_id from {"room_id":"!abc:server"}
-                    room_id = parseRoomId(cr.body) orelse {
-                        cr.deinit();
-                        _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                        continue;
-                    };
-
-                    // Update m.direct account data so the room is recognized as a DM.
-                    // Best-effort: if this fails, the next sync will still pick up the room.
-                    if (self_user_id) |uid| {
-                        updateMDirect(client, uid, contact_id, room_id);
-                    }
-
-                    create_resp = cr;
+            // If no room yet, create a DM room for this contact first.
+            var create_resp: ?http.RawResponse = null;
+            if (room_id.len == 0) {
+                const contact_id = msg.contact_id_buf[0..msg.contact_id_len];
+                if (contact_id.len == 0) {
+                    _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                    return;
                 }
-                defer if (create_resp) |*cr| cr.deinit();
 
-                // Upload media
-                var upload_resp = client.uploadMedia(ogg_data) catch {
-                    _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                    continue;
+                var cr = client.createRoom(contact_id) catch {
+                    _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                    return;
                 };
 
-                // Parse mxc:// URL from response: {"content_uri":"mxc://..."}
-                const mxc_url = parseMxcUrl(upload_resp.body) orelse {
-                    upload_resp.deinit();
-                    _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                    continue;
+                room_id = parseRoomId(cr.body) orelse {
+                    cr.deinit();
+                    _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                    return;
                 };
 
-                // Send voice message event
-                client.sendVoiceMessage(room_id, mxc_url, msg.duration_ms, txn_id) catch {
-                    upload_resp.deinit();
-                    _ = ctx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                    continue;
-                };
+                updateMDirect(client, actx.self_user_id, contact_id, room_id);
+                create_resp = cr;
+            }
+            defer if (create_resp) |*cr| cr.deinit();
 
+            // Upload media
+            var upload_resp = client.uploadMedia(ogg_data) catch {
+                _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                return;
+            };
+
+            const mxc_url = parseMxcUrl(upload_resp.body) orelse {
                 upload_resp.deinit();
-                _ = ctx.ui_queue.push(.{ .send_complete = .{ .txn_id = txn_id } });
-            },
-            .download_and_play => |dl| {
-                const mxc_url = dl.mxc_url_buf[0..dl.mxc_url_len];
-                var resp = client.downloadMedia(mxc_url) catch {
-                    _ = ctx.ui_queue.push(.playback_error);
-                    continue;
-                };
-                // Dupe the data so it outlives the response buffer
-                const ogg_copy = ctx.allocator.dupe(u8, resp.body) catch {
-                    resp.deinit();
-                    _ = ctx.ui_queue.push(.playback_error);
-                    continue;
-                };
+                _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                return;
+            };
+
+            client.sendVoiceMessage(room_id, mxc_url, msg.duration_ms, txn_id) catch {
+                upload_resp.deinit();
+                _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                return;
+            };
+
+            upload_resp.deinit();
+            _ = actx.ui_queue.push(.{ .send_complete = .{ .txn_id = txn_id } });
+        },
+        .download_and_play => |dl| {
+            const mxc_url = dl.mxc_url_buf[0..dl.mxc_url_len];
+            var resp = client.downloadMedia(mxc_url) catch {
+                _ = actx.ui_queue.push(.playback_error);
+                return;
+            };
+            const ogg_copy = actx.allocator.dupe(u8, resp.body) catch {
                 resp.deinit();
-                // Send to audio thread for playback
-                if (build_options.use_audio) {
-                    if (ctx.audio_cmd_queue) |acq| {
-                        _ = acq.push(.{ .play = .{
-                            .ogg_data = ogg_copy,
-                            .allocator = ctx.allocator,
-                        } });
-                    }
-                } else {
-                    ctx.allocator.free(ogg_copy);
-                    _ = ctx.ui_queue.push(.playback_error);
+                _ = actx.ui_queue.push(.playback_error);
+                return;
+            };
+            resp.deinit();
+            if (build_options.use_audio) {
+                if (actx.audio_cmd_queue) |acq| {
+                    _ = acq.push(.{ .play = .{
+                        .ogg_data = ogg_copy,
+                        .allocator = actx.allocator,
+                    } });
                 }
-            },
-            .set_display_name => |dn| {
-                const name = dn.name_buf[0..dn.name_len];
-                const uid = self_user_id orelse continue;
-                client.setDisplayName(uid, name) catch {};
-            },
-            .delete_message => |dm| {
-                const room_id = dm.room_id_buf[0..dm.room_id_len];
-                const event_id = dm.event_id_buf[0..dm.event_id_len];
-                S.txn_counter += 1;
-                client.redactEvent(room_id, event_id, S.txn_counter) catch {};
-            },
-        }
+            } else {
+                actx.allocator.free(ogg_copy);
+                _ = actx.ui_queue.push(.playback_error);
+            }
+        },
+        .set_display_name => |dn| {
+            const name = dn.name_buf[0..dn.name_len];
+            client.setDisplayName(actx.self_user_id, name) catch {};
+        },
+        .delete_message => |dm| {
+            const room_id = dm.room_id_buf[0..dm.room_id_len];
+            const event_id = dm.event_id_buf[0..dm.event_id_len];
+            S.txn_counter += 1;
+            client.redactEvent(room_id, event_id, S.txn_counter) catch {};
+        },
     }
 }
 

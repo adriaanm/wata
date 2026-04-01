@@ -7,6 +7,7 @@ const input = @import("../input.zig");
 const shell = @import("../shell.zig");
 const types = @import("../types.zig");
 const queue_mod = @import("../queue.zig");
+const mailbox_mod = @import("../mailbox.zig");
 const config = @import("../config.zig");
 const led = if (!build_options.use_sdl) @import("../led.zig") else struct {
     pub fn readBatteryPercent() ?u8 { return null; }
@@ -34,7 +35,7 @@ const State = struct {
     selected: usize = 0,
     brightness: u8 = 40,
     echo: EchoState = .idle,
-    action_queue: ?*queue_mod.BoundedQueue(types.Action, 64) = null,
+    action_queue: ?*mailbox_mod.Mailbox(types.Action, 64) = null,
     snapshot: ?*const types.StateSnapshot = null,
     name_idx: usize = 0, // index into DISPLAY_NAMES
     should_stop: ?*std.atomic.Value(bool) = null,
@@ -217,14 +218,14 @@ fn pushDisplayName(s: *State) void {
         .name_len = @intCast(name.len),
     } };
     @memcpy(action.set_display_name.name_buf[0..name.len], name);
-    _ = aq.push(action);
+    _ = aq.send(action);
 }
 
 /// Called by main loop to provide shared context.
 pub fn setContext(
     applet_state: *anyopaque,
     snapshot: ?*const types.StateSnapshot,
-    action_q: *queue_mod.BoundedQueue(types.Action, 64),
+    action_q: *mailbox_mod.Mailbox(types.Action, 64),
     should_stop: *std.atomic.Value(bool),
 ) void {
     const s: *State = @ptrCast(@alignCast(applet_state));
