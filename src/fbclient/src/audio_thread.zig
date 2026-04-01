@@ -195,33 +195,49 @@ fn doPlayback(ctx: *Context, ogg_data: []const u8, data_allocator: std.mem.Alloc
     var reader = ogg.Reader.init(ogg_data);
     var frame_buf: [opus_mod.MAX_FRAME_BYTES]u8 = undefined;
     const opus_frame_bytes = opus_mod.FRAME_SAMPLES * alsa.FRAME_SIZE * alsa.CHANNELS;
-    var period_buf: [alsa.PERIOD_BYTES]u8 = undefined;
-    var period_off: u32 = 0;
 
-    // Stream decoded frames — auto-starts after first period is written.
-    // Accumulate Opus frames (960 samples each) into full ALSA periods
-    // (1920 samples) before writing — MSM ADSP requires period-sized writes.
-    while (!ctx.should_stop.load(.acquire)) {
-        // Check for stop command
-        if (ctx.cmd_queue.pop()) |cmd| {
-            switch (cmd) {
-                .stop_playback => break,
-                .quit => return,
-                else => {},
+    // Decode in ~500ms chunks and write each as a single large pcm_writei call.
+    // The kernel handles period-by-period DMA blocking internally, which is much
+    // smoother than a userspace per-period write loop (avoids scheduler-induced
+    // underruns on the BQ268's small 80ms ALSA buffer). See docs/voice.md.
+    const CHUNK_PERIODS = 12; // 12 periods × 40ms = 480ms
+    const CHUNK_BYTES = CHUNK_PERIODS * alsa.PERIOD_BYTES;
+    var chunk_buf: [CHUNK_BYTES]u8 = undefined;
+    var chunk_off: u32 = 0;
+    var stream_done = false;
+
+    while (!stream_done and !ctx.should_stop.load(.acquire)) {
+        // Fill a chunk by decoding Opus frames
+        chunk_off = 0;
+        while (chunk_off + opus_frame_bytes <= CHUNK_BYTES) {
+            // Check for stop command between frames
+            if (ctx.cmd_queue.pop()) |cmd| {
+                switch (cmd) {
+                    .stop_playback => {
+                        stream_done = true;
+                        break;
+                    },
+                    .quit => return,
+                    else => {},
+                }
             }
+
+            const frame = reader.nextFrame(&frame_buf) orelse {
+                stream_done = true;
+                break;
+            };
+
+            _ = decoder.decode(frame, chunk_buf[chunk_off..][0..opus_frame_bytes]) catch {
+                stream_done = true;
+                break;
+            };
+            chunk_off += opus_frame_bytes;
         }
 
-        // Get next Opus frame from Ogg container
-        const frame = reader.nextFrame(&frame_buf) orelse break; // end of stream
-
-        // Decode to PCM (960 samples = half an ALSA period)
-        _ = decoder.decode(frame, period_buf[period_off..][0..opus_frame_bytes]) catch break;
-        period_off += opus_frame_bytes;
-
-        // Flush full periods to ALSA
-        if (period_off >= alsa.PERIOD_BYTES) {
-            playback.writeFrames(&period_buf) catch break;
-            period_off = 0;
+        // Write the accumulated chunk in one call (must be period-aligned for MSM ADSP).
+        const write_bytes = chunk_off - (chunk_off % alsa.PERIOD_BYTES);
+        if (write_bytes > 0) {
+            playback.writeFrames(chunk_buf[0..write_bytes]) catch break;
         }
     }
 

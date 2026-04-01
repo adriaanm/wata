@@ -5,7 +5,7 @@
 ## Framebuffer Client (Zig)
 
 ### Active
-- [ ] Streaming playback stutter — audio_thread.zig writes period-at-a-time, causing underruns on BQ268. Echo test fixed (single large pcm_writei). **Blocked on**: getting the fbclient wata applet fully working end-to-end first. **When ready**: investigate partial buffering — decode N ms of audio before starting playback, stream the rest. Start with 500ms pre-buffer and tune down to find the minimum the hardware needs for smooth playback.
+- [x] Streaming playback stutter — decode in 480ms chunks (12 periods), write each chunk as a single pcm_writei. Kernel handles period-by-period DMA internally. Needs on-device testing to confirm smooth playback.
 - [x] DM room creation — create room with `is_direct: true`, update `m.direct`. Lazy creation on first send.
 - [x] Auto-join invites — auto-join all invited rooms during sync (trusted family environment).
 - [x] DM room deduplication — skip stale/left rooms, use first joined room from m.direct.
