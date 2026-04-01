@@ -29,6 +29,28 @@ pub const DEFAULT_CONFIG = Config{
 
 pub const ActionQueue = mailbox_mod.Mailbox(types.Action, 64);
 
+/// Auth credentials published by sync thread after login.
+/// Action thread waits on auth_ready before processing actions.
+pub const AuthStore = struct {
+    /// Packed pointer to AuthCredentials, or 0 if not yet ready.
+    ptr: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+
+    pub fn publish(self: *AuthStore, creds: *const AuthCredentials) void {
+        self.ptr.store(@intFromPtr(creds), .release);
+    }
+
+    pub fn load(self: *AuthStore) ?*const AuthCredentials {
+        const p = self.ptr.load(.acquire);
+        if (p == 0) return null;
+        return @ptrFromInt(p);
+    }
+};
+
+pub const AuthCredentials = struct {
+    access_token: []const u8,
+    user_id: []const u8,
+};
+
 pub const SyncThreadContext = struct {
     config: Config,
     ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
@@ -36,6 +58,17 @@ pub const SyncThreadContext = struct {
     audio_cmd_queue: ?*audio_thread.CommandQueue,
     state_store: *types.StateStore,
     should_stop: *std.atomic.Value(bool),
+    auth_store: *AuthStore,
+    allocator: std.mem.Allocator,
+    io: Io,
+};
+
+pub const ActionThreadContext = struct {
+    config: Config,
+    ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
+    action_queue: *ActionQueue,
+    audio_cmd_queue: ?*audio_thread.CommandQueue,
+    auth_store: *AuthStore,
     allocator: std.mem.Allocator,
     io: Io,
 };
@@ -128,25 +161,12 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
     client.access_token = access_token;
     _ = ctx.ui_queue.push(.{ .connection_state = .connected });
 
-    // Spawn a separate action thread so uploads/sends execute immediately
-    // instead of waiting for the sync long-poll (up to 30s) to return.
-    var action_ctx = ActionThreadContext{
-        .config = ctx.config,
-        .ui_queue = ctx.ui_queue,
-        .action_queue = ctx.action_queue,
-        .audio_cmd_queue = ctx.audio_cmd_queue,
-        .allocator = allocator,
-        .io = ctx.io,
+    // Publish auth credentials so the action thread (spawned from main) can start.
+    var auth_creds = AuthCredentials{
         .access_token = access_token,
-        .self_user_id = user_id,
+        .user_id = user_id,
     };
-    const action_handle = std.Thread.spawn(.{}, actionThreadMain, .{&action_ctx}) catch null;
-    defer {
-        if (action_handle) |h| {
-            ctx.action_queue.close(); // wake action thread from blocking receive
-            h.join();
-        }
-    }
+    ctx.auth_store.publish(&auth_creds);
 
     // Init processor
     var processor = sync_engine.SyncProcessor.init(allocator);
@@ -243,33 +263,38 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
 }
 
 // ---------------------------------------------------------------------------
-// Action thread — executes uploads/sends immediately, independent of sync
+// Action thread — executes uploads/sends immediately, independent of sync.
+// Spawned from main. Waits for auth credentials from sync thread before
+// processing actions.
 // ---------------------------------------------------------------------------
 
-const ActionThreadContext = struct {
-    config: Config,
-    ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
-    action_queue: *ActionQueue,
-    audio_cmd_queue: ?*audio_thread.CommandQueue,
-    allocator: std.mem.Allocator,
-    io: Io,
-    access_token: []const u8,
-    self_user_id: []const u8,
-};
+pub fn actionThreadMain(actx: *ActionThreadContext) void {
+    // Wait for sync thread to publish auth credentials after login.
+    // While waiting, drain the mailbox to stay responsive to close().
+    var creds: ?*const AuthCredentials = null;
+    while (creds == null) {
+        creds = actx.auth_store.load();
+        if (creds != null) break;
+        // Not ready yet — check if mailbox is closing
+        if (actx.action_queue.isClosed()) return;
+        // Brief sleep to avoid spinning
+        var ts = std.os.linux.timespec{ .sec = 0, .nsec = 50_000_000 }; // 50ms
+        _ = std.os.linux.nanosleep(&ts, null);
+    }
 
-fn actionThreadMain(actx: *ActionThreadContext) void {
+    const auth = creds.?;
     var client = http.MatrixHttpClient.init(actx.allocator, actx.io, actx.config.homeserver);
-    client.access_token = actx.access_token;
+    client.access_token = auth.access_token;
 
     // Block on mailbox receive — no polling, no sleep
     while (actx.action_queue.receive()) |action| {
-        executeAction(actx, &client, action);
+        executeAction(actx, &client, action, auth.user_id);
     }
     // receive() returned null → mailbox closed → clean exit
 }
 
 /// Execute a single action from the UI thread.
-fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, action: types.Action) void {
+fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, action: types.Action, self_user_id: []const u8) void {
     const S = struct {
         var txn_counter: u32 = 0;
     };
@@ -307,7 +332,7 @@ fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, act
                     return;
                 };
 
-                updateMDirect(client, actx.self_user_id, contact_id, room_id);
+                updateMDirect(client, self_user_id, contact_id, room_id);
                 create_resp = cr;
             }
             defer if (create_resp) |*cr| cr.deinit();
@@ -359,7 +384,7 @@ fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, act
         },
         .set_display_name => |dn| {
             const name = dn.name_buf[0..dn.name_len];
-            client.setDisplayName(actx.self_user_id, name) catch {};
+            client.setDisplayName(self_user_id, name) catch {};
         },
         .delete_message => |dm| {
             const room_id = dm.room_id_buf[0..dm.room_id_len];

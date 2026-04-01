@@ -52,6 +52,9 @@ pub fn main(init: std.process.Init) !void {
     var audio_cmd_queue: if (build_options.use_audio) audio_thread.CommandQueue else void = if (build_options.use_audio) .{} else {};
     var audio_evt_queue: if (build_options.use_audio) audio_thread.EventQueue else void = if (build_options.use_audio) .{} else {};
 
+    // Auth store — sync thread publishes credentials, action thread waits
+    var auth_store: sync_thread.AuthStore = .{};
+
     // Sync thread context
     var sync_ctx = sync_thread.SyncThreadContext{
         .config = sync_thread.DEFAULT_CONFIG,
@@ -60,11 +63,23 @@ pub fn main(init: std.process.Init) !void {
         .audio_cmd_queue = if (build_options.use_audio) &audio_cmd_queue else null,
         .state_store = &state_store,
         .should_stop = &should_stop,
+        .auth_store = &auth_store,
         .allocator = allocator,
         .io = init.io,
     };
 
-    // Spawn sync thread (unless offline mode — UI + audio only, no network)
+    // Action thread context
+    var action_ctx = sync_thread.ActionThreadContext{
+        .config = sync_thread.DEFAULT_CONFIG,
+        .ui_queue = &ui_queue,
+        .action_queue = &action_queue,
+        .audio_cmd_queue = if (build_options.use_audio) &audio_cmd_queue else null,
+        .auth_store = &auth_store,
+        .allocator = allocator,
+        .io = init.io,
+    };
+
+    // Spawn sync + action threads (unless offline mode)
     const sync_handle = if (!build_options.offline) blk: {
         debugLog("[main] connecting to {s} as {s}", .{ sync_ctx.config.homeserver, sync_ctx.config.username });
         break :blk std.Thread.spawn(.{}, sync_thread.syncThreadMain, .{&sync_ctx}) catch null;
@@ -72,6 +87,10 @@ pub fn main(init: std.process.Init) !void {
         debugLog("[main] offline mode — network disabled", .{});
         break :blk @as(?std.Thread, null);
     };
+    const action_handle = if (!build_options.offline)
+        std.Thread.spawn(.{}, sync_thread.actionThreadMain, .{&action_ctx}) catch null
+    else
+        @as(?std.Thread, null);
 
     // Spawn audio thread (device only)
     var audio_ctx: if (build_options.use_audio) audio_thread.Context else void = if (build_options.use_audio) .{
@@ -85,12 +104,14 @@ pub fn main(init: std.process.Init) !void {
         null;
 
     defer {
-        should_stop.store(true, .release);
-        action_queue.close(); // wake action thread from blocking receive
+        // Structured shutdown: signal all threads, then join all
+        should_stop.store(true, .release); // sync thread
+        action_queue.close(); // action thread
         if (build_options.use_audio) {
-            audio_cmd_queue.close(); // wake audio thread from blocking receive
+            audio_cmd_queue.close(); // audio thread
             if (audio_handle) |h| h.join();
         }
+        if (action_handle) |h| h.join();
         if (sync_handle) |h| h.join();
         state_store.deinit();
     }
