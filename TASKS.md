@@ -5,7 +5,7 @@
 ## Framebuffer Client (Zig)
 
 ### Active
-- [ ] Streaming playback stutter — audio_thread.zig writes period-at-a-time, causing underruns on BQ268. Echo test fixed (single large pcm_writei). Streaming playback needs similar approach: decode all frames into buffer, then write at once. Trade-off: adds latency for long messages (must decode fully before playing).
+- [ ] Streaming playback stutter — audio_thread.zig writes period-at-a-time, causing underruns on BQ268. Echo test fixed (single large pcm_writei). **Blocked on**: getting the fbclient wata applet fully working end-to-end first. **When ready**: investigate partial buffering — decode N ms of audio before starting playback, stream the rest. Start with 500ms pre-buffer and tune down to find the minimum the hardware needs for smooth playback.
 - [ ] DM room creation — fbclient can send to existing DMs but cannot create new ones. Need `ensureDMRoom` equivalent: create room with `is_direct: true`, update `m.direct` account data. Without this, first message to a contact fails.
 - [ ] DM room deduplication — Matrix allows multiple DM rooms between two users. Android/TUI pick the oldest by creation timestamp. Fbclient sync_engine doesn't deduplicate — may show duplicate conversations or route messages to wrong room.
 - [ ] Auto-join invites — family model requires auto-accepting all room invites (trusted environment). Fbclient sync response contains invite events but doesn't act on them. New family members won't appear until manually joined.
