@@ -125,6 +125,27 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
     client.access_token = access_token;
     _ = ctx.ui_queue.push(.{ .connection_state = .connected });
 
+    // Spawn a separate action thread so uploads/sends execute immediately
+    // instead of waiting for the sync long-poll (up to 30s) to return.
+    var action_ctx = ActionThreadContext{
+        .config = ctx.config,
+        .ui_queue = ctx.ui_queue,
+        .action_queue = ctx.action_queue,
+        .audio_cmd_queue = ctx.audio_cmd_queue,
+        .should_stop = ctx.should_stop,
+        .allocator = allocator,
+        .io = ctx.io,
+        .access_token = access_token,
+        .self_user_id = user_id,
+    };
+    const action_handle = std.Thread.spawn(.{}, actionThreadMain, .{&action_ctx}) catch null;
+    defer {
+        if (action_handle) |h| {
+            ctx.should_stop.store(true, .release);
+            h.join();
+        }
+    }
+
     // Init processor
     var processor = sync_engine.SyncProcessor.init(allocator);
     defer processor.deinit();
@@ -213,9 +234,45 @@ fn syncThreadMainInner(ctx: *SyncThreadContext) !void {
 
         // Reset retry delay on success
         retry_delay_ms = 1000;
+    }
+}
 
-        // Execute pending UI actions (read receipts, etc.)
-        drainActions(ctx, &client, processor.self_user_id);
+// ---------------------------------------------------------------------------
+// Action thread — executes uploads/sends immediately, independent of sync
+// ---------------------------------------------------------------------------
+
+const ActionThreadContext = struct {
+    config: Config,
+    ui_queue: *queue.BoundedQueue(types.UiEvent, 256),
+    action_queue: *queue.BoundedQueue(types.Action, 64),
+    audio_cmd_queue: ?*audio_thread.CommandQueue,
+    should_stop: *std.atomic.Value(bool),
+    allocator: std.mem.Allocator,
+    io: Io,
+    access_token: []const u8,
+    self_user_id: []const u8,
+};
+
+fn actionThreadMain(actx: *ActionThreadContext) void {
+    var client = http.MatrixHttpClient.init(actx.allocator, actx.io, actx.config.homeserver);
+    client.access_token = actx.access_token;
+
+    // Wrap in SyncThreadContext-shaped struct for drainActions compatibility
+    var compat = SyncThreadContext{
+        .config = actx.config,
+        .ui_queue = actx.ui_queue,
+        .action_queue = actx.action_queue,
+        .audio_cmd_queue = actx.audio_cmd_queue,
+        .state_store = undefined, // not used by drainActions
+        .should_stop = actx.should_stop,
+        .allocator = actx.allocator,
+        .io = actx.io,
+    };
+
+    while (!actx.should_stop.load(.acquire)) {
+        drainActions(&compat, &client, actx.self_user_id);
+        // Sleep briefly to avoid busy-spinning when queue is empty
+        sleepMs(actx.io, 50);
     }
 }
 
