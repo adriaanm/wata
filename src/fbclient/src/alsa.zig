@@ -128,14 +128,18 @@ pub fn setupCaptureMixer() void {
     const mixer = c.mixer_open(0) orelse return;
     defer c.mixer_close(mixer);
 
-    // Disable speaker during capture to prevent feedback
-    setSwitch(mixer, "Ext Spk Switch", false);
+    // Mute speaker completely
+    setEnum(mixer, "RX2 MIX1 INP1", "ZERO");
+    setEnum(mixer, "Ext Spk Switch", "Off");
 
-    // Microphone capture route
-    setSwitch(mixer, "MultiMedia1 Mixer TERT_MI2S_TX", true);
+    // Enable mic capture route
+    setInt(mixer, "MultiMedia1 Mixer TERT_MI2S_TX", 1);
     setEnum(mixer, "DEC1 MUX", "ADC1");
     setInt(mixer, "ADC1 Volume", 6);
     setInt(mixer, "DEC1 Volume", 104);
+
+    // Verify with amixer (diagnostic — writes to /tmp/wata-mixer.log)
+    verifyMixer();
 }
 
 /// Enable speaker playback route.
@@ -143,12 +147,16 @@ pub fn setupPlaybackMixer() void {
     const mixer = c.mixer_open(0) orelse return;
     defer c.mixer_close(mixer);
 
-    // Speaker playback route
     setEnum(mixer, "RX2 MIX1 INP1", "RX1");
     setEnum(mixer, "RDAC2 MUX", "RX2");
-    setSwitch(mixer, "HPHR", true);
-    setSwitch(mixer, "Ext Spk Switch", true);
+    setEnum(mixer, "HPHR", "Switch");
+    setEnum(mixer, "Ext Spk Switch", "On");
     setInt(mixer, "RX2 Digital Volume", 84);
+}
+
+fn verifyMixer() void {
+    const sys = @cImport(@cInclude("stdlib.h"));
+    _ = sys.system("amixer cget name='Ext Spk Switch' > /tmp/wata-mixer.log 2>&1; amixer cget name='RX2 MIX1 INP1' >> /tmp/wata-mixer.log 2>&1");
 }
 
 fn setEnum(mixer: anytype, name: [*:0]const u8, value: [*:0]const u8) void {
