@@ -14,6 +14,7 @@ const led = if (!build_options.use_sdl) @import("../led.zig") else struct {
 };
 const alsa = if (build_options.use_audio) @import("../alsa.zig") else struct {};
 const opus_mod = if (build_options.use_audio) @import("../opus.zig") else struct {};
+const ogg = if (build_options.use_audio) @import("../ogg.zig") else struct {};
 
 const MenuItem = enum {
     echo_test,
@@ -230,10 +231,9 @@ fn startEchoRecord(s: *State) void {
 }
 
 fn doEchoTest(s: *State) void {
-    // Pre-allocate the full 2s buffer
-    var pcm_buf: [ECHO_BUF_BYTES]u8 = undefined;
+    const OPUS_FRAME_BYTES: u32 = opus_mod.FRAME_SAMPLES * alsa.FRAME_SIZE * alsa.CHANNELS;
 
-    // --- RECORD ---
+    // --- RECORD + ENCODE ---
     alsa.setupCaptureMixer();
 
     var capture = alsa.Capture.open() catch {
@@ -241,34 +241,92 @@ fn doEchoTest(s: *State) void {
         return;
     };
 
-    var rec_offset: u32 = 0;
-    while (rec_offset + alsa.PERIOD_BYTES <= ECHO_BUF_BYTES) {
-        _ = capture.readFrames(pcm_buf[rec_offset..][0..alsa.PERIOD_BYTES]) catch break;
-        rec_offset += alsa.PERIOD_BYTES;
+    var encoder = opus_mod.Encoder.init() catch {
+        capture.close();
+        s.echo = .err;
+        return;
+    };
+
+    var writer = ogg.Writer.init(std.heap.page_allocator);
+    writer.writeOpusHead() catch {
+        encoder.deinit();
+        capture.close();
+        writer.deinit();
+        s.echo = .err;
+        return;
+    };
+    writer.writeOpusTags() catch {
+        encoder.deinit();
+        capture.close();
+        writer.deinit();
+        s.echo = .err;
+        return;
+    };
+
+    var pcm_buf: [alsa.PERIOD_BYTES]u8 = undefined;
+    var opus_buf: [opus_mod.MAX_FRAME_BYTES]u8 = undefined;
+    var total_samples: u32 = 0;
+
+    while (total_samples < ECHO_BUF_FRAMES) {
+        _ = capture.readFrames(&pcm_buf) catch break;
+
+        // Each ALSA period = 2 Opus frames (1920 samples = 2 × 960)
+        var off: u32 = 0;
+        while (off + OPUS_FRAME_BYTES <= alsa.PERIOD_BYTES) {
+            const encoded = encoder.encode(pcm_buf[off..][0..OPUS_FRAME_BYTES], &opus_buf) catch break;
+            writer.writeAudioFrame(opus_buf[0..encoded], opus_mod.FRAME_SAMPLES) catch break;
+            total_samples += opus_mod.FRAME_SAMPLES;
+            off += OPUS_FRAME_BYTES;
+        }
     }
+
     capture.close();
+    encoder.deinit();
+    writer.finish() catch {};
+
+    const ogg_data = writer.data();
 
     s.echo = .playing;
 
-    // --- PLAY BACK ---
+    // --- DECODE + PLAY BACK ---
     alsa.setupPlaybackMixer();
 
+    var decoder = opus_mod.Decoder.init() catch {
+        writer.deinit();
+        s.echo = .err;
+        return;
+    };
+
     var playback = alsa.Playback.open() catch {
+        decoder.deinit();
+        writer.deinit();
         s.echo = .err;
         return;
     };
 
-    // Write entire buffer in one call — the kernel handles blocking/chunking
-    // internally with less scheduling overhead than a userspace loop.
-    playback.writeFrames(pcm_buf[0..rec_offset]) catch {
-        s.echo = .err;
-        playback.close();
-        return;
-    };
+    // Decode all frames into a contiguous buffer, then write in one call
+    // to avoid per-period write loop stutter (see docs/voice.md).
+    var pcm_out: [ECHO_BUF_BYTES]u8 = undefined;
+    var decode_off: u32 = 0;
+    var reader = ogg.Reader.init(ogg_data);
+    var frame_buf: [opus_mod.MAX_FRAME_BYTES]u8 = undefined;
 
-    // Wait for the last buffered audio to finish playing.
+    while (reader.nextFrame(&frame_buf)) |frame| {
+        if (decode_off + OPUS_FRAME_BYTES > ECHO_BUF_BYTES) break;
+        _ = decoder.decode(frame, pcm_out[decode_off..][0..OPUS_FRAME_BYTES]) catch break;
+        decode_off += OPUS_FRAME_BYTES;
+    }
+
+    // Round down to full period boundary for MSM ADSP
+    const playback_bytes = decode_off - (decode_off % alsa.PERIOD_BYTES);
+    if (playback_bytes > 0) {
+        playback.writeFrames(pcm_out[0..playback_bytes]) catch {};
+    }
+
     playback.drain();
     playback.close();
+    decoder.deinit();
+    writer.deinit();
 
     s.echo = .done;
 }

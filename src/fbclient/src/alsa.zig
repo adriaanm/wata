@@ -83,6 +83,8 @@ pub const Playback = struct {
 
     /// Write frames. `buf` length determines frame count.
     /// Blocks when the buffer is full (natural flow control).
+    /// IMPORTANT: MSM Q6 ADSP requires writes of at least FRAMES_PER_PERIOD.
+    /// Sub-period writes cause pcm_writei to block until timeout.
     pub fn writeFrames(self: *Playback, buf: []const u8) PcmError!void {
         const frames: c_uint = @intCast(buf.len / (FRAME_SIZE * CHANNELS));
         const ret = c.pcm_writei(self.pcm, buf.ptr, frames);
