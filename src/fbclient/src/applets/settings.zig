@@ -21,12 +21,16 @@ const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig")
 const MenuItem = enum {
     echo_test,
     brightness,
+    screen_off,
     display_name,
     disconnect,
     info,
 };
 
-const ITEMS = [_]MenuItem{ .echo_test, .brightness, .display_name, .disconnect, .info };
+const ITEMS = [_]MenuItem{ .echo_test, .brightness, .screen_off, .display_name, .disconnect, .info };
+
+const SCREEN_TIMEOUTS = [_]u32{ 30, 60, 120, 300, 0 }; // seconds (0 = never)
+const SCREEN_TIMEOUT_LABELS = [_][]const u8{ "30s", "1m", "2m", "5m", "Never" };
 
 const EchoState = enum { idle, recording, playing, done, err };
 
@@ -41,6 +45,7 @@ const State = struct {
     audio_evt: ?*audio_thread.EventQueue = null,
     snapshot: ?*const types.StateSnapshot = null,
     name_idx: usize = 0, // index into DISPLAY_NAMES
+    screen_timeout_idx: usize = 1, // index into SCREEN_TIMEOUTS (default: 1m)
     should_stop: ?*std.atomic.Value(bool) = null,
     connected: bool = true,
 };
@@ -89,6 +94,7 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
                     }
                 },
                 .brightness => {},
+                .screen_off => {},
                 .info => {},
             }
         },
@@ -98,6 +104,8 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
                 if (!build_options.use_sdl) led.setBacklight(s.brightness);
             } else if (ITEMS[s.selected] == .display_name) {
                 s.name_idx = if (s.name_idx == 0) DISPLAY_NAMES.len - 1 else s.name_idx - 1;
+            } else if (ITEMS[s.selected] == .screen_off) {
+                s.screen_timeout_idx = if (s.screen_timeout_idx == 0) SCREEN_TIMEOUTS.len - 1 else s.screen_timeout_idx - 1;
             }
         },
         .right => {
@@ -106,6 +114,8 @@ fn handleInput(ptr: *anyopaque, key: input.Key, key_state: input.KeyState) shell
                 if (!build_options.use_sdl) led.setBacklight(s.brightness);
             } else if (ITEMS[s.selected] == .display_name) {
                 s.name_idx = (s.name_idx + 1) % DISPLAY_NAMES.len;
+            } else if (ITEMS[s.selected] == .screen_off) {
+                s.screen_timeout_idx = (s.screen_timeout_idx + 1) % SCREEN_TIMEOUTS.len;
             }
         },
         else => {},
@@ -169,6 +179,10 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
                 const bar = std.fmt.bufPrint(&bar_buf, "{d}/40", .{s.brightness}) catch "?";
                 font.drawText(fb, bar, 15, row, fg, null);
             },
+            .screen_off => {
+                font.drawText(fb, "Screen off", 1, row, fg, null);
+                font.drawText(fb, SCREEN_TIMEOUT_LABELS[s.screen_timeout_idx], 13, row, fg, null);
+            },
             .disconnect => {
                 font.drawText(fb, "Network", 1, row, fg, null);
                 font.drawText(fb, if (s.connected) "ON" else "OFF", 12, row, if (s.connected) c.green else c.red, null);
@@ -221,6 +235,10 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
         .brightness => {
             font.drawText(fb, "</>  adjust", 1, detail_row, c.mid_gray, null);
         },
+        .screen_off => {
+            font.drawText(fb, "</>  change timeout", 1, detail_row, c.mid_gray, null);
+            font.drawText(fb, "Any key to wake", 1, detail_row + 1, c.mid_gray, null);
+        },
     }
 }
 
@@ -235,6 +253,18 @@ fn pushDisplayName(s: *State) void {
     } };
     @memcpy(action.set_display_name.name_buf[0..name.len], name);
     _ = aq.send(action);
+}
+
+/// Screen off timeout in seconds. 0 = never.
+pub fn getScreenTimeout(applet_state: *anyopaque) u32 {
+    const s: *const State = @ptrCast(@alignCast(applet_state));
+    return SCREEN_TIMEOUTS[s.screen_timeout_idx];
+}
+
+/// Current brightness setting (for restoring after screen wake).
+pub fn getBrightness(applet_state: *anyopaque) u8 {
+    const s: *const State = @ptrCast(@alignCast(applet_state));
+    return s.brightness;
 }
 
 /// Called by main loop to provide shared context.

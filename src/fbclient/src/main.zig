@@ -202,6 +202,10 @@ pub fn main(init: std.process.Init) !void {
     var current_snapshot: ?*const types.StateSnapshot = null;
     defer if (current_owned) |o| o.release();
 
+    // Screensaver state
+    var idle_time: f32 = 0.0;
+    var display_off: bool = false;
+
     while (true) {
         const now_ms: i64 = if (build_options.use_sdl) @intCast(sdl.SDL_GetTicks()) else clockMs();
         const dt_raw = now_ms - last_ms;
@@ -261,17 +265,52 @@ pub fn main(init: std.process.Init) !void {
         const result = inp.poll(&event_buf);
         if (result.quit) break;
 
-        for (result.events) |ev| {
-            const action = sh.handleInput(ev.key, ev.state);
-            if (action == .quit) break;
+        // Screensaver: wake on any input
+        if (result.events.len > 0) {
+            if (display_off) {
+                // Wake: restore backlight + button backlight
+                if (!build_options.use_sdl) {
+                    const brightness = if (sh.states[1]) |ss| settings_applet.getBrightness(ss) else 40;
+                    led.setBacklight(brightness);
+                    led.setButtonBacklight(true);
+                }
+                display_off = false;
+                // Swallow the wake input — don't forward to applets
+            } else {
+                // Normal input handling
+                for (result.events) |ev| {
+                    const action = sh.handleInput(ev.key, ev.state);
+                    if (action == .quit) break;
+                }
+            }
+            idle_time = 0.0;
+        }
+
+        // Screensaver: accumulate idle time and check timeout
+        idle_time += dt;
+        if (!display_off) {
+            const timeout_s: u32 = if (sh.states[1]) |ss| settings_applet.getScreenTimeout(ss) else 60;
+            if (timeout_s > 0) {
+                const timeout_f: f32 = @floatFromInt(timeout_s);
+                if (idle_time >= timeout_f) {
+                    if (!build_options.use_sdl) {
+                        led.setBacklight(0);
+                        led.setButtonBacklight(false);
+                    }
+                    display_off = true;
+                }
+            }
         }
 
         sh.update(dt);
 
-        var fb = disp.framebuffer();
-        fb.clear(display.colors.black);
-        sh.render(&fb);
-        disp.present();
+        // Skip rendering when display is off (saves CPU)
+        if (!display_off) {
+            var fb = disp.framebuffer();
+            fb.clear(display.colors.black);
+            sh.render(&fb);
+            disp.present();
+        }
 
         if (build_options.use_sdl) {
             sdl.SDL_Delay(16); // ~60fps for dev
