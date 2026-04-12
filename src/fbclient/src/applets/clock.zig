@@ -66,8 +66,8 @@ const row_gap: u32 = 10;
 const total_h: u32 = digit_h * 2 + row_gap; // 122
 
 // Colours (ketchup-mayonnaise)
-const color_mayo = display.colors.rgb(255, 255, 162); // mayonnaise
-const color_ketchup = display.colors.rgb(225, 64, 128); // ketchup
+const color_mayo = display.colors.rgb(255, 255, 32); // mayonnaise
+const color_ketchup = display.colors.rgb(255, 73, 146); // ketchup
 
 fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
     const s: *State = @ptrCast(@alignCast(ptr));
@@ -87,8 +87,9 @@ fn render(ptr: *anyopaque, fb: *display.Framebuffer) void {
     const even_minute = (minutes % 2 == 0);
     const bg_above = if (even_minute) color_mayo else color_ketchup;
     const bg_below = if (even_minute) color_ketchup else color_mayo;
-    const fg_above = display.colors.black;
-    const fg_below = display.colors.white;
+    // Digit fill contrasts with its background: black on mayo, white on ketchup.
+    const fg_above = if (even_minute) display.colors.black else display.colors.white;
+    const fg_below = if (even_minute) display.colors.white else display.colors.black;
 
     // Centering
     const x_start: i32 = @intCast((display.width - pair_w) / 2);
