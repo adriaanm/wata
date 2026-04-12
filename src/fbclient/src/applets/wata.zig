@@ -323,6 +323,7 @@ fn update(ptr: *anyopaque, dt: f32) void {
                         s.play_error = true;
                         s.status_timer = 2.0;
                     },
+                    .echo_recording, .echo_playing, .echo_done, .echo_error => {},
                 }
             }
         }
