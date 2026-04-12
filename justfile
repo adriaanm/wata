@@ -1,4 +1,4 @@
-zig := env("ZIG", home_dir() / "zig-x86_64-linux-0.16.0-dev.3059+42e33db9d/zig")
+zig := env("ZIG", home_dir() / ".local/zig/zig")
 device := "bq268"
 device_dir := "/opt/wata"
 
