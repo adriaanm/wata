@@ -170,6 +170,25 @@ fn hasMessageFromContact(ctx: HasMessageCtx, snap: *const types.StateSnapshot) b
     return false;
 }
 
+const HasDurationsCtx = struct { contact_id: []const u8, durations: []const f64 };
+/// True iff the conversation's LAST N messages have the given durations,
+/// in order. Lets a test wait for a specific sequence regardless of how
+/// many other messages already exist in the room.
+fn lastMessagesMatchDurations(ctx: HasDurationsCtx, snap: *const types.StateSnapshot) bool {
+    for (snap.conversations) |conv| {
+        if (conv.contact) |c| {
+            if (!std.mem.eql(u8, c.user.id, ctx.contact_id)) continue;
+            if (conv.messages.len < ctx.durations.len) return false;
+            const start = conv.messages.len - ctx.durations.len;
+            for (ctx.durations, 0..) |want, i| {
+                if (conv.messages[start + i].duration != want) return false;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 const MessagePlayedCtx = struct { contact_id: []const u8, event_id: []const u8 };
 fn messagePlayed(ctx: MessagePlayedCtx, snap: *const types.StateSnapshot) bool {
     for (snap.conversations) |conv| {
@@ -447,6 +466,72 @@ test "integration: bob's own snapshot reflects the receipt he sent" {
         20_000,
     );
     defer bob_played.release();
+}
+
+test "integration: multi-turn conversation preserves order and dedupes" {
+    const allocator = testing.allocator;
+    const env = loadEnv(allocator);
+
+    var pair = TestPair.init(allocator, env) catch |err| switch (err) {
+        error.SkipZigTest => return error.SkipZigTest,
+        else => return err,
+    };
+    defer pair.deinit();
+
+    const bob_self = try pair.bob.waitForSnapshot(SelfReadyCtx{}, selfReady, 15_000);
+    defer bob_self.release();
+    const bob_user_id = bob_self.snapshot.self_user.?.id;
+
+    const alice_self = try pair.alice.waitForSnapshot(SelfReadyCtx{}, selfReady, 15_000);
+    defer alice_self.release();
+    const alice_user_id = alice_self.snapshot.self_user.?.id;
+
+    // Use distinctive durations as markers so the predicate can find
+    // the specific sequence regardless of messages left by prior tests.
+    // Durations are in ms; converted to seconds in the snapshot (÷1000).
+    const alice_durs = [_]u64{ 100, 200, 300 };
+    const bob_durs = [_]u64{ 400, 500, 600 };
+    const alice_secs = [_]f64{ 0.1, 0.2, 0.3 };
+    const all_six_secs = [_]f64{ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6 };
+
+    // Alice sends 3 back-to-back. With the m.direct lookup in the action
+    // thread, all three land in the same DM room.
+    for (alice_durs) |d| {
+        _ = pair.alice.sendAction(buildSendVoiceAction(bob_user_id, "", FAKE_OGG, d));
+    }
+
+    // Wait for bob to see alice's 3 as the last 3 messages, in order.
+    const bob_after = try pair.bob.waitForSnapshot(
+        HasDurationsCtx{ .contact_id = alice_user_id, .durations = &alice_secs },
+        lastMessagesMatchDurations,
+        30_000,
+    );
+    defer bob_after.release();
+
+    // Capture the room_id so bob can reply into the same conversation.
+    var room_id: []const u8 = "";
+    for (bob_after.snapshot.conversations) |conv| {
+        if (conv.contact) |c| if (std.mem.eql(u8, c.user.id, alice_user_id)) {
+            room_id = conv.room_id;
+            break;
+        };
+    }
+    try testing.expect(room_id.len > 0);
+
+    // Bob replies with 3 messages into the SAME room.
+    for (bob_durs) |d| {
+        _ = pair.bob.sendAction(buildSendVoiceAction(alice_user_id, room_id, FAKE_OGG, d));
+    }
+
+    // Alice's view: the last 6 messages are the full exchange in order.
+    // This also verifies dedup — if the 3 alice sends were double-counted,
+    // the tail wouldn't match the expected sequence.
+    const alice_after = try pair.alice.waitForSnapshot(
+        HasDurationsCtx{ .contact_id = bob_user_id, .durations = &all_six_secs },
+        lastMessagesMatchDurations,
+        30_000,
+    );
+    defer alice_after.release();
 }
 
 test "integration: alice deletes (redacts) a message" {
