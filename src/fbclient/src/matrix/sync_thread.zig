@@ -14,7 +14,7 @@ const audio_thread = if (build_options.use_audio) @import("../audio_thread.zig")
     pub const CommandQueue = void;
 };
 
-const Config = struct {
+pub const Config = struct {
     homeserver: []const u8,
     username: []const u8,
     password: []const u8,
@@ -314,8 +314,11 @@ fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, act
             S.txn_counter += 1;
             const txn_id = S.txn_counter;
 
-            // If no room yet, create a DM room for this contact first.
+            // If no room yet: reuse an existing DM for this contact from
+            // m.direct (TS dm-room-service.getOrCreateDmRoom parity), or
+            // create a fresh one and tag it.
             var create_resp: ?http.RawResponse = null;
+            var get_resp: ?http.RawResponse = null;
             if (room_id.len == 0) {
                 const contact_id = msg.contact_id_buf[0..msg.contact_id_len];
                 if (contact_id.len == 0) {
@@ -323,21 +326,31 @@ fn executeAction(actx: *ActionThreadContext, client: *http.MatrixHttpClient, act
                     return;
                 }
 
-                var cr = client.createRoom(contact_id) catch {
-                    _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                    return;
-                };
+                if (client.getAccountData(self_user_id, "m.direct")) |resp| {
+                    get_resp = resp;
+                    if (findRoomForContact(resp.body, contact_id)) |existing| {
+                        room_id = existing;
+                    }
+                } else |_| {}
 
-                room_id = parseRoomId(cr.body) orelse {
-                    cr.deinit();
-                    _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
-                    return;
-                };
+                if (room_id.len == 0) {
+                    var cr = client.createRoom(contact_id) catch {
+                        _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                        return;
+                    };
 
-                updateMDirect(client, self_user_id, contact_id, room_id);
-                create_resp = cr;
+                    room_id = parseRoomId(cr.body) orelse {
+                        cr.deinit();
+                        _ = actx.ui_queue.push(.{ .send_failed = .{ .txn_id = txn_id } });
+                        return;
+                    };
+
+                    updateMDirect(client, self_user_id, contact_id, room_id);
+                    create_resp = cr;
+                }
             }
             defer if (create_resp) |*cr| cr.deinit();
+            defer if (get_resp) |*r| r.deinit();
 
             // Upload media
             var upload_resp = client.uploadMedia(ogg_data) catch {
@@ -450,6 +463,23 @@ pub fn parseMxcUrl(json_body: []const u8) ?[]const u8 {
     return json_body[val_start..end];
 }
 
+/// Scan an m.direct JSON body for the first room_id mapped to `contact_id`.
+/// Returns a slice into `json_body` — caller must ensure the buffer outlives
+/// the returned slice (or copy it).
+pub fn findRoomForContact(json_body: []const u8, contact_id: []const u8) ?[]const u8 {
+    var search_buf: [256]u8 = undefined;
+    const contact_key = std.fmt.bufPrint(&search_buf, "\"{s}\":", .{contact_id}) catch return null;
+    const key_pos = std.mem.indexOf(u8, json_body, contact_key) orelse return null;
+    const after_key = key_pos + contact_key.len;
+    // Expect an array — find the first quoted string inside it.
+    const bracket_open = std.mem.indexOfPos(u8, json_body, after_key, "[") orelse return null;
+    const first_quote = std.mem.indexOfPos(u8, json_body, bracket_open, "\"") orelse return null;
+    const val_start = first_quote + 1;
+    const end = std.mem.indexOfPos(u8, json_body, val_start, "\"") orelse return null;
+    if (end == val_start) return null;
+    return json_body[val_start..end];
+}
+
 pub fn parseRoomId(json_body: []const u8) ?[]const u8 {
     const key = "\"room_id\":\"";
     const start = std.mem.indexOf(u8, json_body, key) orelse return null;
@@ -540,4 +570,20 @@ test "parseRoomId: extracts room ID from createRoom response" {
 
 test "parseRoomId: returns null for missing key" {
     try testing.expect(parseRoomId("{}") == null);
+}
+
+test "findRoomForContact: extracts first room for contact" {
+    const body =
+        \\{"@bob:test":["!first:test","!second:test"],"@charlie:test":["!c:test"]}
+    ;
+    try testing.expectEqualStrings("!first:test", findRoomForContact(body, "@bob:test").?);
+    try testing.expectEqualStrings("!c:test", findRoomForContact(body, "@charlie:test").?);
+    try testing.expect(findRoomForContact(body, "@nobody:test") == null);
+}
+
+test "findRoomForContact: empty body or no array" {
+    try testing.expect(findRoomForContact("{}", "@bob:test") == null);
+    try testing.expect(findRoomForContact(
+        \\{"@bob:test":[]}
+    , "@bob:test") == null);
 }
