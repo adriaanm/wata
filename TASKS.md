@@ -2,6 +2,10 @@
 
 **Current focus: Framebuffer client (Zig).** Planning doc: [docs/planning/framebuffer-client.md](docs/planning/framebuffer-client.md) — treat as a working document, update as things change. The **TUI is the most complete frontend** — use it as the reference implementation when docs are incomplete (read the TUI source, not just the docs).
 
+## Inbound specs from sibling repos
+
+- [ ] **Metrics heartbeat tick** (from bq268-alpine) — emit a 16-byte `SOCK_DGRAM` datagram to `/run/wata.tick` once per matrix long-poll iteration so the bq268-alpine metrics sampler can align its wakeups with wata's. wata owns only the emit; no metrics content. Spec: [docs/planning/metrics-heartbeat-tick.md](docs/planning/metrics-heartbeat-tick.md).
+
 ## Framebuffer Client (Zig)
 
 ### Active
