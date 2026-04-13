@@ -24,6 +24,8 @@ const Io = std.Io;
 
 const client_mod = @import("client.zig");
 const http = @import("http.zig");
+const json_types = @import("json_types.zig");
+const sync_thread_mod = @import("sync_thread.zig");
 const types = @import("../types.zig");
 
 const DEFAULT_HOMESERVER = "http://localhost:8008";
@@ -185,6 +187,18 @@ fn messageWithDurationGone(ctx: MessageGoneCtx, snap: *const types.StateSnapshot
     }
     // No conversation with this contact at all counts as "gone".
     return true;
+}
+
+const FamilyHasDurationCtx = struct { duration: f64 };
+fn familyHasDuration(ctx: FamilyHasDurationCtx, snap: *const types.StateSnapshot) bool {
+    if (snap.family == null) return false;
+    for (snap.conversations) |conv| {
+        if (conv.conv_type != .family) continue;
+        for (conv.messages) |m| {
+            if (m.duration == ctx.duration) return true;
+        }
+    }
+    return false;
 }
 
 const HasDurationsCtx = struct { contact_id: []const u8, durations: []const f64 };
@@ -621,6 +635,147 @@ test "integration: alice deletes (redacts) a message and bob sees the redaction"
         20_000,
     );
     defer bob_after_redact.release();
+}
+
+test "integration: family room — both members see a voice message" {
+    const allocator = testing.allocator;
+    const env = loadEnv(allocator);
+
+    // Probe first so the skip path doesn't leak.
+    {
+        var probe = std.Io.Threaded.init(allocator, .{});
+        defer probe.deinit();
+        requireHomeserver(allocator, probe.io(), env.homeserver) catch return error.SkipZigTest;
+    }
+
+    // Direct HTTP client for alice — used to create the family room
+    // outside of the MatrixClient's action thread, which only knows how
+    // to create DMs. We log alice in to get a token and then POST
+    // createRoom with room_alias_name="family".
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+
+    var alice_http = http.MatrixHttpClient.init(allocator, threaded.io(), env.homeserver);
+    defer alice_http.deinit();
+
+    var login_resp = alice_http.login(env.user1, env.pass1) catch return error.SkipZigTest;
+    defer login_resp.deinit();
+
+    const parsed_login = try std.json.parseFromSlice(
+        json_types.LoginResponse,
+        allocator,
+        login_resp.body,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed_login.deinit();
+
+    const alice_token = try allocator.dupe(u8, parsed_login.value.access_token);
+    defer allocator.free(alice_token);
+    alice_http.access_token = alice_token;
+
+    // Resolve bob's full Matrix ID. env.user2 is "bob" (localpart); we
+    // need "@bob:<server_name>". Conduit at http://localhost:8008 serves
+    // the "localhost" server_name in our test/docker config.
+    var bob_id_buf: [128]u8 = undefined;
+    const bob_full_id = try std.fmt.bufPrint(&bob_id_buf, "@{s}:localhost", .{env.user2});
+
+    // Create or join the family room. On a clean Conduit this creates it;
+    // on a reused Conduit (integration-fast path), the alias already
+    // exists and alice joins it instead.
+    var family_room_id_buf: [128]u8 = undefined;
+    var family_room_id: []const u8 = "";
+    if (alice_http.createRoomWithAlias("family", bob_full_id)) |cr_resp_val| {
+        var cr_resp = cr_resp_val;
+        defer cr_resp.deinit();
+        const rid = sync_thread_mod.parseRoomId(cr_resp.body) orelse return error.SkipZigTest;
+        @memcpy(family_room_id_buf[0..rid.len], rid);
+        family_room_id = family_room_id_buf[0..rid.len];
+    } else |_| {
+        // Alias already exists — join it by alias.
+        alice_http.joinRoom("#family:localhost") catch return error.SkipZigTest;
+        // Best-effort: we don't have the room_id handy but alice's sync
+        // will surface it; for the test we only need alice + bob to be
+        // joined and produce the canonical_alias state event. We'll
+        // resolve the room_id from alice's snapshot after syncing.
+    }
+
+    // Now spin up MatrixClients for alice and bob. Bob's sync will see
+    // the invite (if fresh) and auto-join. Alice's sync will see the
+    // room she just created/joined.
+    var pair = TestPair.init(allocator, env) catch |err| switch (err) {
+        error.SkipZigTest => return error.SkipZigTest,
+        else => return err,
+    };
+    defer pair.deinit();
+
+    // Wait for alice's snapshot to show a family conversation (family
+    // field populated and a conv with .family type).
+    const FamilyReadyCtx = struct {};
+    const alice_ready = try pair.alice.waitForSnapshot(
+        FamilyReadyCtx{},
+        struct {
+            fn f(_: FamilyReadyCtx, snap: *const types.StateSnapshot) bool {
+                if (snap.family == null) return false;
+                for (snap.conversations) |conv| {
+                    if (conv.conv_type == .family) return true;
+                }
+                return false;
+            }
+        }.f,
+        30_000,
+    );
+    defer alice_ready.release();
+
+    // Extract the family room_id from alice's snapshot so we can send
+    // into it directly (bypassing DM-room logic).
+    for (alice_ready.snapshot.conversations) |conv| {
+        if (conv.conv_type == .family) {
+            if (family_room_id.len == 0) {
+                @memcpy(family_room_id_buf[0..conv.room_id.len], conv.room_id);
+                family_room_id = family_room_id_buf[0..conv.room_id.len];
+            }
+            break;
+        }
+    }
+    try testing.expect(family_room_id.len > 0);
+
+    // Bob should also see the family room once he has auto-joined.
+    const bob_ready = try pair.bob.waitForSnapshot(
+        FamilyReadyCtx{},
+        struct {
+            fn f(_: FamilyReadyCtx, snap: *const types.StateSnapshot) bool {
+                if (snap.family == null) return false;
+                for (snap.conversations) |conv| {
+                    if (conv.conv_type == .family) return true;
+                }
+                return false;
+            }
+        }.f,
+        30_000,
+    );
+    defer bob_ready.release();
+
+    // Alice sends a voice message into the family room with a unique
+    // marker duration. contact_id is empty — the action thread skips
+    // DM-room resolution when room_id is non-empty.
+    const marker_ms: u64 = 888;
+    const marker_sec: f64 = 0.888;
+    _ = pair.alice.sendAction(buildSendVoiceAction("", family_room_id, FAKE_OGG, marker_ms));
+
+    // Both alice and bob should see the message in the family conversation.
+    const alice_after = try pair.alice.waitForSnapshot(
+        FamilyHasDurationCtx{ .duration = marker_sec },
+        familyHasDuration,
+        20_000,
+    );
+    defer alice_after.release();
+
+    const bob_after = try pair.bob.waitForSnapshot(
+        FamilyHasDurationCtx{ .duration = marker_sec },
+        familyHasDuration,
+        20_000,
+    );
+    defer bob_after.release();
 }
 
 fn nowMs() i64 {

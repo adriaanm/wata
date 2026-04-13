@@ -135,6 +135,22 @@ pub const MatrixHttpClient = struct {
         return self.doRequest(.POST, "/_matrix/client/v3/createRoom", body);
     }
 
+    /// Create a room with an alias local-part and an invite list. Used for
+    /// the family room: `alias_local` becomes the localpart of
+    /// `m.room.canonical_alias` (`#{alias_local}:{server}`), and the
+    /// invited user is added as a non-DM member.
+    pub fn createRoomWithAlias(
+        self: *MatrixHttpClient,
+        alias_local: []const u8,
+        invite_user_id: []const u8,
+    ) HttpError!RawResponse {
+        var body_buf: [1024]u8 = undefined;
+        const body = std.fmt.bufPrint(&body_buf,
+            \\{{"room_alias_name":"{s}","invite":["{s}"],"preset":"trusted_private_chat","visibility":"private"}}
+        , .{ alias_local, invite_user_id }) catch return HttpError.OutOfMemory;
+        return self.doRequest(.POST, "/_matrix/client/v3/createRoom", body);
+    }
+
     /// GET /_matrix/client/v3/user/{userId}/account_data/{type}
     pub fn getAccountData(self: *MatrixHttpClient, user_id: []const u8, data_type: []const u8) HttpError!RawResponse {
         var path_buf: [512]u8 = undefined;
