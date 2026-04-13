@@ -19,6 +19,7 @@ Existing Zig tests: 7 in sync_engine.zig (sync state machine). Run with `cd src/
 - [x] **HTTP helpers tests** (4 tests) — parseRetryAfterMs, parseMxcUrl, parseRoomId.
 - [x] **Sync engine tests (expand)** (7 new, 14 total) — m.direct dedup, family room detection, roomless members, self-exclusion, read receipts, unplayed count.
 - [ ] **Opus codec roundtrip** — port from `audio-codec.test.ts`. Encode PCM→Opus→Ogg→decode→PCM, verify sample count and basic signal preservation. Requires `use_audio` build flag.
+- [x] **MatrixClient extraction + integration harness** — extracted `matrix/client.zig` (MatrixClient runtime: owns sync+action threads, queues, state store, auth; exposes start/stop/sendAction/pollEvent/acquireSnapshot + waitForConnection/waitForSnapshot test helpers). New `zig build test-integration` step runs `matrix/client_integration_test.zig` against a live homeserver (defaults `localhost:8008`, override via `WATA_TEST_HOMESERVER`/`WATA_TEST_USER1` etc). 5 E2E tests scaffolded: login+sync, dual-client connect, voice send, read receipt, redact. Audio stubbed via `audio_cmd_queue=null`. Skip cleanly when homeserver unreachable. Run with `just fb-test-integration`.
 
 ### Concurrency redesign
 Planning doc: [docs/planning/concurrency-redesign.md](docs/planning/concurrency-redesign.md) — treat as a working document.

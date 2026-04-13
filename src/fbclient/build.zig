@@ -99,6 +99,25 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    // Integration test step — runs against a live Matrix homeserver.
+    // Skipped from the default `test` step. Use `zig build test-integration`.
+    // Configure with env vars: WATA_TEST_HOMESERVER, WATA_TEST_USER1/PASS, WATA_TEST_USER2/PASS.
+    const integration_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/test_integration_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    integration_test_mod.addOptions("build_options", options);
+    integration_test_mod.link_libc = true;
+
+    const integration_tests = b.addTest(.{
+        .root_module = integration_test_mod,
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+    run_integration_tests.has_side_effects = true; // network — never cache
+    const integration_step = b.step("test-integration", "Run integration tests against a live homeserver");
+    integration_step.dependOn(&run_integration_tests.step);
 }
 
 /// Build FreeType 2.13.3 as a static C library from vendored source.

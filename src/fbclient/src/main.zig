@@ -5,14 +5,13 @@ const display = @import("display.zig");
 const input = @import("input.zig");
 const shell_mod = @import("shell.zig");
 const types = @import("types.zig");
-const queue = @import("queue.zig");
-const mailbox = @import("mailbox.zig");
 const snake = @import("applets/snake.zig");
 const clock_applet = @import("applets/clock.zig");
 const charmap = @import("applets/charmap.zig");
 const settings_applet = @import("applets/settings.zig");
 const wata_applet = @import("applets/wata.zig");
 const sync_thread = @import("matrix/sync_thread.zig");
+const matrix_client_mod = @import("matrix/client.zig");
 const audio_thread = if (build_options.use_audio) @import("audio_thread.zig") else struct {};
 const led = if (!build_options.use_sdl) @import("led.zig") else struct {};
 
@@ -42,55 +41,30 @@ pub fn main(init: std.process.Init) !void {
 
     debugLog("[main] wata-fb starting in debug mode", .{});
 
-    // Inter-thread communication
-    var ui_queue: queue.BoundedQueue(types.UiEvent, 256) = .{};
-    var action_queue: mailbox.Mailbox(types.Action, 64) = .{};
-    var state_store: types.StateStore = .{};
-    var should_stop = std.atomic.Value(bool).init(false);
-
-    // Audio queues (created before sync thread so it can reference them)
+    // Audio queues (created before the Matrix client so it can reference them)
     var audio_cmd_queue: if (build_options.use_audio) audio_thread.CommandQueue else void = if (build_options.use_audio) .{} else {};
     var audio_evt_queue: if (build_options.use_audio) audio_thread.EventQueue else void = if (build_options.use_audio) .{} else {};
 
-    // Auth store — sync thread publishes credentials, action thread waits
-    var auth_store: sync_thread.AuthStore = .{};
+    // Matrix runtime — owns sync + action threads, queues, state store, auth.
+    var matrix_client = matrix_client_mod.MatrixClient.init(
+        allocator,
+        init.io,
+        .{
+            .homeserver = sync_thread.DEFAULT_CONFIG.homeserver,
+            .username = sync_thread.DEFAULT_CONFIG.username,
+            .password = sync_thread.DEFAULT_CONFIG.password,
+            .sync_timeout_ms = sync_thread.DEFAULT_CONFIG.sync_timeout_ms,
+        },
+        if (build_options.use_audio) &audio_cmd_queue else null,
+    );
+    defer matrix_client.deinit();
 
-    // Sync thread context
-    var sync_ctx = sync_thread.SyncThreadContext{
-        .config = sync_thread.DEFAULT_CONFIG,
-        .ui_queue = &ui_queue,
-        .action_queue = &action_queue,
-        .audio_cmd_queue = if (build_options.use_audio) &audio_cmd_queue else null,
-        .state_store = &state_store,
-        .should_stop = &should_stop,
-        .auth_store = &auth_store,
-        .allocator = allocator,
-        .io = init.io,
-    };
-
-    // Action thread context
-    var action_ctx = sync_thread.ActionThreadContext{
-        .config = sync_thread.DEFAULT_CONFIG,
-        .ui_queue = &ui_queue,
-        .action_queue = &action_queue,
-        .audio_cmd_queue = if (build_options.use_audio) &audio_cmd_queue else null,
-        .auth_store = &auth_store,
-        .allocator = allocator,
-        .io = init.io,
-    };
-
-    // Spawn sync + action threads (unless offline mode)
-    const sync_handle = if (!build_options.offline) blk: {
-        debugLog("[main] connecting to {s} as {s}", .{ sync_ctx.config.homeserver, sync_ctx.config.username });
-        break :blk std.Thread.spawn(.{}, sync_thread.syncThreadMain, .{&sync_ctx}) catch null;
-    } else blk: {
+    if (!build_options.offline) {
+        debugLog("[main] connecting to {s} as {s}", .{ matrix_client.config.homeserver, matrix_client.config.username });
+        matrix_client.start() catch {};
+    } else {
         debugLog("[main] offline mode — network disabled", .{});
-        break :blk @as(?std.Thread, null);
-    };
-    const action_handle = if (!build_options.offline)
-        std.Thread.spawn(.{}, sync_thread.actionThreadMain, .{&action_ctx}) catch null
-    else
-        @as(?std.Thread, null);
+    }
 
     // Spawn audio thread (device only)
     var audio_ctx: if (build_options.use_audio) audio_thread.Context else void = if (build_options.use_audio) .{
@@ -104,16 +78,10 @@ pub fn main(init: std.process.Init) !void {
         null;
 
     defer {
-        // Structured shutdown: signal all threads, then join all
-        should_stop.store(true, .release); // sync thread
-        action_queue.close(); // action thread
         if (build_options.use_audio) {
-            audio_cmd_queue.close(); // audio thread
+            audio_cmd_queue.close();
             if (audio_handle) |h| h.join();
         }
-        if (action_handle) |h| h.join();
-        if (sync_handle) |h| h.join();
-        state_store.deinit();
     }
 
     if (debug_mode) {
@@ -124,9 +92,9 @@ pub fn main(init: std.process.Init) !void {
         var current_owned: ?*types.OwnedSnapshot = null;
         defer if (current_owned) |o| o.release();
 
-        while (!should_stop.load(.acquire)) {
+        while (!matrix_client.should_stop.load(.acquire)) {
             // Drain events
-            while (ui_queue.pop()) |ev| {
+            while (matrix_client.pollEvent()) |ev| {
                 switch (ev) {
                     .connection_state => |cs| {
                         if (cs != connection) {
@@ -135,7 +103,7 @@ pub fn main(init: std.process.Init) !void {
                         }
                     },
                     .snapshot_ready => {
-                        if (state_store.acquire()) |new_owned| {
+                        if (matrix_client.acquireSnapshot()) |new_owned| {
                             if (current_owned) |old| old.release();
                             current_owned = new_owned;
                             const snap = &new_owned.snapshot;
@@ -214,7 +182,7 @@ pub fn main(init: std.process.Init) !void {
         const dt: f32 = @as(f32, @floatFromInt(dt_clamped)) / 1000.0;
 
         // Pick up new snapshot (release previous owned snapshot)
-        if (state_store.acquire()) |new_owned| {
+        if (matrix_client.acquireSnapshot()) |new_owned| {
             if (current_owned) |old| old.release();
             current_owned = new_owned;
             current_snapshot = &new_owned.snapshot;
@@ -222,7 +190,7 @@ pub fn main(init: std.process.Init) !void {
         }
 
         // Drain UI events
-        while (ui_queue.pop()) |ev| {
+        while (matrix_client.pollEvent()) |ev| {
             switch (ev) {
                 .connection_state => |cs| {
                     connection = cs;
@@ -255,10 +223,10 @@ pub fn main(init: std.process.Init) !void {
 
         // Push snapshot + queues to applets that need them
         if (sh.states[0]) |wata_state| {
-            wata_applet.setContext(wata_state, current_snapshot, connection, &action_queue, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
+            wata_applet.setContext(wata_state, current_snapshot, connection, &matrix_client.action_queue, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
         }
         if (sh.states[1]) |settings_state| {
-            settings_applet.setContext(settings_state, current_snapshot, &action_queue, &should_stop, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
+            settings_applet.setContext(settings_state, current_snapshot, &matrix_client.action_queue, &matrix_client.should_stop, if (build_options.use_audio) &audio_cmd_queue else null, if (build_options.use_audio) &audio_evt_queue else null);
         }
 
         // Poll input

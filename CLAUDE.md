@@ -82,6 +82,8 @@ pnpm fb:build                 # Build only
 pnpm fb:device                # Cross-compile for ARM device
 just fb-build                 # Cross-compile for ARM (justfile)
 just fb-deploy                # Build + deploy + restart on BQ268
+just fb-test                  # Unit tests
+just fb-test-integration      # E2E tests against Conduit (auto-starts via test/docker)
 
 # Dev helpers
 pnpm dev:server               # Start Conduit Matrix server
