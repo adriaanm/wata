@@ -31,6 +31,11 @@ pub const RoomState = struct {
     /// Read receipts: event_id → list of user_ids
     receipt_user_ids: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged([]const u8)),
     prev_batch: ?[]const u8,
+    /// Sticky DM flag: once any m.room.member event in this room has
+    /// `is_direct: true` (in invite_state, state, or timeline), the room is
+    /// treated as a DM even if the flag is absent from later member events.
+    /// Mirrors TS dm-room-service `hasIsDirectFlag()`.
+    is_dm: bool,
 
     pub fn init(room_id: []const u8) RoomState {
         return .{
@@ -42,6 +47,7 @@ pub const RoomState = struct {
             .voice_messages = .empty,
             .receipt_user_ids = .empty,
             .prev_batch = null,
+            .is_dm = false,
         };
     }
 
@@ -167,9 +173,36 @@ pub const SyncProcessor = struct {
                     try self.processJoinedRoom(entry.key_ptr.*, entry.value_ptr.*, &events, event_arena);
                 }
             }
+            // Invited rooms — process stripped state so we can detect DMs via
+            // is_direct on the invitee's member event before auto-joining.
+            // Parity with TS sync-engine.processInvitedRoom.
+            if (rooms.invite) |invite_map| {
+                var invite_it = invite_map.map.iterator();
+                while (invite_it.next()) |entry| {
+                    try self.processInvitedRoom(entry.key_ptr.*, entry.value_ptr.*, &events, event_arena);
+                }
+            }
         }
 
         return events.items;
+    }
+
+    fn processInvitedRoom(
+        self: *SyncProcessor,
+        room_id: []const u8,
+        data: json_types.InvitedRoom,
+        events: *std.ArrayListUnmanaged(SyncEvent),
+        arena: Allocator,
+    ) !void {
+        const room = try self.getOrCreateRoom(room_id);
+        if (data.invite_state) |invite_state| {
+            if (invite_state.events) |state_events| {
+                for (state_events) |event| {
+                    try self.processStateEvent(room, event, events, arena);
+                }
+            }
+        }
+        try events.append(arena, .{ .room_updated = room.room_id });
     }
 
     fn getOrCreateRoom(self: *SyncProcessor, room_id: []const u8) !*RoomState {
@@ -301,6 +334,9 @@ pub const SyncProcessor = struct {
                     .membership = owned_membership,
                     .is_direct = is_direct,
                 };
+                // Sticky room-level DM flag — mirrors TS hasIsDirectFlag,
+                // which treats any is_direct member event as sufficient proof.
+                if (is_direct) room.is_dm = true;
 
                 try events.append(arena, .{ .membership_changed = .{
                     .room_id = room.room_id,
@@ -528,6 +564,106 @@ pub const SyncProcessor = struct {
                 .messages = messages.items,
                 .unplayed_count = unplayed,
             });
+        }
+
+        // Infer DM conversations from the sticky `is_dm` flag for rooms not
+        // covered by m.direct. Parity with TS dm-room-service.refreshFromSync:
+        // any room with an is_direct member event is treated as a DM with the
+        // other joined member, regardless of m.direct account data.
+        {
+            var r_it = self.rooms.iterator();
+            while (r_it.next()) |r_entry| {
+                const room = r_entry.value_ptr;
+                if (!room.is_dm) continue;
+
+                // Skip if this room is already represented in conversations.
+                var already_added = false;
+                for (conversations.items) |conv| {
+                    if (std.mem.eql(u8, conv.room_id, room.room_id)) {
+                        already_added = true;
+                        break;
+                    }
+                }
+                if (already_added) continue;
+
+                // Find the "other" joined/invited member — the DM peer.
+                var peer: ?*const MemberInfo = null;
+                var mem_it = room.members.iterator();
+                while (mem_it.next()) |m_entry| {
+                    const member = m_entry.value_ptr;
+                    if (self.self_user_id) |self_id| {
+                        if (std.mem.eql(u8, member.user_id, self_id)) continue;
+                    }
+                    if (!std.mem.eql(u8, member.membership, "join") and
+                        !std.mem.eql(u8, member.membership, "invite")) continue;
+                    peer = member;
+                    break;
+                }
+                const other = peer orelse continue;
+
+                // If peer is already a contact (e.g. from m.direct) with a
+                // different conversation, skip — m.direct is the authority.
+                var peer_has_conv = false;
+                for (conversations.items) |conv| {
+                    if (conv.contact) |ct| {
+                        if (std.mem.eql(u8, ct.user.id, other.user_id)) {
+                            peer_has_conv = true;
+                            break;
+                        }
+                    }
+                }
+                if (peer_has_conv) continue;
+
+                const contact = types.Contact{ .user = .{
+                    .id = other.user_id,
+                    .display_name = other.display_name,
+                } };
+
+                // Add to contacts list if not already present.
+                var contact_exists = false;
+                for (contacts.items) |c| {
+                    if (std.mem.eql(u8, c.user.id, other.user_id)) {
+                        contact_exists = true;
+                        break;
+                    }
+                }
+                if (!contact_exists) try contacts.append(arena, contact);
+
+                var messages: std.ArrayListUnmanaged(types.VoiceMessage) = .empty;
+                for (room.voice_messages.items) |vm| {
+                    const sender_name = if (room.members.get(vm.sender)) |m| m.display_name else vm.sender;
+                    const is_played = if (room.receipt_user_ids.get(vm.event_id)) |users| blk: {
+                        if (self.self_user_id) |self_id| {
+                            for (users.items) |uid| {
+                                if (std.mem.eql(u8, uid, self_id)) break :blk true;
+                            }
+                        }
+                        break :blk false;
+                    } else false;
+
+                    try messages.append(arena, .{
+                        .id = vm.event_id,
+                        .sender = .{ .id = vm.sender, .display_name = sender_name },
+                        .audio_url = vm.mxc_url,
+                        .mxc_url = vm.mxc_url,
+                        .duration = @as(f64, @floatFromInt(vm.duration_ms)) / 1000.0,
+                        .timestamp = vm.timestamp,
+                        .is_played = is_played,
+                    });
+                }
+                var unplayed: u32 = 0;
+                for (messages.items) |m| if (!m.is_played) {
+                    unplayed += 1;
+                };
+
+                try conversations.append(arena, .{
+                    .room_id = room.room_id,
+                    .conv_type = .dm,
+                    .contact = contact,
+                    .messages = messages.items,
+                    .unplayed_count = unplayed,
+                });
+            }
         }
 
         // Find family room by canonical alias containing "#family:"
