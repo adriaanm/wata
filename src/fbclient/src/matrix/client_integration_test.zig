@@ -170,6 +170,23 @@ fn hasMessageFromContact(ctx: HasMessageCtx, snap: *const types.StateSnapshot) b
     return false;
 }
 
+const MessageGoneCtx = struct { contact_id: []const u8, duration: f64 };
+/// True iff NO message in the conversation with `contact_id` has the given
+/// duration — used to verify a redaction has been ingested.
+fn messageWithDurationGone(ctx: MessageGoneCtx, snap: *const types.StateSnapshot) bool {
+    for (snap.conversations) |conv| {
+        if (conv.contact) |c| {
+            if (!std.mem.eql(u8, c.user.id, ctx.contact_id)) continue;
+            for (conv.messages) |m| {
+                if (m.duration == ctx.duration) return false;
+            }
+            return true;
+        }
+    }
+    // No conversation with this contact at all counts as "gone".
+    return true;
+}
+
 const HasDurationsCtx = struct { contact_id: []const u8, durations: []const f64 };
 /// True iff the conversation's LAST N messages have the given durations,
 /// in order. Lets a test wait for a specific sequence regardless of how
@@ -534,7 +551,7 @@ test "integration: multi-turn conversation preserves order and dedupes" {
     defer alice_after.release();
 }
 
-test "integration: alice deletes (redacts) a message" {
+test "integration: alice deletes (redacts) a message and bob sees the redaction" {
     const allocator = testing.allocator;
     const env = loadEnv(allocator);
 
@@ -548,12 +565,21 @@ test "integration: alice deletes (redacts) a message" {
     defer bob_snap.release();
     const bob_user_id = bob_snap.snapshot.self_user.?.id;
 
-    _ = pair.alice.sendAction(buildSendVoiceAction(bob_user_id, "", FAKE_OGG, 1000));
+    const alice_snap = try pair.alice.waitForSnapshot(SelfReadyCtx{}, selfReady, 15_000);
+    defer alice_snap.release();
+    const alice_user_id = alice_snap.snapshot.self_user.?.id;
 
-    // Wait until alice's own snapshot reflects the sent message.
+    // Alice sends a message with a unique marker duration so the test
+    // can tell it apart from messages left by earlier tests.
+    const marker_ms: u64 = 777;
+    const marker_sec: f64 = 0.777;
+    _ = pair.alice.sendAction(buildSendVoiceAction(bob_user_id, "", FAKE_OGG, marker_ms));
+
+    // Wait for alice's own snapshot to include the marker — we need the
+    // room_id and event_id to issue the redaction.
     const alice_after = try pair.alice.waitForSnapshot(
-        HasMessageCtx{ .contact_id = bob_user_id, .min_count = 1 },
-        hasMessageFromContact,
+        HasDurationsCtx{ .contact_id = bob_user_id, .durations = &[_]f64{marker_sec} },
+        lastMessagesMatchDurations,
         20_000,
     );
     defer alice_after.release();
@@ -561,16 +587,40 @@ test "integration: alice deletes (redacts) a message" {
     var room_id: []const u8 = "";
     var event_id: []const u8 = "";
     for (alice_after.snapshot.conversations) |conv| {
-        if (conv.contact) |c| if (std.mem.eql(u8, c.user.id, bob_user_id) and conv.messages.len > 0) {
-            room_id = conv.room_id;
-            event_id = conv.messages[conv.messages.len - 1].id;
+        if (conv.contact) |c| if (std.mem.eql(u8, c.user.id, bob_user_id)) {
+            for (conv.messages) |m| {
+                if (m.duration == marker_sec) {
+                    room_id = conv.room_id;
+                    event_id = m.id;
+                    break;
+                }
+            }
             break;
         };
     }
     try testing.expect(room_id.len > 0);
     try testing.expect(event_id.len > 0);
 
+    // Wait for bob to see the marker too, BEFORE redacting. If we redact
+    // too early, Conduit may never forward the original to bob, and we
+    // wouldn't be testing that the redaction removes an existing message.
+    const bob_after = try pair.bob.waitForSnapshot(
+        HasDurationsCtx{ .contact_id = alice_user_id, .durations = &[_]f64{marker_sec} },
+        lastMessagesMatchDurations,
+        20_000,
+    );
+    defer bob_after.release();
+
+    // Alice redacts.
     try testing.expect(pair.alice.sendAction(buildDeleteAction(room_id, event_id)));
+
+    // Bob's snapshot should eventually show the marker message gone.
+    const bob_after_redact = try pair.bob.waitForSnapshot(
+        MessageGoneCtx{ .contact_id = alice_user_id, .duration = marker_sec },
+        messageWithDurationGone,
+        20_000,
+    );
+    defer bob_after_redact.release();
 }
 
 fn nowMs() i64 {

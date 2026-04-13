@@ -64,6 +64,9 @@ pub const MatrixEvent = struct {
     state_key: ?[]const u8 = null,
     content: ?std.json.Value = null,
     unsigned: ?std.json.Value = null,
+    /// Populated for m.room.redaction events (top-level per v1.10, previously
+    /// nested under content; we accept the top-level shape Conduit emits).
+    redacts: ?[]const u8 = null,
 };
 
 pub const RoomSummary = struct {

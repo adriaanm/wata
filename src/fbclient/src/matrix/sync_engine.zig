@@ -255,11 +255,20 @@ pub const SyncProcessor = struct {
                     }
 
                     // Extract voice messages (m.room.message with msgtype m.audio)
+                    // and apply redactions.
                     if (event.type) |evt_type| {
                         if (std.mem.eql(u8, evt_type, "m.room.message")) {
                             if (try self.extractVoiceMessageOwned(event)) |vm| {
                                 try room.voice_messages.append(self.gpa, vm);
                             }
+                        } else if (std.mem.eql(u8, evt_type, "m.room.redaction")) {
+                            // Accept `redacts` from top-level (v1.10+) or
+                            // from content (older servers).
+                            var target: ?[]const u8 = event.redacts;
+                            if (target == null) {
+                                if (event.content) |c| target = getJsonString(c, "redacts");
+                            }
+                            if (target) |tid| removeVoiceMessage(room, tid);
                         }
                     }
 
@@ -804,6 +813,21 @@ pub const SyncProcessor = struct {
 // ---------------------------------------------------------------------------
 // JSON helpers
 // ---------------------------------------------------------------------------
+
+/// Remove a voice message from a room by event_id. Used when processing
+/// m.room.redaction events — the redacted message is simply dropped from
+/// the snapshot rather than marked, matching TS behavior of hiding
+/// redacted messages from the conversation list.
+fn removeVoiceMessage(room: *RoomState, target_event_id: []const u8) void {
+    var i: usize = 0;
+    while (i < room.voice_messages.items.len) {
+        if (std.mem.eql(u8, room.voice_messages.items[i].event_id, target_event_id)) {
+            _ = room.voice_messages.orderedRemove(i);
+            continue;
+        }
+        i += 1;
+    }
+}
 
 fn getJsonString(value: std.json.Value, key: []const u8) ?[]const u8 {
     switch (value) {
