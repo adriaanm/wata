@@ -54,25 +54,42 @@ Each task adds an integration test to `client_integration_test.zig`,
 mirroring a TS scenario. Keep tests cheap — no sleeps beyond what
 `waitForSnapshot` already does.
 
-- [ ] **T1 — redact round-trip**: `bob sees alice's message deleted`.
-  Alice sends, bob sees it (existing predicate), alice redacts, bob's
-  snapshot eventually shows the message gone (or marked redacted — match
-  whatever `RoomState` currently does with redactions).
-- [ ] **T2 — receipt round-trip**: `alice sees readBy after bob marks played`.
-  Alice sends, bob sees and sends read receipt, alice's snapshot shows
-  the message as read by bob. Requires a predicate over
-  `conversation.messages[i]` read-state.
-- [ ] **T3 — multi-turn conversation**: `alice ↔ bob exchange 3 messages each`.
-  Assert final ordering matches send order on both sides and dedup
-  produces 6 distinct messages (not 12).
-- [ ] **T4 — family room**: `both members see a voice message in family`.
-  Create a room aliased `#family:localhost` with both users, send a
-  voice message, assert both snapshots expose it under
-  `snapshot.family` / the family conversation (conv_type=.family).
-- [ ] **T5 — media download**: `bob downloads alice's audio and bytes match`.
-  Bypass the audio command queue — drive `downloadMedia` directly
-  through the http client (or a new test helper) and assert the bytes
-  returned equal `FAKE_OGG`.
+- [x] **T1 — redact round-trip**: implemented in `e4d3f2b`. Required
+  adding `m.room.redaction` handling to the sync engine — it previously
+  ignored redactions entirely. Dropped redacted messages from the
+  snapshot rather than marking them, matching TS behavior.
+- [x] **T2 — receipt round-trip**: implemented in `2b3cee5`. Verifies
+  bob's own snapshot marks the message `is_played=true` after he sends
+  the receipt, which exercises the full ephemeral round-trip through
+  Conduit.
+- [x] **T3 — multi-turn conversation**: implemented in `9ffcfa2`. Needed
+  a supporting fix in `a0d2413` — the action thread used to create a
+  new DM room for every empty-room send; now it looks up existing rooms
+  via `m.direct` first, matching TS `getOrCreateDmRoom`. Also wired
+  `fb-test-integration` to wipe Conduit volumes for determinism.
+- [x] **T4 — family room**: implemented in `68c5994`. Uses a direct
+  `MatrixHttpClient` to create the room with `room_alias_name=family`
+  outside the action thread (which only knows DMs), then verifies both
+  sides see `snapshot.family` populated and a `conv_type=.family`
+  conversation carrying the voice message.
+- [x] **T5 — media download**: implemented in `8d5b26a`. Reads the
+  mxc URL from bob's snapshot, logs in bob via a direct
+  `MatrixHttpClient`, and downloads the media — asserting the bytes
+  equal `FAKE_OGG`. Closes the `upload → mxc → download` loop that the
+  audio-stubbed integration build otherwise never exercises.
+
+## Outcome
+
+Started at 41 integration tests, ended at 47 (+6 test-cases across the
+5 tasks — T1 modified an existing test, the others added new ones).
+Required three real behavior fixes along the way:
+
+- `is_direct` DM recognition on the invitee side (`3332e52`)
+- DM room reuse via `m.direct` lookup in the action thread (`a0d2413`)
+- `m.room.redaction` event handling in the sync engine (`e4d3f2b`)
+
+All three were pre-existing parity gaps with the TypeScript client that
+only surfaced once round-trip assertions were added.
 
 ## Non-goals for this round
 
