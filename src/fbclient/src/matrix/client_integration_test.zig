@@ -637,6 +637,82 @@ test "integration: alice deletes (redacts) a message and bob sees the redaction"
     defer bob_after_redact.release();
 }
 
+test "integration: bob downloads alice's audio and bytes match" {
+    const allocator = testing.allocator;
+    const env = loadEnv(allocator);
+
+    var pair = TestPair.init(allocator, env) catch |err| switch (err) {
+        error.SkipZigTest => return error.SkipZigTest,
+        else => return err,
+    };
+    defer pair.deinit();
+
+    const bob_snap = try pair.bob.waitForSnapshot(SelfReadyCtx{}, selfReady, 15_000);
+    defer bob_snap.release();
+    const bob_user_id = bob_snap.snapshot.self_user.?.id;
+
+    const alice_snap = try pair.alice.waitForSnapshot(SelfReadyCtx{}, selfReady, 15_000);
+    defer alice_snap.release();
+    const alice_user_id = alice_snap.snapshot.self_user.?.id;
+
+    // Alice sends a voice message with a unique marker so we can pick it
+    // out from any messages left by earlier tests.
+    const marker_ms: u64 = 555;
+    const marker_sec: f64 = 0.555;
+    _ = pair.alice.sendAction(buildSendVoiceAction(bob_user_id, "", FAKE_OGG, marker_ms));
+
+    const bob_after = try pair.bob.waitForSnapshot(
+        HasDurationsCtx{ .contact_id = alice_user_id, .durations = &[_]f64{marker_sec} },
+        lastMessagesMatchDurations,
+        20_000,
+    );
+    defer bob_after.release();
+
+    // Copy the mxc URL out of the snapshot arena into a stable buffer
+    // — the next HTTP call allocates, and we don't want dangling slices.
+    var mxc_buf: [256]u8 = undefined;
+    var mxc_url: []const u8 = "";
+    for (bob_after.snapshot.conversations) |conv| {
+        if (conv.contact) |c| if (std.mem.eql(u8, c.user.id, alice_user_id)) {
+            for (conv.messages) |m| {
+                if (m.duration == marker_sec) {
+                    @memcpy(mxc_buf[0..m.mxc_url.len], m.mxc_url);
+                    mxc_url = mxc_buf[0..m.mxc_url.len];
+                    break;
+                }
+            }
+            break;
+        };
+    }
+    try testing.expect(mxc_url.len > 0);
+
+    // Direct HTTP download as bob — bypasses the audio command queue,
+    // which is stubbed in integration builds (audio_cmd_queue = null).
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+
+    var bob_http = http.MatrixHttpClient.init(allocator, threaded.io(), env.homeserver);
+    defer bob_http.deinit();
+
+    var login_resp = try bob_http.login(env.user2, env.pass2);
+    defer login_resp.deinit();
+    const parsed = try std.json.parseFromSlice(
+        json_types.LoginResponse,
+        allocator,
+        login_resp.body,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+    const bob_token = try allocator.dupe(u8, parsed.value.access_token);
+    defer allocator.free(bob_token);
+    bob_http.access_token = bob_token;
+
+    var dl = try bob_http.downloadMedia(mxc_url);
+    defer dl.deinit();
+
+    try testing.expectEqualSlices(u8, FAKE_OGG, dl.body);
+}
+
 test "integration: family room — both members see a voice message" {
     const allocator = testing.allocator;
     const env = loadEnv(allocator);
