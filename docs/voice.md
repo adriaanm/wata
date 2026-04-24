@@ -246,6 +246,16 @@ The Qualcomm MSM PCM driver behaves differently from standard ALSA:
 | `openBuffered(total_frames)` with 51 periods | Error | Way beyond DMA limits |
 | `start_threshold > buffer_size` (fill-then-start) | Silent, then timeout | MSM driver requires RUNNING state for writes |
 | `period_count=2`, single large `pcm_writei`, ioctl drain | **Works** | Kernel handles chunking, proper drain |
+| `period_count=2`, 12-period chunks (`f6b057c`) | Silent, `wait_event_timeout failed` | Regressed — the chunked write pattern now stalls inside `msm_pcm_playback_copy`. Stick with the single-write pattern above. See [audio-regression-2026-04-24.md](planning/audio-regression-2026-04-24.md). |
+
+### Mandatory mixer gate
+
+`PRI_MI2S_RX Audio Mixer MultiMedia1 = 1` is the route from PCM device
+0 (MultiMedia1) to the output DAI. Setting `RX2 MIX1 INP1`, `RDAC2 MUX`,
+`HPHR`, `Ext Spk Switch`, and `RX2 Digital Volume` does nothing audible
+without this — PA toggles around the stream but no samples flow to the
+codec. Source of truth for the full boot-time mixer configuration lives
+in `~/bq268-alpine/rootfs/files/etc/init.d/audio-mixer`.
 
 ### Files
 

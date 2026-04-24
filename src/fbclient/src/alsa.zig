@@ -20,6 +20,16 @@ pub const PcmError = error{ OpenFailed, WriteFailed, ReadFailed };
 
 const PcmPtr = if (build_options.use_audio) ?*c.struct_pcm else ?*anyopaque;
 
+/// Returns the last error from a tinyalsa PCM handle, or an empty string if
+/// the handle is null. The returned pointer is owned by tinyalsa and valid
+/// until the next pcm call.
+pub fn pcmErrorStr(pcm: PcmPtr) []const u8 {
+    if (!build_options.use_audio) return "";
+    if (pcm == null) return "";
+    const ptr = c.pcm_get_error(pcm) orelse return "";
+    return std.mem.sliceTo(ptr, 0);
+}
+
 fn makeConfig() c.pcm_config {
     return .{
         .channels = CHANNELS,
@@ -47,6 +57,8 @@ pub const Capture = struct {
         var config = makeConfig();
         const pcm = c.pcm_open(0, 0, c.PCM_IN, &config);
         if (pcm == null or c.pcm_is_ready(pcm) == 0) {
+            const msg = pcmErrorStr(pcm);
+            if (msg.len > 0) std.debug.print("[alsa] capture open failed: {s}\n", .{msg});
             if (pcm != null) _ = c.pcm_close(pcm);
             return error.OpenFailed;
         }
@@ -56,7 +68,10 @@ pub const Capture = struct {
     /// Read one period (960 frames = 20ms) of S16_LE mono audio.
     pub fn readFrames(self: *Capture, buf: []u8) PcmError!u32 {
         const ret = c.pcm_readi(self.pcm, buf.ptr, FRAMES_PER_PERIOD);
-        if (ret < 0) return error.ReadFailed;
+        if (ret < 0) {
+            std.debug.print("[alsa] pcm_readi failed: {s}\n", .{pcmErrorStr(self.pcm)});
+            return error.ReadFailed;
+        }
         return @intCast(ret);
     }
 
@@ -75,6 +90,8 @@ pub const Playback = struct {
         config.start_threshold = FRAMES_PER_PERIOD;
         const pcm = c.pcm_open(0, 0, c.PCM_OUT, &config);
         if (pcm == null or c.pcm_is_ready(pcm) == 0) {
+            const msg = pcmErrorStr(pcm);
+            if (msg.len > 0) std.debug.print("[alsa] playback open failed: {s}\n", .{msg});
             if (pcm != null) _ = c.pcm_close(pcm);
             return error.OpenFailed;
         }
@@ -88,7 +105,10 @@ pub const Playback = struct {
     pub fn writeFrames(self: *Playback, buf: []const u8) PcmError!void {
         const frames: c_uint = @intCast(buf.len / (FRAME_SIZE * CHANNELS));
         const ret = c.pcm_writei(self.pcm, buf.ptr, frames);
-        if (ret < 0) return error.WriteFailed;
+        if (ret < 0) {
+            std.debug.print("[alsa] pcm_writei failed: {s}\n", .{pcmErrorStr(self.pcm)});
+            return error.WriteFailed;
+        }
     }
 
     /// Wait for all buffered audio to finish playing.
@@ -111,16 +131,26 @@ pub const Playback = struct {
 /// Set up both playback and capture mixer routes (one-time after boot).
 /// Called once at startup — no per-recording switching to avoid ADSP churn
 /// that was causing hard crashes (PS_HOLD reset → fastboot).
+///
+/// The playback settings mirror bq268-alpine's `/etc/init.d/audio-mixer`
+/// (source of truth for the boot-time mixer config); see
+/// bq268-alpine/docs/roadmap.md §"Audio — done" for the signal path:
+/// WCD msm8x16 codec → HPHR PA → GPIO36 ext amp → speaker.
 pub fn setupMixer() void {
     const mixer = c.mixer_open(0) orelse return;
     defer c.mixer_close(mixer);
 
-    // Playback route: speaker on
+    // Playback route: MultiMedia1 → PRI_MI2S_RX → RX2 (HPHR) → speaker.
+    // The PRI_MI2S_RX ↔ MultiMedia1 routing gate is the one that makes
+    // pcm writes on hw:0,0 (MultiMedia1) actually reach the DAI — it is
+    // NOT implied by the RX2/HPHR/Ext Spk chain. Without it, PA toggles
+    // as expected but no samples flow to the codec.
+    setInt(mixer, "PRI_MI2S_RX Audio Mixer MultiMedia1", 1);
     setEnum(mixer, "RX2 MIX1 INP1", "RX1");
     setEnum(mixer, "RDAC2 MUX", "RX2");
     setEnum(mixer, "HPHR", "Switch");
     setEnum(mixer, "Ext Spk Switch", "On");
-    setInt(mixer, "RX2 Digital Volume", 84);
+    setInt(mixer, "RX2 Digital Volume", 96);
 
     // Capture route: mic on
     setInt(mixer, "MultiMedia1 Mixer TERT_MI2S_TX", 1);

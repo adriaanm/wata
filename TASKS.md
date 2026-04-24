@@ -9,7 +9,8 @@
 ## Framebuffer Client (Zig)
 
 ### Active
-- [x] Streaming playback stutter — decode in 480ms chunks (12 periods), write each chunk as a single pcm_writei. Kernel handles period-by-period DMA internally. Needs on-device testing to confirm smooth playback.
+- [ ] **BQ268 audio silent (regression)** — playback is silent end-to-end even with correct mixer state and on a fresh reboot. `aplay -D hw:0,0` is also silent, so this is below wata-fb. Leading hypothesis: cellular modem Q6 DSP now initialises at boot and may be contending with audio ADSP. Investigation log + next steps: [docs/planning/audio-regression-2026-04-24.md](docs/planning/audio-regression-2026-04-24.md). Diagnostic: `just fb-audio-test [echo|play|all]`.
+- [x] Streaming playback stutter — decode in 480ms chunks (12 periods), write each chunk as a single pcm_writei. Kernel handles period-by-period DMA internally. Needs on-device testing to confirm smooth playback. (Regressed — reverted to single-write in doPlayback; see audio-regression-2026-04-24.md.)
 - [x] DM room creation — create room with `is_direct: true`, update `m.direct`. Lazy creation on first send.
 - [x] Auto-join invites — auto-join all invited rooms during sync (trusted family environment).
 - [x] DM room deduplication — skip stale/left rooms, use first joined room from m.direct.

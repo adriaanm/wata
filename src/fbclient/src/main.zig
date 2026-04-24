@@ -13,6 +13,7 @@ const wata_applet = @import("applets/wata.zig");
 const sync_thread = @import("matrix/sync_thread.zig");
 const matrix_client_mod = @import("matrix/client.zig");
 const audio_thread = if (build_options.use_audio) @import("audio_thread.zig") else struct {};
+const audio_selftest = if (build_options.use_audio) @import("audio_selftest.zig") else struct {};
 const led = if (!build_options.use_sdl) @import("led.zig") else struct {};
 
 const sdl = if (build_options.use_sdl) @import("sdl.zig").c else struct {};
@@ -34,6 +35,27 @@ pub fn main(init: std.process.Init) !void {
     debug_mode = build_options.debug_mode;
     g_io = init.io;
     const allocator = init.gpa;
+
+    // Handle CLI flags before any UI/network setup so --selftest runs
+    // cleanly in isolation.
+    var it = std.process.Args.Iterator.init(init.minimal.args);
+    _ = it.skip(); // argv[0]
+    while (it.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--selftest")) {
+            if (!build_options.use_audio) {
+                std.debug.print("--selftest requires an audio build (use_audio=true)\n", .{});
+                std.process.exit(2);
+            }
+            const which = it.next() orelse "all";
+            const stage: audio_selftest.Stage = if (std.mem.eql(u8, which, "echo"))
+                .echo
+            else if (std.mem.eql(u8, which, "play"))
+                .play
+            else
+                .all;
+            std.process.exit(audio_selftest.run(allocator, stage));
+        }
+    }
 
     // Share io with applets that need it
     clock_applet.setIo(init.io);
