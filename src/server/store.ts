@@ -205,6 +205,10 @@ export class Store {
     return this.rooms.get(roomId);
   }
 
+  getAllRooms(): Room[] {
+    return Array.from(this.rooms.values());
+  }
+
   getRoomsForUser(userId: string, membership: string): Room[] {
     const result: Room[] = [];
     for (const room of this.rooms.values()) {

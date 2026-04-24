@@ -30,6 +30,7 @@ import {
   handleJoinRoom,
   handleJoinRoomById,
   handleInvite,
+  handlePublicRooms,
   handleResolveAlias,
 } from './handlers/rooms.js';
 import { handleSync } from './handlers/sync.js';
@@ -265,6 +266,13 @@ export function createRouter(
       method: 'POST',
       pattern: '/_matrix/client/v3/rooms/:roomId/receipt/:receiptType/:eventId',
       handler: handleReceipt,
+    },
+
+    // ── Public rooms ───────────────────────────────────────────
+    {
+      method: 'GET',
+      pattern: '/_matrix/client/v3/publicRooms',
+      handler: handlePublicRooms,
     },
   ];
 

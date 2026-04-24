@@ -285,8 +285,8 @@ class WataClient(
         val response = api.createRoom(
             CreateRoomRequest(
                 name = name,
-                visibility = "private",
-                preset = "private_chat",
+                visibility = "public",
+                preset = "public_chat",
                 room_alias_name = "family"
             )
         )

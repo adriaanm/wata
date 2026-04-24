@@ -373,8 +373,8 @@ export class WataClient {
   async createFamily(name: string): Promise<Family> {
     const response = await this.api.createRoom({
       name,
-      visibility: 'private',
-      preset: 'private_chat',
+      visibility: 'public',
+      preset: 'public_chat',
       room_alias_name: 'family',
     });
 

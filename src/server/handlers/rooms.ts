@@ -298,6 +298,81 @@ export const handleInvite: Handler = async (request, store, config, params) => {
   return jsonResponse({});
 };
 
+// ── handlePublicRooms ─────────────────────────────────────────────
+// Wata is designed as a per-family homeserver, network-gated (e.g.
+// via wireguard). Anyone who can reach the server is already
+// authorized family, so every room with join_rule == "public" is
+// listed — typically just the family broadcast room. 1:1 DMs use
+// join_rule == "invite" and stay out of the directory.
+
+function stateContent(
+  store: Store,
+  roomId: string,
+  type: string,
+  stateKey: string = '',
+): Record<string, unknown> | undefined {
+  const room = store.getRoom(roomId);
+  if (!room) return undefined;
+  return room.state.get(`${type}\0${stateKey}`)?.content;
+}
+
+function joinedMemberCount(store: Store, roomId: string): number {
+  const room = store.getRoom(roomId);
+  if (!room) return 0;
+  let n = 0;
+  for (const ev of room.state.values()) {
+    if (ev.type === 'm.room.member' && ev.content.membership === 'join') n++;
+  }
+  return n;
+}
+
+export const handlePublicRooms: Handler = async (_request, store) => {
+  const chunk = store
+    .getAllRooms()
+    .filter((room) => {
+      const joinRule = stateContent(store, room.roomId, 'm.room.join_rules')
+        ?.join_rule as string | undefined;
+      return joinRule === 'public';
+    })
+    .map((room) => {
+      const name = stateContent(store, room.roomId, 'm.room.name')?.name as
+        | string
+        | undefined;
+      const topic = stateContent(store, room.roomId, 'm.room.topic')?.topic as
+        | string
+        | undefined;
+      const canonicalAlias = stateContent(
+        store,
+        room.roomId,
+        'm.room.canonical_alias',
+      )?.alias as string | undefined;
+      const historyVisibility = stateContent(
+        store,
+        room.roomId,
+        'm.room.history_visibility',
+      )?.history_visibility as string | undefined;
+      const avatarUrl = stateContent(store, room.roomId, 'm.room.avatar')
+        ?.url as string | undefined;
+
+      return {
+        room_id: room.roomId,
+        num_joined_members: joinedMemberCount(store, room.roomId),
+        world_readable: historyVisibility === 'world_readable',
+        guest_can_join: false,
+        join_rule: 'public',
+        ...(name ? { name } : {}),
+        ...(topic ? { topic } : {}),
+        ...(canonicalAlias ? { canonical_alias: canonicalAlias } : {}),
+        ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+      };
+    });
+
+  return jsonResponse({
+    chunk,
+    total_room_count_estimate: chunk.length,
+  });
+};
+
 // ── handleResolveAlias ────────────────────────────────────────────
 
 export const handleResolveAlias: Handler = async (_request, store, config, params) => {

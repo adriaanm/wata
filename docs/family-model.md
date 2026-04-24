@@ -26,6 +26,17 @@ What users see:
 
 Users never see: room IDs, Matrix IDs, invitations, or sync state.
 
+## Trust Model
+
+Wata runs **one homeserver per family**, gated at the network layer (typically wireguard). Anyone who can reach the server is already authorized family — there is no untrusted population sharing the homeserver. This is a deliberate design choice: wata is not a Signal/WhatsApp competitor, it's a dedicated walkie-talkie for close-knit, trusted groups.
+
+The implication for room configuration:
+
+- **Family room** is `public_chat` / `visibility: public` / `join_rule: public`. Everyone on the server *is* family, so there's no reason to gate the broadcast channel behind invites. This also lets third-party Matrix clients (FluffyChat, Element, etc.) discover and join the family room through the standard public-rooms directory.
+- **1:1 DM rooms** stay `trusted_private_chat` / `visibility: private` / `join_rule: invite`. Even inside the family, a DM between Alice and Bob shouldn't be visible to Charlie.
+
+In other words: privacy between family members (DMs) is still enforced, but the server boundary *is* the family boundary.
+
 ## Implementation Layer
 
 ### Matrix Concepts Used
@@ -61,9 +72,13 @@ The family room serves two purposes:
 2. **Broadcast channel**: Sending a voice message to "Family" sends an `m.audio` event to this room. All members receive it.
 
 Room configuration:
-- `preset: private_chat` (invite-only)
-- `visibility: private` (not listed in directory)
+- `preset: public_chat` (anyone on the server can join)
+- `visibility: public` (listed in the public-rooms directory)
+- `join_rule: public`
+- Alias: `#family:<server>` (canonical handle)
 - Name: "Family" (shown in UI)
+
+The server network boundary (wireguard) *is* the trust boundary — see [Trust Model](#trust-model).
 
 ### DM Rooms
 
@@ -137,12 +152,10 @@ First-time setup (run once per server):
 // 1. Create family room
 const familyRoom = await client.createRoom({
   name: 'Family',
-  preset: 'private_chat',
-  visibility: 'private',
+  preset: 'public_chat',
+  visibility: 'public',
+  room_alias_name: 'family',
 });
-
-// 2. Store room ID in well-known location
-// (TBD: room alias, account data, or config)
 ```
 
 ### Adding a Family Member
@@ -264,14 +277,16 @@ For the walkie-talkie use case, occasional duplicate DMs are acceptable - users 
 
 ## Future Considerations
 
-### Public Matrix Server Hosting
+### Shared / Multi-Family Hosting
 
-If families are hosted on shared servers (e.g., `wata.example.com`):
+The current model is **one server per family**, network-gated. If we ever need to host multiple families on a single shared server (e.g., a paid `wata.example.com` tier), the public-family-room assumption breaks — an untrusted population would share the server. In that case:
 
-- Family rooms must be private and invite-only (already the case)
-- Room alias should be unique per family: `#family-smith:wata.example.com`
-- User registration should be controlled (invite-only or admin-approved)
-- No changes to room structure needed
+- Family rooms would need to flip back to `private_chat` / `join_rule: invite`.
+- Room alias would need to be unique per family: `#family-smith:wata.example.com`.
+- The wata-server's "list every public room" behavior (see `src/server/handlers/rooms.ts` → `handlePublicRooms`) would need per-family scoping.
+- User registration would need to be controlled (invite-only or admin-approved).
+
+Not planned — called out here so the assumption doesn't get accidentally broken by someone reading the one-server-per-family docs out of context.
 
 ### Sub-groups
 

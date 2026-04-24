@@ -138,7 +138,10 @@ pub const MatrixHttpClient = struct {
     /// Create a room with an alias local-part and an invite list. Used for
     /// the family room: `alias_local` becomes the localpart of
     /// `m.room.canonical_alias` (`#{alias_local}:{server}`), and the
-    /// invited user is added as a non-DM member.
+    /// invited user is added as a non-DM member. The family room is
+    /// created as a public chat — within a per-family wata-server the
+    /// network layer (wireguard) is the trust boundary, so inside the
+    /// server everything is visible to everyone.
     pub fn createRoomWithAlias(
         self: *MatrixHttpClient,
         alias_local: []const u8,
@@ -146,7 +149,7 @@ pub const MatrixHttpClient = struct {
     ) HttpError!RawResponse {
         var body_buf: [1024]u8 = undefined;
         const body = std.fmt.bufPrint(&body_buf,
-            \\{{"room_alias_name":"{s}","invite":["{s}"],"preset":"trusted_private_chat","visibility":"private"}}
+            \\{{"room_alias_name":"{s}","invite":["{s}"],"preset":"public_chat","visibility":"public"}}
         , .{ alias_local, invite_user_id }) catch return HttpError.OutOfMemory;
         return self.doRequest(.POST, "/_matrix/client/v3/createRoom", body);
     }
