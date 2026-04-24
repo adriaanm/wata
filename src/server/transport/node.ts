@@ -3,6 +3,7 @@ import http from 'node:http';
 export function startNodeServer(
   handler: (request: Request) => Promise<Response>,
   port: number,
+  host: string = '0.0.0.0',
 ): http.Server {
   const server = http.createServer(async (req, res) => {
     try {
@@ -56,8 +57,8 @@ export function startNodeServer(
     }
   });
 
-  server.listen(port, () => {
-    console.log(`Wata server listening on port ${port}`);
+  server.listen(port, host, () => {
+    console.log(`Wata server listening on http://${host}:${port}`);
   });
 
   return server;

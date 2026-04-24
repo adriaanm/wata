@@ -22,7 +22,7 @@ pub const Config = struct {
 };
 
 pub const DEFAULT_CONFIG = Config{
-    .homeserver = "http://192.168.179.38:8008",
+    .homeserver = "http://192.168.179.41:8008",
     .username = "bob",
     .password = "testpass123",
 };

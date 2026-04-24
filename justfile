@@ -2,6 +2,26 @@ zig := env("ZIG", home_dir() / ".local/zig/zig")
 device := "bq268"
 device_dir := "/opt/wata"
 
+# Start the wata-server systemd user service.
+wata-up:
+    systemctl --user start wata-server.service
+
+# Stop the wata-server systemd user service.
+wata-down:
+    systemctl --user stop wata-server.service
+
+# Restart the wata-server systemd user service.
+wata-restart:
+    systemctl --user restart wata-server.service
+
+# Show wata-server status.
+wata-status:
+    systemctl --user status wata-server.service --no-pager
+
+# Tail wata-server logs from journald.
+wata-logs:
+    journalctl --user -u wata-server.service -f --no-pager
+
 # Cross-compile fbclient for ARM device
 fb-build *FLAGS:
     cd src/fbclient && {{zig}} build -Dtarget=arm-linux-musleabihf -Doptimize=ReleaseSafe {{FLAGS}}

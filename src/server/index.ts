@@ -5,7 +5,7 @@ import { startNodeServer } from './transport/node.js';
 
 const config: ServerConfig = {
   serverName: 'localhost',
-  port: 8008,
+  port: Number(process.env.WATA_SERVER_PORT ?? 8008),
   users: [
     { localpart: 'alice', password: 'testpass123', displayName: 'Alice' },
     { localpart: 'bob', password: 'testpass123', displayName: 'Bob' },

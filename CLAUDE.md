@@ -86,7 +86,10 @@ just fb-test                  # Unit tests
 just fb-test-integration      # E2E tests against Conduit (auto-starts via test/docker)
 
 # Dev helpers
-pnpm dev:server               # Start Conduit Matrix server
+pnpm dev:server               # Start wata-server in foreground (TS, in-memory)
+pnpm dev:server:conduit       # Start Conduit via docker (fallback)
+just wata-up / wata-down      # Control permanent wata-server systemd user service
+just wata-logs                # Tail wata-server journald logs
 pnpm dev:forward              # ADB port forwarding (physical devices)
 pnpm dev:ip                   # Show local IP (fallback)
 

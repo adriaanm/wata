@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { ServerConfig, UserConfig } from './config.js';
 import {
   generateRoomId,
@@ -5,6 +7,7 @@ import {
   generateDeviceId,
   generateAccessToken,
   generateMediaId,
+  Debug,
 } from './utils.js';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -76,11 +79,59 @@ export class Store {
   private receipts: Map<string, Receipt[]> = new Map(); // roomId → Receipt[]
   private globalSeq = 0;
   private waiters: Map<string, Array<() => void>> = new Map(); // userId → callbacks
+  private devicesPath: string | null;
 
   constructor(config: ServerConfig) {
     this.serverName = config.serverName;
     for (const user of config.users) {
       this.users.set(user.localpart, user);
+    }
+    this.devicesPath = process.env.WATA_SERVER_DEVICES_PATH ?? null;
+    this.loadDevices();
+  }
+
+  // ── Device persistence ────────────────────────────────────────
+  // Only devices/tokens are persisted across restarts. Rooms, messages,
+  // account data, receipts, and media remain in-memory (ephemeral), so
+  // clients keep their sessions but any room state gets a clean slate.
+
+  private loadDevices(): void {
+    if (!this.devicesPath) return;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(this.devicesPath, 'utf8');
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        Debug.error('STORE', `Failed to read devices file: ${this.devicesPath}`, err);
+      }
+      return;
+    }
+    try {
+      const arr = JSON.parse(raw) as Array<
+        Omit<Device, 'txnIdMap'>
+      >;
+      for (const d of arr) {
+        const device: Device = { ...d, txnIdMap: new Map() };
+        this.devices.set(device.deviceId, device);
+        this.tokenIndex.set(device.accessToken, device);
+      }
+      Debug.log('STORE', `Loaded ${arr.length} devices from ${this.devicesPath}`);
+    } catch (err) {
+      Debug.error('STORE', `Failed to parse devices file: ${this.devicesPath}`, err);
+    }
+  }
+
+  private saveDevices(): void {
+    if (!this.devicesPath) return;
+    const arr = Array.from(this.devices.values()).map(
+      ({ txnIdMap: _ignore, ...rest }) => rest,
+    );
+    const dir = path.dirname(this.devicesPath);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.devicesPath, JSON.stringify(arr, null, 2));
+    } catch (err) {
+      Debug.error('STORE', `Failed to write devices file: ${this.devicesPath}`, err);
     }
   }
 
@@ -104,6 +155,7 @@ export class Store {
     const device: Device = { deviceId, userId, accessToken, displayName, txnIdMap: new Map() };
     this.devices.set(deviceId, device);
     this.tokenIndex.set(accessToken, device);
+    this.saveDevices();
     return device;
   }
 
@@ -117,6 +169,7 @@ export class Store {
       this.tokenIndex.delete(device.accessToken);
       device.txnIdMap.clear();
       this.devices.delete(deviceId);
+      this.saveDevices();
     }
   }
 
