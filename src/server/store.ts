@@ -21,6 +21,8 @@ export interface MatrixEvent {
   content: Record<string, unknown>;
   state_key?: string;
   unsigned?: Record<string, unknown>;
+  /** Top-level target for m.room.redaction events (Matrix v1.10+). */
+  redacts?: string;
   /** Internal sequence number for sync ordering */
   _seq: number;
 }

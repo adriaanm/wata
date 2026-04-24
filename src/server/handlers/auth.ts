@@ -33,6 +33,13 @@ export async function handlePostLogin(
     return matrixError('M_FORBIDDEN', 'Missing user identifier', 403);
   }
 
+  // Accept full MXIDs ("@alice:localhost") as well as bare localparts.
+  // Strip a leading "@" and anything from ":" onward so clients like
+  // FluffyChat/Element that send the canonical MXID still resolve.
+  if (localpart.startsWith('@')) localpart = localpart.slice(1);
+  const colon = localpart.indexOf(':');
+  if (colon !== -1) localpart = localpart.slice(0, colon);
+
   const user = store.getUserByLocalpart(localpart);
   if (!user) {
     Debug.log('AUTH', `Login failed: unknown user ${localpart}`);

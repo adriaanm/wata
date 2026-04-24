@@ -274,6 +274,64 @@ export function createRouter(
       pattern: '/_matrix/client/v3/publicRooms',
       handler: handlePublicRooms,
     },
+
+    // ── Filters (stub) ─────────────────────────────────────────
+    // Clients like FluffyChat create a sync filter on startup. We
+    // don't honor filter contents — /sync returns everything — but
+    // we do need to hand back an id so the client can reference it.
+    {
+      method: 'POST',
+      pattern: '/_matrix/client/v3/user/:userId/filter',
+      handler: async () => jsonResponse({ filter_id: '0' }),
+    },
+    {
+      method: 'GET',
+      pattern: '/_matrix/client/v3/user/:userId/filter/:filterId',
+      handler: async () => jsonResponse({}),
+    },
+
+    // ── E2EE keys (no-op stubs) ────────────────────────────────
+    // Wata-server does not implement end-to-end encryption. These
+    // stubs exist so clients like FluffyChat/Element can complete
+    // their post-login device-key handshake and proceed to /sync.
+    {
+      method: 'POST',
+      pattern: '/_matrix/client/v3/keys/query',
+      handler: async () =>
+        jsonResponse({
+          device_keys: {},
+          master_keys: {},
+          self_signing_keys: {},
+          user_signing_keys: {},
+          failures: {},
+        }),
+    },
+    {
+      method: 'POST',
+      pattern: '/_matrix/client/v3/keys/device_signing/upload',
+      handler: async () => jsonResponse({}),
+    },
+    {
+      method: 'POST',
+      pattern: '/_matrix/client/v3/keys/upload',
+      handler: async (request) => {
+        // Echo back per-algorithm counts of the one-time keys the client
+        // just uploaded. matrix-dart-sdk (FluffyChat) rejects the response
+        // if the reported counts don't match what it sent.
+        const body = (await request.json().catch(() => ({}))) as {
+          one_time_keys?: Record<string, unknown>;
+          fallback_keys?: Record<string, unknown>;
+        };
+        const counts: Record<string, number> = {};
+        for (const keyId of Object.keys(body.one_time_keys ?? {})) {
+          const algo = keyId.split(':')[0];
+          counts[algo] = (counts[algo] ?? 0) + 1;
+        }
+        if (!('signed_curve25519' in counts)) counts.signed_curve25519 = 0;
+        Debug.log('KEYS', `upload: one_time_key_counts=`, counts);
+        return jsonResponse({ one_time_key_counts: counts });
+      },
+    },
   ];
 
   return async (request: Request): Promise<Response> => {

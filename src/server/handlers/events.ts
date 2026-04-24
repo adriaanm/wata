@@ -92,7 +92,9 @@ export function handleRedactEvent(
       sender: userId,
       room_id: roomId,
       origin_server_ts: Date.now(),
+      redacts: eventId,
       content: {
+        redacts: eventId,
         reason: body.reason,
       },
       unsigned: { transaction_id: txnId },
