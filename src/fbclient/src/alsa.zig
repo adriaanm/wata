@@ -16,6 +16,19 @@ pub const FRAME_SIZE: u32 = 2; // S16_LE = 2 bytes per sample per channel
 pub const FRAMES_PER_PERIOD: u32 = 1920;
 pub const PERIOD_BYTES: u32 = FRAMES_PER_PERIOD * CHANNELS * FRAME_SIZE;
 
+/// Ring-buffer depth (in periods) for playback. 8 × 40 ms = 320 ms of slack
+/// so writeFrames rarely blocks waiting for the DSP to drain, and a stray
+/// scheduling hiccup between chunks doesn't underrun. Capture keeps a small
+/// buffer (low latency) — only playback needs the cushion.
+pub const PLAYBACK_PERIODS: u32 = 8;
+
+/// Max periods handed to a single pcm_writei. The MSM Q6 ADSP rejects a large
+/// one-shot write with ETIMEDOUT (its wait_event_timeout can't cover a multi-
+/// second write in one call), so writeFrames splits the buffer into chunks of
+/// this many periods and lets each drain — the pacing aplay does implicitly.
+/// Kept <= PLAYBACK_PERIODS so a chunk always fits the ring.
+pub const WRITE_CHUNK_PERIODS: u32 = 4;
+
 pub const PcmError = error{ OpenFailed, WriteFailed, ReadFailed };
 
 const PcmPtr = if (build_options.use_audio) ?*c.struct_pcm else ?*anyopaque;
@@ -87,7 +100,15 @@ pub const Playback = struct {
     /// (MSM Q6 ADSP requires the stream to be running before pcm_writei works.)
     pub fn open() PcmError!Playback {
         var config = makeConfig();
+        config.period_count = PLAYBACK_PERIODS;
         config.start_threshold = FRAMES_PER_PERIOD;
+        // stop_threshold must be the full buffer, not 0. With 0 the kernel
+        // stops the stream the instant the buffer has any free space, so
+        // pcm_writei keeps accepting data without the DSP rendering it in
+        // real time — the write "succeeds" and drains almost instantly but
+        // nothing is audible. Set to the ring size so the stream only stops
+        // on a genuine full underrun (matches aplay's default).
+        config.stop_threshold = FRAMES_PER_PERIOD * PLAYBACK_PERIODS;
         const pcm = c.pcm_open(0, 0, c.PCM_OUT, &config);
         if (pcm == null or c.pcm_is_ready(pcm) == 0) {
             const msg = pcmErrorStr(pcm);
@@ -98,16 +119,27 @@ pub const Playback = struct {
         return .{ .pcm = pcm };
     }
 
-    /// Write frames. `buf` length determines frame count.
-    /// Blocks when the buffer is full (natural flow control).
-    /// IMPORTANT: MSM Q6 ADSP requires writes of at least FRAMES_PER_PERIOD.
-    /// Sub-period writes cause pcm_writei to block until timeout.
+    /// Write frames, pacing the MSM Q6 ADSP. `buf` must be whole periods
+    /// (sub-period writes stall the Q6); callers trim to PERIOD_BYTES.
+    ///
+    /// A single large pcm_writei returns ETIMEDOUT on this device — the Q6
+    /// driver can't accept a multi-second write in one call. Feed it
+    /// WRITE_CHUNK_PERIODS at a time (as aplay does implicitly) so each call
+    /// blocks only until the DSP drains a little and the write keeps pace with
+    /// real-time playback.
     pub fn writeFrames(self: *Playback, buf: []const u8) PcmError!void {
-        const frames: c_uint = @intCast(buf.len / (FRAME_SIZE * CHANNELS));
-        const ret = c.pcm_writei(self.pcm, buf.ptr, frames);
-        if (ret < 0) {
-            std.debug.print("[alsa] pcm_writei failed: {s}\n", .{pcmErrorStr(self.pcm)});
-            return error.WriteFailed;
+        const chunk_bytes: usize = WRITE_CHUNK_PERIODS * PERIOD_BYTES;
+        var off: usize = 0;
+        while (off < buf.len) {
+            const end = @min(off + chunk_bytes, buf.len);
+            const slice = buf[off..end];
+            const frames: c_uint = @intCast(slice.len / (FRAME_SIZE * CHANNELS));
+            const ret = c.pcm_writei(self.pcm, slice.ptr, frames);
+            if (ret < 0) {
+                std.debug.print("[alsa] pcm_writei failed: {s}\n", .{pcmErrorStr(self.pcm)});
+                return error.WriteFailed;
+            }
+            off = end;
         }
     }
 
