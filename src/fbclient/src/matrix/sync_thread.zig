@@ -22,6 +22,7 @@ pub const Config = struct {
 };
 
 pub const DEFAULT_CONFIG = Config{
+    // Dev default homeserver; override per-environment. Mac wata-server host.
     .homeserver = "http://192.168.179.41:8008",
     .username = "bob",
     .password = "testpass123",
