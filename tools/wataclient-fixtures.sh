@@ -31,8 +31,9 @@ BASE="http://127.0.0.1:$PORT"
 mkdir -p "$FIXDIR"
 "$SGO" build --app wata-server >/dev/null
 
+WATA="$SPIKE"; . "$SPIKE/tools/emitdir.sh"       # E3 (b): emission under the module's own tree
 TMP=$(mktemp -d); LOG="$TMP/server.log"
-"$SPIKE/.sgo/wata/wata-server" ":$PORT" >"$LOG" 2>&1 &
+"$(emitdir wata-server)/$(binname wata-server)" ":$PORT" >"$LOG" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true' EXIT
 

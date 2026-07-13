@@ -2,10 +2,12 @@
 # (moved from the sgola tree in BUILD chunk E2b, adapted to the wata repo).
 #
 # A wata app module builds through sgo's table pipeline with the toolchain +
-# shared emission under $SGOLA_HOME: its generated tree lands at
-# $SGOLA_HOME/.sgo/<emitname> (the emitname declared in the module's own
-# sgo.build — never re-encoded here). Source this file (with $WATA = the wata
-# repo root and $SGOLA_HOME set) and call:
+# SHARED-LIBRARY emission (core/json/wataclient) under $SGOLA_HOME, but its OWN
+# generated tree lands under ITS OWN dir at <module>/.sgo/<emitname> (BUILD E3
+# item (b): a moved-out app emits under its own tree, the fresh-module rule; the
+# E2b $SGOLA_HOME/.sgo coupling was the recorded shortcut, now retired). The
+# emitname is declared in the module's own sgo.build — never re-encoded here.
+# Source this file (with $WATA = the wata repo root and $SGOLA_HOME set) and call:
 #
 #   emitdir <module-dir-name>   # echoes the app's absolute emission dir
 #   binname <module-dir-name>   # echoes the app's built-binary basename
@@ -24,7 +26,7 @@ emitdir() {
   local em
   em="$(_marker "$1" emitname)" || return 1
   [ -n "$em" ] || { echo "emitdir: module '$1' declares no emitname" >&2; return 1; }
-  printf '%s\n' "$SGOLA_HOME/.sgo/$em"
+  printf '%s\n' "$WATA/$1/.sgo/$em"
 }
 
 binname() {

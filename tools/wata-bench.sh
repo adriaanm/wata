@@ -14,21 +14,22 @@ WATA="$(pwd)"
 [ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set"; exit 1; }
 # E2b NOTE: moved from the sgola tree with the wata code. Dev tool, NOT in
 # either ci gate; needs $SGOLA_HOME (the sgola toolchain) and builds the wata
-# modules from THIS repo. Emission stays under $SGOLA_HOME/.sgo/ (E2b shortcut).
+# modules from THIS repo. E3 (b): emission is under the module's OWN tree.
 
 SGO="$SGOLA_HOME/tools/sgo/sgo"
 WATA="${WATA_REPO:-$HOME/g/bq268/wata}"
 
 ( cd "$SGOLA_HOME/tools/sgo" && go build -o sgo . ) >/dev/null || { echo "bench: sgo build failed"; exit 1; }
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "bench: build failed"; exit 1; }
+WATA_EMIT="$WATA/wata-server/.sgo/wata"           # E3 (b): the module's own emission tree
 
 echo "========== (1) allocs/op on the emitted serve path =========="
-cp tools/wata-bench/bench_test.go $SGOLA_HOME/.sgo/wata/bench_test.go
+cp tools/wata-bench/bench_test.go "$WATA_EMIT/bench_test.go"
 for bm in BenchmarkWhoami BenchmarkLogin BenchmarkSyncInitial; do
-  ( cd $SGOLA_HOME/.sgo/wata && go test -bench "^${bm}$" -benchmem -run '^$' 2>&1 | grep -E "$bm" )
+  ( cd "$WATA_EMIT" && go test -bench "^${bm}$" -benchmem -run '^$' 2>&1 | grep -E "$bm" )
 done
-( cd $SGOLA_HOME/.sgo/wata && go test -bench '^BenchmarkSend$' -benchmem -benchtime=500x -run '^$' 2>&1 | grep -E "BenchmarkSend" )
-rm -f $SGOLA_HOME/.sgo/wata/bench_test.go
+( cd "$WATA_EMIT" && go test -bench '^BenchmarkSend$' -benchmem -benchtime=500x -run '^$' 2>&1 | grep -E "BenchmarkSend" )
+rm -f "$WATA_EMIT/bench_test.go"
 
 echo
 echo "========== (2/3) throughput + wake latency (Sgola vs TS vs Conduit) =========="
@@ -46,7 +47,7 @@ SP=""; TP=""
 cleanup() { [ -n "$SP" ] && kill -9 "$SP" 2>/dev/null; [ -n "$TP" ] && kill -9 "$TP" 2>/dev/null; pkill -9 -f "server/index.ts" 2>/dev/null; true; }
 trap cleanup EXIT
 
-$SGOLA_HOME/.sgo/wata/wata-server ":8008" >/tmp/wata-bench-sgola.log 2>&1 & SP=$!
+"$WATA_EMIT/wata-server" ":8008" >/tmp/wata-bench-sgola.log 2>&1 & SP=$!
 for i in $(seq 1 80); do curl -s -o /dev/null http://127.0.0.1:8008/_matrix/client/versions && break; sleep 0.25; done
 echo "### SGOLA (8008) ###"
 ( cd tools/wata-throughput && go run . http://127.0.0.1:8008 "$N" )

@@ -26,7 +26,7 @@ WATA="$(pwd)"
 [ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set"; exit 1; }
 # E2b NOTE: moved from the sgola tree with the wata code. Dev tool, NOT in
 # either ci gate; needs $SGOLA_HOME (the sgola toolchain) and builds the wata
-# modules from THIS repo. Emission stays under $SGOLA_HOME/.sgo/ (E2b shortcut).
+# modules from THIS repo. E3 (b): emission is under the module's OWN tree.
 
 WATA_TS="${WATA_TS_REPO:-$HOME/g/bq268/wata}"  # the ORIGINAL TS wata repo (jest oracle source)
 PORT="${WATA_PORT:-8008}"
@@ -34,7 +34,8 @@ BASE="http://127.0.0.1:$PORT"
 ONLY="${1:-}"
 
 SGO="$SGOLA_HOME/tools/sgo/sgo"
-BIN="$SPIKE/$SGOLA_HOME/.sgo/wata/wata-server"
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
+BIN="$(emitdir wata-server)/$(binname wata-server)"
 
 # M7 chunk 6: WATA_PERSIST=1 re-runs the SAME oracle with the JSONL journal ON,
 # a FRESH log file per suite (temp dir) — each suite still starts clean (empty

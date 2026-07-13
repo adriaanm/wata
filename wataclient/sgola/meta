@@ -1,3 +1,4 @@
 sgola v0.1.0-spike
 tasty 28.8
 root 
+knobs crosskey=wataclient emitname=wataclient optreport

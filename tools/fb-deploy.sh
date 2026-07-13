@@ -22,12 +22,13 @@ WATA="$(pwd)"
 [ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set"; exit 1; }
 # E2b NOTE: moved from the sgola tree with the wata code. Dev tool, NOT in
 # either ci gate; needs $SGOLA_HOME (the sgola toolchain) and builds the wata
-# modules from THIS repo. Emission stays under $SGOLA_HOME/.sgo/ (E2b shortcut).
+# modules from THIS repo. E3 (b): emission is under the module's OWN tree.
 
 SGO="$SGOLA_HOME/tools/sgo/sgo"
 HOST="${BQ268_HOST:-bq268}"
 CC="${FB_CC:-zig cc -target arm-linux-musleabihf}"
-BIN="$SPIKE/$SGOLA_HOME/.sgo/fb/wata-fb-linux-arm"
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
+BIN="$(emitdir wata-fb)/wata-fb-linux-arm"
 REMOTE="/dev/shm/wata-fb"
 FB_CMD="${1:-}"   # e.g. `fbsmoke` (chunk 5); empty = the skeleton
 
