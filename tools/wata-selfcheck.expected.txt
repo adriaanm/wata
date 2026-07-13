@@ -1,0 +1,36 @@
+errcode M_FORBIDDEN
+envelope {"errcode":"M_FORBIDDEN","error":"Invalid username or password"}
+userid @alice:localhost
+localpart alice
+clean-mxid alice
+clean-bare alice
+profile {"displayname":"Alice"}
+acct-get {"foo":"bar"}
+acct-replace {"foo":"baz"}
+acct-missing none
+acct-405 true
+acct-ok false
+trans-join if-public allowed allowed if-public denied
+trans-invite allowed allowed denied allowed denied
+roomid-fmt true
+eventid-fmt true
+mediaid-nonempty true
+mem-creator join
+mem-invitee invite
+join-legal allowed
+mem-joined join
+join-not-invited if-public
+join-rule invite
+send-added true
+redacted-content {}
+member-updated Alice Z
+sync-join-rooms 1
+sync-invite-rooms 0
+sync-joined-count 2
+sync-invited-count 0
+sync-hero @bob:localhost
+sync-next-batch-prefix true
+sync-global-acct-count 1
+sync-incr-empty false
+sync-incr-after-send true
+sync-fullstate-rooms 1

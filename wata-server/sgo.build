@@ -1,0 +1,9 @@
+# sgo.build (schema: see core/sgo.build). wata-server is an APP over core + json.
+# emitname is `wata` (the pre-6b shared-tree subdir .sgo/wata — the ci scripts
+# reference it), while the module dir + binary are `wata-server`.
+mode app
+emitname wata
+binname wata-server
+gomod sgolawata
+crosskey wata-server
+optreport

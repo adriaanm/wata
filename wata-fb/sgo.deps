@@ -1,0 +1,4 @@
+# In-link libraries above the implicit prelude (core). wata-fb links json +
+# wataclient (order: json then wataclient, matching the pre-6b upstream chain).
+json
+wataclient
