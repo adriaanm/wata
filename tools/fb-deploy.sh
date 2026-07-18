@@ -24,7 +24,7 @@ WATA="$(pwd)"
 # either ci gate; needs $SGOLA_HOME (the sgola toolchain) and builds the wata
 # modules from THIS repo. E3 (b): emission is under the module's OWN tree.
 
-SGO="$SGOLA_HOME/tools/sgo/sgo"
+SGO="$SGOLA_HOME/sgo/sgo"
 HOST="${BQ268_HOST:-bq268}"
 CC="${FB_CC:-zig cc -target arm-linux-musleabihf}"
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
@@ -33,7 +33,7 @@ REMOTE="/dev/shm/wata-fb"
 FB_CMD="${1:-}"   # e.g. `fbsmoke` (chunk 5); empty = the skeleton
 
 echo "== fb-deploy: cross-build wata-fb (armv7-musl) =="
-( cd "$SPIKE/tools/sgo" && go build -o sgo . )
+( cd "$SGOLA_HOME/sgo" && go build -o sgo . )
 ( cd "$WATA/wata-fb" && "$SGO" build ) --goos linux --goarch arm --goarm 7 --cgo --cc "$CC"
 ls -la "$BIN"; file "$BIN" || true
 

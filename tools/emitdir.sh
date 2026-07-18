@@ -14,7 +14,7 @@
 #
 # LOUD if the module (or its marker) is missing.
 
-: "${SGO:=$SGOLA_HOME/tools/sgo/sgo}"
+: "${SGO:=$SGOLA_HOME/sgo/sgo}"
 
 _marker() { # _marker <module> <key> -> value (empty if absent)
   local f="$WATA/$1/sgo.build"

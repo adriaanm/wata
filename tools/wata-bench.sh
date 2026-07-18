@@ -16,10 +16,10 @@ WATA="$(pwd)"
 # either ci gate; needs $SGOLA_HOME (the sgola toolchain) and builds the wata
 # modules from THIS repo. E3 (b): emission is under the module's OWN tree.
 
-SGO="$SGOLA_HOME/tools/sgo/sgo"
+SGO="$SGOLA_HOME/sgo/sgo"
 WATA="${WATA_REPO:-$HOME/g/bq268/wata}"
 
-( cd "$SGOLA_HOME/tools/sgo" && go build -o sgo . ) >/dev/null || { echo "bench: sgo build failed"; exit 1; }
+( cd "$SGOLA_HOME/sgo" && go build -o sgo . ) >/dev/null || { echo "bench: sgo build failed"; exit 1; }
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "bench: build failed"; exit 1; }
 WATA_EMIT="$WATA/wata-server/.sgo/wata"           # E3 (b): the module's own emission tree
 

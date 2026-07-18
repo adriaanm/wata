@@ -23,7 +23,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SPIKE="$(pwd)"
-SGO="$SPIKE/tools/sgo/sgo"
+SGO="$SGOLA_HOME/sgo/sgo"
 FIXDIR="$SPIKE/wataclient/test-fixtures"
 PORT=18119
 BASE="http://127.0.0.1:$PORT"

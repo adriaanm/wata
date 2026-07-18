@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 WATA="$(pwd)"
 # E2b: the suite runs FROM the wata repo; the sgola toolchain rides $SGOLA_HOME.
 [ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set (the sgola toolchain home)"; exit 1; }
-SGO="${SGO:-$SGOLA_HOME/tools/sgo/sgo}"
+SGO="${SGO:-$SGOLA_HOME/sgo/sgo}"
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers (E2b)
 
 echo "-- wata-fb (1/2): native build + run (audio stub) --"

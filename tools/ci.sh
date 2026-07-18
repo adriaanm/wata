@@ -6,7 +6,7 @@
 # coverage is preserved while the fixtures live where the code lives.
 #
 # Requires: the sgola toolchain reachable via $SGOLA_HOME (the `sgo` driver on
-# PATH or under $SGOLA_HOME/tools/sgo), and the module deps (json, wataclient)
+# PATH or under $SGOLA_HOME/sgo), and the module deps (json, wataclient)
 # resolved into a Go module cache (the caller — the wata ci wrapper or the sgola
 # proving-consumer step — populates a hermetic file-GOPROXY + pkg/mod; a
 # developer with the real proxies gets the same via plain `go get`).
@@ -19,7 +19,7 @@ WATA="$(pwd)"
 # The sgola toolchain home (the v1 packaging stand-in — README shortcut).
 if [ -z "${SGOLA_HOME:-}" ]; then
   echo "wata-ci: SGOLA_HOME is not set — the wata suite needs the sgola toolchain." >&2
-  echo "wata-ci: set SGOLA_HOME=/path/to/sgola/spike (or a released sgola home)." >&2
+  echo "wata-ci: set SGOLA_HOME=/path/to/sgola (or a released sgola home)." >&2
   exit 1
 fi
 export SGOLA_HOME
@@ -27,8 +27,8 @@ export SGOLA_HOME
 if command -v sgo >/dev/null 2>&1; then
   SGO="$(command -v sgo)"
 else
-  SGO="$SGOLA_HOME/tools/sgo/sgo"
-  ( cd "$SGOLA_HOME/tools/sgo" && go build -o sgo . ) || { echo "wata-ci: failed to build sgo driver"; exit 1; }
+  SGO="$SGOLA_HOME/sgo/sgo"
+  ( cd "$SGOLA_HOME/sgo" && go build -o sgo . ) || { echo "wata-ci: failed to build sgo driver"; exit 1; }
 fi
 export SGO
 
@@ -51,7 +51,7 @@ export GOPROXY="file://$PROXY,off"
 if [ ! -d "$GOMODCACHE/sgola.spike/json@v0.1.0" ] || [ ! -d "$GOMODCACHE/sgola.spike/wataclient@v0.1.0" ]; then
   echo "wata-ci: populating the hermetic module cache (json + wataclient via file-GOPROXY)"
   rm -rf "$PROXY"; mkdir -p "$PROXY" "$GOMODCACHE"
-  "$SGO" bind-proxy "$SGOLA_HOME/json" sgola.spike/json v0.1.0 >/dev/null \
+  "$SGO" bind-proxy "$SGOLA_HOME/scenarios/json" sgola.spike/json v0.1.0 >/dev/null \
     || { echo "wata-ci: bind-proxy json failed"; exit 1; }
   "$SGO" bind-proxy "$WATA/wataclient" sgola.spike/wataclient v0.1.0 >/dev/null \
     || { echo "wata-ci: bind-proxy wataclient failed"; exit 1; }

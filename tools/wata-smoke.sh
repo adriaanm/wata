@@ -25,7 +25,7 @@ WATA="$(pwd)"
 [ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set (the sgola toolchain home)"; exit 1; }
 ACCEPT="${1:-}"
 
-SGO="${SGO:-$SGOLA_HOME/tools/sgo/sgo}"
+SGO="${SGO:-$SGOLA_HOME/sgo/sgo}"
 [ -x "$SGO" ] || { echo "wata-smoke: sgo driver not built ($SGO)"; exit 1; }
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers (E2b)
 

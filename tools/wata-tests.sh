@@ -33,7 +33,7 @@ PORT="${WATA_PORT:-8008}"
 BASE="http://127.0.0.1:$PORT"
 ONLY="${1:-}"
 
-SGO="$SGOLA_HOME/tools/sgo/sgo"
+SGO="$SGOLA_HOME/sgo/sgo"
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 BIN="$(emitdir wata-server)/$(binname wata-server)"
 
@@ -92,7 +92,7 @@ fi
 run_node() { env "${NODE_ENV_ASSIGNS[@]}" NODE_OPTIONS='--experimental-vm-modules' "$NODE" "$@"; }
 
 # ---- build ------------------------------------------------------------------
-( cd "$SPIKE/tools/sgo" && go build -o sgo . ) || { echo "wata-tests: sgo build failed"; exit 1; }
+( cd "$SGOLA_HOME/sgo" && go build -o sgo . ) || { echo "wata-tests: sgo build failed"; exit 1; }
 echo "wata-tests: building wata-server…"
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "wata-tests: sgo build --app wata-server failed"; exit 1; }
 [ -x "$BIN" ] || { echo "wata-tests: $BIN missing after build"; exit 1; }
