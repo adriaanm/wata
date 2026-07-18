@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# The Wata scenario suite — the six scenarios that used to be sgola ci steps
-# 11–16, preserved VERBATIM (moved with the code in BUILD chunk E2b). This is the
-# wata repo's own gate; the sgola gate runs the SAME suite from a hermetic build
-# of this repo (its "wata proving consumer" step), so the compiler-regression
-# coverage is preserved while the fixtures live where the code lives.
+# The Wata suite — the wata repo's OWN gate (GRADUATION H2b: SGOLA STANDS
+# ALONE — sgola's gate is self-contained and never runs this; the
+# chunk-boundary law is TWO gates, two repos). Scenarios 1–6 are the six
+# scenarios that used to be sgola ci steps 11–16, preserved VERBATIM (moved
+# with the code in BUILD chunk E2b); steps 7–9 are the wata-as-consumer legs
+# of sgola's old steps 11/29/30, migrated here at H2b (source-in-link
+# byte-identity + payload idempotence, the wata-server linux/amd64 smoke, and
+# the wata modules' crossing residue).
 #
 # Requires: the sgola toolchain reachable via $SGOLA_HOME (the `sgo` driver on
 # PATH or under $SGOLA_HOME/sgo), and the module deps (json, wataclient)
@@ -48,16 +51,25 @@ export GOMODCACHE="$GOPATH/pkg/mod"
 export GOSUMDB=off GOFLAGS=-mod=mod
 PROXY="$SGOLA_HOME/.sgo/bind/proxy"
 export GOPROXY="file://$PROXY,off"
-if [ ! -d "$GOMODCACHE/sgola.spike/json@v0.1.0" ] || [ ! -d "$GOMODCACHE/sgola.spike/wataclient@v0.1.0" ]; then
+# GRADUATION H2b: the requires graduated to the REAL module paths —
+# github.com/adriaanm/sgola/json (served from the sgola repo's COMMITTED
+# top-level json/ artifact) + github.com/adriaanm/wata/wataclient (this repo's
+# committed payload) — resolved LOCALLY via the file-GOPROXY until the repos
+# have fetchable remotes (the recorded insteadOf/GOPROXY posture is the release
+# path; the hermetic proxy is the ci path).
+JSONMOD="github.com/adriaanm/sgola/json";    JSONVER="v0.2.0"
+WCMOD="github.com/adriaanm/wata/wataclient"; WCVER="v0.2.0"
+if [ ! -d "$GOMODCACHE/$JSONMOD@$JSONVER" ] || [ ! -d "$GOMODCACHE/$WCMOD@$WCVER" ]; then
   echo "wata-ci: populating the hermetic module cache (json + wataclient via file-GOPROXY)"
   rm -rf "$PROXY"; mkdir -p "$PROXY" "$GOMODCACHE"
-  "$SGO" bind-proxy "$SGOLA_HOME/scenarios/json" sgola.spike/json v0.1.0 >/dev/null \
+  [ -d "$SGOLA_HOME/json/sgola" ] || { echo "wata-ci: sgola committed json/ artifact missing under $SGOLA_HOME"; exit 1; }
+  "$SGO" bind-proxy "$SGOLA_HOME/json" "$JSONMOD" "$JSONVER" >/dev/null \
     || { echo "wata-ci: bind-proxy json failed"; exit 1; }
-  "$SGO" bind-proxy "$WATA/wataclient" sgola.spike/wataclient v0.1.0 >/dev/null \
+  "$SGO" bind-proxy "$WATA/wataclient" "$WCMOD" "$WCVER" >/dev/null \
     || { echo "wata-ci: bind-proxy wataclient failed"; exit 1; }
   GETDIR="$(mktemp -d)"
   ( cd "$GETDIR" && go mod init wata.ci/get >/dev/null 2>&1 \
-      && go get sgola.spike/json@v0.1.0 && go get sgola.spike/wataclient@v0.1.0 ) \
+      && go get "$JSONMOD@$JSONVER" && go get "$WCMOD@$WCVER" ) \
     || { echo "wata-ci: go get into the hermetic cache failed"; exit 1; }
   rm -rf "$GETDIR"
 fi
@@ -90,6 +102,30 @@ pass 5 "10/10 live scenarios, fresh server each, -race clean"
 banner 6 "wata-fb framebuffer golden frame"
 bash tools/fb-golden.sh || fail 6 "fb-golden.sh"
 pass 6 "framebuffer golden frame byte-identical (160x128 RGB565 -> PNG)"
+
+# ---- 7–9: the legs MIGRATED from the sgola gate (GRADUATION H2b — SGOLA ------
+# STANDS ALONE: sgola's ci carries no wata dependency; the wata-as-consumer
+# assertions its old steps 11/29/30 made live HERE, where the consumers live).
+
+banner 7 "source-in-link byte-identity + payload idempotence (tools/wata-sil.sh)"
+WATA_HERM="$WATA_HERM" bash tools/wata-sil.sh || fail 7 "wata-sil.sh"
+pass 7 "wataclient payload idempotent; wata trees BYTE-IDENTICAL local-dirs vs source-in-link; BUILD-6 rides the source payload"
+
+banner 8 "linux/amd64 server smoke (tools/linux-amd64-smoke.sh)"
+LA_TX="$(mktemp)"
+if bash tools/linux-amd64-smoke.sh >"$LA_TX" 2>&1; then
+  cat "$LA_TX"
+  LA_MODE="$(awk -F= '/^MODE=/{print $2}' "$LA_TX")"
+  rm -f "$LA_TX"
+  pass 8 "linux/amd64 server: cross-build (x86-64 Linux ELF) + selfcheck (mode: $LA_MODE)"
+else
+  cat "$LA_TX"; rm -f "$LA_TX"
+  fail 8 "linux-amd64-smoke.sh"
+fi
+
+banner 9 "crossing-hatch residue: zero blessed crossings in the wata modules (tools/crossing-residue.sh)"
+bash tools/crossing-residue.sh || fail 9 "crossing-residue.sh"
+pass 9 "wataclient/wata-server/wata-fb at zero blessed crossings (M9 pinned)"
 
 echo
 echo "================= WATA-CI PASS ================="
