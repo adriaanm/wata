@@ -66,6 +66,28 @@ echo "== wataclient-tests: 2/7 plugin emit + 3/7 JVM conformance seed =="
 # sbt's wataclientJvm project retired with the move) — the SHARED sources (core
 # bytes/prelude/list under $SGOLA_HOME + wataclient ogg/oracle here) compile to
 # REAL JVM bytecode, no plugin, and Conformance runs the byte oracle on scalac.
+#
+# STDLIB-HOME migration (sgola GRADUATION-BRIEF ruling 16/17, 2026-07-20):
+# core's List/Option/Either/ListOps now live at their REAL scala.* FQNs
+# (list.scala declares `package scala.collection.immutable`, etc — see
+# scala_prelude.scala/scala_aliases.scala/scala_compiletime.scala), so this
+# leg must compile THOSE files too (the old bytes/prelude/list-only set left
+# `Option`/`ListOps` unresolved: "Not found: ListOps" + friends). The
+# designer ruling asked to re-point the classpath at minlib (the sgola-owned
+# `scala.*` source tree, $SGOLA_HOME/minlib) instead of the real stdlib jars.
+# Verified NOT viable as the sole classpath here: minlib deliberately never
+# reaches GenBCode (`-Ystop-after:inlining`, TASTy-only — it doesn't carry
+# backend runtime vocabulary), so backend-compiling it standalone crashes the
+# compiler ("does not have a member method apply" on a mid-pipeline megaphase).
+# A real, executable `scala.*` runtime (MatchError, Product, boxing, …) is
+# unavoidable for something that actually RUNS on a JVM. The honest-post-
+# migration fix that still runs: keep the real stdlib jars as the backing
+# runtime for everything core/minlib don't own, but compile core's real-FQN
+# sources FRESH into this unit (shadowing the jars' `List`/`Option`/`Either`/
+# `ListOps`) and put OUR classes FIRST on the runtime classpath — otherwise
+# the JVM verifier rejects our `Nil` linked against a same-named-but-
+# differently-shaped classpath `List` (VerifyError, reproduced then fixed
+# here). No `???` fired.
 SCALA_V="$(sed -n 's/.*scala3Version *= *"\([0-9.]*\)".*/\1/p' "$SGOLA_HOME/build.sbt" | head -1)"
 CACHE="$HOME/Library/Caches/Coursier/v1/https/repo1.maven.org/maven2"
 CP="$CACHE/org/scala-lang/scala3-compiler_3/$SCALA_V/scala3-compiler_3-$SCALA_V.jar"
@@ -81,11 +103,17 @@ java -cp "$CP" dotty.tools.dotc.Main -classpath "$CP" -d "$JVMWORK" \
   "$SGOLA_HOME/core/src/main/scala/bytes.scala" \
   "$SGOLA_HOME/core/src/main/scala/prelude.scala" \
   "$SGOLA_HOME/core/src/main/scala/list.scala" \
+  "$SGOLA_HOME/core/src/main/scala/scala_prelude.scala" \
+  "$SGOLA_HOME/core/src/main/scala/scala_aliases.scala" \
+  "$SGOLA_HOME/core/src/main/scala/scala_compiletime.scala" \
   "$SRC/ogg.scala" "$SRC/oracle.scala" \
   "$WATA/wataclient-jvm/src/main/scala/Conformance.scala" 2>&1 | tail -5
 [ -f "$JVMWORK/Conformance.class" ] || { rm -rf "$JVMWORK"; \
   echo "wataclient-tests FAIL: JVM conformance seed did not compile (plain dotc)"; exit 1; }
-java -cp "$CP:$JVMWORK" Conformance | tail -40
+# $JVMWORK FIRST: our freshly-compiled scala.{List,Option,Either,ListOps,...}
+# must shadow the real jars' same-named classes, or the JVM verifier rejects
+# the mixed-shape linkage (see the note above).
+java -cp "$JVMWORK:$CP" Conformance | tail -40
 STATUS=${PIPESTATUS[0]}
 rm -rf "$JVMWORK"
 if [ "$STATUS" -ne 0 ]; then
