@@ -70,7 +70,7 @@ object MatrixHttp:
 
   /** PUT profile displayname. */
   def setDisplayName(hs: Hs, userId: String, name: String): HttpResponse =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("displayname", JStr(name)) :: fs
     request(hs, "PUT", "/_matrix/client/v3/profile/" + userId + "/displayname", JSON,
       Json.write(JObj(fs)))
@@ -103,9 +103,9 @@ object MatrixHttp:
 
   /** POST /createRoom — a DM (is_direct + trusted_private_chat, http.zig). */
   def createRoom(hs: Hs, contactUserId: String): HttpResponse =
-    var inv: List[Json] = Nil[Json]()
+    var inv: List[Json] = Nil
     inv = JStr(contactUserId) :: inv
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("visibility", JStr("private")) :: fs
     fs = ("preset", JStr("trusted_private_chat")) :: fs
     fs = ("invite", JArr(inv)) :: fs
@@ -115,9 +115,9 @@ object MatrixHttp:
   /** POST /createRoom with an alias localpart (the FAMILY room; public — the
    *  per-family wireguard boundary is the trust boundary, http.zig). */
   def createRoomWithAlias(hs: Hs, aliasLocal: String, inviteUserId: String): HttpResponse =
-    var inv: List[Json] = Nil[Json]()
+    var inv: List[Json] = Nil
     inv = JStr(inviteUserId) :: inv
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("visibility", JStr("public")) :: fs
     fs = ("preset", JStr("public_chat")) :: fs
     fs = ("invite", JArr(inv)) :: fs
@@ -174,7 +174,7 @@ object MatrixHttp:
 
   def firstStringIn(items: List[Json]): String = items match
     case h :: t => WJson.strOr(h, "")
-    case Nil()  => ""
+    case Nil  => ""
 
   /** sync_thread.zig `updateMDirect`, json-module edition: parse the current
    *  m.direct object ("{}" when absent), append `roomId` to the contact's list
@@ -182,16 +182,16 @@ object MatrixHttp:
   def mdirectWithRoom(body: String, contactId: String, roomId: String): String =
     val j = parseOrNull(body)
     val fields = objFields(j)
-    Json.write(JObj(upsertRoomList(fields, contactId, roomId, Nil[(String, Json)]())))
+    Json.write(JObj(upsertRoomList(fields, contactId, roomId, Nil)))
 
   def objFields(j: Json): List[(String, Json)] = j match
     case o: JObj => o.fields
-    case _       => Nil[(String, Json)]()
+    case _       => Nil
 
   def upsertRoomList(fs: List[(String, Json)], contactId: String, roomId: String,
                      acc: List[(String, Json)]): List[(String, Json)] = fs match
     case p :: t => upsertRoomStep(p, t, contactId, roomId, acc)
-    case Nil()  => ListOps.reverse((contactId, oneRoomArr(roomId)) :: acc)
+    case Nil  => ListOps.reverse((contactId, oneRoomArr(roomId)) :: acc)
 
   def upsertRoomStep(p: (String, Json), t: List[(String, Json)], contactId: String,
                      roomId: String, acc: List[(String, Json)]): List[(String, Json)] =
@@ -206,14 +206,14 @@ object MatrixHttp:
   /** reverse `acc` onto `t` (the core List has no `:::`). */
   def revAppendFields(acc: List[(String, Json)], t: List[(String, Json)]): List[(String, Json)] = acc match
     case h :: r => revAppendStep(h, r, t)
-    case Nil()  => t
+    case Nil  => t
 
   def revAppendStep(h: (String, Json), r: List[(String, Json)],
                     t: List[(String, Json)]): List[(String, Json)] =
     revAppendFields(r, h :: t)
 
   def oneRoomArr(roomId: String): Json =
-    var xs: List[Json] = Nil[Json]()
+    var xs: List[Json] = Nil
     xs = JStr(roomId) :: xs
     JArr(xs)
 

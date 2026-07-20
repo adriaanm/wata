@@ -38,8 +38,8 @@ object MediaEdge:
     case _: Right[MErr, Auth] => download2(w, r)
 
   def download2(w: go.net.http.ResponseWriter, r: go.net.http.Request): Unit = Store.getMedia(r.pathValue("mediaId")) match
-    case s: Some[MediaItem] => Respond.raw(w, s.v.contentType, s.v.data)
-    case _: None[MediaItem] => Respond.finish(w, 404, Json.write(errEnvelope(MErr(404, M_NOT_FOUND(), "Media not found"))))
+    case s: Some[MediaItem] => Respond.raw(w, s.value.contentType, s.value.data)
+    case None => Respond.finish(w, 404, Json.write(errEnvelope(MErr(404, M_NOT_FOUND(), "Media not found"))))
 
 /** The catch-all: a Matrix 404 envelope for unmatched paths, 204 for CORS
  *  OPTIONS preflight. */
@@ -148,8 +148,8 @@ object SelfCheck:
     syncDemo()
 
   def printProfile(userId: String): Unit = Store.getProfile(userId) match
-    case s: Some[Profile] => println("profile " + Json.write(Router.profileJson(s.v)))
-    case _: None[Profile] => println("profile none")
+    case s: Some[Profile] => println("profile " + Json.write(Router.profileJson(s.value)))
+    case None => println("profile none")
 
   def acctDemo(): Unit =
     val c1 = obj1("foo", JStr("bar"))
@@ -164,8 +164,8 @@ object SelfCheck:
 
   def acctGetStr(userId: String, dtype: String): String =
     Store.getAccountData(userId, false, "", dtype) match
-      case s: Some[AcctData] => Json.write(s.v.content)
-      case _: None[AcctData] => "none"
+      case s: Some[AcctData] => Json.write(s.value.content)
+      case None => "none"
 
   // ---- M7 chunk 3 parity: membership state machine, IDs, room flow -----------
 
@@ -216,13 +216,13 @@ object SelfCheck:
     println("member-updated " + memberDisplayName(roomId, alice))
 
   def roomOf(roomId: String): Room = Store.getRoom(roomId) match
-    case s: Some[Room] => s.v
-    case _: None[Room] => Room(roomId, "10", Nil[(String, Event)](), Nil[Event]())
+    case s: Some[Room] => s.value
+    case None => Room(roomId, "10", Nil, Nil)
 
   def sendRedactDemo(roomId: String, sender: String): Unit =
     Store.addEvent(roomId, "m.room.message", sender, JsonNav.obj1("body", JStr("hi")), false, "", false, "", JNull()) match
-      case s: Some[Event] => sendRedactDemo2(roomId, sender, s.v)
-      case _: None[Event] => println("send none")
+      case s: Some[Event] => sendRedactDemo2(roomId, sender, s.value)
+      case None => println("send none")
 
   def sendRedactDemo2(roomId: String, sender: String, ev: Event): Unit =
     println("send-added true")
@@ -231,20 +231,20 @@ object SelfCheck:
     println("redacted-content " + eventContentStr(roomId, ev.eventId))
 
   def redactApply(roomId: String, eventId: String, red: Option[Event]): Unit = red match
-    case s: Some[Event] => Store.redactTarget(roomId, eventId, s.v)
-    case _: None[Event] => ()
+    case s: Some[Event] => Store.redactTarget(roomId, eventId, s.value)
+    case None => ()
 
   def eventContentStr(roomId: String, eventId: String): String = Store.getEventById(roomId, eventId) match
-    case s: Some[Event] => Json.write(s.v.content)
-    case _: None[Event] => "none"
+    case s: Some[Event] => Json.write(s.value.content)
+    case None => "none"
 
   def memberDisplayName(roomId: String, userId: String): String = Store.getRoom(roomId) match
-    case s: Some[Room] => memberDisplayName2(s.v, userId)
-    case _: None[Room] => "none"
+    case s: Some[Room] => memberDisplayName2(s.value, userId)
+    case None => "none"
 
   def memberDisplayName2(room: Room, userId: String): String = Store.stateContent(room, "m.room.member", userId) match
-    case s: Some[Json] => JsonNav.strField(s.v, "displayname", "")
-    case _: None[Json] => "none"
+    case s: Some[Json] => JsonNav.strField(s.value, "displayname", "")
+    case None => "none"
 
   // ---- M7 chunk 4 parity: /sync building (deterministic — no age/IDs printed) -
 
@@ -274,8 +274,8 @@ object SelfCheck:
   def nav2(j: Json, k1: String, k2: String): Json = navField(navField(j, k1), k2)
 
   def navField(j: Json, k: String): Json = JsonNav.getField(j, k) match
-    case s: Some[Json] => s.v
-    case _: None[Json] => JsonNav.emptyObj
+    case s: Some[Json] => s.value
+    case None => JsonNav.emptyObj
 
   def objLen(j: Json): scala.Long = j match
     case o: JObj => pairLen(o.fields, 0L)
@@ -283,7 +283,7 @@ object SelfCheck:
 
   def pairLen(xs: List[(String, Json)], n: scala.Long): scala.Long = xs match
     case _ :: t => pairLen(t, n + 1L)
-    case Nil()  => n
+    case Nil  => n
 
   def arrLen(j: Json): scala.Long = j match
     case a: JArr => jsonLen(a.items, 0L)
@@ -291,12 +291,12 @@ object SelfCheck:
 
   def jsonLen(xs: List[Json], n: scala.Long): scala.Long = xs match
     case _ :: t => jsonLen(t, n + 1L)
-    case Nil()  => n
+    case Nil  => n
 
   def firstRoom(rooms: List[Room]): Room = rooms match
     case h :: _ => h
-    case Nil()  => Room("", "10", Nil[(String, Event)](), Nil[Event]())
+    case Nil  => Room("", "10", Nil, Nil)
 
   def firstStr(xs: List[String]): String = xs match
     case h :: _ => h
-    case Nil()  => "none"
+    case Nil  => "none"

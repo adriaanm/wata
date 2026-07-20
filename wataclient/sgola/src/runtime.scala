@@ -225,7 +225,7 @@ object Runtime:
         case e :: t =>
           backfillIfSelfJoin(hs, e, selfUid)
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
 
   def backfillIfSelfJoin(hs: Hs, e: SyncEvent, selfUid: String): Unit = e match
     case m: MembershipChanged =>
@@ -252,7 +252,7 @@ object Runtime:
         case p :: t =>
           joinOne(hs, p)
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
 
   def joinOne(hs: Hs, p: (String, Json)): Unit =
     val roomId: String = p._1
@@ -266,7 +266,7 @@ object Runtime:
         case p :: t =>
           backfillIfLimited(hs, p)
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
 
   def backfillIfLimited(hs: Hs, p: (String, Json)): Unit =
     val roomId: String = p._1
@@ -291,7 +291,7 @@ object Runtime:
         case e :: t =>
           SyncEngine.ingestBackfill(roomId, e)
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
 
   /** publish to the capacity-1 cell: drain (sole producer — never racing
    *  another send), then send; a reader between the two just sees "no snapshot
@@ -420,8 +420,8 @@ object Runtime:
   def pollSnap(c: MatrixClient): Option[StateSnapshot] =
     val o = c.snaps.tryReceive()
     o match
-      case s: Some[StateSnapshot] => snapC.set(s.v)
-      case _: None[StateSnapshot] => ()
+      case s: Some[StateSnapshot] => snapC.set(s.value)
+      case None => ()
     o
 
   /** the most recent snapshot `pollSnap`/`waitForSnapshot` saw (client.zig
@@ -430,8 +430,8 @@ object Runtime:
   private val snapC: sgo.Atomic[StateSnapshot] = sgo.atomic(emptySnapshot())
 
   def emptySnapshot(): StateSnapshot =
-    StateSnapshot(Disconnected(), false, User("", ""), Nil[Contact](),
-      Nil[Conversation](), false, Family("", "", Nil[Contact]()))
+    StateSnapshot(Disconnected(), false, User("", ""), Nil,
+      Nil, false, Family("", "", Nil))
 
   /** non-blocking stop probe (a CLOSED channel's receive is always ready —
    *  the M7 close-signal persistence). select-as-EXPRESSION: the taken arm's
@@ -451,8 +451,8 @@ object Runtime:
       else if c.clock.nowUnixMillis() >= deadline then run = false
       else
         pollEvent(c) match
-          case s: Some[UiEvent] => found = isConnEvent(s.v, want)
-          case _: None[UiEvent] => c.clock.sleepMs(20L)
+          case s: Some[UiEvent] => found = isConnEvent(s.value, want)
+          case None => c.clock.sleepMs(20L)
     found
 
   def isConnEvent(e: UiEvent, want: ConnectionState): Boolean = e match
@@ -480,7 +480,7 @@ object Runtime:
       else if c.clock.nowUnixMillis() >= deadline then run = false
       else
         pollSnap(c) match
-          case s: Some[StateSnapshot] => found = pred(s.v)
-          case _: None[StateSnapshot] => c.clock.sleepMs(20L)
+          case s: Some[StateSnapshot] => found = pred(s.value)
+          case None => c.clock.sleepMs(20L)
     found
 

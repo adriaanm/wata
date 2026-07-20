@@ -16,7 +16,7 @@ object Sessions:
   /** encode a `Session` to its `config.json` object (field order matches
    *  config.zig's `saveSession` writer). */
   def toJson(s: Session): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("device_id", JStr(s.deviceId)) :: fs
     fs = ("user_id", JStr(s.userId)) :: fs
     fs = ("access_token", JStr(s.accessToken)) :: fs

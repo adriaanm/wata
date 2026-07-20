@@ -185,28 +185,28 @@ object WataLogic:
   def playSelected(s: WataState, ctx: FrameCtx): WataState =
     selectedMsg(ctx.snap, s.convContactIdx, s.msgSelected) match
       case m: Some[VoiceMessage] =>
-        if !m.v.isPlayed then pushReceipt(ctx, roomIdAt(ctx.snap, s.convContactIdx), m.v.id)
-        Runtime.sendAction(ctx.client, ActPlay(m.v.mxcUrl))
+        if !m.value.isPlayed then pushReceipt(ctx, roomIdAt(ctx.snap, s.convContactIdx), m.value.id)
+        Runtime.sendAction(ctx.client, ActPlay(m.value.mxcUrl))
         withPlaying(s, true)
-      case _: None[VoiceMessage] => s
+      case None => s
 
   def deleteSelected(s: WataState, ctx: FrameCtx): WataState =
     selectedMsg(ctx.snap, s.convContactIdx, s.msgSelected) match
       case m: Some[VoiceMessage] =>
-        Runtime.sendAction(ctx.client, ActRedact(roomIdAt(ctx.snap, s.convContactIdx), m.v.id))
+        Runtime.sendAction(ctx.client, ActRedact(roomIdAt(ctx.snap, s.convContactIdx), m.value.id))
         s
-      case _: None[VoiceMessage] => s
+      case None => s
 
   // ---- receipts (wata.zig pushReadReceipt / sendReadReceiptForConversation) --
   def sendReceiptForConversation(ctx: FrameCtx, idx: scala.Int): Unit =
     convAt(ctx.snap, idx) match
-      case c: Some[Conversation] => receiptLatest(ctx, c.v)
-      case _: None[Conversation] => ()
+      case c: Some[Conversation] => receiptLatest(ctx, c.value)
+      case None => ()
 
   def receiptLatest(ctx: FrameCtx, conv: Conversation): Unit =
     lastMsg(conv.messages) match
-      case m: Some[VoiceMessage] => pushReceipt(ctx, conv.roomId, m.v.id)
-      case _: None[VoiceMessage] => ()
+      case m: Some[VoiceMessage] => pushReceipt(ctx, conv.roomId, m.value.id)
+      case None => ()
 
   def pushReceipt(ctx: FrameCtx, roomId: String, eventId: String): Unit =
     if roomId != "" && eventId != "" then Runtime.sendAction(ctx.client, ActReceipt(roomId, eventId))
@@ -234,8 +234,8 @@ object WataLogic:
     var run = true
     while run do
       ctx.audioEvts.tryReceive() match
-        case e: Some[AudioEvt] => s = onAudioEvent(s, e.v, ctx)
-        case _: None[AudioEvt] => run = false
+        case e: Some[AudioEvt] => s = onAudioEvent(s, e.value, ctx)
+        case None => run = false
     s
 
   def onAudioEvent(s: WataState, e: AudioEvt, ctx: FrameCtx): WataState = e match
@@ -254,9 +254,9 @@ object WataLogic:
     val idx = convIdxForSend(s)
     convAt(ctx.snap, idx) match
       case c: Some[Conversation] =>
-        val contactId = if c.v.hasContact then c.v.contact.user.id else ""
-        Runtime.sendAction(ctx.client, ActSendVoice(c.v.roomId, contactId, ogg, durationMs))
-      case _: None[Conversation] => ()
+        val contactId = if c.value.hasContact then c.value.contact.user.id else ""
+        Runtime.sendAction(ctx.client, ActSendVoice(c.value.roomId, contactId, ogg, durationMs))
+      case None => ()
 
   def convIdxForSend(s: WataState): scala.Int = s.view match
     case _: VConversation => s.convContactIdx
@@ -305,18 +305,18 @@ object WataLogic:
   def renderContactRow(px: go.Bytes, ctx: FrameCtx, i: scala.Int, row: scala.Int, fg: scala.Int, selected: Boolean): Unit =
     convAt(ctx.snap, i) match
       case c: Some[Conversation] =>
-        val name = convName(ctx.snap, c.v)
-        val nameColor = if isFamily(c.v.convType) && !selected then Color.cyan else fg
+        val name = convName(ctx.snap, c.value)
+        val nameColor = if isFamily(c.value.convType) && !selected then Color.cyan else fg
         Font.drawText(px, clip(name, 18), 0, row, nameColor, false, 0)
-        if c.v.unplayedCount > 0 then
-          val badge = "" + c.v.unplayedCount
+        if c.value.unplayedCount > 0 then
+          val badge = "" + c.value.unplayedCount
           Font.drawText(px, badge, Font.COLS - badge.length, row, Color.yellow, false, 0)
-      case _: None[Conversation] => ()
+      case None => ()
 
   def renderConversation(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
     convAt(ctx.snap, s.convContactIdx) match
-      case c: Some[Conversation] => renderConvBody(s, px, c.v)
-      case _: None[Conversation] => Font.drawText(px, "No conversation", 3, 6, Color.midGray, false, 0)
+      case c: Some[Conversation] => renderConvBody(s, px, c.value)
+      case None => Font.drawText(px, "No conversation", 3, 6, Color.midGray, false, 0)
 
   def renderConvBody(s: WataState, px: go.Bytes, conv: Conversation): Unit =
     val header = if conv.hasContact then conv.contact.user.displayName else "Chat"
@@ -339,9 +339,9 @@ object WataLogic:
       msgAt(conv.messages, i) match
         case m: Some[VoiceMessage] =>
           if selected then Draw.fillRect(px, 0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)
-          val fg = if selected then Color.black else (if m.v.isPlayed then Color.midGray else Color.green)
-          renderMsgRow(px, m.v, row, fg)
-        case _: None[VoiceMessage] => ()
+          val fg = if selected then Color.black else (if m.value.isPlayed then Color.midGray else Color.green)
+          renderMsgRow(px, m.value, row, fg)
+        case None => ()
       i += 1
 
   def renderMsgRow(px: go.Bytes, m: VoiceMessage, row: scala.Int, fg: scala.Int): Unit =
@@ -424,27 +424,27 @@ object WataLogic:
     while going do
       cur match
         case _ :: t => n += 1; cur = t
-        case Nil()  => going = false
+        case Nil  => going = false
     n
 
   def convAt(snap: StateSnapshot, i: scala.Int): Option[Conversation] = nthConv(snap.conversations, i)
 
   def nthConv(cs: List[Conversation], i: scala.Int): Option[Conversation] =
-    if i < 0 then None[Conversation]()
+    if i < 0 then None
     else cs match
       case h :: t => nthConvStep(h, t, i)
-      case Nil()  => None[Conversation]()
+      case Nil  => None
 
   def nthConvStep(h: Conversation, t: List[Conversation], i: scala.Int): Option[Conversation] =
     if i == 0 then Some(h) else nthConv(t, i - 1)
 
   def roomIdAt(snap: StateSnapshot, i: scala.Int): String = convAt(snap, i) match
-    case c: Some[Conversation] => c.v.roomId
-    case _: None[Conversation] => ""
+    case c: Some[Conversation] => c.value.roomId
+    case None => ""
 
   def msgCount(snap: StateSnapshot, convIdx: scala.Int): scala.Int = convAt(snap, convIdx) match
-    case c: Some[Conversation] => msgCountList(c.v.messages)
-    case _: None[Conversation] => 0
+    case c: Some[Conversation] => msgCountList(c.value.messages)
+    case None => 0
 
   def msgCountList(ms: List[VoiceMessage]): scala.Int =
     var n = 0
@@ -453,30 +453,30 @@ object WataLogic:
     while going do
       cur match
         case _ :: t => n += 1; cur = t
-        case Nil()  => going = false
+        case Nil  => going = false
     n
 
   def selectedMsg(snap: StateSnapshot, convIdx: scala.Int, msgIdx: scala.Int): Option[VoiceMessage] =
     convAt(snap, convIdx) match
-      case c: Some[Conversation] => msgAt(c.v.messages, msgIdx)
-      case _: None[Conversation] => None[VoiceMessage]()
+      case c: Some[Conversation] => msgAt(c.value.messages, msgIdx)
+      case None => None
 
   def msgAt(ms: List[VoiceMessage], i: scala.Int): Option[VoiceMessage] =
-    if i < 0 then None[VoiceMessage]()
+    if i < 0 then None
     else ms match
       case h :: t => msgAtStep(h, t, i)
-      case Nil()  => None[VoiceMessage]()
+      case Nil  => None
 
   def msgAtStep(h: VoiceMessage, t: List[VoiceMessage], i: scala.Int): Option[VoiceMessage] =
     if i == 0 then Some(h) else msgAt(t, i - 1)
 
   def lastMsg(ms: List[VoiceMessage]): Option[VoiceMessage] = ms match
     case h :: t => lastMsgStep(h, t)
-    case Nil()  => None[VoiceMessage]()
+    case Nil  => None
 
   def lastMsgStep(h: VoiceMessage, t: List[VoiceMessage]): Option[VoiceMessage] = t match
     case h2 :: t2 => lastMsgStep(h2, t2)
-    case Nil()    => Some(h)
+    case Nil    => Some(h)
 
 /** M10 chunk 5: the UNIFIED per-frame context (main.zig setContext), one
  *  record for every applet: the live snapshot, the connection, the matrix
@@ -681,8 +681,8 @@ object SettingsLogic:
     var run = true
     while run do
       ctx.audioEvts.tryReceive() match
-        case e: Some[AudioEvt] => st = onEcho(st, e.v)
-        case _: None[AudioEvt] => run = false
+        case e: Some[AudioEvt] => st = onEcho(st, e.value)
+        case None => run = false
     st
 
   def onEcho(s: SettingsState, e: AudioEvt): SettingsState = e match

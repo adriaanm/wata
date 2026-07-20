@@ -128,4 +128,4 @@ object Config:
   def userByLocalpart(localpart: String): Option[UserCfg] =
     if localpart == "alice" then Some(UserCfg("alice", "testpass123", "Alice"))
     else if localpart == "bob" then Some(UserCfg("bob", "testpass123", "Bob"))
-    else None[UserCfg]()
+    else None

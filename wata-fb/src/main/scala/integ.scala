@@ -120,12 +120,12 @@ object Integ:
         // M8 chunk 6: pollEvent returns Option (tryReceive) — no stash cell.
         Runtime.pollEvent(c) match
           case s: Some[UiEvent] =>
-            val v = sendResultOf(s.v)
+            val v = sendResultOf(s.value)
             if v == 1 then
               res = true
               run = false
             else if v == 2 then run = false
-          case _: None[UiEvent] => c.clock.sleepMs(20L)
+          case None => c.clock.sleepMs(20L)
     res
 
   def sendResultOf(e: UiEvent): Int = e match
@@ -137,7 +137,7 @@ object Integ:
 
   def findConv(cs: List[Conversation], contactId: String): Option[Conversation] = cs match
     case h :: t => findConvStep(h, t, contactId)
-    case Nil()  => None[Conversation]()
+    case Nil  => None
 
   def findConvStep(h: Conversation, t: List[Conversation], contactId: String): Option[Conversation] =
     if h.hasContact && h.contact.user.id == contactId then Some(h)
@@ -145,7 +145,7 @@ object Integ:
 
   def findFamilyConv(cs: List[Conversation]): Option[Conversation] = cs match
     case h :: t => findFamilyStep(h, t)
-    case Nil()  => None[Conversation]()
+    case Nil  => None
 
   def findFamilyStep(h: Conversation, t: List[Conversation]): Option[Conversation] =
     if isFamilyType(h.convType) then Some(h) else findFamilyConv(t)
@@ -163,7 +163,7 @@ object Integ:
         case h :: t =>
           n += 1
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
     n
 
   def dropMsgs(ms: List[VoiceMessage], n: Int): List[VoiceMessage] =
@@ -174,7 +174,7 @@ object Integ:
         case h :: t =>
           cur = t
           i += 1
-        case Nil() => i = n
+        case Nil => i = n
     cur
 
   def dursMatch(ms: List[VoiceMessage], ds: List[Long]): Boolean =
@@ -185,7 +185,7 @@ object Integ:
     while going do
       want match
         case d :: dt => going = dursMatchStep(cur, d)
-        case Nil()   => going = false
+        case Nil   => going = false
       if going then
         want = tailDurs(want)
         cur = tailMsgs(cur)
@@ -196,32 +196,32 @@ object Integ:
    *  ran out of messages). */
   def dursMatchStep(cur: List[VoiceMessage], d: Long): Boolean = cur match
     case m :: t => m.durationMs == d
-    case Nil()  => false
+    case Nil  => false
 
   def doneMatch(want: List[Long]): Boolean = want match
     case _ :: _ => false // walk ended early -> mismatch
-    case Nil()  => true
+    case Nil  => true
 
   def tailDurs(ds: List[Long]): List[Long] = ds match
     case _ :: t => t
-    case Nil()  => Nil[Long]()
+    case Nil  => Nil
 
   def tailMsgs(ms: List[VoiceMessage]): List[VoiceMessage] = ms match
     case _ :: t => t
-    case Nil()  => Nil[VoiceMessage]()
+    case Nil  => Nil
 
   /** Zig `hasMessageFromContact`. */
   def hasMsgFrom(s: StateSnapshot, contactId: String, min: Int): Boolean =
     findConv(s.conversations, contactId) match
-      case cv: Some[Conversation] => msgCount(cv.v.messages) >= min
-      case _: None[Conversation]  => false
+      case cv: Some[Conversation] => msgCount(cv.value.messages) >= min
+      case None  => false
 
   /** Zig `lastMessagesMatchDurations`: the conversation's LAST k messages have
    *  exactly these durations, in order. */
   def lastDursMatch(s: StateSnapshot, contactId: String, ds: List[Long]): Boolean =
     findConv(s.conversations, contactId) match
-      case cv: Some[Conversation] => lastDursIn(cv.v.messages, ds)
-      case _: None[Conversation]  => false
+      case cv: Some[Conversation] => lastDursIn(cv.value.messages, ds)
+      case None  => false
 
   def lastDursIn(ms: List[VoiceMessage], ds: List[Long]): Boolean =
     val n = msgCount(ms)
@@ -238,18 +238,18 @@ object Integ:
         case _ :: t =>
           n += 1
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
     n
 
   /** Zig `messagePlayed`: the message with `eventId` is marked played. */
   def msgPlayed(s: StateSnapshot, contactId: String, eventId: String): Boolean =
     findConv(s.conversations, contactId) match
-      case cv: Some[Conversation] => playedIn(cv.v.messages, eventId)
-      case _: None[Conversation]  => false
+      case cv: Some[Conversation] => playedIn(cv.value.messages, eventId)
+      case None  => false
 
   def playedIn(ms: List[VoiceMessage], eventId: String): Boolean = ms match
     case m :: t => playedStep(m, t, eventId)
-    case Nil()  => false
+    case Nil  => false
 
   def playedStep(m: VoiceMessage, t: List[VoiceMessage], eventId: String): Boolean =
     if m.id == eventId && m.isPlayed then true else playedIn(t, eventId)
@@ -258,12 +258,12 @@ object Integ:
    *  missing conversation counts as gone). */
   def durGone(s: StateSnapshot, contactId: String, d: Long): Boolean =
     findConv(s.conversations, contactId) match
-      case cv: Some[Conversation] => !hasDurIn(cv.v.messages, d)
-      case _: None[Conversation]  => true
+      case cv: Some[Conversation] => !hasDurIn(cv.value.messages, d)
+      case None  => true
 
   def hasDurIn(ms: List[VoiceMessage], d: Long): Boolean = ms match
     case m :: t => hasDurStep(m, t, d)
-    case Nil()  => false
+    case Nil  => false
 
   def hasDurStep(m: VoiceMessage, t: List[VoiceMessage], d: Long): Boolean =
     if m.durationMs == d then true else hasDurIn(t, d)
@@ -275,7 +275,7 @@ object Integ:
 
   def hasFamilyConv(cs: List[Conversation]): Boolean = findFamilyConv(cs) match
     case _: Some[Conversation] => true
-    case _: None[Conversation] => false
+    case None => false
 
   /** Zig `familyHasDuration`. */
   def familyHasDur(s: StateSnapshot, d: Long): Boolean =
@@ -283,14 +283,14 @@ object Integ:
     else familyDurIn(s.conversations, d)
 
   def familyDurIn(cs: List[Conversation], d: Long): Boolean = findFamilyConv(cs) match
-    case cv: Some[Conversation] => hasDurIn(cv.v.messages, d)
-    case _: None[Conversation]  => false
+    case cv: Some[Conversation] => hasDurIn(cv.value.messages, d)
+    case None  => false
 
   /** stash the DM conversation's room id + LAST message's event id + mxc url. */
   def stashLastMsg(s: StateSnapshot, contactId: String): Boolean =
     findConv(s.conversations, contactId) match
-      case cv: Some[Conversation] => stashFromConv(cv.v)
-      case _: None[Conversation]  => false
+      case cv: Some[Conversation] => stashFromConv(cv.value)
+      case None  => false
 
   def stashFromConv(conv: Conversation): Boolean =
     val n = msgCount(conv.messages)
@@ -299,7 +299,7 @@ object Integ:
 
   def stashMsgFields(roomId: String, lastOne: List[VoiceMessage]): Boolean = lastOne match
     case m :: t => stashMsg1(roomId, m)
-    case Nil()  => false
+    case Nil  => false
 
   def stashMsg1(roomId: String, m: VoiceMessage): Boolean =
     outRoomC.set(roomId)
@@ -310,15 +310,15 @@ object Integ:
   /** stash the room id + event id + mxc of the message with duration `d`. */
   def stashMsgWithDur(s: StateSnapshot, contactId: String, d: Long): Boolean =
     findConv(s.conversations, contactId) match
-      case cv: Some[Conversation] => stashDurConv(cv.v, d)
-      case _: None[Conversation]  => false
+      case cv: Some[Conversation] => stashDurConv(cv.value, d)
+      case None  => false
 
   def stashDurConv(conv: Conversation, d: Long): Boolean =
     stashDurWalk(conv.roomId, conv.messages, d)
 
   def stashDurWalk(roomId: String, ms: List[VoiceMessage], d: Long): Boolean = ms match
     case m :: t => stashDurStep(roomId, m, t, d)
-    case Nil()  => false
+    case Nil  => false
 
   def stashDurStep(roomId: String, m: VoiceMessage, t: List[VoiceMessage], d: Long): Boolean =
     if m.durationMs == d then stashMsg1(roomId, m)
@@ -327,8 +327,8 @@ object Integ:
   /** stash the FAMILY conversation's room id. */
   def stashFamilyRoom(s: StateSnapshot): Boolean =
     findFamilyConv(s.conversations) match
-      case cv: Some[Conversation] => stashRoomOf(cv.v)
-      case _: None[Conversation]  => false
+      case cv: Some[Conversation] => stashRoomOf(cv.value)
+      case None  => false
 
   def stashRoomOf(conv: Conversation): Boolean =
     outRoomC.set(conv.roomId)
@@ -435,14 +435,14 @@ object Integ:
     else Runtime.waitForSnapshot(c, s => lastDursMatch(s, aliceId, durs6()), 30000L)
 
   def durs3(): List[Long] =
-    var ds: List[Long] = Nil[Long]()
+    var ds: List[Long] = Nil
     ds = 300L :: ds
     ds = 200L :: ds
     ds = 100L :: ds
     ds
 
   def durs6(): List[Long] =
-    var ds: List[Long] = Nil[Long]()
+    var ds: List[Long] = Nil
     ds = 600L :: ds
     ds = 500L :: ds
     ds = 400L :: ds
@@ -485,7 +485,7 @@ object Integ:
       true
 
   def one(d: Long): List[Long] =
-    var ds: List[Long] = Nil[Long]()
+    var ds: List[Long] = Nil
     ds = d :: ds
     ds
 

@@ -75,7 +75,7 @@ object FbCaps:
         case p :: t =>
           setHeader1(r, p)
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
 
   def setHeader1(r: go.net.http.Request, p: (String, String)): Unit =
     val k: String = p._1

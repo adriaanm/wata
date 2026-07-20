@@ -136,14 +136,14 @@ object Sync:
   // ---- initial sync ----------------------------------------------------------
 
   def initialParts(userId: String, upTo: scala.Long): SyncParts =
-    val joins = buildJoinsInitial(Store.roomsForUser(userId, "join"), userId, Nil[(String, Json)]())
-    val invites = buildInvites(Store.roomsForUser(userId, "invite"), Nil[(String, Json)]())
+    val joins = buildJoinsInitial(Store.roomsForUser(userId, "join"), userId, Nil)
+    val invites = buildInvites(Store.roomsForUser(userId, "invite"), Nil)
     val global = Store.allAccountData(userId, false, "")
     SyncParts(joins, invites, global, upTo)
 
   def buildJoinsInitial(rooms: List[Room], userId: String, acc: List[(String, Json)]): List[(String, Json)] = rooms match
     case h :: t => buildJoinsInitialStep(h, t, userId, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def buildJoinsInitialStep(h: Room, t: List[Room], userId: String, acc: List[(String, Json)]): List[(String, Json)] =
     var acc2: List[(String, Json)] = acc
@@ -163,14 +163,14 @@ object Sync:
   // ---- incremental sync ------------------------------------------------------
 
   def incrParts(userId: String, sinceSeq: scala.Long, upTo: scala.Long): SyncParts =
-    val joins = buildJoinsIncr(Store.roomsForUser(userId, "join"), userId, sinceSeq, Nil[(String, Json)]())
-    val invites = buildInvitesIncr(Store.roomsForUser(userId, "invite"), userId, sinceSeq, Nil[(String, Json)]())
+    val joins = buildJoinsIncr(Store.roomsForUser(userId, "join"), userId, sinceSeq, Nil)
+    val invites = buildInvitesIncr(Store.roomsForUser(userId, "invite"), userId, sinceSeq, Nil)
     val global = Store.acctSinceGlobal(userId, sinceSeq)
     SyncParts(joins, invites, global, upTo)
 
   def buildJoinsIncr(rooms: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] = rooms match
     case h :: t => buildJoinsIncrStep(h, t, userId, sinceSeq, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   /** SPEC-CORRECTION over dormant sync.ts (recorded in the report): sync.ts
    *  includes an incremental room block whenever it has ANY receipts ("receipts
@@ -195,16 +195,16 @@ object Sync:
     fs = ("state", obj1("events", stateEventsIncr(newEvents))) :: fs
     fs = ("timeline", timelineObj(eventsArr(newEvents), "s" + JsonNav.longStr(sinceSeq))) :: fs
     fs = ("ephemeral", obj1("events", formatReceipts(receipts))) :: fs
-    fs = ("account_data", obj1("events", JArr(Nil[Json]()))) :: fs
+    fs = ("account_data", obj1("events", JArr(Nil))) :: fs
     fs = ("unread_notifications", unreadZero) :: fs
     endObj(fs)
 
   /** incremental state: only the NEW events that carry a state key. */
-  def stateEventsIncr(evs: List[Event]): Json = JArr(ListOps.reverse(filterStateEv(evs, Nil[Json]())))
+  def stateEventsIncr(evs: List[Event]): Json = JArr(ListOps.reverse(filterStateEv(evs, Nil)))
 
   def filterStateEv(evs: List[Event], acc: List[Json]): List[Json] = evs match
     case h :: t => filterStateEvStep(h, t, acc)
-    case Nil()  => acc
+    case Nil  => acc
 
   def filterStateEvStep(h: Event, t: List[Event], acc: List[Json]): List[Json] =
     var acc2: List[Json] = acc
@@ -215,7 +215,7 @@ object Sync:
 
   def buildInvites(rooms: List[Room], acc: List[(String, Json)]): List[(String, Json)] = rooms match
     case h :: t => buildInvitesStep(h, t, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def buildInvitesStep(h: Room, t: List[Room], acc: List[(String, Json)]): List[(String, Json)] =
     var acc2: List[(String, Json)] = acc
@@ -226,7 +226,7 @@ object Sync:
    *  than the since-token (sync.ts's `inviteEvent._seq <= sinceSeq` skip). */
   def buildInvitesIncr(rooms: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] = rooms match
     case h :: t => buildInvitesIncrStep(h, t, userId, sinceSeq, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def buildInvitesIncrStep(h: Room, t: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] =
     var acc2: List[(String, Json)] = acc
@@ -234,8 +234,8 @@ object Sync:
     buildInvitesIncr(t, userId, sinceSeq, acc2)
 
   def isNewInvite(room: Room, userId: String, sinceSeq: scala.Long): Boolean = Store.memberEvent(room, userId) match
-    case s: Some[Event] => s.v.seq > sinceSeq
-    case _: None[Event] => false
+    case s: Some[Event] => s.value.seq > sinceSeq
+    case None => false
 
   def inviteBlock(room: Room): Json =
     obj1("invite_state", obj1("events", strippedInviteArr(room.state)))
@@ -249,11 +249,11 @@ object Sync:
 
   /** up to five join/invite members other than this user, in state order. */
   def heroesOf(state: List[(String, Event)], userId: String): List[String] =
-    take5(heroesList(state, userId, Nil[String]()))
+    take5(heroesList(state, userId, Nil))
 
   def heroesList(state: List[(String, Event)], userId: String, acc: List[String]): List[String] = state match
     case p :: t => heroesListStep(p, t, userId, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def heroesListStep(p: (String, Event), t: List[(String, Event)], userId: String, acc: List[String]): List[String] =
     val ev: Event = p._2
@@ -272,7 +272,7 @@ object Sync:
 
   def countMembership(state: List[(String, Event)], want: String, n: scala.Long): scala.Long = state match
     case p :: t => countMembershipStep(p, t, want, n)
-    case Nil()  => n
+    case Nil  => n
 
   def countMembershipStep(p: (String, Event), t: List[(String, Event)], want: String, n: scala.Long): scala.Long =
     val ev: Event = p._2
@@ -299,28 +299,28 @@ object Sync:
     case _: JNull => JsonNav.emptyObj
     case _        => u
 
-  def eventsArr(evs: List[Event]): Json = JArr(ListOps.reverse(mapStrip(evs, Nil[Json]())))
+  def eventsArr(evs: List[Event]): Json = JArr(ListOps.reverse(mapStrip(evs, Nil)))
 
   def mapStrip(evs: List[Event], acc: List[Json]): List[Json] = evs match
     case h :: t => mapStrip(t, stripAndAge(h) :: acc)
-    case Nil()  => acc
+    case Nil  => acc
 
-  def stateValuesArr(state: List[(String, Event)]): Json = JArr(ListOps.reverse(mapStripState(state, Nil[Json]())))
+  def stateValuesArr(state: List[(String, Event)]): Json = JArr(ListOps.reverse(mapStripState(state, Nil)))
 
   def mapStripState(state: List[(String, Event)], acc: List[Json]): List[Json] = state match
     case p :: t => mapStripStateStep(p, t, acc)
-    case Nil()  => acc
+    case Nil  => acc
 
   def mapStripStateStep(p: (String, Event), t: List[(String, Event)], acc: List[Json]): List[Json] =
     val ev: Event = p._2
     mapStripState(t, stripAndAge(ev) :: acc)
 
   /** stripped state for an invited room: {type, state_key, content, sender}. */
-  def strippedInviteArr(state: List[(String, Event)]): Json = JArr(ListOps.reverse(mapStripped(state, Nil[Json]())))
+  def strippedInviteArr(state: List[(String, Event)]): Json = JArr(ListOps.reverse(mapStripped(state, Nil)))
 
   def mapStripped(state: List[(String, Event)], acc: List[Json]): List[Json] = state match
     case p :: t => mapStrippedStep(p, t, acc)
-    case Nil()  => acc
+    case Nil  => acc
 
   def mapStrippedStep(p: (String, Event), t: List[(String, Event)], acc: List[Json]): List[Json] =
     val ev: Event = p._2
@@ -331,11 +331,11 @@ object Sync:
 
   // ---- account-data events ---------------------------------------------------
 
-  def acctEventsArr(items: List[AcctData]): Json = JArr(ListOps.reverse(acctEvents(items, Nil[Json]())))
+  def acctEventsArr(items: List[AcctData]): Json = JArr(ListOps.reverse(acctEvents(items, Nil)))
 
   def acctEvents(items: List[AcctData], acc: List[Json]): List[Json] = items match
     case h :: t => acctEvents(t, acctEventObj(h) :: acc)
-    case Nil()  => acc
+    case Nil  => acc
 
   def acctEventObj(a: AcctData): Json = obj2("type", JStr(a.dtype), "content", a.content)
 
@@ -346,12 +346,12 @@ object Sync:
   // folding the flat receipt list into a nested JObj via jsonSet.
 
   def formatReceipts(rs: List[Receipt]): Json =
-    if isEmptyR(rs) then JArr(Nil[Json]())
+    if isEmptyR(rs) then JArr(Nil)
     else arr1(obj2("type", JStr("m.receipt"), "content", groupReceipts(rs, emptyObj)))
 
   def groupReceipts(rs: List[Receipt], content: Json): Json = rs match
     case h :: t => groupReceipts(t, addReceipt(content, h))
-    case Nil()  => content
+    case Nil  => content
 
   def addReceipt(content: Json, r: Receipt): Json =
     val byEvent = objFieldOr(content, r.eventId)
@@ -361,38 +361,38 @@ object Sync:
     JsonNav.jsonSet(content, r.eventId, newByType)
 
   def objFieldOr(j: Json, key: String): Json = getField(j, key) match
-    case s: Some[Json] => s.v
-    case _: None[Json] => emptyObj
+    case s: Some[Json] => s.value
+    case None => emptyObj
 
   // ---- list helpers ----------------------------------------------------------
 
-  def strArr(xs: List[String]): Json = JArr(ListOps.reverse(strJsons(xs, Nil[Json]())))
+  def strArr(xs: List[String]): Json = JArr(ListOps.reverse(strJsons(xs, Nil)))
 
   def strJsons(xs: List[String], acc: List[Json]): List[Json] = xs match
     case h :: t => strJsons(t, JStr(h) :: acc)
-    case Nil()  => acc
+    case Nil  => acc
 
-  def take5(xs: List[String]): List[String] = takeN(xs, 5, Nil[String]())
+  def take5(xs: List[String]): List[String] = takeN(xs, 5, Nil)
 
   def takeN(xs: List[String], n: scala.Int, acc: List[String]): List[String] =
     if n <= 0 then ListOps.reverse(acc) else takeNStep(xs, n, acc)
 
   def takeNStep(xs: List[String], n: scala.Int, acc: List[String]): List[String] = xs match
     case h :: t => takeN(t, n - 1, h :: acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def isEmptyEv(xs: List[Event]): Boolean = xs match
     case _ :: _ => false
-    case Nil()  => true
+    case Nil  => true
 
   def isEmptyR(xs: List[Receipt]): Boolean = xs match
     case _ :: _ => false
-    case Nil()  => true
+    case Nil  => true
 
   def notEmptyPairs(xs: List[(String, Json)]): Boolean = xs match
     case _ :: _ => true
-    case Nil()  => false
+    case Nil  => false
 
   def notEmptyAcct(xs: List[AcctData]): Boolean = xs match
     case _ :: _ => true
-    case Nil()  => false
+    case Nil  => false

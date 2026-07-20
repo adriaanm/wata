@@ -99,4 +99,4 @@ object FbTest:
         case ev :: t =>
           println("key " + Evdev.keyName(ev.key) + " " + Evdev.stateName(ev.state))
           cur = t
-        case Nil() => going = false
+        case Nil => going = false

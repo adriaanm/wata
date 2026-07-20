@@ -33,7 +33,7 @@ object SyncDescribe:
             b.append('\n')
           b.append(runFixture(c.head._2, c.head._3))
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def runFixture(name: String, body: String): String =
@@ -71,7 +71,7 @@ object SyncDescribe:
         case c: ::[SyncEvent] =>
           b.append(describeEvent(c.head))
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def describeEvent(e: SyncEvent): String = e match
@@ -92,7 +92,7 @@ object SyncDescribe:
         case c: ::[RoomState] =>
           b.append(describeRoom(c.head))
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.append(describeDirect())
     b.toString
 
@@ -133,7 +133,7 @@ object SyncDescribe:
           b.append(boolStr(c.head.isDirect))
           b.append('\n')
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def describeVoices(vs: List[VoiceMessageRaw]): String =
@@ -153,7 +153,7 @@ object SyncDescribe:
           b.append(c.head.durationMs.toInt)
           b.append('\n')
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def describeReceipts(res: List[ReceiptEntry]): String =
@@ -169,7 +169,7 @@ object SyncDescribe:
           b.append(strListStr(c.head.userIds))
           b.append('\n')
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def describeDirect(): String =
@@ -185,7 +185,7 @@ object SyncDescribe:
           b.append(strListStr(c.head.roomIds))
           b.append('\n')
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def strListStr(xs: List[String]): String =
@@ -198,7 +198,7 @@ object SyncDescribe:
           b.append(' ')
           b.append(c.head)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   // ---- snapshot -------------------------------------------------------------------
@@ -236,7 +236,7 @@ object SyncDescribe:
           b.append('"')
           b.append('\n')
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def contactIdsStr(cs: List[Contact]): String =
@@ -251,7 +251,7 @@ object SyncDescribe:
           b.append(c.head.user.id)
           first = false
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def describeConvs(cs: List[Conversation]): String =
@@ -263,7 +263,7 @@ object SyncDescribe:
         case c: ::[Conversation] =>
           b.append(describeConv(c.head))
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def describeConv(c: Conversation): String =
@@ -302,5 +302,5 @@ object SyncDescribe:
           b.append(boolStr(c.head.isPlayed))
           b.append('\n')
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString

@@ -38,19 +38,19 @@ class StoreState:
     HashMap.empty[String, Device](k => sgo.hash(k), (a, b) => a == b)
   var profiles: HashMap[String, Profile] =
     HashMap.empty[String, Profile](k => sgo.hash(k), (a, b) => a == b)
-  var acct: List[AcctData] = Nil[AcctData]()
+  var acct: List[AcctData] = Nil
   var rooms: HashMap[String, Room] =
     HashMap.empty[String, Room](k => sgo.hash(k), (a, b) => a == b)
   var aliases: HashMap[String, String] =
     HashMap.empty[String, String](k => sgo.hash(k), (a, b) => a == b)
   var media: HashMap[String, MediaItem] =
     HashMap.empty[String, MediaItem](k => sgo.hash(k), (a, b) => a == b)
-  var receiptList: List[Receipt] = Nil[Receipt]()
+  var receiptList: List[Receipt] = Nil
   var txns: HashMap[String, String] =
     HashMap.empty[String, String](k => sgo.hash(k), (a, b) => a == b)
-  var roomIds: List[String] = Nil[String]()
+  var roomIds: List[String] = Nil
   var seq: scala.Long = 0L
-  var waiters: List[Waiter] = Nil[Waiter]()
+  var waiters: List[Waiter] = Nil
   var waiterSeq: scala.Long = 0L
 
 /** A pure snapshot crossing out of `updateMemberProfile`'s `withLock` (the
@@ -118,8 +118,8 @@ object Store:
     cell.withLock(st => dropDevice(st, HashMap.get(st.devices, deviceId), deviceId))
 
   def dropDevice(st: StoreState, d: Option[Device], deviceId: String): Unit = d match
-    case s: Some[Device] => dropDeviceGo(st, s.v, deviceId)
-    case _: None[Device] => ()
+    case s: Some[Device] => dropDeviceGo(st, s.value, deviceId)
+    case None => ()
 
   def dropDeviceGo(st: StoreState, d: Device, deviceId: String): Unit =
     st.tokens = HashMap.remove(st.tokens, d.accessToken)
@@ -150,8 +150,8 @@ object Store:
     updateMemberProfile(userId)
 
   def profileOr(p: Option[Profile]): Profile = p match
-    case s: Some[Profile] => s.v
-    case _: None[Profile] => Profile("", "")
+    case s: Some[Profile] => s.value
+    case None => Profile("", "")
 
   /** profile.ts `updateMemberProfile`: rewrite the user's `m.room.member` state
    *  event in every room they've joined with the freshly-stored profile, and
@@ -165,7 +165,7 @@ object Store:
 
   def updateRooms(ids: List[String], userId: String, prof: Profile): Unit = ids match
     case h :: t => updateRoomsStep(h, t, userId, prof)
-    case Nil()  => ()
+    case Nil  => ()
 
   def updateRoomsStep(h: String, t: List[String], userId: String, prof: Profile): Unit =
     updateOneRoom(h, userId, prof)
@@ -176,13 +176,13 @@ object Store:
     case _        => ()
 
   def rewriteMember(roomId: String, userId: String, prof: Profile): Unit = getRoom(roomId) match
-    case s: Some[Room] => rewriteMember2(s.v, roomId, userId, prof)
-    case _: None[Room] => ()
+    case s: Some[Room] => rewriteMember2(s.value, roomId, userId, prof)
+    case None => ()
 
   def rewriteMember2(room: Room, roomId: String, userId: String, prof: Profile): Unit =
     lookupState(room.state, stateKeyOf("m.room.member", userId)) match
-      case s: Some[Event] => rewriteMember3(roomId, userId, prof, s.v.content)
-      case _: None[Event] => ()
+      case s: Some[Event] => rewriteMember3(roomId, userId, prof, s.value.content)
+      case None => ()
 
   def rewriteMember3(roomId: String, userId: String, prof: Profile, content: Json): Unit =
     addEvent(roomId, "m.room.member", userId, mergeProfile(content, prof), true, userId, false, "", JNull())
@@ -205,17 +205,17 @@ object Store:
 
   def acctExists(xs: List[AcctData], item: AcctData): Boolean = xs match
     case h :: t => acctExistsStep(h, t, item)
-    case Nil()  => false
+    case Nil  => false
 
   def acctExistsStep(h: AcctData, t: List[AcctData], item: AcctData): Boolean =
     if acctSameKey(h, item) then true else acctExists(t, item)
 
   def acctMap(xs: List[AcctData], item: AcctData): List[AcctData] =
-    acctMapGo(xs, item, Nil[AcctData]())
+    acctMapGo(xs, item, Nil)
 
   def acctMapGo(xs: List[AcctData], item: AcctData, acc: List[AcctData]): List[AcctData] = xs match
     case h :: t => acctMapStep(h, t, item, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def acctMapStep(h: AcctData, t: List[AcctData], item: AcctData, acc: List[AcctData]): List[AcctData] =
     if acctSameKey(h, item) then acctMapGo(t, item, item :: acc)
@@ -230,7 +230,7 @@ object Store:
 
   def findAcct(xs: List[AcctData], probe: AcctData): Option[AcctData] = xs match
     case h :: t => findAcctStep(h, t, probe)
-    case Nil()  => None[AcctData]()
+    case Nil  => None
 
   def findAcctStep(h: AcctData, t: List[AcctData], probe: AcctData): Option[AcctData] =
     if acctSameKey(h, probe) then Some(h) else findAcct(t, probe)
@@ -283,11 +283,11 @@ object Store:
    *  already removed+closed it, this finds nothing. Never closes — the caller
    *  discards its own channel. */
   def removeWaiter(id: scala.Long): Unit =
-    cell.withLock(st => st.waiters = dropId(st.waiters, id, Nil[Waiter]()))
+    cell.withLock(st => st.waiters = dropId(st.waiters, id, Nil))
 
   def dropId(xs: List[Waiter], id: scala.Long, acc: List[Waiter]): List[Waiter] = xs match
     case h :: t => dropIdStep(h, t, id, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def dropIdStep(h: Waiter, t: List[Waiter], id: scala.Long, acc: List[Waiter]): List[Waiter] =
     var acc2: List[Waiter] = acc
@@ -303,13 +303,13 @@ object Store:
   def notifyUser(userId: String): Unit =
     cell.withLock { st =>
       val old = st.waiters
-      st.waiters = dropUser(old, userId, Nil[Waiter]())
+      st.waiters = dropUser(old, userId, Nil)
       closeUser(old, userId)
     }
 
   def dropUser(xs: List[Waiter], userId: String, acc: List[Waiter]): List[Waiter] = xs match
     case h :: t => dropUserStep(h, t, userId, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def dropUserStep(h: Waiter, t: List[Waiter], userId: String, acc: List[Waiter]): List[Waiter] =
     var acc2: List[Waiter] = acc
@@ -318,7 +318,7 @@ object Store:
 
   def closeUser(xs: List[Waiter], userId: String): Unit = xs match
     case h :: t => closeUserStep(h, t, userId)
-    case Nil()  => ()
+    case Nil  => ()
 
   def closeUserStep(h: Waiter, t: List[Waiter], userId: String): Unit =
     if h.userId == userId then h.ch.close() else ()
@@ -352,7 +352,7 @@ object Store:
   def createRoom(): String =
     val id = genRoomId()
     cell.withLock { st =>
-      st.rooms = HashMap.put(st.rooms, id, Room(id, "10", Nil[(String, Event)](), Nil[Event]()))
+      st.rooms = HashMap.put(st.rooms, id, Room(id, "10", Nil, Nil))
       st.roomIds = id :: st.roomIds
       if Journal.enabled then Journal.rec(Journal.roomOp(id)) else ()
     }
@@ -363,12 +363,12 @@ object Store:
 
   def stateContent(room: Room, etype: String, sk: String): Option[Json] =
     lookupState(room.state, stateKeyOf(etype, sk)) match
-      case s: Some[Event] => Some(s.v.content)
-      case _: None[Event] => None[Json]()
+      case s: Some[Event] => Some(s.value.content)
+      case None => None
 
   def lookupState(state: List[(String, Event)], key: String): Option[Event] = state match
     case p :: t => lookupStateStep(p, t, key)
-    case Nil()  => None[Event]()
+    case Nil  => None
 
   def lookupStateStep(p: (String, Event), t: List[(String, Event)], key: String): Option[Event] =
     val k: String = p._1
@@ -381,12 +381,12 @@ object Store:
     cell.withLock(st => membershipLocked(st, roomId, userId))
 
   def membershipLocked(st: StoreState, roomId: String, userId: String): Membership = HashMap.get(st.rooms, roomId) match
-    case s: Some[Room] => memInState(s.v.state, stateKeyOf("m.room.member", userId))
-    case _: None[Room] => MNone()
+    case s: Some[Room] => memInState(s.value.state, stateKeyOf("m.room.member", userId))
+    case None => MNone()
 
   def memInState(state: List[(String, Event)], key: String): Membership = lookupState(state, key) match
-    case s: Some[Event] => Mem.parse(strField(s.v.content, "membership", ""))
-    case _: None[Event] => MNone()
+    case s: Some[Event] => Mem.parse(strField(s.value.content, "membership", ""))
+    case None => MNone()
 
   // ---- events ----------------------------------------------------------------
 
@@ -399,8 +399,8 @@ object Store:
   def addEventLocked(st: StoreState, roomId: String, etype: String, sender: String, content: Json,
                      hasSK: Boolean, sk: String, hasRedacts: Boolean, redacts: String, unsigned: Json): Option[Event] =
     HashMap.get(st.rooms, roomId) match
-      case s: Some[Room] => addEventTo(st, s.v, roomId, etype, sender, content, hasSK, sk, hasRedacts, redacts, unsigned)
-      case _: None[Room] => None[Event]()
+      case s: Some[Room] => addEventTo(st, s.value, roomId, etype, sender, content, hasSK, sk, hasRedacts, redacts, unsigned)
+      case None => None
 
   def addEventTo(st: StoreState, room: Room, roomId: String, etype: String, sender: String, content: Json,
                  hasSK: Boolean, sk: String, hasRedacts: Boolean, redacts: String, unsigned: Json): Option[Event] =
@@ -415,12 +415,12 @@ object Store:
     if hasSK then putState(state, key, ev) else state
 
   def putState(state: List[(String, Event)], key: String, ev: Event): List[(String, Event)] =
-    if stateHas(state, key) then stateReplace(state, key, ev, Nil[(String, Event)]())
+    if stateHas(state, key) then stateReplace(state, key, ev, Nil)
     else appendEndS(state, key, ev)
 
   def stateHas(state: List[(String, Event)], key: String): Boolean = state match
     case p :: t => stateHasStep(p, t, key)
-    case Nil()  => false
+    case Nil  => false
 
   def stateHasStep(p: (String, Event), t: List[(String, Event)], key: String): Boolean =
     val k: String = p._1
@@ -428,7 +428,7 @@ object Store:
 
   def stateReplace(state: List[(String, Event)], key: String, ev: Event, acc: List[(String, Event)]): List[(String, Event)] = state match
     case p :: t => stateReplaceStep(p, t, key, ev, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def stateReplaceStep(p: (String, Event), t: List[(String, Event)], key: String, ev: Event, acc: List[(String, Event)]): List[(String, Event)] =
     val k: String = p._1
@@ -448,12 +448,12 @@ object Store:
     cell.withLock(st => eventByIdLocked(st, roomId, eventId))
 
   def eventByIdLocked(st: StoreState, roomId: String, eventId: String): Option[Event] = HashMap.get(st.rooms, roomId) match
-    case s: Some[Room] => findEv(s.v.timeline, eventId)
-    case _: None[Room] => None[Event]()
+    case s: Some[Room] => findEv(s.value.timeline, eventId)
+    case None => None
 
   def findEv(xs: List[Event], eventId: String): Option[Event] = xs match
     case h :: t => findEvStep(h, t, eventId)
-    case Nil()  => None[Event]()
+    case Nil  => None
 
   def findEvStep(h: Event, t: List[Event], eventId: String): Option[Event] =
     if h.eventId == eventId then Some(h) else findEv(t, eventId)
@@ -465,18 +465,18 @@ object Store:
     cell.withLock(st => redactLocked(st, roomId, eventId, red))
 
   def redactLocked(st: StoreState, roomId: String, eventId: String, red: Event): Unit = HashMap.get(st.rooms, roomId) match
-    case s: Some[Room] => redactRoom(st, s.v, roomId, eventId, red)
-    case _: None[Room] => ()
+    case s: Some[Room] => redactRoom(st, s.value, roomId, eventId, red)
+    case None => ()
 
   def redactRoom(st: StoreState, room: Room, roomId: String, eventId: String, red: Event): Unit =
     st.rooms = HashMap.put(st.rooms, roomId,
-      Room(room.roomId, room.version, redactState(room.state, eventId, red, Nil[(String, Event)]()),
-        redactTL(room.timeline, eventId, red, Nil[Event]())))
+      Room(room.roomId, room.version, redactState(room.state, eventId, red, Nil),
+        redactTL(room.timeline, eventId, red, Nil)))
     if Journal.enabled then Journal.rec(Journal.redactOp(roomId, eventId, red.eventId)) else ()
 
   def redactTL(xs: List[Event], eventId: String, red: Event, acc: List[Event]): List[Event] = xs match
     case h :: t => redactTLStep(h, t, eventId, red, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def redactTLStep(h: Event, t: List[Event], eventId: String, red: Event, acc: List[Event]): List[Event] =
     if h.eventId == eventId then redactTL(t, eventId, red, redactedCopy(h, red) :: acc)
@@ -484,7 +484,7 @@ object Store:
 
   def redactState(state: List[(String, Event)], eventId: String, red: Event, acc: List[(String, Event)]): List[(String, Event)] = state match
     case p :: t => redactStateStep(p, t, eventId, red, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def redactStateStep(p: (String, Event), t: List[(String, Event)], eventId: String, red: Event, acc: List[(String, Event)]): List[(String, Event)] =
     val k: String = p._1
@@ -532,7 +532,7 @@ object Store:
     }
 
   def replaceReceipt(xs: List[Receipt], rc: Receipt): List[Receipt] =
-    if receiptHas(xs, rc) then receiptMap(xs, rc, Nil[Receipt]())
+    if receiptHas(xs, rc) then receiptMap(xs, rc, Nil)
     else appendReceipt(xs, rc)
 
   def appendReceipt(xs: List[Receipt], rc: Receipt): List[Receipt] =
@@ -542,14 +542,14 @@ object Store:
 
   def receiptHas(xs: List[Receipt], rc: Receipt): Boolean = xs match
     case h :: t => receiptHasStep(h, t, rc)
-    case Nil()  => false
+    case Nil  => false
 
   def receiptHasStep(h: Receipt, t: List[Receipt], rc: Receipt): Boolean =
     if sameReceiptKey(h, rc) then true else receiptHas(t, rc)
 
   def receiptMap(xs: List[Receipt], rc: Receipt, acc: List[Receipt]): List[Receipt] = xs match
     case h :: t => receiptMapStep(h, t, rc, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def receiptMapStep(h: Receipt, t: List[Receipt], rc: Receipt, acc: List[Receipt]): List[Receipt] =
     if sameReceiptKey(h, rc) then receiptMap(t, rc, rc :: acc)
@@ -577,12 +577,12 @@ object Store:
   /** notify every join/invite member of a room (chunk-4 wake; a no-op body via
    *  notifyUser today, but the scan is live so chunk 4 only fills notifyUser). */
   def notifyRoomMembers(roomId: String): Unit = getRoom(roomId) match
-    case s: Some[Room] => notifyMembers(s.v.state)
-    case _: None[Room] => ()
+    case s: Some[Room] => notifyMembers(s.value.state)
+    case None => ()
 
   def notifyMembers(state: List[(String, Event)]): Unit = state match
     case p :: t => notifyMembersStep(p, t)
-    case Nil()  => ()
+    case Nil  => ()
 
   def notifyMembersStep(p: (String, Event), t: List[(String, Event)]): Unit =
     val ev: Event = p._2
@@ -617,11 +617,11 @@ object Store:
    *  `want` ("join"/"invite"), in stable creation order (roomIds is newest-first,
    *  so reverse gives oldest-first). */
   def roomsForUser(userId: String, want: String): List[Room] =
-    cell.withLock(st => collectRooms(st, ListOps.reverse(st.roomIds), userId, want, Nil[Room]()))
+    cell.withLock(st => collectRooms(st, ListOps.reverse(st.roomIds), userId, want, Nil))
 
   def collectRooms(st: StoreState, ids: List[String], userId: String, want: String, acc: List[Room]): List[Room] = ids match
     case h :: t => collectRoomsStep(st, h, t, userId, want, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def collectRoomsStep(st: StoreState, h: String, t: List[String], userId: String, want: String, acc: List[Room]): List[Room] =
     var acc2: List[Room] = acc
@@ -629,8 +629,8 @@ object Store:
     collectRooms(st, t, userId, want, acc2)
 
   def keepIfMember(ro: Option[Room], userId: String, want: String, acc: List[Room]): List[Room] = ro match
-    case s: Some[Room] => keepIfMember2(s.v, userId, want, acc)
-    case _: None[Room] => acc
+    case s: Some[Room] => keepIfMember2(s.value, userId, want, acc)
+    case None => acc
 
   def keepIfMember2(room: Room, userId: String, want: String, acc: List[Room]): List[Room] =
     if membershipStrOf(room, userId) == want then room :: acc else acc
@@ -645,11 +645,11 @@ object Store:
 
   /** store.ts `getReceipts`: all receipts for a room (the flat list, filtered). */
   def receiptsForRoom(roomId: String): List[Receipt] =
-    cell.withLock(st => filterReceipts(st.receiptList, roomId, Nil[Receipt]()))
+    cell.withLock(st => filterReceipts(st.receiptList, roomId, Nil))
 
   def filterReceipts(xs: List[Receipt], roomId: String, acc: List[Receipt]): List[Receipt] = xs match
     case h :: t => filterReceiptsStep(h, t, roomId, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def filterReceiptsStep(h: Receipt, t: List[Receipt], roomId: String, acc: List[Receipt]): List[Receipt] =
     var acc2: List[Receipt] = acc
@@ -661,11 +661,11 @@ object Store:
    *  in a room NEWER than the since-token. /sync uses this to decide whether an
    *  incremental room block is warranted (spec-correction, see sync.scala). */
   def receiptsSinceRoom(roomId: String, sinceSeq: scala.Long): List[Receipt] =
-    cell.withLock(st => filterReceiptsSince(st.receiptList, roomId, sinceSeq, Nil[Receipt]()))
+    cell.withLock(st => filterReceiptsSince(st.receiptList, roomId, sinceSeq, Nil))
 
   def filterReceiptsSince(xs: List[Receipt], roomId: String, sinceSeq: scala.Long, acc: List[Receipt]): List[Receipt] = xs match
     case h :: t => filterReceiptsSinceStep(h, t, roomId, sinceSeq, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def filterReceiptsSinceStep(h: Receipt, t: List[Receipt], roomId: String, sinceSeq: scala.Long, acc: List[Receipt]): List[Receipt] =
     var acc2: List[Receipt] = acc
@@ -678,12 +678,12 @@ object Store:
     cell.withLock(st => timelineSinceLocked(st, roomId, sinceSeq))
 
   def timelineSinceLocked(st: StoreState, roomId: String, sinceSeq: scala.Long): List[Event] = HashMap.get(st.rooms, roomId) match
-    case s: Some[Room] => filterSince(s.v.timeline, sinceSeq, Nil[Event]())
-    case _: None[Room] => Nil[Event]()
+    case s: Some[Room] => filterSince(s.value.timeline, sinceSeq, Nil)
+    case None => Nil
 
   def filterSince(xs: List[Event], sinceSeq: scala.Long, acc: List[Event]): List[Event] = xs match
     case h :: t => filterSinceStep(h, t, sinceSeq, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def filterSinceStep(h: Event, t: List[Event], sinceSeq: scala.Long, acc: List[Event]): List[Event] =
     var acc2: List[Event] = acc
@@ -693,11 +693,11 @@ object Store:
   /** store.ts `getAllAccountData(userId, roomId?)`: all entries for a user in a
    *  scope (global when `hasRoom` is false, per-room otherwise). */
   def allAccountData(userId: String, hasRoom: Boolean, roomId: String): List[AcctData] =
-    cell.withLock(st => filterAcct(st.acct, userId, hasRoom, roomId, Nil[AcctData]()))
+    cell.withLock(st => filterAcct(st.acct, userId, hasRoom, roomId, Nil))
 
   def filterAcct(xs: List[AcctData], userId: String, hasRoom: Boolean, roomId: String, acc: List[AcctData]): List[AcctData] = xs match
     case h :: t => filterAcctStep(h, t, userId, hasRoom, roomId, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def filterAcctStep(h: AcctData, t: List[AcctData], userId: String, hasRoom: Boolean, roomId: String, acc: List[AcctData]): List[AcctData] =
     var acc2: List[AcctData] = acc
@@ -713,11 +713,11 @@ object Store:
   /** store.ts `getAccountDataSince(userId, sinceSeq)` filtered to GLOBAL entries
    *  (roomId === null) — /sync's incremental account-data delta. */
   def acctSinceGlobal(userId: String, sinceSeq: scala.Long): List[AcctData] =
-    cell.withLock(st => filterAcctSince(st.acct, userId, sinceSeq, Nil[AcctData]()))
+    cell.withLock(st => filterAcctSince(st.acct, userId, sinceSeq, Nil))
 
   def filterAcctSince(xs: List[AcctData], userId: String, sinceSeq: scala.Long, acc: List[AcctData]): List[AcctData] = xs match
     case h :: t => filterAcctSinceStep(h, t, userId, sinceSeq, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def filterAcctSinceStep(h: AcctData, t: List[AcctData], userId: String, sinceSeq: scala.Long, acc: List[AcctData]): List[AcctData] =
     var acc2: List[AcctData] = acc
@@ -759,15 +759,15 @@ object Store:
 
   def replayRoom(id: String): Unit =
     cell.withLock { st =>
-      st.rooms = HashMap.put(st.rooms, id, Room(id, "10", Nil[(String, Event)](), Nil[Event]()))
+      st.rooms = HashMap.put(st.rooms, id, Room(id, "10", Nil, Nil))
       st.roomIds = id :: st.roomIds
     }
 
   def replayEvent(ev: Event): Unit =
     cell.withLock { st =>
       HashMap.get(st.rooms, ev.roomId) match
-        case s: Some[Room] => replayEventTo(st, s.v, ev)
-        case _: None[Room] => ()
+        case s: Some[Room] => replayEventTo(st, s.value, ev)
+        case None => ()
     }
 
   def replayEventTo(st: StoreState, room: Room, ev: Event): Unit =
@@ -778,13 +778,13 @@ object Store:
   def replayRedact(roomId: String, targetId: String, redId: String): Unit =
     cell.withLock { st =>
       HashMap.get(st.rooms, roomId) match
-        case s: Some[Room] => replayRedact2(st, s.v, roomId, targetId, redId)
-        case _: None[Room] => ()
+        case s: Some[Room] => replayRedact2(st, s.value, roomId, targetId, redId)
+        case None => ()
     }
 
   def replayRedact2(st: StoreState, room: Room, roomId: String, targetId: String, redId: String): Unit = findEv(room.timeline, redId) match
-    case s: Some[Event] => redactRoom(st, room, roomId, targetId, s.v)
-    case _: None[Event] => ()
+    case s: Some[Event] => redactRoom(st, room, roomId, targetId, s.value)
+    case None => ()
 
   def replayAlias(alias: String, roomId: String): Unit =
     cell.withLock(st => st.aliases = HashMap.put(st.aliases, alias, roomId))

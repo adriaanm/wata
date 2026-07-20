@@ -90,7 +90,7 @@ object Evdev:
   /** open /dev/input/event0..2 nonblocking; skip any that fail to open (Zig
    *  EvdevInput.init — a dev host may have none). Returns the open fds. */
   def open(): List[scala.Int] =
-    var acc: List[scala.Int] = Nil[scala.Int]()
+    var acc: List[scala.Int] = Nil
     var i = 0
     while i < 3 do
       val path = "/dev/input/event" + i
@@ -108,7 +108,7 @@ object Evdev:
     while going do
       cur match
         case f :: t => n = n + 1; cur = t
-        case Nil()  => going = false
+        case Nil  => going = false
     n
 
   def closeAll(fds: List[scala.Int]): Unit =
@@ -117,11 +117,11 @@ object Evdev:
     while going do
       cur match
         case fd :: t => go.syscall.close(fd); cur = t
-        case Nil()   => going = false
+        case Nil   => going = false
 
   /** poll all fds, draining every pending input_event; map to KeyEvents. */
   def poll(fds: List[scala.Int]): List[KeyEvent] =
-    var acc: List[KeyEvent] = Nil[KeyEvent]()
+    var acc: List[KeyEvent] = Nil
     var cur = fds
     var going = true
     while going do
@@ -129,7 +129,7 @@ object Evdev:
         case fd :: t =>
           acc = drainFd(fd, acc)
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
     ListOps.reverse(acc)
 
   /** drain one fd until EAGAIN (read throws) or a short read (Zig's `catch

@@ -203,10 +203,10 @@ object DevCli:
       else
         evts.tryReceive() match
           case s: Some[AudioEvt] =>
-            val t = recEvtOf(s.v)
+            val t = recEvtOf(s.value)
             if t == 1 then run = false
             else if t == 2 then run = false
-          case _: None[AudioEvt] => clock.sleepMs(10L)
+          case None => clock.sleepMs(10L)
     recOggC.get()
 
   /** 0 continue, 1 done, 2 error (playback tags only). */
@@ -224,12 +224,12 @@ object DevCli:
       else
         evts.tryReceive() match
           case s: Some[AudioEvt] =>
-            val t = playEvtOf(s.v)
+            val t = playEvtOf(s.value)
             if t == 1 then
               res = true
               run = false
             else if t == 2 then run = false
-          case _: None[AudioEvt] => clock.sleepMs(10L)
+          case None => clock.sleepMs(10L)
     res
 
   /** 0 continue, 1 complete, 2 failed (send tags only). */
@@ -247,12 +247,12 @@ object DevCli:
       else
         Runtime.pollEvent(c) match
           case s: Some[UiEvent] =>
-            val t = sendEvtOf(s.v)
+            val t = sendEvtOf(s.value)
             if t == 1 then
               res = true
               run = false
             else if t == 2 then run = false
-          case _: None[UiEvent] => clock.sleepMs(20L)
+          case None => clock.sleepMs(20L)
     res
 
   // ---- snapshot inspection ------------------------------------------------------
@@ -263,7 +263,7 @@ object DevCli:
    *  order — the last one is the newest). */
   def firstMxc(cs: List[Conversation]): String = cs match
     case h :: t => firstMxcStep(h, t)
-    case Nil()  => ""
+    case Nil  => ""
 
   def firstMxcStep(h: Conversation, t: List[Conversation]): String =
     val m = lastMxcOf(h.messages)
@@ -271,7 +271,7 @@ object DevCli:
 
   def lastMxcOf(ms: List[VoiceMessage]): String = ms match
     case h :: t => lastMxcStep(h, t)
-    case Nil()  => ""
+    case Nil  => ""
 
   def lastMxcStep(h: VoiceMessage, t: List[VoiceMessage]): String =
     val rest = lastMxcOf(t)

@@ -8,7 +8,7 @@ import language.experimental.saferExceptions
  *  spike-relative paths, so the output is deterministic). */
 object SyncFixDriver:
   def run(args: Array[String]): Unit =
-    var fixtures: List[(String, String, String)] = Nil[(String, String, String)]()
+    var fixtures: List[(String, String, String)] = Nil
     var i = 1
     while i < args.length do
       val arg = args(i)

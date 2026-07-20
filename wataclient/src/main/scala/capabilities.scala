@@ -50,6 +50,6 @@ trait Rand extends Shareable:
  *  a bare case-class FIELD type alone requests no template stamp, see the
  *  chunk-3 DOGFOOD note). */
 object Caps:
-  def noHeaders: List[(String, String)] = Nil[(String, String)]()
+  def noHeaders: List[(String, String)] = Nil
   def withHeader(hs: List[(String, String)], name: String, value: String): List[(String, String)] =
     (name, value) :: hs

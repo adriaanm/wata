@@ -46,8 +46,8 @@ object Rooms:
 
   /** rooms.ts: preset ?? (visibility == 'public' ? 'public_chat' : 'private_chat'). */
   def presetOf(j: Json): String = getField(j, "preset") match
-    case s: Some[Json] => strOr(s.v, presetFromVisibility(j))
-    case _: None[Json] => presetFromVisibility(j)
+    case s: Some[Json] => strOr(s.value, presetFromVisibility(j))
+    case None => presetFromVisibility(j)
 
   def presetFromVisibility(j: Json): String =
     if strField(j, "visibility", "") == "public" then "public_chat" else "private_chat"
@@ -67,7 +67,7 @@ object Rooms:
     addStateEvent(roomId, userId, "m.room.guest_access", "", obj1("guest_access", JStr("forbidden")))
 
   def powerLevels(creator: String, preset: String, invites: List[String]): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("users", usersMap(creator, preset, invites)) :: fs
     fs = ("users_default", JInt(0L)) :: fs
     fs = ("events_default", JInt(0L)) :: fs
@@ -79,14 +79,14 @@ object Rooms:
     endObj(fs)
 
   def usersMap(creator: String, preset: String, invites: List[String]): Json =
-    var us: List[(String, Json)] = Nil[(String, Json)]()
+    var us: List[(String, Json)] = Nil
     us = (creator, JInt(100L)) :: us
     if preset == "trusted_private_chat" then us = addTrusted(us, invites) else ()
     endObj(us)
 
   def addTrusted(us: List[(String, Json)], invites: List[String]): List[(String, Json)] = invites match
     case h :: t => addTrustedStep(us, h, t)
-    case Nil()  => us
+    case Nil  => us
 
   def addTrustedStep(us: List[(String, Json)], h: String, t: List[String]): List[(String, Json)] =
     var us2: List[(String, Json)] = us
@@ -97,7 +97,7 @@ object Rooms:
     obj2("creator", JStr(creator), "room_version", JStr("10"))
 
   def memberJoinContent(userId: String, direct: Boolean): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("membership", JStr("join")) :: fs
     fs = ("displayname", JStr(displayNameOf(userId))) :: fs
     if direct then fs = ("is_direct", JBool(true)) :: fs else ()
@@ -107,19 +107,19 @@ object Rooms:
     obj2("membership", JStr("invite"), "is_direct", JBool(direct))
 
   def displayNameOf(userId: String): String = Config.userByLocalpart(Store.localpartOf(userId)) match
-    case s: Some[UserCfg] => s.v.displayName
-    case _: None[UserCfg] => Store.localpartOf(userId)
+    case s: Some[UserCfg] => s.value.displayName
+    case None => Store.localpartOf(userId)
 
   def addName(roomId: String, userId: String, j: Json): Unit = getField(j, "name") match
-    case s: Some[Json] => addName2(roomId, userId, strOr(s.v, ""))
-    case _: None[Json] => ()
+    case s: Some[Json] => addName2(roomId, userId, strOr(s.value, ""))
+    case None => ()
 
   def addName2(roomId: String, userId: String, name: String): Unit =
     if name == "" then () else addStateEvent(roomId, userId, "m.room.name", "", obj1("name", JStr(name)))
 
   def addAlias(roomId: String, userId: String, j: Json): Unit = getField(j, "room_alias_name") match
-    case s: Some[Json] => addAlias2(roomId, userId, strOr(s.v, ""))
-    case _: None[Json] => ()
+    case s: Some[Json] => addAlias2(roomId, userId, strOr(s.value, ""))
+    case None => ()
 
   def addAlias2(roomId: String, userId: String, name: String): Unit =
     if name == "" then () else addAlias3(roomId, userId, "#" + name + ":" + Config.serverName)
@@ -130,7 +130,7 @@ object Rooms:
 
   def addInvites(roomId: String, userId: String, invites: List[String], direct: Boolean): Unit = invites match
     case h :: t => addInvitesStep(roomId, userId, h, t, direct)
-    case Nil()  => ()
+    case Nil  => ()
 
   def addInvitesStep(roomId: String, userId: String, target: String, t: List[String], direct: Boolean): Unit =
     addStateEvent(roomId, userId, "m.room.member", target, memberInviteContent(direct))
@@ -138,20 +138,20 @@ object Rooms:
     addInvites(roomId, userId, t, direct)
 
   def invitesOf(j: Json): List[String] = getField(j, "invite") match
-    case s: Some[Json] => arrStrings(s.v)
-    case _: None[Json] => Nil[String]()
+    case s: Some[Json] => arrStrings(s.value)
+    case None => Nil
 
   def arrStrings(j: Json): List[String] = j match
-    case a: JArr => collectStrings(a.items, Nil[String]())
-    case _       => Nil[String]()
+    case a: JArr => collectStrings(a.items, Nil)
+    case _       => Nil
 
   def collectStrings(xs: List[Json], acc: List[String]): List[String] = xs match
     case h :: t => collectStrings(t, prependStr(h, acc))
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def prependStr(h: Json, acc: List[String]): List[String] = asStr(h) match
-    case s: Some[String] => s.v :: acc
-    case _: None[String] => acc
+    case s: Some[String] => s.value :: acc
+    case None => acc
 
   /** a state event: type + non-empty state key, no redacts/unsigned. */
   def addStateEvent(roomId: String, sender: String, etype: String, sk: String, content: Json): Unit =
@@ -169,12 +169,12 @@ object Rooms:
     else doJoinRoom(userId, target)
 
   def joinByAlias(userId: String, alias: String): Either[MErr, Json] = Store.getRoomIdByAlias(alias) match
-    case s: Some[String] => doJoinRoom(userId, s.v)
-    case _: None[String] => Left(MErr(404, M_NOT_FOUND(), "Room alias not found"))
+    case s: Some[String] => doJoinRoom(userId, s.value)
+    case None => Left(MErr(404, M_NOT_FOUND(), "Room alias not found"))
 
   def doJoinRoom(userId: String, roomId: String): Either[MErr, Json] = Store.getRoom(roomId) match
-    case s: Some[Room] => joinWithRoom(userId, roomId, s.v)
-    case _: None[Room] => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+    case s: Some[Room] => joinWithRoom(userId, roomId, s.value)
+    case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
 
   def joinWithRoom(userId: String, roomId: String, room: Room): Either[MErr, Json] = Store.getMembership(roomId, userId) match
     case _: MJoin => Right(obj1("room_id", JStr(roomId)))
@@ -191,8 +191,8 @@ object Rooms:
     else Left(MErr(403, M_FORBIDDEN(), "You are not invited to this room"))
 
   def joinRuleOf(room: Room): String = Store.stateContent(room, "m.room.join_rules", "") match
-    case s: Some[Json] => strField(s.v, "join_rule", "")
-    case _: None[Json] => ""
+    case s: Some[Json] => strField(s.value, "join_rule", "")
+    case None => ""
 
   def joinPerform(userId: String, roomId: String): Either[MErr, Json] =
     addStateEvent(roomId, userId, "m.room.member", userId, memberJoinContent(userId, false))
@@ -216,8 +216,8 @@ object Rooms:
     case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
 
   def invite3(roomId: String, j: Json): Either[MErr, Json] = getField(j, "user_id") match
-    case s: Some[Json] => invite4(roomId, strOr(s.v, ""))
-    case _: None[Json] => Left(MErr(400, M_BAD_JSON(), "Missing user_id"))
+    case s: Some[Json] => invite4(roomId, strOr(s.value, ""))
+    case None => Left(MErr(400, M_BAD_JSON(), "Missing user_id"))
 
   def invite4(roomId: String, target: String): Either[MErr, Json] =
     if target == "" then Left(MErr(400, M_BAD_JSON(), "Missing user_id"))
@@ -238,8 +238,8 @@ object Rooms:
   // ---- resolve alias (rooms.ts handleResolveAlias) ---------------------------
 
   def resolveAlias(r: go.net.http.Request): Either[MErr, Json] = Store.getRoomIdByAlias(r.pathValue("roomAlias")) match
-    case s: Some[String] => Right(obj2("room_id", JStr(s.v), "servers", arr1(JStr(Config.serverName))))
-    case _: None[String] => Left(MErr(404, M_NOT_FOUND(), "Room alias not found"))
+    case s: Some[String] => Right(obj2("room_id", JStr(s.value), "servers", arr1(JStr(Config.serverName))))
+    case None => Left(MErr(404, M_NOT_FOUND(), "Room alias not found"))
 
   // ---- send message (events.ts handleSendEvent) ------------------------------
 
@@ -251,7 +251,7 @@ object Rooms:
     val roomId = r.pathValue("roomId")
     Store.getRoom(roomId) match
       case _: Some[Room] => send2(auth, roomId, r, body)
-      case _: None[Room] => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
 
   def send2(auth: Auth, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     Store.getMembership(roomId, auth.userId) match
@@ -261,8 +261,8 @@ object Rooms:
   def send3(auth: Auth, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     val txnId = r.pathValue("txnId")
     Store.getTxn(auth.deviceId, txnId) match
-      case s: Some[String] => Right(obj1("event_id", JStr(s.v)))
-      case _: None[String] => send4(auth, roomId, r.pathValue("eventType"), txnId, body)
+      case s: Some[String] => Right(obj1("event_id", JStr(s.value)))
+      case None => send4(auth, roomId, r.pathValue("eventType"), txnId, body)
 
   def send4(auth: Auth, roomId: String, etype: String, txnId: String, body: String): Either[MErr, Json] = Json.tryParse(body) match
     case Right(j) => send5(auth, roomId, etype, txnId, j)
@@ -270,8 +270,8 @@ object Rooms:
 
   def send5(auth: Auth, roomId: String, etype: String, txnId: String, content: Json): Either[MErr, Json] =
     Store.addEvent(roomId, etype, auth.userId, content, false, "", false, "", unsignedTxn(txnId)) match
-      case s: Some[Event] => send6(auth, roomId, txnId, s.v)
-      case _: None[Event] => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+      case s: Some[Event] => send6(auth, roomId, txnId, s.value)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
 
   def send6(auth: Auth, roomId: String, txnId: String, ev: Event): Either[MErr, Json] =
     Store.notifyRoomMembers(roomId)
@@ -304,13 +304,13 @@ object Rooms:
     val eventId = r.pathValue("eventId")
     Store.getEventById(roomId, eventId) match
       case _: Some[Event] => redact4(auth, roomId, r, eventId, j)
-      case _: None[Event] => Left(MErr(404, M_NOT_FOUND(), "Event not found"))
+      case None => Left(MErr(404, M_NOT_FOUND(), "Event not found"))
 
   def redact4(auth: Auth, roomId: String, r: go.net.http.Request, eventId: String, j: Json): Either[MErr, Json] =
     val txnId = r.pathValue("txnId")
     Store.addEvent(roomId, "m.room.redaction", auth.userId, redactionContent(eventId, j), false, "", true, eventId, unsignedTxn(txnId)) match
-      case s: Some[Event] => redact5(roomId, eventId, s.v)
-      case _: None[Event] => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+      case s: Some[Event] => redact5(roomId, eventId, s.value)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
 
   def redact5(roomId: String, eventId: String, red: Event): Either[MErr, Json] =
     Store.redactTarget(roomId, eventId, red)
@@ -318,8 +318,8 @@ object Rooms:
     Right(obj1("event_id", JStr(red.eventId)))
 
   def redactionContent(eventId: String, j: Json): Json = getField(j, "reason") match
-    case s: Some[Json] => obj2("redacts", JStr(eventId), "reason", s.v)
-    case _: None[Json] => obj1("redacts", JStr(eventId))
+    case s: Some[Json] => obj2("redacts", JStr(eventId), "reason", s.value)
+    case None => obj1("redacts", JStr(eventId))
 
   // ---- receipts (receipts.ts handleReceipt) ----------------------------------
 
@@ -371,8 +371,8 @@ object Rooms:
   def messages1(userId: String, r: go.net.http.Request): Either[MErr, Json] =
     val roomId = r.pathValue("roomId")
     Store.getRoom(roomId) match
-      case s: Some[Room] => messages2(userId, roomId, s.v, r)
-      case _: None[Room] => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+      case s: Some[Room] => messages2(userId, roomId, s.value, r)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
 
   def messages2(userId: String, roomId: String, room: Room, r: go.net.http.Request): Either[MErr, Json] =
     Store.getMembership(roomId, userId) match
@@ -390,10 +390,10 @@ object Rooms:
 
   def messagesFrom(room: Room, from: String, reverse: Boolean, limit: scala.Int): Either[MErr, Json] =
     if timelineHas(room.timeline, from) then messagesBase(room, from, reverse, limit)
-    else Right(obj3("start", JStr(from), "end", JStr(from), "chunk", JArr(Nil[Json]())))
+    else Right(obj3("start", JStr(from), "end", JStr(from), "chunk", JArr(Nil)))
 
   def messagesBase(room: Room, from: String, reverse: Boolean, limit: scala.Int): Either[MErr, Json] =
-    val base = if reverse then eventsBefore(room.timeline, from, Nil[Event]()) else eventsAfter(room.timeline, from)
+    val base = if reverse then eventsBefore(room.timeline, from, Nil) else eventsAfter(room.timeline, from)
     messagesSlice(base, from, reverse, limit, true)
 
   /** `base` is oldest-first; backward pagination returns the last `limit` events
@@ -415,14 +415,14 @@ object Rooms:
 
   def timelineHas(xs: List[Event], id: String): Boolean = xs match
     case h :: t => timelineHasStep(h, t, id)
-    case Nil()  => false
+    case Nil  => false
 
   def timelineHasStep(h: Event, t: List[Event], id: String): Boolean =
     if h.eventId == id then true else timelineHas(t, id)
 
   def eventsBefore(xs: List[Event], from: String, acc: List[Event]): List[Event] = xs match
     case h :: t => eventsBeforeStep(h, t, from, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def eventsBeforeStep(h: Event, t: List[Event], from: String, acc: List[Event]): List[Event] =
     if h.eventId == from then ListOps.reverse(acc)
@@ -430,28 +430,28 @@ object Rooms:
 
   def eventsAfter(xs: List[Event], from: String): List[Event] = xs match
     case h :: t => eventsAfterStep(h, t, from)
-    case Nil()  => Nil[Event]()
+    case Nil  => Nil
 
   def eventsAfterStep(h: Event, t: List[Event], from: String): List[Event] =
     if h.eventId == from then t else eventsAfter(t, from)
 
-  def takeFirst(xs: List[Event], n: scala.Int): List[Event] = takeFirstAcc(xs, n, Nil[Event]())
+  def takeFirst(xs: List[Event], n: scala.Int): List[Event] = takeFirstAcc(xs, n, Nil)
 
   def takeFirstAcc(xs: List[Event], n: scala.Int, acc: List[Event]): List[Event] =
     if n <= 0 then ListOps.reverse(acc) else takeFirstStep(xs, n, acc)
 
   def takeFirstStep(xs: List[Event], n: scala.Int, acc: List[Event]): List[Event] = xs match
     case h :: t => takeFirstAcc(t, n - 1, h :: acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def takeLast(xs: List[Event], n: scala.Int): List[Event] = ListOps.reverse(takeFirst(ListOps.reverse(xs), n))
 
   def headEventId(xs: List[Event]): String = xs match
     case h :: _ => h.eventId
-    case Nil()  => "s0"
+    case Nil  => "s0"
 
   def lastEventId(xs: List[Event], from: String): String = ListOps.reverse(xs) match
     case h :: _ => h.eventId
-    case Nil()  => lastFallback(from)
+    case Nil  => lastFallback(from)
 
   def lastFallback(from: String): String = if from == "" then "s0" else from

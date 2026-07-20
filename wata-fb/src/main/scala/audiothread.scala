@@ -69,8 +69,8 @@ object AudioThread:
   /** 0 = continue, 1 = stop-recording, 2 = quit; other commands ignored (Zig). */
   def recCtl(cmds: sgo.Chan[AudioCmd]): Int =
     cmds.tryReceive() match
-      case s: Some[AudioCmd] => recCtlOf(s.v)
-      case _: None[AudioCmd] => 0
+      case s: Some[AudioCmd] => recCtlOf(s.value)
+      case None => 0
 
   def recCtlOf(c: AudioCmd): Int = c match
     case _: AcRecordStop => 1
@@ -80,8 +80,8 @@ object AudioThread:
   /** 0 = continue, 1 = stop-playback, 2 = quit; other commands ignored (Zig). */
   def playCtl(cmds: sgo.Chan[AudioCmd]): Int =
     cmds.tryReceive() match
-      case s: Some[AudioCmd] => playCtlOf(s.v)
-      case _: None[AudioCmd] => 0
+      case s: Some[AudioCmd] => playCtlOf(s.value)
+      case None => 0
 
   def playCtlOf(c: AudioCmd): Int = c match
     case _: AcStopPlayback => 1
@@ -139,7 +139,7 @@ object AudioThread:
    *  normal stop; quit discards the recording (Zig `writer.deinit`). */
   def recordLoop(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt],
                  cap: go.audio.Capture, enc: go.audio.Encoder): Int throws sgo.GoError =
-    var frames: List[Bytes] = Nil[Bytes]()
+    var frames: List[Bytes] = Nil
     var total = 0L
     var code = 0
     val buf = go.makeSlice[Byte](go.audio.PeriodBytes)
@@ -217,7 +217,7 @@ object AudioThread:
             val pcm = dec.decodeFrame(GoBytes.fromPortable(h))
             pcmB.addBytes(GoBytes.toPortable(pcm))
             cur = t
-          case Nil() => going = false
+          case Nil => going = false
     if code == CodeDone then playPcm(evts, pcmB.result())
     code
 
@@ -287,7 +287,7 @@ object AudioThread:
   /** 2 seconds = 96000 samples of periods, both subframes encoded (Zig
    *  doEchoTest's own shape). */
   def echoLoop(cap: go.audio.Capture, enc: go.audio.Encoder): Bytes throws sgo.GoError =
-    var frames: List[Bytes] = Nil[Bytes]()
+    var frames: List[Bytes] = Nil
     var total = 0L
     val buf = go.makeSlice[Byte](go.audio.PeriodBytes)
     while total < 96000L do
@@ -338,5 +338,5 @@ object AudioThread:
           val pcm = dec.decodeFrame(GoBytes.fromPortable(h))
           b.addBytes(GoBytes.toPortable(pcm))
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
     b.result()

@@ -8,11 +8,11 @@ object WJson:
   /** object field lookup (insertion-ordered `List[(String, Json)]`). */
   def getField(j: Json, key: String): Option[Json] = j match
     case o: JObj => lookupList(o.fields, key)
-    case _       => None[Json]()
+    case _       => None
 
   def lookupList(fs: List[(String, Json)], key: String): Option[Json] = fs match
     case p :: t => lookupStep(p, t, key)
-    case Nil()  => None[Json]()
+    case Nil  => None
 
   def lookupStep(p: (String, Json), t: List[(String, Json)], key: String): Option[Json] =
     val k: String = p._1 // bind to a String local so `==` stays native (DOGFOOD)
@@ -20,8 +20,8 @@ object WJson:
 
   /** a string field, or the default when absent / non-string. */
   def strField(j: Json, key: String, dflt: String): String = getField(j, key) match
-    case s: Some[Json] => strOr(s.v, dflt)
-    case _: None[Json] => dflt
+    case s: Some[Json] => strOr(s.value, dflt)
+    case None => dflt
 
   def strOr(j: Json, dflt: String): String = j match
     case s: JStr => s.s
@@ -29,8 +29,8 @@ object WJson:
 
   /** a boolean field, or false when absent / non-bool. */
   def boolField(j: Json, key: String): Boolean = getField(j, key) match
-    case s: Some[Json] => boolOr(s.v)
-    case _: None[Json] => false
+    case s: Some[Json] => boolOr(s.value)
+    case None => false
 
   def boolOr(j: Json): Boolean = j match
     case b: JBool => b.b
@@ -38,8 +38,8 @@ object WJson:
 
   /** an int64 field, or the default (accepts `JInt`; a `JFloat` is truncated). */
   def longField(j: Json, key: String, dflt: Long): Long = getField(j, key) match
-    case s: Some[Json] => longOr(s.v, dflt)
-    case _: None[Json] => dflt
+    case s: Some[Json] => longOr(s.value, dflt)
+    case None => dflt
 
   def longOr(j: Json, dflt: Long): Long = j match
     case i: JInt   => i.v
@@ -48,8 +48,8 @@ object WJson:
 
   /** does this value have a `JStr` at `key`? (presence test, no default). */
   def hasStr(j: Json, key: String): Boolean = getField(j, key) match
-    case s: Some[Json] => isStr(s.v)
-    case _: None[Json] => false
+    case s: Some[Json] => isStr(s.value)
+    case None => false
 
   def isStr(j: Json): Boolean = j match
     case _: JStr => true
@@ -57,5 +57,5 @@ object WJson:
 
   /** the child object at `key`, or `JNull` when absent / non-object. */
   def objField(j: Json, key: String): Json = getField(j, key) match
-    case s: Some[Json] => s.v
-    case _: None[Json] => JNull()
+    case s: Some[Json] => s.value
+    case None => JNull()

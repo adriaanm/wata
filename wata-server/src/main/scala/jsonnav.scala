@@ -36,22 +36,22 @@ object JsonNav:
   // undefined `List` head (DOGFOOD 2026-07-10), so it is avoided everywhere.
 
   /** empty object `{}` — the success body for logout / set-* endpoints. */
-  def emptyObj: Json = JObj(Nil[(String, Json)]())
+  def emptyObj: Json = JObj(Nil)
 
   def obj1(k1: String, v1: Json): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = (k1, v1) :: fs
     JObj(fs)
 
   def obj2(k1: String, v1: Json, k2: String, v2: Json): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = (k2, v2) :: fs
     fs = (k1, v1) :: fs
     JObj(fs)
 
   def obj4(k1: String, v1: Json, k2: String, v2: Json,
            k3: String, v3: Json, k4: String, v4: Json): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = (k4, v4) :: fs
     fs = (k3, v3) :: fs
     fs = (k2, v2) :: fs
@@ -59,7 +59,7 @@ object JsonNav:
     JObj(fs)
 
   def arr1(v1: Json): Json =
-    var xs: List[Json] = Nil[Json]()
+    var xs: List[Json] = Nil
     xs = v1 :: xs
     JArr(xs)
 
@@ -71,11 +71,11 @@ object JsonNav:
 
   def getField(j: Json, key: String): Option[Json] = j match
     case o: JObj => lookupList(o.fields, key)
-    case _       => None[Json]()
+    case _       => None
 
   def lookupList(fs: List[(String, Json)], key: String): Option[Json] = fs match
     case p :: t => lookupStep(p, t, key)
-    case Nil()  => None[Json]()
+    case Nil  => None
 
   def lookupStep(p: (String, Json), t: List[(String, Json)], key: String): Option[Json] =
     // bind the tuple's `_1` to a String local before comparing: comparing the
@@ -88,12 +88,12 @@ object JsonNav:
   /** a JSON value as a String, or `None` if it is not a `JStr`. */
   def asStr(j: Json): Option[String] = j match
     case s: JStr => Some(s.s)
-    case _       => None[String]()
+    case _       => None
 
   /** a required string field, or the default when absent / non-string. */
   def strField(j: Json, key: String, dflt: String): String = getField(j, key) match
-    case s: Some[Json] => strOr(s.v, dflt)
-    case _: None[Json] => dflt
+    case s: Some[Json] => strOr(s.value, dflt)
+    case None => dflt
 
   def strOr(j: Json, dflt: String): String = j match
     case s: JStr => s.s
@@ -108,8 +108,8 @@ object JsonNav:
 
   /** a boolean field, or the default when absent / non-bool. */
   def boolField(j: Json, key: String): Boolean = getField(j, key) match
-    case s: Some[Json] => boolOr(s.v, false)
-    case _: None[Json] => false
+    case s: Some[Json] => boolOr(s.value, false)
+    case None => false
 
   def boolOr(j: Json, dflt: Boolean): Boolean = j match
     case b: JBool => b.b
@@ -119,10 +119,10 @@ object JsonNav:
    *  idiom): the reverse restores insertion order. */
   def endObj(fs: List[(String, Json)]): Json = JObj(ListOps.reverse(fs))
 
-  def startObj: List[(String, Json)] = Nil[(String, Json)]()
+  def startObj: List[(String, Json)] = Nil
 
   def obj3(k1: String, v1: Json, k2: String, v2: Json, k3: String, v3: Json): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = (k1, v1) :: fs
     fs = (k2, v2) :: fs
     fs = (k3, v3) :: fs
@@ -137,12 +137,12 @@ object JsonNav:
     case _       => obj1(key, value)
 
   def setField(fs: List[(String, Json)], key: String, value: Json): List[(String, Json)] =
-    if fieldHas(fs, key) then fieldReplace(fs, key, value, Nil[(String, Json)]())
+    if fieldHas(fs, key) then fieldReplace(fs, key, value, Nil)
     else appendField(fs, key, value)
 
   def fieldHas(fs: List[(String, Json)], key: String): Boolean = fs match
     case p :: t => fieldHasStep(p, t, key)
-    case Nil()  => false
+    case Nil  => false
 
   def fieldHasStep(p: (String, Json), t: List[(String, Json)], key: String): Boolean =
     val k: String = p._1
@@ -150,7 +150,7 @@ object JsonNav:
 
   def fieldReplace(fs: List[(String, Json)], key: String, value: Json, acc: List[(String, Json)]): List[(String, Json)] = fs match
     case p :: t => fieldReplaceStep(p, t, key, value, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def fieldReplaceStep(p: (String, Json), t: List[(String, Json)], key: String, value: Json, acc: List[(String, Json)]): List[(String, Json)] =
     val k: String = p._1
@@ -172,7 +172,7 @@ object JsonNav:
   /** an event as its Matrix wire object (used for `redacted_because` now, /sync
    *  next chunk). Optional fields present only when their has-flag is set. */
   def eventToJson(ev: Event): Json =
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("event_id", JStr(ev.eventId)) :: fs
     fs = ("type", JStr(ev.etype)) :: fs
     fs = ("sender", JStr(ev.sender)) :: fs

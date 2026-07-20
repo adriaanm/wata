@@ -34,11 +34,11 @@ object Matrix:
 
   /** `POST /login` body: `{type, identifier:{type,user}, password}`. */
   def loginBody(user: String, password: String): Json =
-    var idf: List[(String, Json)] = Nil[(String, Json)]()
+    var idf: List[(String, Json)] = Nil
     idf = ("user", JStr(user)) :: idf
     idf = ("type", JStr("m.id.user")) :: idf
     val ident = JObj(idf)
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("password", JStr(password)) :: fs
     fs = ("identifier", ident) :: fs
     fs = ("type", JStr("m.login.password")) :: fs
@@ -48,12 +48,12 @@ object Matrix:
    *  sendVoiceMessage): `{msgtype:"m.audio", body, url, info:{duration, mimetype,
    *  size}}`. */
   def voiceContent(mxcUrl: String, durationMs: Long, size: Int): Json =
-    var info: List[(String, Json)] = Nil[(String, Json)]()
+    var info: List[(String, Json)] = Nil
     info = ("size", JInt(size.toLong)) :: info
     info = ("mimetype", JStr("audio/ogg")) :: info
     info = ("duration", JInt(durationMs)) :: info
     val infoObj = JObj(info)
-    var fs: List[(String, Json)] = Nil[(String, Json)]()
+    var fs: List[(String, Json)] = Nil
     fs = ("info", infoObj) :: fs
     fs = ("url", JStr(mxcUrl)) :: fs
     fs = ("body", JStr("Voice message")) :: fs
@@ -61,7 +61,7 @@ object Matrix:
     JObj(fs)
 
   /** an `m.read` receipt has an empty JSON body `{}`. */
-  def emptyBody(): Json = JObj(Nil[(String, Json)]())
+  def emptyBody(): Json = JObj(Nil)
 
   // ---- URL / query shaping --------------------------------------------------
 

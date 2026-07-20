@@ -191,7 +191,7 @@ object Journal:
       ok = true
       ()
     catch case e: sgo.GoError => ()
-    if ok then replayLines(splitLines(go.string(raw), 0, "", Nil[String]())) else ()
+    if ok then replayLines(splitLines(go.string(raw), 0, "", Nil)) else ()
 
   /** split on '\n' into non-empty lines (STR-1 byte scan; the json module's own
    *  idiom — no String.split in the subset). */
@@ -214,7 +214,7 @@ object Journal:
 
   def replayLines(xs: List[String]): Unit = xs match
     case h :: t => replayLinesStep(h, t)
-    case Nil()  => ()
+    case Nil  => ()
 
   def replayLinesStep(h: String, t: List[String]): Unit =
     replayLine(h)
@@ -268,13 +268,13 @@ object Journal:
   // ---- field accessors (JInt / nested Json) ----------------------------------
 
   def longField(j: Json, k: String): scala.Long = getField(j, k) match
-    case s: Some[Json] => longOr(s.v)
-    case _: None[Json] => 0L
+    case s: Some[Json] => longOr(s.value)
+    case None => 0L
 
   def longOr(j: Json): scala.Long = j match
     case i: JInt => i.v
     case _       => 0L
 
   def jsonField(j: Json, k: String): Json = getField(j, k) match
-    case s: Some[Json] => s.v
-    case _: None[Json] => JNull()
+    case s: Some[Json] => s.value
+    case None => JNull()

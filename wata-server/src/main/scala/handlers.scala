@@ -54,13 +54,13 @@ object Router:
   def requireAuthTok(h: String): Either[MErr, Auth] =
     val token = h.substring(7)
     Store.deviceByToken(token) match
-      case _: None[Device] => Left(MErr(401, M_UNKNOWN_TOKEN(), "Unknown access token"))
-      case s: Some[Device] => Right(Auth(s.v.userId, s.v.deviceId))
+      case None => Left(MErr(401, M_UNKNOWN_TOKEN(), "Unknown access token"))
+      case s: Some[Device] => Right(Auth(s.value.userId, s.value.deviceId))
 
   // ---- versions --------------------------------------------------------------
 
   def versions(): Json =
-    var vs: List[Json] = Nil[Json]()
+    var vs: List[Json] = Nil
     vs = JStr("v1.6") :: vs
     vs = JStr("v1.5") :: vs
     vs = JStr("v1.4") :: vs
@@ -82,25 +82,25 @@ object Router:
     case Right(j) => loginParsed(j)
 
   def loginParsed(j: Json): Either[MErr, Json] = loginLocalpart(j) match
-    case s: Some[String] => loginUser(cleanLocalpart(s.v), j)
-    case _: None[String] => Left(MErr(403, M_FORBIDDEN(), "Missing user identifier"))
+    case s: Some[String] => loginUser(cleanLocalpart(s.value), j)
+    case None => Left(MErr(403, M_FORBIDDEN(), "Missing user identifier"))
 
   /** identifier.user (m.id.user) or the deprecated top-level `user` field. */
   def loginLocalpart(j: Json): Option[String] = identUser(j) match
     case s: Some[String] => s
-    case _: None[String] => topUser(j)
+    case None => topUser(j)
 
   def identUser(j: Json): Option[String] = getField(j, "identifier") match
-    case s: Some[Json] => identUserField(s.v)
-    case _: None[Json] => None[String]()
+    case s: Some[Json] => identUserField(s.value)
+    case None => None
 
   def identUserField(id: Json): Option[String] = getField(id, "user") match
-    case s: Some[Json] => asStr(s.v)
-    case _: None[Json] => None[String]()
+    case s: Some[Json] => asStr(s.value)
+    case None => None
 
   def topUser(j: Json): Option[String] = getField(j, "user") match
-    case s: Some[Json] => asStr(s.v)
-    case _: None[Json] => None[String]()
+    case s: Some[Json] => asStr(s.value)
+    case None => None
 
   /** accept full MXIDs ("@alice:localhost") as well as bare localparts. */
   def cleanLocalpart(lp: String): String = cutColon(stripAt(lp))
@@ -110,8 +110,8 @@ object Router:
     if i < 0 then s else s.substring(0, i)
 
   def loginUser(lp: String, j: Json): Either[MErr, Json] = Store.userByLocalpart(lp) match
-    case _: None[UserCfg] => Left(MErr(403, M_FORBIDDEN(), "Invalid username or password"))
-    case s: Some[UserCfg] => loginCheck(s.v, lp, j)
+    case None => Left(MErr(403, M_FORBIDDEN(), "Invalid username or password"))
+    case s: Some[UserCfg] => loginCheck(s.value, lp, j)
 
   def loginCheck(u: UserCfg, lp: String, j: Json): Either[MErr, Json] =
     if u.password == strField(j, "password", "") then loginOk(lp)
@@ -150,8 +150,8 @@ object Router:
 
   def getProfile(r: go.net.http.Request): Either[MErr, Json] =
     Store.getProfile(r.pathValue("userId")) match
-      case _: None[Profile] => Left(MErr(404, M_NOT_FOUND(), "User not found"))
-      case s: Some[Profile] => Right(profileJson(s.v))
+      case None => Left(MErr(404, M_NOT_FOUND(), "User not found"))
+      case s: Some[Profile] => Right(profileJson(s.value))
 
   def profileJson(p: Profile): Json =
     if p.avatarUrl == "" then obj1("displayname", JStr(p.displayname))
@@ -214,8 +214,8 @@ object Router:
 
   def getAcct3(userId: String, r: go.net.http.Request, hasRoom: Boolean): Either[MErr, Json] =
     Store.getAccountData(userId, hasRoom, r.pathValue("roomId"), r.pathValue("type")) match
-      case _: None[AcctData] => Left(MErr(404, M_NOT_FOUND(), "Account data not found"))
-      case s: Some[AcctData] => Right(s.v.content)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Account data not found"))
+      case s: Some[AcctData] => Right(s.value.content)
 
   def setAcct(r: go.net.http.Request, body: String, hasRoom: Boolean): Either[MErr, Json] = requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)

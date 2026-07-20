@@ -43,20 +43,20 @@ object SyncEngine:
   // their old names via private accessor defs (zero churn at ~50 read sites);
   // writes go through `.set`. Whole-record swaps of immutable snapshots — the
   // engine's existing discipline, now checker-visible.
-  private val roomsC: sgo.Atomic[List[RoomState]] = sgo.atomic(Nil[RoomState]())
+  private val roomsC: sgo.Atomic[List[RoomState]] = sgo.atomic(Nil)
   private val selfUserIdC: sgo.Atomic[String] = sgo.atomic("")
   private val batchC: sgo.Atomic[String] = sgo.atomic("")
-  private val mDirectC: sgo.Atomic[List[DirectEntry]] = sgo.atomic(Nil[DirectEntry]())
+  private val mDirectC: sgo.Atomic[List[DirectEntry]] = sgo.atomic(Nil)
   private def rooms: List[RoomState] = roomsC.get()
   private def selfUserId: String = selfUserIdC.get()
   private def batch: String = batchC.get()
   private def mDirect: List[DirectEntry] = mDirectC.get()
 
   def reset(): Unit =
-    roomsC.set(Nil[RoomState]())
+    roomsC.set(Nil)
     selfUserIdC.set("")
     batchC.set("")
-    mDirectC.set(Nil[DirectEntry]())
+    mDirectC.set(Nil)
 
   /** set after login/whoami (client.zig sets `proc.self_user_id`). */
   def setSelfUser(uid: String): Unit = selfUserIdC.set(uid)
@@ -77,14 +77,14 @@ object SyncEngine:
     while going do
       cur match
         case c: ::[RoomState] => n += 1; cur = c.tail
-        case Nil()            => going = false
+        case Nil            => going = false
     n
 
   def findRoom(roomId: String): Option[RoomState] = findRoomIn(rooms, roomId)
 
   def findRoomIn(rs: List[RoomState], roomId: String): Option[RoomState] = rs match
     case h :: t => findRoomStep(h, t, roomId)
-    case Nil()  => None[RoomState]()
+    case Nil  => None
 
   def findRoomStep(h: RoomState, t: List[RoomState], roomId: String): Option[RoomState] =
     val k: String = h.roomId
@@ -92,15 +92,15 @@ object SyncEngine:
 
   def hasRoom(roomId: String): Boolean = findRoom(roomId) match
     case _: Some[RoomState] => true
-    case _: None[RoomState] => false
+    case None => false
 
   def roomOr(roomId: String, dflt: RoomState): RoomState = findRoom(roomId) match
-    case s: Some[RoomState] => s.v
-    case _: None[RoomState] => dflt
+    case s: Some[RoomState] => s.value
+    case None => dflt
 
   def emptyRoom(roomId: String): RoomState =
-    RoomState(roomId, "", false, "", Nil[MemberInfo](), Nil[String](),
-      Nil[VoiceMessageRaw](), Nil[ReceiptEntry](), "", false)
+    RoomState(roomId, "", false, "", Nil, Nil,
+      Nil, Nil, "", false)
 
   /** getOrCreateRoom: append a fresh RoomState if absent (insertion order). */
   def ensureRoom(roomId: String): Unit =
@@ -111,11 +111,11 @@ object SyncEngine:
 
   /** swap the room record with the same roomId (position preserved). */
   def updateRoom(r: RoomState): Unit =
-    roomsC.set(replaceRoom(rooms, r, Nil[RoomState]()))
+    roomsC.set(replaceRoom(rooms, r, Nil))
 
   def replaceRoom(rs: List[RoomState], r: RoomState, acc: List[RoomState]): List[RoomState] = rs match
     case h :: t => replaceRoomStep(h, t, r, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def replaceRoomStep(h: RoomState, t: List[RoomState], r: RoomState, acc: List[RoomState]): List[RoomState] =
     val k: String = h.roomId
@@ -127,7 +127,7 @@ object SyncEngine:
 
   def findMember(ms: List[MemberInfo], userId: String): Option[MemberInfo] = ms match
     case h :: t => findMemberStep(h, t, userId)
-    case Nil()  => None[MemberInfo]()
+    case Nil  => None
 
   def findMemberStep(h: MemberInfo, t: List[MemberInfo], userId: String): Option[MemberInfo] =
     val k: String = h.userId
@@ -135,16 +135,16 @@ object SyncEngine:
 
   /** ArrayHashMap getOrPut + overwrite: replace keeps position, else append. */
   def upsertMember(ms: List[MemberInfo], m: MemberInfo): List[MemberInfo] =
-    if memberExists(ms, m.userId) then replaceMember(ms, m, Nil[MemberInfo]())
+    if memberExists(ms, m.userId) then replaceMember(ms, m, Nil)
     else ListOps.reverse(m :: ListOps.reverse(ms))
 
   def memberExists(ms: List[MemberInfo], userId: String): Boolean = findMember(ms, userId) match
     case _: Some[MemberInfo] => true
-    case _: None[MemberInfo] => false
+    case None => false
 
   def replaceMember(ms: List[MemberInfo], m: MemberInfo, acc: List[MemberInfo]): List[MemberInfo] = ms match
     case h :: t => replaceMemberStep(h, t, m, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def replaceMemberStep(h: MemberInfo, t: List[MemberInfo], m: MemberInfo, acc: List[MemberInfo]): List[MemberInfo] =
     val k: String = h.userId
@@ -162,14 +162,14 @@ object SyncEngine:
         case c: ::[MemberInfo] =>
           if c.head.membership == "join" then n += 1
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     n
 
   // ---- string-list / receipt plumbing ----------------------------------------
 
   def strListContains(xs: List[String], s: String): Boolean = xs match
     case h :: t => strListContainsStep(h, t, s)
-    case Nil()  => false
+    case Nil  => false
 
   def strListContainsStep(h: String, t: List[String], s: String): Boolean =
     if h == s then true else strListContains(t, s)
@@ -179,7 +179,7 @@ object SyncEngine:
 
   def findReceipt(res: List[ReceiptEntry], eventId: String): Option[ReceiptEntry] = res match
     case h :: t => findReceiptStep(h, t, eventId)
-    case Nil()  => None[ReceiptEntry]()
+    case Nil  => None
 
   def findReceiptStep(h: ReceiptEntry, t: List[ReceiptEntry], eventId: String): Option[ReceiptEntry] =
     val k: String = h.eventId
@@ -187,7 +187,7 @@ object SyncEngine:
 
   def replaceReceipt(res: List[ReceiptEntry], e: ReceiptEntry, acc: List[ReceiptEntry]): List[ReceiptEntry] = res match
     case h :: t => replaceReceiptStep(h, t, e, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def replaceReceiptStep(h: ReceiptEntry, t: List[ReceiptEntry], e: ReceiptEntry, acc: List[ReceiptEntry]): List[ReceiptEntry] =
     val k: String = h.eventId
@@ -196,16 +196,16 @@ object SyncEngine:
     replaceReceipt(t, e, acc2)
 
   def upsertReceipt(res: List[ReceiptEntry], e: ReceiptEntry): List[ReceiptEntry] = findReceipt(res, e.eventId) match
-    case _: Some[ReceiptEntry] => replaceReceipt(res, e, Nil[ReceiptEntry]())
-    case _: None[ReceiptEntry] => ListOps.reverse(e :: ListOps.reverse(res))
+    case _: Some[ReceiptEntry] => replaceReceipt(res, e, Nil)
+    case None => ListOps.reverse(e :: ListOps.reverse(res))
 
   // ---- backfill (M8 chunk 4, sync_thread.zig `backfillRoom`) -------------------
 
   /** the room's stored `prev_batch` pagination token, "" when the room is
    *  unknown / none stored (the loop's backfill gate). */
   def prevBatchOf(roomId: String): String = findRoom(roomId) match
-    case s: Some[RoomState] => s.v.prevBatch
-    case _: None[RoomState] => ""
+    case s: Some[RoomState] => s.value.prevBatch
+    case None => ""
 
   /** ingest ONE backfilled event from a GET /messages chunk — exactly the Zig
    *  per-event body: timeline DEDUP + `m.room.message` voice extraction, and
@@ -228,21 +228,21 @@ object SyncEngine:
 
   def arrItems(j: Json): List[Json] = j match
     case a: JArr => a.items
-    case _       => Nil[Json]()
+    case _       => Nil
 
   /** `<obj>.events` as a list (EventList shape: absent -> empty). */
   def eventsOf(j: Json): List[Json] = arrItems(WJson.objField(j, "events"))
 
   def hasField(j: Json, key: String): Boolean = WJson.getField(j, key) match
     case _: Some[Json] => true
-    case _: None[Json] => false
+    case None => false
 
   // ============================ process ========================================
 
   /** process a parsed sync response; returns the emitted events IN ORDER. */
   def process(resp: Json): List[SyncEvent] =
     batchC.set(WJson.strField(resp, "next_batch", ""))
-    var evs: List[SyncEvent] = Nil[SyncEvent]()          // built REVERSED
+    var evs: List[SyncEvent] = Nil          // built REVERSED
     evs = accountDataLoop(eventsOf(WJson.objField(resp, "account_data")), evs)
     val roomsJ = WJson.objField(resp, "rooms")
     evs = joinMapLoop(WJson.objField(roomsJ, "join"), evs)
@@ -260,7 +260,7 @@ object SyncEngine:
         case c: ::[Json] =>
           evs = accountDataEvent(c.head, evs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     evs
 
   def accountDataEvent(ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
@@ -273,12 +273,12 @@ object SyncEngine:
   /** clear-and-rebuild m_direct from `{userId: [roomIds]}` (non-array values
    *  SKIP the user entirely — Zig's `.array` arm is the only one that puts). */
   def rebuildDirect(content: Option[Json]): Unit = content match
-    case s: Some[Json] => rebuildDirectFrom(s.v)
-    case _: None[Json] => ()
+    case s: Some[Json] => rebuildDirectFrom(s.value)
+    case None => ()
 
   def rebuildDirectFrom(c: Json): Unit = c match
     case o: JObj =>
-      mDirectC.set(Nil[DirectEntry]())
+      mDirectC.set(Nil)
       directFieldsLoop(o.fields)
     case _ => ()
 
@@ -290,7 +290,7 @@ object SyncEngine:
         case c: ::[(String, Json)] =>
           directField(c.head)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
 
   def directField(p: (String, Json)): Unit =
     val uid: String = p._1
@@ -302,7 +302,7 @@ object SyncEngine:
     ListOps.reverse(d :: ListOps.reverse(ds))
 
   def stringItems(items: List[Json]): List[String] =
-    var acc: List[String] = Nil[String]()
+    var acc: List[String] = Nil
     var cur = items
     var going = true
     while going do
@@ -310,7 +310,7 @@ object SyncEngine:
         case c: ::[Json] =>
           acc = consIfStr(c.head, acc)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     ListOps.reverse(acc)
 
   def consIfStr(j: Json, acc: List[String]): List[String] = j match
@@ -321,7 +321,7 @@ object SyncEngine:
 
   def findDirectIn(ds: List[DirectEntry], userId: String): Option[DirectEntry] = ds match
     case h :: t => findDirectStep(h, t, userId)
-    case Nil()  => None[DirectEntry]()
+    case Nil  => None
 
   def findDirectStep(h: DirectEntry, t: List[DirectEntry], userId: String): Option[DirectEntry] =
     val k: String = h.userId
@@ -334,7 +334,7 @@ object SyncEngine:
     while going do
       cur match
         case c: ::[DirectEntry] => n += 1; cur = c.tail
-        case Nil()              => going = false
+        case Nil              => going = false
     n
 
   // ---- joined / invited room maps ----------------------------------------------
@@ -352,7 +352,7 @@ object SyncEngine:
         case c: ::[(String, Json)] =>
           evs = joinedRoom(c.head, evs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     evs
 
   def joinedRoom(p: (String, Json), evs0: List[SyncEvent]): List[SyncEvent] =
@@ -384,7 +384,7 @@ object SyncEngine:
         case c: ::[(String, Json)] =>
           evs = invitedRoom(c.head, evs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     evs
 
   /** invited rooms: process stripped invite_state (DM detection via is_direct
@@ -407,7 +407,7 @@ object SyncEngine:
         case c: ::[Json] =>
           evs = stateEvent(roomId, c.head, evs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     evs
 
   def stateEvent(roomId: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
@@ -427,8 +427,8 @@ object SyncEngine:
   /** canonical_alias: an alias string sets it; a PRESENT content without one
    *  CLEARS it (Zig's `else` arm); an absent content changes nothing. */
   def stateAlias(roomId: String, ev: Json): Unit = WJson.getField(ev, "content") match
-    case s: Some[Json] => stateAliasSet(roomId, s.v)
-    case _: None[Json] => ()
+    case s: Some[Json] => stateAliasSet(roomId, s.value)
+    case None => ()
 
   def stateAliasSet(roomId: String, content: Json): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
@@ -445,8 +445,8 @@ object SyncEngine:
 
   def stateMemberKeyed(roomId: String, uid: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
     WJson.getField(ev, "content") match                     // Zig: whole block inside if(content)
-      case s: Some[Json] => stateMemberContent(roomId, uid, s.v, evs0)
-      case _: None[Json] => evs0
+      case s: Some[Json] => stateMemberContent(roomId, uid, s.value, evs0)
+      case None => evs0
 
   def stateMemberContent(roomId: String, uid: String, content: Json, evs0: List[SyncEvent]): List[SyncEvent] =
     val membership = WJson.strField(content, "membership", "leave")
@@ -475,7 +475,7 @@ object SyncEngine:
         case c: ::[Json] =>
           evs = timelineEvent(roomId, c.head, evs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     evs
 
   def timelineEvent(roomId: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
@@ -527,12 +527,12 @@ object SyncEngine:
   def removeVoice(roomId: String, targetId: String): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, dropVoice(r.voiceMessages, targetId, Nil[VoiceMessageRaw]()),
+      r.timelineEventIds, dropVoice(r.voiceMessages, targetId, Nil),
       r.receipts, r.prevBatch, r.isDm))
 
   def dropVoice(vs: List[VoiceMessageRaw], targetId: String, acc: List[VoiceMessageRaw]): List[VoiceMessageRaw] = vs match
     case h :: t => dropVoiceStep(h, t, targetId, acc)
-    case Nil()  => ListOps.reverse(acc)
+    case Nil  => ListOps.reverse(acc)
 
   def dropVoiceStep(h: VoiceMessageRaw, t: List[VoiceMessageRaw], targetId: String, acc: List[VoiceMessageRaw]): List[VoiceMessageRaw] =
     val k: String = h.eventId
@@ -550,7 +550,7 @@ object SyncEngine:
         case c: ::[Json] =>
           evs = ephemeralEvent(roomId, c.head, evs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     evs
 
   def ephemeralEvent(roomId: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
@@ -572,7 +572,7 @@ object SyncEngine:
         case c: ::[(String, Json)] =>
           evs = receiptField(roomId, c.head, evs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     evs
 
   def receiptField(roomId: String, p: (String, Json), evs0: List[SyncEvent]): List[SyncEvent] =
@@ -585,8 +585,8 @@ object SyncEngine:
   def receiptUsers(roomId: String, eventId: String, users: List[(String, Json)], evs0: List[SyncEvent]): List[SyncEvent] =
     val r = roomOr(roomId, emptyRoom(roomId))
     val existing = findReceipt(r.receipts, eventId) match
-      case s: Some[ReceiptEntry] => s.v
-      case _: None[ReceiptEntry] => ReceiptEntry(eventId, Nil[String]())
+      case s: Some[ReceiptEntry] => s.value
+      case None => ReceiptEntry(eventId, Nil)
     val updated = ReceiptEntry(eventId, appendUserKeys(existing.userIds, users))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
       r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.isDm))
@@ -602,7 +602,7 @@ object SyncEngine:
         case c: ::[(String, Json)] =>
           acc = appendUserKey(acc, c.head)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     acc
 
   def appendUserKey(acc: List[String], p: (String, Json)): List[String] =
@@ -613,7 +613,7 @@ object SyncEngine:
 
   def buildSnapshot(): StateSnapshot =
     val contacts0 = contactsFromDirect()
-    var conversations: List[Conversation] = Nil[Conversation]()
+    var conversations: List[Conversation] = Nil
     var contacts = contacts0
     // conversations from m.direct (insertion order; first JOINED room wins)
     conversations = convsFromDirect(contacts, conversations)
@@ -634,7 +634,7 @@ object SyncEngine:
   // ---- contacts from m.direct ----------------------------------------------------
 
   def contactsFromDirect(): List[Contact] =
-    var acc: List[Contact] = Nil[Contact]()
+    var acc: List[Contact] = Nil
     var cur = mDirect
     var going = true
     while going do
@@ -642,7 +642,7 @@ object SyncEngine:
         case c: ::[DirectEntry] =>
           acc = contactFromEntry(c.head, acc)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     ListOps.reverse(acc)
 
   def contactFromEntry(d: DirectEntry, acc: List[Contact]): List[Contact] =
@@ -662,21 +662,21 @@ object SyncEngine:
             val dn = displayIn(c.head, userId)
             if dn != "" then { result = dn; found = true }
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     result
 
   /** the member's display name in a room, or "" (room missing / member missing). */
   def displayIn(roomId: String, userId: String): String = findRoom(roomId) match
-    case s: Some[RoomState] => displayInRoom(s.v, userId)
-    case _: None[RoomState] => ""
+    case s: Some[RoomState] => displayInRoom(s.value, userId)
+    case None => ""
 
   def displayInRoom(r: RoomState, userId: String): String = findMember(r.members, userId) match
-    case s: Some[MemberInfo] => s.v.displayName
-    case _: None[MemberInfo] => ""
+    case s: Some[MemberInfo] => s.value.displayName
+    case None => ""
 
   def findContact(cs: List[Contact], userId: String): Option[Contact] = cs match
     case h :: t => findContactStep(h, t, userId)
-    case Nil()  => None[Contact]()
+    case Nil  => None
 
   def findContactStep(h: Contact, t: List[Contact], userId: String): Option[Contact] =
     val k: String = h.user.id
@@ -684,7 +684,7 @@ object SyncEngine:
 
   def contactExists(cs: List[Contact], userId: String): Boolean = findContact(cs, userId) match
     case _: Some[Contact] => true
-    case _: None[Contact] => false
+    case None => false
 
   // ---- conversations from m.direct -----------------------------------------------
 
@@ -697,7 +697,7 @@ object SyncEngine:
         case c: ::[DirectEntry] =>
           convs = convFromEntry(c.head, contacts, convs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     convs
 
   def convFromEntry(d: DirectEntry, contacts: List[Contact], convs: List[Conversation]): List[Conversation] =
@@ -711,8 +711,8 @@ object SyncEngine:
         val found = findContact(contacts, d.userId)
         val hasContact = contactExists(contacts, d.userId)
         val contact = found match
-          case s: Some[Contact] => s.v
-          case _: None[Contact] => Contact(User(d.userId, d.userId))
+          case s: Some[Contact] => s.value
+          case None => Contact(User(d.userId, d.userId))
         appendConv(convs, Conversation(rid, DmConv(), hasContact, contact, messages, unplayedOf(messages)))
 
   /** the FIRST room id in the m.direct list that we have joined ("" if none) —
@@ -726,7 +726,7 @@ object SyncEngine:
         case c: ::[String] =>
           if result == "" && hasRoom(c.head) then result = c.head
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     result
 
   def appendConv(cs: List[Conversation], c: Conversation): List[Conversation] =
@@ -735,7 +735,7 @@ object SyncEngine:
   // ---- messages / played state ----------------------------------------------------
 
   def buildMessages(r: RoomState): List[VoiceMessage] =
-    var acc: List[VoiceMessage] = Nil[VoiceMessage]()
+    var acc: List[VoiceMessage] = Nil
     var cur = r.voiceMessages
     var going = true
     while going do
@@ -743,7 +743,7 @@ object SyncEngine:
         case c: ::[VoiceMessageRaw] =>
           acc = buildMessage(r, c.head) :: acc
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     ListOps.reverse(acc)
 
   def buildMessage(r: RoomState, vm: VoiceMessageRaw): VoiceMessage =
@@ -756,8 +756,8 @@ object SyncEngine:
   def isPlayed(r: RoomState, eventId: String): Boolean =
     if selfUserId == "" then false
     else findReceipt(r.receipts, eventId) match
-      case s: Some[ReceiptEntry] => strListContains(s.v.userIds, selfUserId)
-      case _: None[ReceiptEntry] => false
+      case s: Some[ReceiptEntry] => strListContains(s.value.userIds, selfUserId)
+      case None => false
 
   def unplayedOf(messages: List[VoiceMessage]): Int =
     var n = 0
@@ -768,7 +768,7 @@ object SyncEngine:
         case c: ::[VoiceMessage] =>
           if !c.head.isPlayed then n += 1
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     n
 
   // ---- sticky is_dm inference (rooms not covered by m.direct) ----------------------
@@ -786,7 +786,7 @@ object SyncEngine:
           contacts = step._1
           convs = step._2
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     (contacts, convs)
 
   def inferDmRoom(r: RoomState, contacts: List[Contact], convs: List[Conversation]): (List[Contact], List[Conversation]) =
@@ -795,8 +795,8 @@ object SyncEngine:
     else
       val peer = findPeer(r)
       peer match
-        case s: Some[MemberInfo] => inferDmPeer(r, s.v, contacts, convs)
-        case _: None[MemberInfo] => (contacts, convs)
+        case s: Some[MemberInfo] => inferDmPeer(r, s.value, contacts, convs)
+        case None => (contacts, convs)
 
   def inferDmPeer(r: RoomState, other: MemberInfo, contacts0: List[Contact], convs: List[Conversation]): (List[Contact], List[Conversation]) =
     if peerHasConv(convs, other.userId) then (contacts0, convs)  // m.direct is the authority
@@ -812,7 +812,7 @@ object SyncEngine:
 
   def convHasRoom(convs: List[Conversation], roomId: String): Boolean = convs match
     case h :: t => convHasRoomStep(h, t, roomId)
-    case Nil()  => false
+    case Nil  => false
 
   def convHasRoomStep(h: Conversation, t: List[Conversation], roomId: String): Boolean =
     val k: String = h.roomId
@@ -820,7 +820,7 @@ object SyncEngine:
 
   def peerHasConv(convs: List[Conversation], userId: String): Boolean = convs match
     case h :: t => peerHasConvStep(h, t, userId)
-    case Nil()  => false
+    case Nil  => false
 
   def peerHasConvStep(h: Conversation, t: List[Conversation], userId: String): Boolean =
     val k: String = h.contact.user.id
@@ -828,7 +828,7 @@ object SyncEngine:
 
   /** the "other" joined/invited member — the DM peer (first in member order). */
   def findPeer(r: RoomState): Option[MemberInfo] =
-    var result: Option[MemberInfo] = None[MemberInfo]()
+    var result: Option[MemberInfo] = None
     var found = false
     var cur = r.members
     var going = true
@@ -837,7 +837,7 @@ object SyncEngine:
         case c: ::[MemberInfo] =>
           if !found && isPeer(c.head) then { result = Some(c.head); found = true }
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     result
 
   def isPeer(m: MemberInfo): Boolean =
@@ -849,7 +849,7 @@ object SyncEngine:
   /** the FIRST room whose canonical alias starts with "#family:" -> (true, Family). */
   def findFamily(): (Boolean, Family) =
     var has = false
-    var fam = Family("", "", Nil[Contact]())
+    var fam = Family("", "", Nil)
     var cur = rooms
     var going = true
     while going do
@@ -859,7 +859,7 @@ object SyncEngine:
             has = true
             fam = familyOf(c.head)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     (has, fam)
 
   def isFamilyRoom(r: RoomState): Boolean = r.hasAlias && r.alias.startsWith("#family:")
@@ -871,7 +871,7 @@ object SyncEngine:
 
   /** joined members, self excluded (member order). */
   def familyMembers(r: RoomState): List[Contact] =
-    var acc: List[Contact] = Nil[Contact]()
+    var acc: List[Contact] = Nil
     var cur = r.members
     var going = true
     while going do
@@ -879,7 +879,7 @@ object SyncEngine:
         case c: ::[MemberInfo] =>
           acc = familyMemberStep(c.head, acc)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     ListOps.reverse(acc)
 
   def familyMemberStep(m: MemberInfo, acc: List[Contact]): List[Contact] =
@@ -904,12 +904,12 @@ object SyncEngine:
         case c: ::[Contact] =>
           convs = roomlessFamilyStep(c.head, convs)
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     convs
 
   def roomlessFamilyStep(member: Contact, convs: List[Conversation]): List[Conversation] =
     if peerHasConv(convs, member.user.id) then convs
-    else appendConv(convs, Conversation("", DmConv(), true, member, Nil[VoiceMessage](), 0))
+    else appendConv(convs, Conversation("", DmConv(), true, member, Nil, 0))
 
   // ---- self display name ------------------------------------------------------------
 
@@ -927,6 +927,6 @@ object SyncEngine:
               val dn = displayInRoom(c.head, selfUserId)
               if dn != "" && dn != selfUserId then { result = dn; found = true }
             cur = c.tail
-          case Nil() => going = false
+          case Nil => going = false
     result
 

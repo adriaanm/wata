@@ -106,8 +106,8 @@ object Ui:
 
       // pick up the newest snapshot (Runtime.pollSnap TAKES it)
       Runtime.pollSnap(c) match
-        case s: Some[StateSnapshot] => snap = s.v
-        case _: None[StateSnapshot] => ()
+        case s: Some[StateSnapshot] => snap = s.value
+        case None => ()
 
       // drain UI events (connection -> status/LEDs, send/play -> wata flash)
       drainUiEvents(c)
@@ -148,7 +148,7 @@ object Ui:
           if displayOff then wake()               // swallow the wake input
           else quit = applyOne(ev, ctx) || quit
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
     quit
 
   /** route one key event; a `back` press on the contacts view = quit. */
@@ -191,15 +191,15 @@ object Ui:
 
   def hasEvent(evs: List[KeyEvent]): Boolean = evs match
     case _ :: _ => true
-    case Nil()  => false
+    case Nil  => false
 
   // ---- UI event drain (main.zig: connection -> LEDs/status, send/play flash) --
   def drainUiEvents(c: MatrixClient): Unit =
     var run = true
     while run do
       Runtime.pollEvent(c) match
-        case e: Some[UiEvent] => onUiEvent(e.v)
-        case _: None[UiEvent] => run = false
+        case e: Some[UiEvent] => onUiEvent(e.value)
+        case None => run = false
 
   def onUiEvent(e: UiEvent): Unit = e match
     case cs: EvConn        => onConn(cs.state)

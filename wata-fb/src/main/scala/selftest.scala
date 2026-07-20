@@ -55,7 +55,7 @@ object Selftest:
     val enc = go.audio.newEncoder()
     val nFrames = 48000 * durationMs / 1000 / 960
     val pcm = go.audio.tone(440, nFrames * 960)
-    var frames: List[Bytes] = Nil[Bytes]()
+    var frames: List[Bytes] = Nil
     var i = 0
     while i < nFrames do
       val f = enc.encodeFrameAt(pcm, i) // hoisted: throwing calls val-bind
@@ -102,11 +102,11 @@ object Selftest:
       else
         evts.tryReceive() match
           case s: Some[AudioEvt] =>
-            println("  [event] " + evtName(s.v))
-            val t = evtTag(s.v)
+            println("  [event] " + evtName(s.value))
+            val t = evtTag(s.value)
             if t == target then
               res = true
               run = false
             else if isErrTag(t) then run = false
-          case _: None[AudioEvt] => clock.sleepMs(10L)
+          case None => clock.sleepMs(10L)
     res

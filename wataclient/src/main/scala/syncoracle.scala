@@ -31,7 +31,7 @@ object SyncOracle:
     while going do
       cur match
         case c: ::[SyncEvent] => n += 1; cur = c.tail
-        case Nil()            => going = false
+        case Nil            => going = false
     n
 
   def hasEvent(evs: List[SyncEvent], name: String): Boolean =
@@ -43,7 +43,7 @@ object SyncOracle:
         case c: ::[SyncEvent] =>
           if eventName(c.head) == name then found = true
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     found
 
   /** the event names in emission order, dot-separated (order assertions). */
@@ -59,7 +59,7 @@ object SyncOracle:
           b.append(eventName(c.head))
           first = false
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     b.toString
 
   def convCount(ss: StateSnapshot): Int =
@@ -69,7 +69,7 @@ object SyncOracle:
     while going do
       cur match
         case c: ::[Conversation] => n += 1; cur = c.tail
-        case Nil()               => going = false
+        case Nil               => going = false
     n
 
   def contactCount(ss: StateSnapshot): Int =
@@ -79,11 +79,11 @@ object SyncOracle:
     while going do
       cur match
         case c: ::[Contact] => n += 1; cur = c.tail
-        case Nil()          => going = false
+        case Nil          => going = false
     n
 
   def nthConv(ss: StateSnapshot, n: Int): Conversation =
-    var result = Conversation("", DmConv(), false, Contact(User("", "")), Nil[VoiceMessage](), 0)
+    var result = Conversation("", DmConv(), false, Contact(User("", "")), Nil, 0)
     var i = 0
     var cur = ss.conversations
     var going = true
@@ -93,13 +93,13 @@ object SyncOracle:
           if i == n then result = c.head
           i += 1
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     result
 
   def firstMessage(c: Conversation): VoiceMessage =
     c.messages match
       case m :: _ => m
-      case Nil()  => VoiceMessage("", User("", ""), "", 0L, 0L, false)
+      case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false)
 
   def msgCount(c: Conversation): Int =
     var n = 0
@@ -108,7 +108,7 @@ object SyncOracle:
     while going do
       cur match
         case cc: ::[VoiceMessage] => n += 1; cur = cc.tail
-        case Nil()                => going = false
+        case Nil                => going = false
     n
 
   def convTypeName(t: ConversationType): String = t match
@@ -122,16 +122,16 @@ object SyncOracle:
     while going do
       cur match
         case c: ::[Contact] => n += 1; cur = c.tail
-        case Nil()          => going = false
+        case Nil          => going = false
     n
 
   def firstFamMember(f: Family): Contact = f.members match
     case m :: _ => m
-    case Nil()  => Contact(User("", ""))
+    case Nil  => Contact(User("", ""))
 
   /** find the conversation whose contact is `uid` ("" roomId etc. read off it). */
   def convOfContact(ss: StateSnapshot, uid: String): Conversation =
-    var result = Conversation("<none>", DmConv(), false, Contact(User("", "")), Nil[VoiceMessage](), 0)
+    var result = Conversation("<none>", DmConv(), false, Contact(User("", "")), Nil, 0)
     var cur = ss.conversations
     var going = true
     while going do
@@ -140,7 +140,7 @@ object SyncOracle:
           val k: String = c.head.contact.user.id
           if c.head.hasContact && k == uid then result = c.head
           cur = c.tail
-        case Nil() => going = false
+        case Nil => going = false
     result
 
   def report(): String =
@@ -170,8 +170,8 @@ object SyncOracle:
     b.append("t02 room: name "); b.append(room2.name)
     b.append(" joined "); b.append(SyncEngine.joinedMemberCount(room2)); b.append('\n')
     val bob2 = SyncEngine.findMember(room2.members, "@bob:test") match
-      case s: Some[MemberInfo] => s.v
-      case _: None[MemberInfo] => MemberInfo("", "", "", false)
+      case s: Some[MemberInfo] => s.value
+      case None => MemberInfo("", "", "", false)
     b.append("t02 bob: display "); b.append(bob2.displayName)
     b.append(" membership "); b.append(bob2.membership); b.append('\n')
 
@@ -190,7 +190,7 @@ object SyncOracle:
     val room3 = SyncEngine.roomOr("!room1:test", SyncEngine.emptyRoom("?"))
     val vm3 = room3.voiceMessages match
       case v :: _ => v
-      case Nil()  => VoiceMessageRaw("", "", "", 0L, 0L)
+      case Nil  => VoiceMessageRaw("", "", "", 0L, 0L)
     b.append("t03 vm: id "); b.append(vm3.eventId)
     b.append(" sender "); b.append(vm3.sender)
     b.append(" url "); b.append(vm3.mxcUrl)
@@ -208,12 +208,12 @@ object SyncOracle:
     b.append("t04 mdirect: ad-event "); b.append(boolStr(hasEvent(evs4, "account_data_updated")))
     b.append(" entries "); b.append(SyncEngine.directCount); b.append('\n')
     val bobRooms4 = SyncEngine.findDirect("@bob:test") match
-      case s: Some[DirectEntry] => s.v.roomIds
-      case _: None[DirectEntry] => Nil[String]()
+      case s: Some[DirectEntry] => s.value.roomIds
+      case None => Nil
     b.append("t04 bob: first ")
     bobRooms4 match
       case h :: _ => b.append(h)
-      case Nil()  => b.append("<none>")
+      case Nil  => b.append("<none>")
     b.append('\n')
 
     // -- 5. buildSnapshot contacts from m.direct (Zig pokes state; driven via sync) --
@@ -229,7 +229,7 @@ object SyncOracle:
     b.append("t05 snapshot: contacts "); b.append(contactCount(ss5))
     val c5 = ss5.contacts match
       case h :: _ => h
-      case Nil()  => Contact(User("", ""))
+      case Nil  => Contact(User("", ""))
     b.append(" first "); b.append(c5.user.displayName)
     b.append(" convs "); b.append(convCount(ss5))
     b.append(" room "); b.append(nthConv(ss5, 0).roomId); b.append('\n')
@@ -252,7 +252,7 @@ object SyncOracle:
     while going6 do
       cur6 match
         case c: ::[VoiceMessageRaw] => vmCount6 += 1; cur6 = c.tail
-        case Nil()                  => going6 = false
+        case Nil                  => going6 = false
     b.append("t06 dedup: voice "); b.append(vmCount6); b.append('\n')
 
     // -- 7. m.direct dedup: stale rooms skipped, first JOINED room wins ----------------
@@ -399,8 +399,8 @@ object SyncOracle:
     SyncEngine.process(parse("{\"next_batch\":\"batch_after\"}"))  // a later, empty sync
     val room15 = SyncEngine.roomOr("!room1:test", SyncEngine.emptyRoom("?"))
     val bob15 = SyncEngine.findMember(room15.members, "@bob:test") match
-      case s: Some[MemberInfo] => s.v
-      case _: None[MemberInfo] => MemberInfo("", "", "", false)
+      case s: Some[MemberInfo] => s.value
+      case None => MemberInfo("", "", "", false)
     b.append("t15 persist: batch "); b.append(SyncEngine.nextBatch)
     b.append(" name "); b.append(room15.name)
     b.append(" bob "); b.append(bob15.displayName); b.append('\n')

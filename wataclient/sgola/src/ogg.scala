@@ -130,7 +130,7 @@ object Ogg:
           out.addBytes(page(h, granule, 0, seq))
           seq = seq + 1
           cur = t
-        case Nil() => going = false
+        case Nil => going = false
     out.addBytes(page(Bytes.empty, granule, FLAG_EOS, seq))
     out.result()
 
@@ -153,7 +153,7 @@ object Ogg:
   /** extract every AUDIO frame (skipping BOS/OpusTags/empty pages, exactly as
    *  ogg.zig's `nextFrame`: BOS by flag, the SECOND page by count, empty by size). */
   def readFrames(data: Bytes): List[Bytes] =
-    var acc: List[Bytes] = Nil[Bytes]()
+    var acc: List[Bytes] = Nil
     var pos = 0
     var pagesRead = 0
     var going = true
@@ -189,5 +189,5 @@ object Ogg:
     while going do
       cur match
         case c: ::[Bytes] => n = n + 1; cur = c.tail
-        case Nil()        => going = false
+        case Nil        => going = false
     n

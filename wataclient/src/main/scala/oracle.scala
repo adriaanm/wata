@@ -87,7 +87,7 @@ object OggOracle:
     b.append('\n')
 
     // ---- write a stream, verify page CRC + BOS/EOS ----------------------------
-    var frames: List[Bytes] = Nil[Bytes]()
+    var frames: List[Bytes] = Nil
     frames = fill(50, 5) :: frames
     frames = fill(50, 4) :: frames
     frames = fill(600, 3) :: frames // >255 -> multi-segment (3 lacing segments)
@@ -232,13 +232,13 @@ object OggOracle:
   // list helpers on List[Bytes] (single-match defs — the json flattening idiom).
   def isEmpty(xs: List[Bytes]): Boolean = xs match
     case _: ::[Bytes] => false
-    case Nil()        => true
+    case Nil        => true
   def headOf(xs: List[Bytes]): Bytes = xs match
     case c: ::[Bytes] => c.head
-    case Nil()        => Bytes.empty
+    case Nil        => Bytes.empty
   def tailOf(xs: List[Bytes]): List[Bytes] = xs match
     case c: ::[Bytes] => c.tail
-    case Nil()        => xs
+    case Nil        => xs
 
   /** structural frame-content equality of two `List[Bytes]`. */
   def sameFrames(a: List[Bytes], b: List[Bytes]): Boolean =
