@@ -17,9 +17,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WATA="$(pwd)"
-# E2b: the suite runs FROM the wata repo; the sgola toolchain rides $SGOLA_HOME.
-[ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set (the sgola toolchain home)"; exit 1; }
-SGO="${SGO:-$SGOLA_HOME/sgo/sgo}"
+. "$WATA/tools/sgo-env.sh"                          # SGOLA_HOME (pinned clone by default), GOTOOLCHAIN, SGO
 [ -x "$SGO" ] || { echo "persist-smoke: sgo driver not built ($SGO)"; exit 1; }
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers (E2b)
 BIN="$(emitdir wata-server)/$(binname wata-server)"
