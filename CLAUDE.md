@@ -96,6 +96,12 @@ Design docs in `docs/design/` describe **how a subproject is built today**,
 not how it should be. When a change lands that invalidates one, update it
 in the same commit.
 
+**Finishing a logical task means committing it.** A plan carried out, or a
+`TODO.jsonl` item that had no plan of its own, ends in a commit — code,
+doc updates, and queue edits together — once its verification is green.
+Don't leave finished work sitting in the working tree waiting to be asked
+about; an uncommitted tree is work nobody else can see or bisect.
+
 ### Open work — `TODO.jsonl`
 
 `TODO.jsonl` is an **ephemeral work queue**, one JSON object per line,
