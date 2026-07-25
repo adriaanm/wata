@@ -1,12 +1,9 @@
 # sgo.build (schema: see core/sgo.build). wata-fb is an APP over core + json +
-# wataclient (the portable client core) that rides a cgo Go dep (sgola.example/
-# audio, static opus/tinyalsa libs on a cgo cross-build).
-# emitname is `fb` (the pre-6b shared-tree subdir .sgo/fb — the ci scripts
-# reference it), while the module dir + binary are `wata-fb`.
+# wataclient (the portable client core) that rides a cgo Go dep (go-pkgs/audio,
+# static opus/tinyalsa libs on a cgo cross-build).
 mode app
-emitname fb
+emitname wata-fb
 binname wata-fb
-gomod sgolafb
-crosskey wata-fb
+gomod watafb
 optreport
-godep sgola.example/audio go-pkgs/audio cgo
+godep github.com/adriaanm/wata/go-pkgs/audio go-pkgs/audio cgo

@@ -1,13 +1,9 @@
-# emitdir.sh — the wata scenario scripts' bridge to the sgo build layout
-# (moved from the sgola tree in BUILD chunk E2b, adapted to the wata repo).
+# emitdir.sh — the test scripts' bridge to the sgo build layout.
 #
-# A wata app module builds through sgo's table pipeline with the toolchain +
-# SHARED-LIBRARY emission (core/json/wataclient) under $SGOLA_HOME, but its OWN
-# generated tree lands under ITS OWN dir at <module>/.sgo/<emitname> (BUILD E3
-# item (b): a moved-out app emits under its own tree, the fresh-module rule; the
-# E2b $SGOLA_HOME/.sgo coupling was the recorded shortcut, now retired). The
-# emitname is declared in the module's own sgo.build — never re-encoded here.
-# Source this file (with $WATA = the wata repo root and $SGOLA_HOME set) and call:
+# An app module's generated Go tree lands under <module>/.sgo/<emitname>, where
+# emitname is declared in the module's own sgo.build — never re-encoded here, so
+# renaming it is a one-line edit in one place. Source this file (with $WATA = the
+# repo root, after tools/sgo-env.sh) and call:
 #
 #   emitdir <module-dir-name>   # echoes the app's absolute emission dir
 #   binname <module-dir-name>   # echoes the app's built-binary basename

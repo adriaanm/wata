@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-# M8 chunk 4 — the LIVE ORACLE runner (decision 7): run the ported
-# client_integration_test.zig scenarios (wata-fb/src/main/scala/integ.scala)
-# against a FRESH M7 wata-server per scenario (the wata-tests.sh isolation
-# pattern — the in-memory server accumulates state; a fresh server per scenario
-# also stands in for Zig's marker-duration isolation on a shared Conduit).
+# The live client-server oracle: run the scenarios in
+# wata-fb/src/main/scala/integ.scala against a FRESH wata-server per scenario.
+# The server keeps its state in memory and accumulates it across a run, so a
+# per-scenario server is what keeps the assertions independent.
 #
 #   tools/wataclient-integ.sh              # all scenarios, scoreboard
 #   tools/wataclient-integ.sh <scenario>   # one scenario
 #
-# The client driver runs as a `-race` BINARY (built from the emitted .sgo/fb
+# The client driver runs as a `-race` BINARY (built from wata-fb's emitted
 # sources) — every scenario exercises the sync loop + action loop + driver
-# concurrently, so the whole oracle doubles as the chunk's -race gate. Any
-# "DATA RACE" in client or server output fails the run.
+# concurrently, so the whole oracle doubles as a -race gate. Any "DATA RACE" in
+# client or server output fails the run.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WATA="$(pwd)"
@@ -26,7 +25,7 @@ SCENARIOS=(login-syncing both-sync voice-to-bob receipt-accepted receipt-roundtr
 # ---- build -------------------------------------------------------------------
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "integ: wata-server build failed"; exit 1; }
 ( cd "$WATA/wata-fb" && "$SGO" build ) >/dev/null || { echo "integ: wata-fb build failed"; exit 1; }
-. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers (E2b)
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 FB_EMIT="$(emitdir wata-fb)"; WATA_EMIT="$(emitdir wata-server)"
 echo "integ: building -race client binary…"
 ( cd "$FB_EMIT" && go build -race -o wata-fb_race . ) || { echo "integ: go build -race failed"; exit 1; }

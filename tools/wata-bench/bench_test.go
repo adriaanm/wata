@@ -1,10 +1,8 @@
-// M7 chunk 6 — allocs/op on the EMITTED serve path (the M5 harness idea in Go's
-// native shape: testing.B.ReportAllocs, == the runtime.ReadMemStats Mallocs delta
-// the sgola in-source harness uses). Copied into .sgo/wata (package main) by
-// tools/wata-bench.sh and run with `go test -bench`; it drives the emitted
-// WataHandler through the real Go-1.22 ServeMux via httptest — so every op pays
-// the actual mux match + PathValue + store HashMap hits + json-module write, the
-// map-bound handler path the CHAMP gate (ROADMAP M7 decision 6) evaluates.
+// allocs/op on the EMITTED serve path, via testing.B.ReportAllocs. Copied into
+// wata-server's emitted tree (package main) by tools/wata-bench.sh and run with
+// `go test -bench`; it drives the emitted WataHandler through the real ServeMux
+// via httptest, so every op pays the actual mux match + PathValue + store
+// HashMap hits + json-module write.
 package main
 
 import (

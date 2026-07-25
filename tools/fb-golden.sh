@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# fb-golden.sh — M8 chunk 5, ci step 16: the HEADLESS-HOST golden-frame oracle
-# (decision 4). Builds wata-fb NATIVE, runs the deterministic draw script
+# The headless-host golden-frame oracle.
+# Builds wata-fb NATIVE, runs the deterministic draw script
 # (`wata-fb fbdump`) which encodes the RGB565 test pattern to a byte-stable PNG
 # (a single stored-DEFLATE block — Go-version-independent) and writes the raw
 # PNG bytes to stdout, then byte-compares against the checked-in golden
 # `tools/fb-golden.png`. The golden is regenerated designer-reviewed like a
-# baseline: `.sgo/fb/wata-fb fbdump > tools/fb-golden.png` then eyeball it.
+# baseline: `wata-fb/.sgo/wata-fb/wata-fb fbdump > tools/fb-golden.png`, then
+# eyeball it.
 # Host-only, hermetic — no device, no cgo (the draw layer + PNG encoder are
 # pure Sgola; the syscall.Write(1,...) sink exists on darwin too).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 WATA="$(pwd)"
 . "$WATA/tools/sgo-env.sh"                          # SGOLA_HOME (pinned clone by default), GOTOOLCHAIN, SGO
-. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers (E2b)
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 GOLDEN="$WATA/tools/fb-golden.png"
 
 echo "-- fb-golden: build wata-fb (native) + draw the test pattern --"

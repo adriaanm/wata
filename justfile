@@ -41,18 +41,12 @@ build-fb:
 server PORT="8008":
     cd wata-server && ../tools/sgo run :{{PORT}}
 
-# The payload embeds source text and TASTy, so it goes stale the moment a
-# comment under wataclient/src/ moves.
-#
-# regenerate wataclient/sgola/, the committed publish payload
-emit-payload:
-    tools/sgo emit {{justfile_directory()}}/wataclient
-
 # ── Test ──────────────────────────────────────────────────────────────────────
 
+# Each script prints its own PASS; just stops at the first failure.
+#
 # the whole gate
-ci:
-    bash tools/ci.sh
+ci: smoke persist fb-smoke client-tests integ golden amd64-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -70,7 +64,7 @@ fb-smoke:
 golden:
     bash tools/fb-golden.sh
 
-# client core: portability tripwire, emit, JVM oracle, sync/fixture oracles
+# client core: portability tripwire, sync/fixture/ogg byte oracles
 client-tests:
     bash tools/wataclient-tests.sh
 

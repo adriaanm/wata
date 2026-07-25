@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# M7 chunk 6 — the wata-server benchmark harness. Three measurements:
+# The wata-server benchmark harness. Three measurements:
 #   (1) allocs/op on the EMITTED serve path (tools/wata-bench/bench_test.go copied
-#       into $SGOLA_HOME/.sgo/wata, `go test -bench`, each endpoint in an ISOLATED process so
-#       the package-global store starts fresh — the M5 ReportAllocs mechanism).
+#       into the emitted tree, `go test -bench`, each endpoint in an ISOLATED
+#       process so the package-global store starts fresh).
 #   (2) throughput + long-poll wake latency vs the TS reference server
 #       (tools/wata-throughput, run against each baseURL).
 #   (3) Conduit: checked for; benchmarked if present, else recorded unavailable.
@@ -11,17 +11,13 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WATA="$(pwd)"
-[ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set"; exit 1; }
-# E2b NOTE: moved from the sgola tree with the wata code. Dev tool, NOT in
-# either ci gate; needs $SGOLA_HOME (the sgola toolchain) and builds the wata
-# modules from THIS repo. E3 (b): emission is under the module's OWN tree.
+# A dev tool, not part of `just ci`.
+. "$WATA/tools/sgo-env.sh"                        # SGOLA_HOME, GOTOOLCHAIN, SGO
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
+WATA_TS="${WATA_TS_REPO:-$HOME/g/bq268/wata}"     # the TS reference server, for (2)
 
-SGO="$SGOLA_HOME/sgo/sgo"
-WATA="${WATA_REPO:-$HOME/g/bq268/wata}"
-
-( cd "$SGOLA_HOME/sgo" && go build -o sgo . ) >/dev/null || { echo "bench: sgo build failed"; exit 1; }
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "bench: build failed"; exit 1; }
-WATA_EMIT="$WATA/wata-server/.sgo/wata"           # E3 (b): the module's own emission tree
+WATA_EMIT="$(emitdir wata-server)"
 
 echo "========== (1) allocs/op on the emitted serve path =========="
 cp tools/wata-bench/bench_test.go "$WATA_EMIT/bench_test.go"
@@ -53,9 +49,9 @@ echo "### SGOLA (8008) ###"
 ( cd tools/wata-throughput && go run . http://127.0.0.1:8008 "$N" )
 
 # --- TS reference (node --import tsx; DYLD must be exported so node keeps it) ---
-if [ -n "$NODE" ] && [ -f "$WATA/src/server/index.ts" ]; then
+if [ -n "$NODE" ] && [ -f "$WATA_TS/src/server/index.ts" ]; then
   echo; echo "### TYPESCRIPT reference (8009) ###"
-  ( cd "$WATA" && DYLD_FALLBACK_LIBRARY_PATH="$DYLD_SHIM" WATA_SERVER_PORT=8009 "$NODE" --import tsx src/server/index.ts >/tmp/wata-bench-ts.log 2>&1 ) & TP=$!
+  ( cd "$WATA_TS" && DYLD_FALLBACK_LIBRARY_PATH="$DYLD_SHIM" WATA_SERVER_PORT=8009 "$NODE" --import tsx src/server/index.ts >/tmp/wata-bench-ts.log 2>&1 ) & TP=$!
   up=0; for i in $(seq 1 80); do curl -s -o /dev/null http://127.0.0.1:8009/_matrix/client/versions && { up=1; break; }; sleep 0.25; done
   if [ "$up" = 1 ]; then ( cd tools/wata-throughput && go run . http://127.0.0.1:8009 "$N" )
   else echo "TS server did not boot (see /tmp/wata-bench-ts.log — node/tsx ESM-cycle on this machine's node is known)"; fi

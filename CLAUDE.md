@@ -3,7 +3,18 @@
 A Matrix homeserver and a framebuffer device client, written in **Sgola**
 (restricted Scala 3 compiled to readable Go source; no JVM at runtime).
 Wata is a plain downstream consumer of the sgola compiler — nothing in
-this repo is about the compiler's own development.
+this repo is about the compiler's own development, and nothing here
+asserts anything about the compiler.
+
+**The two repos share exactly one interface:**
+
+```
+SGOLA_HOME=/path/to/sgola just smoke
+```
+
+That answers sgola's only question — does the compiler still build and
+pass tests on a non-trivial Sgola codebase? Anything that would only
+serve the compiler's own gate does not belong here.
 
 ## Layout
 
@@ -11,16 +22,14 @@ this repo is about the compiler's own development.
 |--------------------|-------------------------------------------------------------------------|
 | `wata-server/`     | app — the Matrix client-server homeserver                                |
 | `wata-fb/`         | app — the device client (framebuffer display, input, audio, LEDs)        |
-| `wataclient/`      | library — the portable Matrix client core; published, linked by `wata-fb` |
-| `wataclient-jvm/`  | a JVM (plain scalac) twin of the client, used to cross-check behavior     |
+| `wataclient/`      | library — the portable Matrix client core, linked by `wata-fb`            |
 | `go-pkgs/audio/`   | plain Go cgo module — opus + tinyalsa, `wata-fb`'s device audio           |
 | `tools/`           | build, test, and deploy scripts                                          |
 | `docs/`            | design and plan docs (index below)                                       |
 
-Deps between modules are ordinary go.mod `require` lines. `json` comes
-from sgola; `wataclient` is published out of this repo. Neither has a
-fetchable remote yet, so both are served from a local file-GOPROXY that
-`tools/toolchain.py` builds.
+Every module path is `github.com/adriaanm/wata/...`. Deps between modules
+are ordinary go.mod `require` lines; `json` comes from sgola and has no
+fetchable remote yet, so `sgo` compiles it from the toolchain tree.
 
 ## Toolchain
 
@@ -34,8 +43,9 @@ just            # every recipe this repo has
 just sync       # clone/checkout the pin, build the toolchain
 just status     # what's present, does it match the pin
 just pin <sha>  # bump (then `just sync`)
-just build      # both apps;  also build-server, build-fb, server, emit-payload
-just smoke      # also persist, fb-smoke, golden, client-tests, integ, ci
+just build      # both apps;  also build-server, build-fb, server
+just ci         # the whole gate: smoke, persist, fb-smoke, client-tests,
+                #   integ, golden, amd64-smoke — each runnable on its own
 ```
 
 `tools/sgo` is the pinned driver plus the right environment; use it rather
@@ -63,16 +73,8 @@ cache**. `sgo` resolves an in-link library (the names in `sgo.deps`) by
 searching the declaring module's parent dir first, then the toolchain home
 — so `wataclient` is found as a sibling in this repo and `json` as the
 author module in the sgola tree, and both compile from those sources.
-
-The go.mod `require` lines for them declare the dependency and drive
-sgola's *source-in-link* check, which recompiles a dep from a published
-artifact in `pkg/mod` to prove the emitted Go is byte-identical either way.
-That check is sgola's and it sets up its own hermetic proxy. Wata's build
-does not need one.
-
-**`wataclient/sgola/` is a generated, committed publish payload.** Never
-hand-edit it; regenerate with `cd wataclient && ../tools/sgo emit .` after
-changing `wataclient/src/`.
+The build works with `GOPROXY`, `GOMODCACHE`, `GOFLAGS`, and `GOPRIVATE`
+all unset.
 
 ## How we work here
 

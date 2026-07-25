@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# M8 chunk 3 — capture /sync FIXTURES from the LIVE M7 wata-server for the
-# wataclient sync-engine fixture oracle (ci step 14). Mechanical regeneration:
+# Capture /sync FIXTURES from a live wata-server for the wataclient sync-engine
+# fixture oracle (`just client-tests`, leg 3/5). Mechanical regeneration:
 #
 #   tools/wataclient-fixtures.sh          # rewrites wataclient/test-fixtures/*.json
 #
-# Provenance: boots `sgo build --app wata-server` from THIS tree (fresh in-memory
+# Provenance: boots a wata-server built from THIS tree (fresh in-memory
 # state), drives a scripted two-user session (alice+bob, the wata-smoke.sh
 # credentials), and saves the VERBATIM /sync response bodies. The fixtures are
 # checked in; regenerating changes volatile ids/timestamps, so the expected
@@ -22,16 +22,16 @@
 #   bob:   /sync initial                       -> bob__01-initial.json
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SPIKE="$(pwd)"
-SGO="$SGOLA_HOME/sgo/sgo"
-FIXDIR="$SPIKE/wataclient/test-fixtures"
+WATA="$(pwd)"
+. "$WATA/tools/sgo-env.sh"                        # SGOLA_HOME, GOTOOLCHAIN, SGO
+FIXDIR="$WATA/wataclient/test-fixtures"
 PORT=18119
 BASE="http://127.0.0.1:$PORT"
 
 mkdir -p "$FIXDIR"
 "$SGO" build --app wata-server >/dev/null
 
-WATA="$SPIKE"; . "$SPIKE/tools/emitdir.sh"       # E3 (b): emission under the module's own tree
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 TMP=$(mktemp -d); LOG="$TMP/server.log"
 "$(emitdir wata-server)/$(binname wata-server)" ":$PORT" >"$LOG" 2>&1 &
 PID=$!

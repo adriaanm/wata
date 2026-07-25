@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# The linux/amd64 SERVER smoke on wata-server — MIGRATED VERBATIM from the sgola
-# gate (old sgola ci step 29's wata leg) at GRADUATION H2b (SGOLA STANDS ALONE):
-# family-scale production runs wata-server on an always-on linux/amd64 box, and
-# the assertion belongs where the consumer lives. The sgola gate keeps its own
-# self-contained linux/amd64 smoke over its scenario corpus.
+# The linux/amd64 server smoke on wata-server: family-scale production runs the
+# homeserver on an always-on linux/amd64 box, so that tier is a real target and
+# gets its own build+run assertion.
 #
-# Three-mode by design (BUILD exit addendum item 2 + E3 (e), unchanged):
+# Two modes:
 #   (A) CROSS-BUILD (always): emit wata-server via sgo's normal pipeline, then
 #       `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build` the emitted Go tree
 #       with STOCK go (wata-server is pure-Go, no cgo). Assert `file` reports a
@@ -20,15 +18,13 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WATA="$(pwd)"
-: "${SGOLA_HOME:?linux-amd64-smoke: SGOLA_HOME must be set}"
-export SGOLA_HOME
-: "${SGO:=$SGOLA_HOME/sgo/sgo}"
-. "$WATA/tools/emitdir.sh"
+. "$WATA/tools/sgo-env.sh"                        # SGOLA_HOME, GOTOOLCHAIN, SGO
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 
 # ---- (A) cross-build the linux/amd64 server binary --------------------------
 echo "linux-amd64-smoke: building wata-server via sgo…"
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "linux-amd64-smoke: sgo build (wata-server) failed"; exit 1; }
-WATA_EMIT="$(emitdir wata-server)"               # <wata-server>/.sgo/wata, from the module marker
+WATA_EMIT="$(emitdir wata-server)"               # from the module's emitname marker
 
 OUT="$(mktemp -d)"
 BIN="$OUT/wata-server-linux-amd64"

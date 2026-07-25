@@ -1,4 +1,4 @@
-module sgola.spike/wata-server
+module github.com/adriaanm/wata/wata-server
 
 go 1.26.3
 

@@ -9,12 +9,20 @@ links `wataclient` whole-program and supplies the capability
 implementations (real HTTP client, real clock, ALSA/opus audio thread).
 
 `wataclient` is written in Sgola (a restricted Scala 3 dialect compiled to
-Go source by the `sgo` compiler). It is published as a **Sgola-only
-library**: it has no `@goexport` surface and exports nothing directly
-callable from plain Go. Its only consumer today is `wata-fb`, which links
-it whole-program at the Sgola level. The generated, committed copy of
-this source lives under `wataclient/sgola/src/` — it is a build artifact
-produced from `wataclient/src/main/scala/`, never edited directly.
+Go source by the `sgo` compiler). It is a **Sgola-only library**: it has
+no `@goexport` surface and exports nothing directly callable from plain
+Go. Its only consumer today is `wata-fb`, which links it whole-program at
+the Sgola level, resolving it as a source sibling in this repo — `sgo`
+searches the declaring module's parent dir for an in-link library before
+it looks at the toolchain home.
+
+There is no published payload. `sgo emit` can generate one (a
+`wataclient/sgola/{meta,tasty,src}` tree of embedded source and TASTy, for
+consumers that resolve the module from `pkg/mod` instead), but nothing
+consumes it: `wata-fb`'s emitted `go.mod` never references it, and the
+tree goes stale silently on any edit under `wataclient/src/`. Re-enabling
+it means putting `publish` back in `wataclient/sgo.build`, running `sgo
+emit`, and committing the result — plus a check that keeps it honest.
 
 Total size: 13 files, ~3400 lines, under `wataclient/src/main/scala/`.
 
@@ -291,11 +299,11 @@ bytes over a socket":
   `Bytes`-to-raw-`String` round-tripping over the full 0..255 byte range,
   `BytesBuilder.freeze` snapshot-then-mutate semantics, and
   `IArray`/`Array.toBytes` behavior. Its `report()` is designed to be
-  **fully portable** (no `go`-facade use) so the exact same source can run
-  under plain Scala/JVM and under the sgola-compiled binary, and the two
-  outputs must be byte-identical — this is described as a conformance
-  test for the language subset/emitter itself, not really a wataclient
-  feature test. It also contains `foreignReport` (`oracle.scala:321`), a
+  **fully portable** (no `go`-facade use). Only the sgola-compiled side is
+  exercised here (`just client-tests`, leg 4/5); running the same source
+  under plain Scala/JVM and byte-comparing the two outputs is a claim
+  about the compiler, so it is sgola's to make, not this repo's. It also
+  contains `foreignReport` (`oracle.scala:321`), a
   page-by-page walk of a foreign (non-wataclient-authored) Ogg/Opus
   container, driven from a separately maintained pinned fixture, used to
   confirm the reader correctly parses containers that differ from the

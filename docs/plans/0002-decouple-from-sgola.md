@@ -1,6 +1,6 @@
 # 0002 `[DECOUPLE]` — One interface to sgola: `tools/wata-smoke.sh`
 
-**Status:** proposed
+**Status:** done
 
 ## Problem
 

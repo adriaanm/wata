@@ -3,13 +3,13 @@ package go
 import language.experimental.saferExceptions
 
 /** `go.audio` — the APP-OWNED facade for the cgo opus + tinyalsa package
- *  `sgola.example/audio` (go-pkgs/audio). Lives in the wata-fb module, NOT in
+ *  `github.com/adriaanm/wata/go-pkgs/audio`. Lives in the wata-fb module, NOT in
  *  core: the plugin/core carry zero app-tier knowledge — the binding is
  *  entirely `@go.bind`-annotation-driven (the import path rides the tree; the
  *  emitter never learns the name "audio"). The package itself rides the
  *  emitted app module as a plain Go dependency (require + local `replace` in
  *  go.mod, written by the sgo go.mod stage). */
-@go.bind("sgola.example/audio")
+@go.bind("github.com/adriaanm/wata/go-pkgs/audio")
 object audio:
   // --- constants (Go `const`) ------------------------------------------------
   def SampleRate: scala.Int      = ??? // 48000 Hz — the only rate the Q6 accepts

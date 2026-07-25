@@ -2,7 +2,6 @@
 {"key": "SRV-BODY-LIMIT", "title": "serveHTTP readAll has no request body size limit — one request can exhaust memory", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "SRV-MEDIA-UNBOUNDED", "title": "media blobs never evicted or capped, and are base64'd into the journal — unbounded memory and boot-replay time", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "FB-M8-LITERALS", "title": "drop the three M8 milestone literals (fbtest/main/applets); regenerate tools/fb-golden.png and the affected .expected.txt oracles in the same commit", "doc": "docs/design/wata-fb.md", "inProgress": false}
-{"key": "DECOUPLE", "title": "execute plan 0002: delete everything that serves sgola's CI (sil, crossing-residue, JVM twin, the publish payload, ci.sh), rename the sgola.* module paths, make just the entry point", "doc": "docs/plans/0002-decouple-from-sgola.md", "inProgress": false}
 {"key": "CLI-BACKFILL-BOUND", "title": "backfillTail fetches 50 events and never paginates — history gaps larger than that are lost for good", "doc": "docs/design/wataclient.md", "inProgress": false}
 {"key": "CLI-BACKFILL-BLOCKING", "title": "backfill issues blocking /messages calls serially inside processRound, delaying the snapshot publish and the next long-poll", "doc": "docs/design/wataclient.md", "inProgress": false}
 {"key": "FB-SYSCALL-SILENT", "title": "led.scala/syscall.scala swallow every syscall error — a real device LED failure is indistinguishable from absent hardware", "doc": "docs/design/wata-fb.md", "inProgress": false}

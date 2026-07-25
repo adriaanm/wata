@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
-# M7 chunk 2 — the wata-server smoke test. Two checks in one:
+# The wata-server smoke test. Two checks in one:
 #
-#   (1) STORE-ADT PARITY: `wata-server selfcheck` exercises the pure store core
+#   (1) STORE PARITY: `wata-server selfcheck` exercises the pure store core
 #       (error envelope serialization, ID formatting, account-data set/replace/
-#       get, the server-controlled-type predicate) deterministically and the
-#       output is byte-compared to wata-selfcheck.expected.txt. This is the
-#       out-vs-expected parity for the ADT heart (a hello-style scenario would
-#       force hello to depend on wata-server, so the app runs its own mode).
+#       get, the server-controlled-type predicate) deterministically, and the
+#       output is byte-compared to wata-selfcheck.expected.txt.
 #
 #   (2) LIVE SESSION: boots the real `wata-server` binary on a random high port
 #       and drives a scripted Matrix curl session (login -> whoami -> set/get
 #       displayname -> set/get global account data -> a server-controlled-type
 #       405 -> an unknown-token 401 -> a missing-token 401), asserting on the
 #       EXACT deterministic response bodies (the access token is extracted and
-#       substituted; the volatile device_id is dropped). This is first boot of
-#       the real binary — part of the deliverable.
+#       substituted; the volatile device_id is dropped).
 #
 #   tools/wata-smoke.sh            # run + check against the expected fixtures
 #   tools/wata-smoke.sh --accept   # (re)write both expected fixtures
@@ -25,16 +22,15 @@ WATA="$(pwd)"
 ACCEPT="${1:-}"
 
 [ -x "$SGO" ] || { echo "wata-smoke: sgo driver not built ($SGO)"; exit 1; }
-. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers (E2b)
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 
-# Build the wata-server binary via the driver's second-app path (core+json are
-# shared + hash-gated, so this is cheap once they're warm).
+# core and json are shared + hash-gated, so this build is cheap once warm.
 echo "wata-smoke: building wata-server…"
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "wata-smoke: sgo build (wata-server) failed"; exit 1; }
-WATA_EMIT="$(emitdir wata-server)"               # .sgo/wata, discovered not hardcoded
-# M7 chunk 4: build a `-race` binary from the emitted wata-server sources and run
-# the WHOLE session (selfcheck + sessions 1/2 + the concurrency driver) against
-# it, so the long-poll waiter/notify/select path is race-checked end to end.
+WATA_EMIT="$(emitdir wata-server)"               # from the module's emitname marker
+# Build a `-race` binary from the emitted wata-server sources and run the WHOLE
+# session (selfcheck + sessions 1/2 + the concurrency driver) against it, so the
+# long-poll waiter/notify/select path is race-checked end to end.
 echo "wata-smoke: building -race binary…"
 ( cd "$WATA_EMIT" && go build -race -o wata-server_race . ) || { echo "wata-smoke: go build -race failed"; exit 1; }
 BIN="$WATA_EMIT/wata-server_race"
@@ -90,7 +86,7 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 } >"$SESS_TX"
 
 # ---- (3) second-user session: DM room, messaging, receipt, media, alias -----
-# A full two-user Matrix flow (M7 chunk 3). Volatile IDs (room/event/media) are
+# A full two-user Matrix flow. Volatile IDs (room/event/media) are
 # extracted and either format-validated or substituted with a fixed token, so
 # the transcript is deterministic. bob is the second config user.
 BOB_LOGIN=$(curl -s -X POST "$BASE/_matrix/client/v3/login" \
@@ -154,7 +150,7 @@ idok() { [[ "$1" == "$2"*"$3" ]] && echo true || echo false; }
 echo "--- selfcheck transcript ---"; cat "$SELF_TX"
 echo "--- session transcript ---";   cat "$SESS_TX"
 
-# ---- (4) /sync long-poll concurrency driver (M7 chunk 4, THE CONC SHOWCASE) --
+# ---- (4) /sync long-poll concurrency driver ---------------------------------
 # N goroutine clients long-poll /sync while another client sends; all must wake
 # WITH the event under a sane latency bound; a timeout-expiry case returns empty
 # after ~its timeout. Nondeterministic timing => bounds-asserted (exit code),

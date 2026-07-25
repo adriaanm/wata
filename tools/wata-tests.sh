@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# M7 chunk 5 — THE GATE. Run wata's integration jest suites (the oracle) against
-# the Sgola-built wata-server binary.
+# The conformance oracle: run the original TypeScript wata's integration jest
+# suites against the Sgola-built wata-server binary.
 #
 #   tools/wata-tests.sh              # build, run all 10 suites, print scoreboard
 #   tools/wata-tests.sh <suite>      # run one suite (basename, e.g. matrix)
@@ -9,9 +9,9 @@
 # edits). wata's in-memory server accumulates state across suites (its own
 # documented workflow restarts between runs), and several suites assert exact
 # per-user room/message sets, so THIS runner starts a FRESH wata-server on :8008
-# for EACH suite and tears it down after — that isolation is our side, allowed by
-# the brief. The wata repo is READ-ONLY: we only execute its jest suites (pnpm's
-# node_modules must already be installed; we never write to the repo).
+# for EACH suite and tears it down after. The TS repo is READ-ONLY: we only
+# execute its jest suites (pnpm's node_modules must already be installed; we
+# never write to it).
 #
 # Node note (this machine): homebrew node 25.x is linked against a llhttp dylib
 # version that is no longer installed, so `node` fails to launch. Rather than
@@ -23,21 +23,18 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WATA="$(pwd)"
-[ -n "${SGOLA_HOME:-}" ] || { echo "SGOLA_HOME not set"; exit 1; }
-# E2b NOTE: moved from the sgola tree with the wata code. Dev tool, NOT in
-# either ci gate; needs $SGOLA_HOME (the sgola toolchain) and builds the wata
-# modules from THIS repo. E3 (b): emission is under the module's OWN tree.
+# A dev tool, not part of `just ci` — it needs $WATA_TS_REPO checked out.
 
 WATA_TS="${WATA_TS_REPO:-$HOME/g/bq268/wata}"  # the ORIGINAL TS wata repo (jest oracle source)
 PORT="${WATA_PORT:-8008}"
 BASE="http://127.0.0.1:$PORT"
 ONLY="${1:-}"
 
-SGO="$SGOLA_HOME/sgo/sgo"
+. "$WATA/tools/sgo-env.sh"                        # SGOLA_HOME, GOTOOLCHAIN, SGO
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 BIN="$(emitdir wata-server)/$(binname wata-server)"
 
-# M7 chunk 6: WATA_PERSIST=1 re-runs the SAME oracle with the JSONL journal ON,
+# WATA_PERSIST=1 re-runs the SAME oracle with the JSONL journal ON,
 # a FRESH log file per suite (temp dir) — each suite still starts clean (empty
 # log => behaves exactly stateless) while the append-only write path is fully
 # exercised on every mutation. Green here == journaling corrupts no response.
@@ -92,7 +89,6 @@ fi
 run_node() { env "${NODE_ENV_ASSIGNS[@]}" NODE_OPTIONS='--experimental-vm-modules' "$NODE" "$@"; }
 
 # ---- build ------------------------------------------------------------------
-( cd "$SGOLA_HOME/sgo" && go build -o sgo . ) || { echo "wata-tests: sgo build failed"; exit 1; }
 echo "wata-tests: building wata-server…"
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "wata-tests: sgo build --app wata-server failed"; exit 1; }
 [ -x "$BIN" ] || { echo "wata-tests: $BIN missing after build"; exit 1; }

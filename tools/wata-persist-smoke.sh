@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M7 chunk 6 (decision 8) — the PERSISTENCE restart smoke.
+# The wata-server persistence restart smoke.
 #
 # Boots wata-server with WATA_LOG set, creates durable state (login/room/message/
 # media/displayname/receipt), KILLS the process (kill -9 — no graceful shutdown),
@@ -19,7 +19,7 @@ cd "$(dirname "$0")/.."
 WATA="$(pwd)"
 . "$WATA/tools/sgo-env.sh"                          # SGOLA_HOME (pinned clone by default), GOTOOLCHAIN, SGO
 [ -x "$SGO" ] || { echo "persist-smoke: sgo driver not built ($SGO)"; exit 1; }
-. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers (E2b)
+. "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 BIN="$(emitdir wata-server)/$(binname wata-server)"
 echo "persist-smoke: building wata-server…"
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "persist-smoke: sgo build (wata-server) failed"; exit 1; }
