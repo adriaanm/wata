@@ -1,6 +1,16 @@
 # 0001 `[TOOLS-RESTRUCTURE]` — Restructure `tools/` around what wata tests, not where it came from
 
-**Status:** proposed
+**Status:** abandoned — superseded by
+[0002](0002-decouple-from-sgola.md).
+
+This plan assumed wata would keep hosting the compiler-regression
+assertions and hand the scripts to sgola as a transfer. The actual
+decision is narrower: the two repos share exactly one interface,
+`tools/wata-smoke.sh`, and everything sgola-facing is deleted here rather
+than handed over. Its `tools/test.py` proposal is also dropped — with the
+sgola-only legs gone there is nothing left for a runner layer to
+organize, so the justfile names the scripts directly. Kept for the
+inventory of what each script does, which 0002 builds on.
 
 ## Problem
 
