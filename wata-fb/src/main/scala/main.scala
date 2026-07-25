@@ -1,48 +1,45 @@
 import language.experimental.saferExceptions
 
-/** wata-fb — the THIRD Sgola app (M8 chunk 2): a hello-grade skeleton over the
- *  `go.audio` cgo facade, proving the cross-cgo pipeline end to end (one command
- *  from `.scala` to an armv7-musl binary that runs on the BQ268).
+/** wata-fb: the framebuffer device client's entry point.
  *
- *  On the device (linux/arm, cgo opus + tinyalsa) it prints the opus/alsa
- *  constants and encodes ONE generated 440Hz tone frame through Opus — no
- *  speaker, no capture, device state stays clean. On the darwin host the audio
- *  stub errors loudly on `newEncoder()`; we catch it and report, so the native
- *  `sgo build`/`sgo run` (and `sgo ci`) stay green without the device or the C
- *  toolchain. Chunks 3+ grow this into the real fbclient (sync core, runtime
- *  layer, device layer). */
+ *  On the device (linux/arm, cgo opus + tinyalsa) the default (no-subcommand)
+ *  mode prints the opus/alsa constants and encodes ONE generated 440Hz tone
+ *  frame through Opus — no speaker, no capture, device state stays clean. On
+ *  the darwin host the audio stub errors loudly on `newEncoder()`; we catch it
+ *  and report, so a native `sgo build`/`sgo run` stays green without the
+ *  device or the C toolchain. */
 object Main:
   def main(args: Array[String]): Unit =
-    // M8 chunk 3 — the sync-engine oracle DRIVER subcommands (ci step 14):
-    //   wata-fb synctest              print the unit oracle (the 15 ported Zig tests)
+    // the sync-engine oracle driver subcommands:
+    //   wata-fb synctest              print the unit oracle (the ported sync tests)
     //   wata-fb syncfix f1 f2 …       feed captured /sync fixtures (files named
     //                                 <localpart>__<step>.json; self user id =
     //                                 line 1 of the paired .self file) — see
     //                                 tools/wataclient-tests.sh + test-fixtures/.
     // The driver is APP-side (go.sys file reads); the engine + describers it
     // calls live in the PORTABLE wataclient module.
-    // M8 chunk 4 — the LIVE integration oracle (tools/wataclient-integ.sh):
-    //   wata-fb integ <scenario> <baseUrl>  run ONE ported Zig scenario against
+    // the LIVE integration oracle (tools/wataclient-integ.sh):
+    //   wata-fb integ <scenario> <baseUrl>  run one integration scenario against
     //                                       a live wata-server; prints INTEG
     //                                       PASS/FAIL <scenario>.
     if args.length > 0 && args(0) == "synctest" then
       printReport(SyncOracle.report())
-    // M8 chunk 5 completion cycle — the sgola-side Ogg/CRC byte oracle (ci
-    // step 14): the SAME OggOracle.report() the JVM conformance seed runs, now
-    // exercised on the Go-emitted side too (the DATA-10 writer bug lived
-    // exactly because only the JVM path ran it). Byte-diffed against
+    // the sgola-side Ogg/CRC byte oracle: the SAME OggOracle.report() the JVM
+    // conformance seed runs, exercised on the Go-emitted side too (this catches
+    // codegen-only drift, since the writer bug that motivated this oracle only
+    // showed up on the JVM path). Byte-diffed against
     // tools/wataclient-ogg.expected.txt.
     else if args.length > 0 && args(0) == "oggtest" then
       printReport(OggOracle.report())
-    // M8 chunk 7 follow-up — the FOREIGN-CONTAINER fixture (ci step 14 check
-    // 7/7): the pinned TUI-shaped Ogg through the portable reader
-    // (oggforeign.scala; the decode half is go-pkgs/audio's linux/arm Go test).
+    // the FOREIGN-CONTAINER fixture: a pinned Ogg produced by a different
+    // encoder, through the portable reader (oggforeign.scala; the decode half
+    // is go-pkgs/audio's linux/arm Go test).
     else if args.length > 1 && args(0) == "oggforeign" then
       OggForeign.run(args)
-    // M8 chunk 5 — device layer I: the framebuffer golden-frame oracle + smoke.
+    // the framebuffer golden-frame oracle + smoke.
     //   wata-fb fbdump      draw the deterministic test pattern, encode PNG, and
     //                       write the raw PNG bytes to stdout (fd 1) — the host
-    //                       golden oracle (tools/fb-golden.sh, ci step 16).
+    //                       golden oracle (tools/fb-golden.sh).
     //   wata-fb fbsmoke     ON-DEVICE: mmap /dev/fb0, draw + present the pattern,
     //                       blink the LEDs, poll evdev echoing keys ~20s, clear.
     else if args.length > 0 && args(0) == "fbdump" then FbTest.dump()
@@ -51,10 +48,10 @@ object Main:
       SyncFixDriver.run(args)
     else if args.length > 2 && args(0) == "integ" then
       Integ.run(args)
-    // M8 chunk 6 — device layer II (decision 9 + the shell drivers):
+    // device layer II (the shell drivers):
     //   wata-fb --selftest [echo|play|all]              the on-device audio selftest
     //   wata-fb login|voicesend|voiceplay|audiosoak …   scripted runtime+audio
-    //                                                   actions against a live M7
+    //                                                   actions against a live
     //                                                   server (devcli.scala header)
     else if args.length > 0 && args(0) == "--selftest" then
       var stage = "all"
@@ -63,10 +60,10 @@ object Main:
     else if args.length > 0 && (args(0) == "login" || args(0) == "voicesend"
         || args(0) == "voiceplay" || args(0) == "audiosoak") then
       DevCli.run(args)
-    // M8 chunk 7 — the full on-device fbclient: shell + wata/settings applets +
-    // the sync runtime + audio thread, driving the framebuffer/input/LED layer
-    // against a live M7 wata-server (ui.scala header). Device-only (mmaps
-    // /dev/fb0); the host build compiles it but reports "device unavailable".
+    // the full on-device fbclient: shell + wata/settings applets + the sync
+    // runtime + audio thread, driving the framebuffer/input/LED layer against a
+    // live wata-server (ui.scala header). Device-only (mmaps /dev/fb0); the
+    // host build compiles it but reports "device unavailable".
     else if args.length > 0 && args(0) == "ui" then
       Ui.run(args)
     else

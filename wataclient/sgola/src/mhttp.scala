@@ -1,27 +1,25 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 4 — the Matrix HTTP CLIENT over the `HttpDo` capability, ported
- *  from fbclient `http.zig` (MatrixHttpClient). PORTABLE — ZERO `go`: every
- *  request goes through the injected `HttpDo.send`; the 429 retry sleeps via the
- *  `Clock` capability. Transport failure surfaces as `status == 0` (the app-side
+/** the Matrix HTTP CLIENT over the `HttpDo` capability. Every request goes
+ *  through the injected `HttpDo.send`; the 429 retry sleeps via the `Clock`
+ *  capability. Transport failure surfaces as `status == 0` (the app-side
  *  HttpDo maps a Go `error` to that — the core never sees Go errors).
  *
  *  Binary bodies (media upload/download) cross the capability as VERBATIM-byte
  *  Strings via `Bytes.rawString`/`Bytes.fromRawString` (a Go string IS immutable
  *  bytes; the JVM reference is ISO-8859-1, byte-exact both ways). */
 
-/** the per-session request context: capabilities + base URL + access token
- *  (immutable — a login mints a new `Hs` with the token, http.zig's
- *  `client.access_token = tok` reassignment). */
+/** the per-session request context: capabilities + base URL + access token.
+ *  Immutable — logging in mints a new `Hs` carrying the new token. */
 case class Hs(http: HttpDo, clock: Clock, base: String, token: String)
 
 object MatrixHttp:
 
   def withToken(hs: Hs, token: String): Hs = Hs(hs.http, hs.clock, hs.base, token)
 
-  /** one request through the capability, with http.zig's 429 retry loop
-   *  (<= 3 retries, `retry_after_ms` else 1000ms). Any other status returns
-   *  as-is — the CALLER decides what non-200 means. */
+  /** one request through the capability, with a 429 retry loop (<= 3 retries,
+   *  `retry_after_ms` else 1000ms). Any other status returns as-is — the
+   *  CALLER decides what non-200 means. */
   def request(hs: Hs, method: String, path: String, contentType: String, body: String): HttpResponse =
     var resp = send1(hs, method, path, contentType, body)
     var attempt = 0
@@ -38,15 +36,15 @@ object MatrixHttp:
     headers = Caps.withHeader(headers, "Content-Type", contentType)
     hs.http.send(HttpRequest(method, hs.base + path, headers, body))
 
-  /** http.zig `parseRetryAfterMs`: the 429 body's `retry_after_ms`, default
-   *  1000ms (also on unparseable JSON — the Zig scanner's default). */
+  /** the 429 body's `retry_after_ms`, default 1000ms (also on unparseable
+   *  JSON, or a non-positive value). */
   def retryAfterMs(body: String): Long =
     val v = WJson.longField(parseOrNull(body), "retry_after_ms", 1000L)
     if v > 0L then v else 1000L
 
   /** parse a response body, `JNull` when malformed (callers read fields with
-   *  defaults — the Zig `catch return null` shape). try-as-STATEMENT: a
-   *  value-yielding try is outside the subset. */
+   *  defaults). try-as-STATEMENT: a value-yielding try is outside the
+   *  language subset. */
   def parseOrNull(body: String): Json =
     var out: Json = JNull()
     try
@@ -55,7 +53,7 @@ object MatrixHttp:
     catch case e: JsonError => out = JNull()
     out
 
-  // ---- the API surface (paths exactly as http.zig) ---------------------------
+  // ---- the API surface --------------------------------------------------------
 
   private def JSON = "application/json"
 
@@ -75,7 +73,7 @@ object MatrixHttp:
     request(hs, "PUT", "/_matrix/client/v3/profile/" + userId + "/displayname", JSON,
       Json.write(JObj(fs)))
 
-  /** PUT redact (reason "deleted", http.zig). */
+  /** PUT redact (reason "deleted"). */
   def redactEvent(hs: Hs, roomId: String, eventId: String, txnId: Int): HttpResponse =
     request(hs, "PUT",
       "/_matrix/client/v3/rooms/" + roomId + "/redact/" + eventId + "/" + Matrix.intStr(txnId),
@@ -101,7 +99,7 @@ object MatrixHttp:
   def joinRoom(hs: Hs, roomId: String): HttpResponse =
     request(hs, "POST", "/_matrix/client/v3/join/" + roomId, JSON, "{}")
 
-  /** POST /createRoom — a DM (is_direct + trusted_private_chat, http.zig). */
+  /** POST /createRoom — a DM (is_direct + trusted_private_chat). */
   def createRoom(hs: Hs, contactUserId: String): HttpResponse =
     var inv: List[Json] = Nil
     inv = JStr(contactUserId) :: inv
@@ -113,7 +111,7 @@ object MatrixHttp:
     request(hs, "POST", "/_matrix/client/v3/createRoom", JSON, Json.write(JObj(fs)))
 
   /** POST /createRoom with an alias localpart (the FAMILY room; public — the
-   *  per-family wireguard boundary is the trust boundary, http.zig). */
+   *  per-family wireguard boundary is the trust boundary). */
   def createRoomWithAlias(hs: Hs, aliasLocal: String, inviteUserId: String): HttpResponse =
     var inv: List[Json] = Nil
     inv = JStr(inviteUserId) :: inv
@@ -146,15 +144,13 @@ object MatrixHttp:
       "/_matrix/client/v3/rooms/" + roomId + "/messages?from=" + from + "&dir=b&limit=" + Matrix.intStr(limit),
       JSON, "")
 
-  /** PUT a voice message (m.audio content over the chunk-3 shaping). */
+  /** PUT a voice message (m.audio content, shaped by `Matrix.voiceContent`). */
   def sendVoiceMessage(hs: Hs, roomId: String, mxcUrl: String, durationMs: Long, size: Int, txnId: Int): HttpResponse =
     request(hs, "PUT",
       "/_matrix/client/v3/rooms/" + roomId + "/send/m.room.message/" + Matrix.intStr(txnId),
       JSON, Json.write(Matrix.voiceContent(mxcUrl, durationMs, size)))
 
-  // ---- response parse helpers (sync_thread.zig, via the json module — the Zig
-  //      scans strings because parsing is heavy there; behavior matches on every
-  //      shape its tests pin, "" = its null) ----------------------------------
+  // ---- response parse helpers ("" = absent throughout) -------------------------
 
   /** upload response -> `content_uri`, "" when absent. */
   def parseMxcUrl(body: String): String =
@@ -176,9 +172,8 @@ object MatrixHttp:
     case h :: t => WJson.strOr(h, "")
     case Nil  => ""
 
-  /** sync_thread.zig `updateMDirect`, json-module edition: parse the current
-   *  m.direct object ("{}" when absent), append `roomId` to the contact's list
-   *  (position-preserving upsert — the insertion-order law), serialize back. */
+  /** parse the current m.direct object ("{}" when absent), append `roomId` to
+   *  the contact's list (position-preserving upsert), serialize back. */
   def mdirectWithRoom(body: String, contactId: String, roomId: String): String =
     val j = parseOrNull(body)
     val fields = objFields(j)
@@ -197,8 +192,8 @@ object MatrixHttp:
                      roomId: String, acc: List[(String, Json)]): List[(String, Json)] =
     val k: String = p._1
     if k == contactId then
-      // cons BOUND first — a `::` in argument position lowers to a broken
-      // value-IIFE (the chunk-3 var-prepend DOGFOOD note).
+      // cons BOUND first — a `::` in argument position does not lower
+      // correctly here.
       val updated = (contactId, appendRoomArr(p._2, roomId)) :: acc
       revAppendFields(updated, t)
     else upsertRoomList(t, contactId, roomId, p :: acc)

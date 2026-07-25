@@ -1,39 +1,35 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 4 — the APP-side capability constructors: `HttpDo` over the
- *  net/http CLIENT facade, `Clock` over `go.time`. This is the seam's other
- *  half (capabilities.scala defines the TRAITS; the app supplies the impls).
+/** The APP-side capability constructors: `HttpDo` over the net/http CLIENT
+ *  facade, `Clock` over `go.time`. This is the seam's other half
+ *  (capabilities.scala, in wataclient, defines the TRAITS; the app supplies
+ *  the impls).
  *
- *  M9 chunk 4t: the capabilities are now proper traits, so the app edge supplies
- *  a NAMED impl class per capability (`FbClock`/`FbHttp`) instead of a record of
- *  closures. Go structural typing makes each `*FbClock` / `*FbHttp` satisfy the
+ *  The capabilities are proper traits, so the app edge supplies a NAMED impl
+ *  class per capability (`FbClock`/`FbHttp`) instead of a record of closures.
+ *  Go structural typing makes each `*FbClock` / `*FbHttp` satisfy the
  *  interface — no `implements`, no vtable. The impls carry no fields yet (they
- *  reach the `go.*` facades directly); ch.6 curation admits the facade-handle
- *  fields (and the `Shareable` flip).
+ *  reach the `go.*` facades directly).
  *
- *  Client facade surface used (all M7 chunk 0 binds except ReadCloser):
- *  `newRequest` (method/URL/body-reader), `Request.header.set` (headers in),
- *  `DefaultClient.Do`, `Response.statusCode` / `Response.body`, `io.readAll`
- *  (body out), and the NEW `go.io.ReadCloser` — `Response.body` retyped from
- *  Reader so the long-poll loop can `close()` each body (connection reuse).
+ *  Client facade surface used: `newRequest` (method/URL/body-reader),
+ *  `Request.header.set` (headers in), `DefaultClient.Do`, `Response.statusCode`
+ *  / `Response.body`, `io.readAll` (body out), and `go.io.ReadCloser` —
+ *  `Response.body` is typed as a `ReadCloser` so the long-poll loop can
+ *  `close()` each body (connection reuse).
  *
- *  Transport failure policy (capabilities.scala doc): a thrown `GoError`
+ *  Transport failure policy (see capabilities.scala): a thrown `GoError`
  *  becomes `HttpResponse(0, "")` — the portable core never sees Go errors. */
-/** the app-edge `Clock` impl over `go.time` (M9 ch.4t: a named class, no
- *  fields). */
+/** the app-edge `Clock` impl over `go.time` (a named class, no fields). */
 class FbClock extends Clock:
   def nowUnixMillis(): Long = go.time.nowUnixMilli()
   def sleepMs(ms: Long): Unit = FbCaps.sleepMs(ms)
 
-/** the app-edge `HttpDo` impl over the net/http CLIENT facade. M9 ch.6: HttpDo
- *  now extends `Shareable`, so this impl is checked at its definition site
- *  (CONC-7). It HOLDS the `go.net.http.Client` handle as a CONSTRUCTOR val-param
- *  field (the M10 ch.5 val-param path — a body-val initializer would be dropped
- *  by the open-iface-impl construction literal, now walled loud in the emitter).
- *  Admissible because the Client facade carries the `@sgo.curatedSafe` verdict
- *  ("Clients are safe for concurrent use by multiple goroutines"), the fourth
- *  disjunct of the crossing predicate. This proves the curated-facade-handle
- *  admission for real (the caps.scala doc promised exactly this). */
+/** the app-edge `HttpDo` impl over the net/http CLIENT facade. `HttpDo`
+ *  extends `Shareable`, so this impl's shareability is checked at its
+ *  definition site. It HOLDS the `go.net.http.Client` handle as a constructor
+ *  val-param field. Admissible because the Client facade carries the
+ *  `@sgo.curatedSafe` verdict ("Clients are safe for concurrent use by
+ *  multiple goroutines"). */
 class FbHttp(client: go.net.http.Client) extends HttpDo:
   def send(req: HttpRequest): HttpResponse = FbCaps.send(req, client)
 

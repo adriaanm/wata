@@ -1,35 +1,34 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 7 — the on-device UI runtime (`main.zig`'s normal-UI branch): the
- *  main loop that ties the sync runtime (chunk 4), the audio thread (chunk 6),
- *  the framebuffer/input/LED device layer (chunk 5), and the shell/applets
- *  (this chunk) together into the live fbclient.
+/** The on-device UI runtime: the main loop that ties the sync runtime, the
+ *  audio thread, the framebuffer/input/LED device layer, and the
+ *  shell/applets together into the live fbclient.
  *
  *    wata-fb ui <base> <user> <pass>   run the full client against a live
- *                                      M7 wata-server (device only).
+ *                                      wata-server (device only).
  *
- *  LOOP (main.zig): each frame — pick up the newest snapshot, drain UI events
+ *  LOOP: each frame — pick up the newest snapshot, drain UI events
  *  (connection -> status + LEDs, send/play -> wata flash), poll input, route to
  *  the shell, screensaver idle-timeout, then update + render + present + ~33ms
- *  sleep (~30fps for the 27Hz panel).
+ *  sleep (~30fps for the panel).
  *
  *  THREADING: sync loop + action loop (Runtime.start) + audio thread all run as
  *  `fork`s in the app's `supervised` scope; the main loop IS the UI thread. The
- *  shell state is a module var touched only by this loop (the Runtime
- *  single-goroutine-per-cell adjudication; see shell.scala DATA-9 note). A
- *  sibling failure cancels the whole scope (structured concurrency).
+ *  shell state is a module var touched only by this loop (see shell.scala's
+ *  header for the single-goroutine-per-cell discipline). A sibling failure
+ *  cancels the whole scope (structured concurrency).
  *
- *  QUIT: `back` from the contacts view is the only quit edge here (main.zig has
- *  no explicit UI quit — the device runs until powered off; we add a clean exit
- *  so a dev/ssh run terminates). Cleanup restores the backlight and tears the
+ *  QUIT: `back` from the contacts view is the only quit edge here — the
+ *  device is otherwise meant to run until powered off; this gives a dev/ssh
+ *  run a clean way to terminate. Cleanup restores the backlight and tears the
  *  loops down through the ordinary stop edges. */
 object Ui:
 
-  // M9 ch.4a (CONC-10 migration): the UI-goroutine shell state now lives in
-  // `val`-held Atomic cells (CONCURRENCY.md §4.3) — still driven by the one UI
-  // goroutine by protocol, but the by-naming reachability is DRF instead of
-  // conventional. Immutable snapshots swap through the cells (ShellState /
-  // ConnectionState box; Double boxes — no Go atomic word; Boolean rides
+  // The UI-goroutine shell state lives in `val`-held Atomic cells: still
+  // driven by the one UI goroutine by protocol, but data-race-freedom is
+  // enforced structurally rather than merely by convention. Immutable
+  // snapshots swap through the cells (ShellState / ConnectionState box;
+  // Double boxes since Go has no atomic float word; Boolean rides
   // atomic.Bool). Reads keep their old names via private accessor defs.
   private val stateC: sgo.Atomic[ShellState] = sgo.atomic(Shell.initial())
   private val connC: sgo.Atomic[ConnectionState] = sgo.atomic(Disconnected())
@@ -62,7 +61,7 @@ object Ui:
     connC.set(Disconnected())
     idleC.set(0.0)
     offC.set(false)
-    // device init: backlight + button LEDs on (main.zig)
+    // device init: backlight + button LEDs on
     Led.setBacklight(40)
     Led.setButtonBacklight(true)
     val fds = Evdev.open()
@@ -70,8 +69,8 @@ object Ui:
     val px = Draw.newBuffer()
     sgo.supervised {
       val evts = sgo.makeChan[AudioEvt](16)
-      // M9 ch.4a (CONC-8): hoist the command Chan out of the fork — the body
-      // needs only the channel (a synchronizer), not the whole client record.
+      // hoist the command Chan out of the fork — the body needs only the
+      // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       Runtime.start(c)
@@ -79,7 +78,7 @@ object Ui:
       c.audioCmds.send(AcQuit())
       Runtime.stopClient(c)
     }
-    // teardown: clear screen + LEDs, release fb (main.zig defers)
+    // teardown: clear screen + LEDs, release fb
     Draw.clear(px, Color.black)
     FbTest.present(mem, px)
     Led.setBacklight(0)
@@ -91,8 +90,8 @@ object Ui:
     go.syscall.close(fd)
     println("ui: done")
 
-  /** the frame loop. `wctx`/`sctx` are rebuilt each frame from the live
-   *  snapshot + connection (main.zig setContext). Returns on a quit edge. */
+  /** the frame loop. The `FrameCtx` is rebuilt each frame from the live
+   *  snapshot + connection. Returns on a quit edge. */
   def frameLoop(c: MatrixClient, clock: Clock, evts: sgo.Chan[AudioEvt],
                 fds: List[scala.Int], mem: go.Bytes, px: go.Bytes): Unit =
     var snap = Runtime.emptySnapshot()
@@ -112,8 +111,7 @@ object Ui:
       // drain UI events (connection -> status/LEDs, send/play -> wata flash)
       drainUiEvents(c)
 
-      // build this frame's context (M10 ch.5: ONE unified FrameCtx for every
-      // applet — formerly the per-applet WataCtx/SettingsCtx pair)
+      // build this frame's context: ONE unified FrameCtx shared by every applet
       val ctx = FrameCtx(snap, connV, c, c.audioCmds, evts)
 
       // poll input; a quit edge (back in contacts) ends the loop
@@ -137,7 +135,7 @@ object Ui:
 
   /** apply this frame's input to the shell; returns true if a quit edge fired
    *  (back pressed while on the contacts view with no active applet override).
-   *  Wake-from-screensaver swallows the first input (main.zig). */
+   *  Wake-from-screensaver swallows the first input. */
   def handleFrameInput(evs: List[KeyEvent], ctx: FrameCtx): Boolean =
     var cur = evs
     var quit = false
@@ -193,7 +191,7 @@ object Ui:
     case _ :: _ => true
     case Nil  => false
 
-  // ---- UI event drain (main.zig: connection -> LEDs/status, send/play flash) --
+  // ---- UI event drain (connection -> LEDs/status, send/play flash) ------------
   def drainUiEvents(c: MatrixClient): Unit =
     var run = true
     while run do
@@ -208,7 +206,7 @@ object Ui:
     case _: EvPlaybackError => stateC.set(Shell.notifyWataPlayError(stateV))
     case _: EvSnapshot     => () // snapshot is picked up via pollSnap
 
-  /** connection change -> mirror on the red/green LEDs (main.zig). */
+  /** connection change -> mirror on the red/green LEDs. */
   def onConn(cs: ConnectionState): Unit =
     connC.set(cs)
     Led.setGreenLed(isLive(cs))

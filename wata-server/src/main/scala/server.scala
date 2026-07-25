@@ -2,8 +2,7 @@ import language.experimental.saferExceptions
 import ListOps.*
 import JsonNav.*
 
-/** M7 chunk 2 — the wata-server boot + the mux edge (server.ts / transport/
- *  node.ts / index.ts). One `WataHandler` (IOP-4 satisfaction) is registered on
+/** The wata-server boot + the HTTP mux edge. One `WataHandler` is registered on
  *  the Go-1.22 ServeMux for every route; a catch-all "/" `NotFound` handles
  *  unmatched paths (Matrix `{errcode,error}` 404) and CORS OPTIONS preflight.
  *  JSON in/out exclusively through the `json` module.
@@ -20,7 +19,7 @@ class WataHandler() extends go.net.http.Handler:
     catch case e: sgo.GoError =>
       Respond.finish(w, 500, Json.write(errEnvelope(MErr(500, M_UNKNOWN(), "Internal server error"))))
 
-/** The edge split (decision 6): media DOWNLOAD writes raw bytes with the stored
+/** The edge split: media DOWNLOAD writes raw bytes with the stored
  *  Content-Type; everything else (incl. media UPLOAD) is the JSON pipeline. The
  *  request body arrives as a byte-preserving Go String (`string([]byte)`), so an
  *  upload's binary bytes survive the round-trip to `Store.storeMedia`. */
@@ -89,7 +88,7 @@ object Server:
     val err = server.listenAndServe()
     println("wata stopped " + err.message)
 
-  /** the server.ts routing table, as method-qualified Go-1.22 patterns. */
+  /** the routing table, as method-qualified Go-1.22 patterns. */
   def registerRoutes(mux: go.net.http.ServeMux, h: go.net.http.Handler): Unit =
     mux.handle("GET /_matrix/client/versions", h)
     mux.handle("GET /_matrix/client/v3/login", h)
@@ -105,7 +104,7 @@ object Server:
     mux.handle("PUT /_matrix/client/v3/user/{userId}/account_data/{type}", h)
     mux.handle("GET /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}", h)
     mux.handle("PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}", h)
-    // M7 chunk 3 — rooms / messaging / receipts / media.
+    // rooms / messaging / receipts / media.
     mux.handle("POST /_matrix/client/v3/createRoom", h)
     mux.handle("POST /_matrix/client/v3/rooms/{roomIdOrAlias}/join", h)
     mux.handle("POST /_matrix/client/v3/join/{roomIdOrAlias}", h)
@@ -167,7 +166,7 @@ object SelfCheck:
       case s: Some[AcctData] => Json.write(s.value.content)
       case None => "none"
 
-  // ---- M7 chunk 3 parity: membership state machine, IDs, room flow -----------
+  // ---- membership state machine, IDs, room flow -------------------------------
 
   /** the membership transition table (the two wired actions, all five from-states):
    *  deterministic, store-free. */
@@ -183,8 +182,8 @@ object SelfCheck:
       Mem.transStr(Mem.transition(d, act)) + " " +
       Mem.transStr(Mem.transition(e, act)))
 
-  /** ID formatting (decision 5): prefix/suffix shape (the random middle is not
-   *  printed — determinism law). */
+  /** ID formatting: prefix/suffix shape (the random middle is not printed, to
+   *  keep this check deterministic). */
   def idFormats(): Unit =
     val rid = Store.genRoomId()
     val eid = Store.genEventId()
@@ -246,7 +245,7 @@ object SelfCheck:
     case s: Some[Json] => JsonNav.strField(s.value, "displayname", "")
     case None => "none"
 
-  // ---- M7 chunk 4 parity: /sync building (deterministic — no age/IDs printed) -
+  // ---- /sync building (deterministic — no age/IDs printed) --------------------
 
   /** derived facts of an initial + incremental sync over the store left by
    *  roomsDemo (alice+bob joined, a message sent+redacted) and acctDemo (alice's

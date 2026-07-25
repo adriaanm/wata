@@ -1,28 +1,29 @@
-/** M8 chunk 4 — the LIVE ORACLE (decision 7): client_integration_test.zig's
- *  scenarios ported against a real wata-server, driven by
- *  `wata-fb integ <scenario> <baseUrl>` (tools/wataclient-integ.sh boots a
- *  FRESH server per scenario and reads the scoreboard).
+/** The LIVE ORACLE: integration-test scenarios run against a real
+ *  wata-server, driven by `wata-fb integ <scenario> <baseUrl>`
+ *  (tools/wataclient-integ.sh boots a FRESH server per scenario and reads
+ *  the scoreboard).
  *
- *  AUDIO IS DECOUPLED exactly like the Zig (`audio_cmd_queue = null`): no audio
- *  thread exists; download-and-play surfaces `EvPlaybackError`.
+ *  AUDIO IS DECOUPLED: no audio thread exists in this driver; download-and-play
+ *  surfaces `EvPlaybackError` since there's nothing to actually play through.
  *
- *  TOPOLOGY DEPARTURE (dispositioned): Zig's TestPair runs alice + bob
- *  CONCURRENTLY; the engine singleton (the accepted chunk-3 one-client-per-
- *  process adjudication) serializes them into SEQUENTIAL PHASES per scenario —
- *  `phase(user)(driver)` = supervised { start; drive; stop }. Every Zig
- *  assertion is preserved (cross-client visibility flows through the server;
- *  a fresh server per scenario stands in for Zig's marker-duration isolation);
- *  what changes is only WHEN the second client syncs (its initial sync instead
- *  of a live push). The live long-poll path IS exercised wherever a phase
- *  waits for its OWN action's echo (send -> own-snapshot wait, receipt ->
- *  is_played round-trip, family send -> family wait).
+ *  TOPOLOGY: rather than running both test users concurrently, this engine is
+ *  a one-client-per-process singleton, so a scenario with two users
+ *  (typically alice + bob) is broken into SEQUENTIAL PHASES —
+ *  `phase(user)(driver)` = supervised { start; drive; stop }. Every assertion
+ *  a concurrent test would make still holds (cross-client visibility flows
+ *  through the server; a fresh server per scenario gives isolation); what
+ *  changes is only WHEN the second client syncs (its initial sync picks up
+ *  what the first client already did, instead of receiving a live push). The
+ *  live long-poll path IS exercised wherever a phase waits for its OWN
+ *  action's echo (send -> own-snapshot wait, receipt -> is_played
+ *  round-trip, family send -> family wait).
  *
- *  CLOSURE RULE (the select-arm stash idiom's sibling): a phase lambda may READ
- *  captured vals but must not ASSIGN enclosing vars (no ObjectRef lowering) —
- *  outputs cross phases through the `out*` module cells, set by defs. */
+ *  CLOSURE RULE: a phase lambda may READ captured vals but must not ASSIGN
+ *  enclosing vars (no captured-ref lowering for closures) — outputs cross
+ *  phases through the `out*` module cells, set by defs. */
 object Integ:
 
-  // M9 ch.4a (CONC-10 migration): `val`-held Atomic[String] cells (§4.3).
+  // `val`-held Atomic[String] cells.
   private val baseC: sgo.Atomic[String] = sgo.atomic("")
   private def base: String = baseC.get()
   private val PASS = "testpass123"
@@ -53,7 +54,7 @@ object Integ:
     ClientConfig(base, user, PASS, 1000, Session("", "", "", "", ""))
 
   /** one client session as a supervised scope: start the loops, drive, wind
-   *  down. The scope join IS client.zig's thread join. */
+   *  down. The scope join is equivalent to joining the client's threads. */
   def phase(user: String)(body: MatrixClient => Boolean): Boolean =
     phaseCfg(cfg(user))(body)
 
@@ -66,8 +67,8 @@ object Integ:
       ok
     }
 
-  /** Zig FAKE_OGG ("OggS\x00\x02" + 8 zero bytes) — the media repo accepts
-   *  arbitrary bytes; upload/send is what's exercised. */
+  /** a fake Ogg payload ("OggS\x00\x02" + 8 zero bytes) — the media repo
+   *  accepts arbitrary bytes; upload/send is what's exercised. */
   def fakeOgg(): Bytes =
     val bb = new BytesBuilder
     bb.addAscii("OggS")
@@ -80,7 +81,7 @@ object Integ:
     bb.result()
 
   // ---- module out-cells (phase lambdas may not assign enclosing vars) ---------
-  // M9 ch.4a (CONC-10 migration): `val`-held Atomic[String] cells (§4.3).
+  // `val`-held Atomic[String] cells.
   private val outIdC: sgo.Atomic[String] = sgo.atomic("")     // a user id
   private val outRoomC: sgo.Atomic[String] = sgo.atomic("")   // a room id
   private val outEventC: sgo.Atomic[String] = sgo.atomic("")  // an event id
@@ -117,7 +118,7 @@ object Integ:
     while run do
       if c.clock.nowUnixMillis() >= deadline then run = false
       else
-        // M8 chunk 6: pollEvent returns Option (tryReceive) — no stash cell.
+        // pollEvent returns Option (tryReceive) — no stash cell needed.
         Runtime.pollEvent(c) match
           case s: Some[UiEvent] =>
             val v = sendResultOf(s.value)
@@ -133,7 +134,7 @@ object Integ:
     case _: EvSendFailed   => 2
     case _                 => 0
 
-  // ---- snapshot inspection (the Zig predicates) --------------------------------
+  // ---- snapshot inspection (scenario assertion predicates) ---------------------
 
   def findConv(cs: List[Conversation], contactId: String): Option[Conversation] = cs match
     case h :: t => findConvStep(h, t, contactId)
@@ -210,14 +211,14 @@ object Integ:
     case _ :: t => t
     case Nil  => Nil
 
-  /** Zig `hasMessageFromContact`. */
+  /** does the conversation with `contactId` have at least `min` messages? */
   def hasMsgFrom(s: StateSnapshot, contactId: String, min: Int): Boolean =
     findConv(s.conversations, contactId) match
       case cv: Some[Conversation] => msgCount(cv.value.messages) >= min
       case None  => false
 
-  /** Zig `lastMessagesMatchDurations`: the conversation's LAST k messages have
-   *  exactly these durations, in order. */
+  /** the conversation's LAST k messages have exactly these durations, in
+   *  order. */
   def lastDursMatch(s: StateSnapshot, contactId: String, ds: List[Long]): Boolean =
     findConv(s.conversations, contactId) match
       case cv: Some[Conversation] => lastDursIn(cv.value.messages, ds)
@@ -241,7 +242,7 @@ object Integ:
         case Nil => going = false
     n
 
-  /** Zig `messagePlayed`: the message with `eventId` is marked played. */
+  /** the message with `eventId` is marked played. */
   def msgPlayed(s: StateSnapshot, contactId: String, eventId: String): Boolean =
     findConv(s.conversations, contactId) match
       case cv: Some[Conversation] => playedIn(cv.value.messages, eventId)
@@ -254,8 +255,8 @@ object Integ:
   def playedStep(m: VoiceMessage, t: List[VoiceMessage], eventId: String): Boolean =
     if m.id == eventId && m.isPlayed then true else playedIn(t, eventId)
 
-  /** Zig `messageWithDurationGone`: NO message with this duration remains (a
-   *  missing conversation counts as gone). */
+  /** NO message with this duration remains (a missing conversation counts as
+   *  gone). */
   def durGone(s: StateSnapshot, contactId: String, d: Long): Boolean =
     findConv(s.conversations, contactId) match
       case cv: Some[Conversation] => !hasDurIn(cv.value.messages, d)
@@ -268,7 +269,7 @@ object Integ:
   def hasDurStep(m: VoiceMessage, t: List[VoiceMessage], d: Long): Boolean =
     if m.durationMs == d then true else hasDurIn(t, d)
 
-  /** Zig FamilyReady: family populated + a family-typed conversation. */
+  /** family populated + a family-typed conversation. */
   def familyReady(s: StateSnapshot): Boolean =
     if !s.hasFamily then false
     else hasFamilyConv(s.conversations)
@@ -277,7 +278,7 @@ object Integ:
     case _: Some[Conversation] => true
     case None => false
 
-  /** Zig `familyHasDuration`. */
+  /** does the family conversation have a message with this duration? */
   def familyHasDur(s: StateSnapshot, d: Long): Boolean =
     if !s.hasFamily then false
     else familyDurIn(s.conversations, d)
@@ -334,7 +335,8 @@ object Integ:
     outRoomC.set(conv.roomId)
     true
 
-  // ---- direct-HTTP helpers (the Zig tests' out-of-band MatrixHttpClient) -------
+  // ---- direct-HTTP helpers (out-of-band Matrix HTTP calls, bypassing the
+  // client runtime) --------------------------------------------------------------
 
   /** login outside any client runtime; "" on failure. */
   def directToken(user: String): String =
@@ -347,16 +349,16 @@ object Integ:
 
   // ============================ the scenarios ==================================
 
-  /** Zig "login and reach syncing state". */
+  /** login and reach syncing state. */
   def s01(): Boolean =
     phase("alice")(c => grabSelf(c))
 
-  /** Zig "alice and bob both reach syncing" (sequential phases — see header). */
+  /** alice and bob both reach syncing (sequential phases — see header). */
   def s02(): Boolean =
     if !phase("alice")(c => grabSelf(c)) then false
     else phase("bob")(c => grabSelf(c))
 
-  /** Zig "alice sends voice to bob, bob sees the message". */
+  /** alice sends voice to bob, bob sees the message. */
   def s03(): Boolean =
     if !phase("bob")(c => grabSelf(c)) then false
     else
@@ -367,7 +369,7 @@ object Integ:
         phase("bob")(c => grabSelf(c) &&
           Runtime.waitForSnapshot(c, s => hasMsgFrom(s, aliceId, 1), 20000L))
 
-  /** Zig "bob acks alice's message with a read receipt" (enqueue accepted). */
+  /** bob acks alice's message with a read receipt (enqueue accepted). */
   def s04(): Boolean =
     if !phase("bob")(c => grabSelf(c)) then false
     else
@@ -385,7 +387,7 @@ object Integ:
       Runtime.sendAction(c, ActReceipt(outRoom, outEvent))
       true
 
-  /** Zig "bob's own snapshot reflects the receipt he sent" — the m.receipt
+  /** bob's own snapshot reflects the receipt he sent — the m.receipt
    *  round-trip over bob's own LIVE long-poll. */
   def s05(): Boolean =
     if !phase("bob")(c => grabSelf(c)) then false
@@ -402,7 +404,7 @@ object Integ:
       val eid = outEvent
       Runtime.waitForSnapshot(c, s => msgPlayed(s, aliceId, eid), 20000L)
 
-  /** Zig "multi-turn conversation preserves order and dedupes". */
+  /** multi-turn conversation preserves order and dedupes. */
   def s06(): Boolean =
     if !phase("bob")(c => grabSelf(c)) then false
     else
@@ -451,8 +453,8 @@ object Integ:
     ds = 100L :: ds
     ds
 
-  /** Zig "alice deletes (redacts) a message and bob sees the redaction".
-   *  Marker 777; bob must see it BEFORE the redaction (the Zig ordering). */
+  /** alice deletes (redacts) a message and bob sees the redaction. Marker
+   *  777; bob must see it BEFORE the redaction. */
   def s07(): Boolean =
     if !phase("bob")(c => grabSelf(c)) then false
     else
@@ -489,7 +491,7 @@ object Integ:
     ds = d :: ds
     ds
 
-  /** Zig "bob downloads alice's audio and bytes match" — direct HTTP as bob,
+  /** bob downloads alice's audio and bytes match — direct HTTP as bob,
    *  outside the client runtime (the audio queue is stubbed). */
   def s08(): Boolean =
     if !phase("bob")(c => grabSelf(c)) then false
@@ -510,8 +512,9 @@ object Integ:
       val dl = MatrixHttp.downloadMedia(directHs(tok), mxc)
       dl.status == 200 && Bytes.fromRawString(dl.body) == fakeOgg()
 
-  /** Zig "family room — both members see a voice message": alias'd public room
-   *  created out-of-band, bob auto-joins his invite, marker 888 visible to both. */
+  /** family room — both members see a voice message: alias'd public room
+   *  created out-of-band, bob auto-joins his invite, marker 888 visible to
+   *  both. */
   def s09(): Boolean =
     val tok = directToken("alice")
     if tok == "" then false
@@ -530,10 +533,10 @@ object Integ:
     else if !sendVoice(c, outRoom, "", d) then false
     else Runtime.waitForSnapshot(c, s => familyHasDur(s, d), 20000L)
 
-  /** BEYOND the Zig nine (login-or-resume, sync_thread.zig's stored-session
-   *  path, has no Zig integration test): resume with a stored token — the
-   *  second client carries a WRONG password, so only the resume path can reach
-   *  Syncing; the published creds must be the STORED token (no fresh login). */
+  /** login-or-resume via a stored session (not part of the original nine
+   *  scenarios above): resume with a stored token — the second client
+   *  carries a WRONG password, so only the resume path can reach Syncing;
+   *  the published creds must be the STORED token (no fresh login). */
   def s10(): Boolean =
     if !phase("alice")(c => grabSelf(c)) then false
     else

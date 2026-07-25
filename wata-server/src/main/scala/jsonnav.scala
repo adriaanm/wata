@@ -1,19 +1,19 @@
 import ListOps.*
 
-/** M7 chunk 2 — JSON navigation + envelope glue over the `json` module.
+/** JSON navigation + envelope glue over the `json` module.
  *
  *  Read side: `getField`/`asStr` walk the insertion-ordered `JObj` field list
  *  (the json module's `List[(String, Json)]`). Write side: envelope + tiny
  *  builders. Every match arm is a simple expr or a single call, and every
- *  if-chain lives at a def-body top level — the json parser's flattening idiom
- *  (the subset lowers `throw`/`try`/value-`if` only in those positions; see
- *  DOGFOOD 2026-07-10). No `OptionOps`/`EitherOps`/`ListOps` inline combinators
- *  (their `inline f` beta-reduction over destructured binders is fragile — the
- *  json module hand-writes its walks too).
+ *  if-chain lives at a def-body top level — this Scala subset only lowers
+ *  `throw`/`try`/value-`if` in those positions, so this file follows the json
+ *  module's own flattening idiom. No `OptionOps`/`EitherOps`/`ListOps` inline
+ *  combinators (their `inline f` beta-reduction over destructured binders is
+ *  fragile — the json module hand-writes its walks too).
  */
 object JsonNav:
 
-  // ---- the errcode -> string tag map (decision 9) ----------------------------
+  // ---- the errcode -> string tag map ------------------------------------------
   def codeStr(c: ErrCode): String = c match
     case _: M_FORBIDDEN     => "M_FORBIDDEN"
     case _: M_NOT_FOUND     => "M_NOT_FOUND"
@@ -32,8 +32,8 @@ object JsonNav:
   // ---- JSON builders ---------------------------------------------------------
   // Every object/array is built by prepending single conses onto a `var` (the
   // json module's proven idiom). A MULTI-CONS `::` LITERAL in expression/arg
-  // position lowers to a value-IIFE whose Go return type is emitted as the bare
-  // undefined `List` head (DOGFOOD 2026-07-10), so it is avoided everywhere.
+  // position lowers incorrectly in this compiler (an emitted Go return type
+  // that is a bare undefined `List` head), so it is avoided everywhere.
 
   /** empty object `{}` — the success body for logout / set-* endpoints. */
   def emptyObj: Json = JObj(Nil)
@@ -79,9 +79,9 @@ object JsonNav:
 
   def lookupStep(p: (String, Json), t: List[(String, Json)], key: String): Option[Json] =
     // bind the tuple's `_1` to a String local before comparing: comparing the
-    // tuple accessor directly makes the emitter pick a boxed-equality helper over
-    // an undefined `Object` (a broken stub) rather than native string `==`
-    // (DOGFOOD 2026-07-10). The local's declared String type restores native ==.
+    // tuple accessor directly makes the compiler pick a boxed-equality helper
+    // over an undefined `Object` (a broken stub) rather than native string `==`.
+    // The local's declared String type restores native ==.
     val k: String = p._1
     if k == key then Some(p._2) else lookupList(t, key)
 
@@ -103,8 +103,6 @@ object JsonNav:
   def isObj(j: Json): Boolean = j match
     case _: JObj => true
     case _       => false
-
-  // ---- M7 chunk 3 additions --------------------------------------------------
 
   /** a boolean field, or the default when absent / non-bool. */
   def boolField(j: Json, key: String): Boolean = getField(j, key) match
@@ -163,14 +161,14 @@ object JsonNav:
     r = (key, value) :: r
     ListOps.reverse(r)
 
-  /** the m.room.member profile fan-out merge (store.ts `updateMemberProfile`):
+  /** the m.room.member profile fan-out merge (`Store.updateMemberProfile`):
    *  set displayname; set avatar_url only when the profile has one. */
   def mergeProfile(content: Json, prof: Profile): Json =
     val c1 = jsonSetStr(content, "displayname", prof.displayname)
     if prof.avatarUrl == "" then c1 else jsonSetStr(c1, "avatar_url", prof.avatarUrl)
 
-  /** an event as its Matrix wire object (used for `redacted_because` now, /sync
-   *  next chunk). Optional fields present only when their has-flag is set. */
+  /** an event as its Matrix wire object (used for `redacted_because` and by
+   *  /sync). Optional fields present only when their has-flag is set. */
   def eventToJson(ev: Event): Json =
     var fs: List[(String, Json)] = Nil
     fs = ("event_id", JStr(ev.eventId)) :: fs

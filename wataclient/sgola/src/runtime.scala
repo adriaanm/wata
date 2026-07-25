@@ -1,75 +1,72 @@
-/** M8 chunk 4 — the MatrixClient RUNTIME, ported from fbclient `client.zig` +
- *  `sync_thread.zig`. PORTABLE — ZERO `go` facade use: transport/time ride the injected
- *  capabilities; concurrency is the sgo surface (CONC-2's first client-side
- *  outing: `supervised`/`fork` + `Chan`).
+/** the MatrixClient RUNTIME. PORTABLE — zero `go` facade use directly:
+ *  transport/time ride the injected capabilities; concurrency is the sgo
+ *  concurrency surface (`supervised`/`fork` + `Chan`).
  *
- *  SHAPE (client.zig): an action queue IN (`Chan[Action]`, the Zig Mailbox), a
- *  UI-event queue OUT (`Chan[UiEvent]`, the Zig BoundedQueue), and an
- *  IMMUTABLE-SNAPSHOT cell — Zig's atomic-swap StateStore becomes a capacity-1
+ *  SHAPE: an action queue IN (`Chan[Action]`), a UI-event queue OUT
+ *  (`Chan[UiEvent]`), and an IMMUTABLE-SNAPSHOT cell — a capacity-1
  *  `Chan[StateSnapshot]`: publish = drain-then-send (sole producer: the sync
- *  loop), acquire = non-blocking receive that TAKES the snapshot (exactly the
- *  Zig `swap(0)` semantics). Zig's OwnedSnapshot refcounting dies — GC; the
- *  snapshot stays an immutable value, the UI never sees shared mutable state.
+ *  loop), acquire = non-blocking receive that TAKES the snapshot (a swap-out
+ *  semantics). The snapshot stays an immutable value, so the UI never sees
+ *  shared mutable state.
  *
- *  SHUTDOWN (the M7 close-signalled pattern — no new cancellation mechanism;
- *  the pending cancellation-as-tracked-signal spec adopts this shape for free):
+ *  SHUTDOWN (a close-signalled pattern — no separate cancellation mechanism):
  *  `stop` is a channel that is only ever CLOSED; the sync loop polls it
  *  non-blockingly between rounds and exits via its ordinary while-condition.
- *  The action loop exits on the `ActQuit` POISON PILL (an ordinary value through
- *  the ordinary receive edge — closing the action channel would hand a nil
- *  interface to `match`). `stopClient` = close(stop) + send(ActQuit).
+ *  The action loop exits on the `ActQuit` POISON PILL (an ordinary value
+ *  through the ordinary receive edge — closing the action channel would hand
+ *  a nil interface to `match`). `stopClient` = close(stop) + send(ActQuit).
  *
- *  QUEUE-SEMANTICS DEPARTURE (recorded): Zig's BoundedQueue.push DROPS when
- *  full; a `Chan.send` BLOCKS (CONC-2 has no non-blocking send). The UI-event
- *  channel is sized 1024 (~500 sync rounds of slack at <=2 events/round); the
- *  app/oracle contract is to poll it. DOGFOOD'd for the designer.
+ *  QUEUE-SEMANTICS NOTE: a `Chan.send` here BLOCKS rather than dropping on a
+ *  full queue (there is no non-blocking send in this concurrency surface).
+ *  The UI-event channel is sized 1024 (~500 sync rounds of slack at <=2
+ *  events/round); the app/oracle contract is to poll it.
  *
- *  SINGLE-CLIENT-PER-PROCESS (the accepted chunk-3 adjudication): the engine is
- *  a singleton and the poll/stash cells below are module vars — one runtime at
- *  a time, phases run sequentially. Each var is touched by exactly ONE
- *  goroutine (stash cells: the driver; txn counter: the action loop; stop probe:
- *  the sync loop); `lastAuth` crosses only over the supervised-join barrier. */
+ *  SINGLE-CLIENT-PER-PROCESS: the engine is a singleton and the poll/stash
+ *  cells below are module vars — one runtime at a time, phases run
+ *  sequentially. Each var is touched by exactly ONE goroutine (stash cells:
+ *  the driver; txn counter: the action loop; stop probe: the sync loop);
+ *  `lastAuth` crosses only over the supervised-join barrier. */
 
-// ---- actions (types.zig Action; inline [128]u8 buffers become Strings) -------
-import sgo.add  // the Atomic[Int] add extension (M9 ch.4a: txnCounter cell)
+// ---- actions -------------------------------------------------------------------
+import sgo.add  // the Atomic[Int] add extension (the txnCounter cell)
 
 sealed trait Action
 case class ActReceipt(roomId: String, eventId: String) extends Action
-/** roomId "" -> resolve/create the DM room for contactId first (Zig). */
+/** roomId "" -> resolve/create the DM room for contactId first. */
 case class ActSendVoice(roomId: String, contactId: String, ogg: Bytes, durationMs: Long) extends Action
 case class ActPlay(mxcUrl: String) extends Action
 case class ActSetName(name: String) extends Action
 case class ActRedact(roomId: String, eventId: String) extends Action
-/** the shutdown poison pill (no Zig counterpart — Zig closes its Mailbox). */
+/** the shutdown poison pill. */
 case class ActQuit() extends Action
 
-// ---- UI events (types.zig UiEvent — the subset these loops push) -------------
+// ---- UI events -----------------------------------------------------------------
 sealed trait UiEvent
 case class EvConn(state: ConnectionState) extends UiEvent
 case class EvSnapshot() extends UiEvent
 case class EvSendComplete(txnId: Int) extends UiEvent
 case class EvSendFailed(txnId: Int) extends UiEvent
-/** audio is DECOUPLED in chunk 4 (client.zig `audio_cmd_queue = null`): a
- *  download-and-play still downloads, then surfaces this (the Zig behavior). */
+/** audio can be DECOUPLED (no audio thread wired up): a download-and-play
+ *  still downloads, then surfaces this instead of playing. */
 case class EvPlaybackError() extends UiEvent
 
-/** login-published credentials (sync_thread.zig AuthCredentials; the Zig
- *  AuthStore atomic pointer becomes a capacity-1 channel). A zero/empty
- *  accessToken = "login failed, stand down" (the channel-close zero value). */
+/** login-published credentials, carried over a capacity-1 channel. A
+ *  zero/empty accessToken = "login failed, stand down" (the channel-close
+ *  zero value). */
 case class AuthCreds(accessToken: String, userId: String)
 
-/** client.zig Config + the stored session for login-or-resume (decision 8;
- *  where the session comes FROM — config.json — is the app layer's business). */
+/** the client's login config plus the stored session for login-or-resume
+ *  (where the session comes FROM — config.json — is the app layer's
+ *  business). */
 case class ClientConfig(homeserver: String, username: String, password: String,
                         syncTimeoutMs: Int, stored: Session)
 
-/** the client handle (client.zig MatrixClient): config + capabilities + the
- *  channels. A plain immutable record — all state lives in the engine
- *  singleton and the channels. M8 chunk 6: `audioCmds` is the audio thread's
- *  command mailbox (client.zig `audio_cmd_queue: ?*CommandQueue`); a `Chan`
- *  cannot be null, so the Zig nullability becomes the `audioEnabled` flag —
- *  false = headless (actions needing audio surface `EvPlaybackError`, the
- *  chunk-4/`-Daudio=false` behavior the integ oracle pins). */
+/** the client handle: config + capabilities + the channels. A plain immutable
+ *  record — all state lives in the engine singleton and the channels.
+ *  `audioCmds` is the audio thread's command mailbox; a `Chan` cannot be
+ *  null, so "no audio thread wired up" is instead represented by the
+ *  `audioEnabled` flag — false = headless (actions needing audio surface
+ *  `EvPlaybackError`). */
 case class MatrixClient(
   cfg: ClientConfig,
   http: HttpDo,
@@ -82,61 +79,59 @@ case class MatrixClient(
   audioEnabled: Boolean,
   audioCmds: sgo.Chan[AudioCmd]
 ) extends Shareable
-// M9 ch.6: `MatrixClient` is the client handle that crosses into the sync +
-// action goroutines (`fork(syncLoop(c))`), so it derives `Shareable` — CONC-7
-// then verifies every field is crossable at THIS definition site: `cfg` pure
+// `MatrixClient` is the client handle that crosses into the sync + action
+// goroutines (`fork(syncLoop(c))`), so it derives `Shareable` — that then
+// requires every field to be crossable at THIS definition site: `cfg` pure
 // config, `http`/`clock` the `Shareable` capability traits (their impls curate
 // their facade-handle fields), the `sgo.Chan[…]` synchronizers, `audioEnabled`
-// a primitive. No hatch — the record proves itself where it is written.
+// a primitive. No escape hatch — the record proves itself where it is written.
 
 object Runtime:
 
   // ---- construction / lifecycle ----------------------------------------------
 
-  /** headless client (audio disabled — the chunk-4 shape; the oracle's). */
+  /** headless client (audio disabled). */
   def make(cfg: ClientConfig, http: HttpDo, clock: Clock): MatrixClient =
     mk(cfg, http, clock, false)
 
-  /** audio-wired client (M8 chunk 6): `audioCmds` is consumed by the app-layer
-   *  audio thread (`AudioThread.mainLoop` reads the SAME chan this handle
-   *  carries — the client.zig `init(.., audio_cmd_queue)` seam). */
+  /** audio-wired client: `audioCmds` is consumed by the app-layer audio thread
+   *  (`AudioThread.mainLoop` reads the SAME chan this handle carries). */
   def makeWithAudio(cfg: ClientConfig, http: HttpDo, clock: Clock): MatrixClient =
     mk(cfg, http, clock, true)
 
   def mk(cfg: ClientConfig, http: HttpDo, clock: Clock, audioEnabled: Boolean): MatrixClient =
     // chans BOUND TO LOCALS first: makeChan's element-type recording is the
     // local-val path (a makeChan in ARGUMENT position has no symbol to record).
-    val actions = sgo.makeChan[Action](64)        // sync_thread.zig Mailbox(_, 64)
-    val events = sgo.makeChan[UiEvent](1024)      // Zig BoundedQueue(_, 256) drops; we block — see header
-    val snaps = sgo.makeChan[StateSnapshot](1)    // the snapshot cell (StateStore)
+    val actions = sgo.makeChan[Action](64)
+    val events = sgo.makeChan[UiEvent](1024)      // sized for polling, not draining eagerly — see header
+    val snaps = sgo.makeChan[StateSnapshot](1)    // the snapshot cell
     val stop = sgo.makeChan[Boolean]()            // close-signalled stop
-    val auth = sgo.makeChan[AuthCreds](1)         // AuthStore
-    val audioCmds = sgo.makeChan[AudioCmd](16)    // audio_thread.zig Mailbox(Command, 16)
+    val auth = sgo.makeChan[AuthCreds](1)
+    val audioCmds = sgo.makeChan[AudioCmd](16)
     MatrixClient(cfg, http, clock, actions, events, snaps, stop, auth, audioEnabled, audioCmds)
 
-  /** spawn the sync + action loops in the CALLER's supervised scope (client.zig
-   *  `start` spawns threads; structured concurrency makes the caller's scope own
-   *  them — `supervised { start(c); …drive…; stopClient(c) }`). */
+  /** spawn the sync + action loops in the CALLER's supervised scope: structured
+   *  concurrency makes the caller's scope own them —
+   *  `supervised { start(c); …drive…; stopClient(c) }`. */
   def start(c: MatrixClient)(using sgo.Scope): Unit =
-    // M9 ch.6: the bridge hatch RETIRED. `MatrixClient` carries the `HttpDo`/
-    // `Clock` capability traits, which now `extends sgo.Shareable` — each impl
-    // proves its facade-handle fields crossable at its own definition site
-    // (CONC-7 + the curated-facade disjunct, §4). So the fork captures are
+    // `MatrixClient` carries the `HttpDo`/`Clock` capability traits, which
+    // extend `sgo.Shareable` — each impl proves its facade-handle fields
+    // crossable at its own definition site. So the fork captures are
     // Shareable by construction; no hatch needed.
     sgo.fork(syncLoop(c))
     sgo.fork(actionLoop(c))
     ()
 
-  /** signal both loops to wind down (client.zig `stop`, minus the joins — the
-   *  enclosing `supervised` IS the join). Idempotence caveat: close twice
-   *  panics, send-after-exit just buffers; call once, like the Zig. */
+  /** signal both loops to wind down (minus the joins — the enclosing
+   *  `supervised` IS the join). Idempotence caveat: close twice panics,
+   *  send-after-exit just buffers; call once. */
   def stopClient(c: MatrixClient): Unit =
     c.stop.close()
     c.actions.send(ActQuit())
 
   def sendAction(c: MatrixClient, a: Action): Unit = c.actions.send(a)
 
-  // ---- the sync loop (sync_thread.zig syncThreadMain) -------------------------
+  // ---- the sync loop -----------------------------------------------------------
 
   def syncLoop(c: MatrixClient): Unit =
     c.events.send(EvConn(Connecting()))
@@ -152,8 +147,8 @@ object Runtime:
       SyncEngine.setSelfUser(creds.userId)
       syncRounds(c, Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken), creds.userId)
 
-  /** login-or-resume (sync_thread.zig): a stored session's token is validated
-   *  with a zero-timeout test sync; expired/foreign -> password login. Empty
+  /** login-or-resume: a stored session's token is validated with a
+   *  zero-timeout test sync; expired/foreign -> password login. Empty
    *  accessToken on total failure. */
   def loginOrResume(c: MatrixClient): AuthCreds =
     var token = ""
@@ -186,12 +181,12 @@ object Runtime:
         if isStopped(c) then run = false
         else if resp.status != 200 then
           c.events.send(EvConn(ConnError()))
-          c.clock.sleepMs(retryMs)       // exponential backoff (Zig: 1s .. 60s)
+          c.clock.sleepMs(retryMs)       // exponential backoff, 1s .. 60s
           retryMs = retryMs * 2L
           if retryMs > 60000L then retryMs = 60000L
         else
           val j = MatrixHttp.parseOrNull(resp.body)
-          if isNullJ(j) then c.events.send(EvConn(ConnError())) // parse fail: err + continue (Zig)
+          if isNullJ(j) then c.events.send(EvConn(ConnError())) // parse fail: report error, keep looping
           else
             processRound(c, hs, selfUid, j)
             retryMs = 1000L
@@ -201,12 +196,15 @@ object Runtime:
     case _        => false
 
   /** one successful sync round: engine ingest -> invite auto-join -> backfill
-   *  -> snapshot publish (the Zig order — auto-join after process() so the NEXT
-   *  sync carries the joined room). Backfill fires on TWO triggers: a limited
-   *  timeline (the Zig/Conduit gap trigger, via prev_batch) and OUR OWN join in
-   *  the delta (a room that is new to us — wata-server never sets `limited`,
-   *  and its /messages `from` is an EVENT id, so the new-room trigger fetches
-   *  the recent TAIL instead; the engine's dedup absorbs any overlap). */
+   *  -> snapshot publish. Auto-join runs after process() so the NEXT sync
+   *  carries the joined room. Backfill fires on TWO triggers: a limited
+   *  timeline (the standard Matrix gap trigger, paging via prev_batch) and
+   *  OUR OWN join in the delta (a room that is new to us — wata-server never
+   *  sets `limited`, and its /messages `from` parameter expects an EVENT id
+   *  rather than a pagination token, so the standard trigger can't recover
+   *  history for a room we just joined; the new-room trigger fetches the
+   *  recent TAIL instead, and the engine's dedup absorbs any overlap between
+   *  the two paths). */
   def processRound(c: MatrixClient, hs: Hs, selfUid: String, j: Json): Unit =
     val evs = SyncEngine.process(j)
     autoJoin(hs, WJson.objField(WJson.objField(j, "rooms"), "invite"))
@@ -233,17 +231,16 @@ object Runtime:
     case _ => ()
 
   /** tail backfill for a newly joined room: /messages with NO from token
-   *  (wata-server: the newest `limit` events), ingested OLDEST-FIRST (the chunk
-   *  arrives newest-first; the engine appends in ingest order — normalizing to
-   *  oldest-first keeps message order deterministic, the house rule; Zig
-   *  ingests as-served and leans on dedup). */
+   *  (against wata-server this returns the newest `limit` events), ingested
+   *  OLDEST-FIRST — the chunk arrives newest-first, and the engine appends in
+   *  ingest order, so reversing here keeps message order deterministic. */
   def backfillTail(hs: Hs, roomId: String): Unit =
     val resp = MatrixHttp.getMessagesTail(hs, roomId, 50)
     if resp.status == 200 then
       ingestChunk(roomId, ListOps.reverse(SyncEngine.arrItems(
         WJson.objField(MatrixHttp.parseOrNull(resp.body), "chunk"))))
 
-  /** trusted family environment — accept ALL invites (Zig). */
+  /** trusted family environment — accept ALL invites. */
   def autoJoin(hs: Hs, inviteMap: Json): Unit =
     var cur = MatrixHttp.objFields(inviteMap)
     var going = true
@@ -273,8 +270,8 @@ object Runtime:
     if WJson.boolField(WJson.objField(p._2, "timeline"), "limited") then
       backfillRoom(hs, roomId)
 
-  /** sync_thread.zig `backfillRoom`: GET /messages(prev_batch, dir=b, 50) and
-   *  feed the chunk through the engine's dedup + voice extraction. */
+  /** GET /messages(prev_batch, dir=b, 50) and feed the chunk through the
+   *  engine's dedup + voice extraction. */
   def backfillRoom(hs: Hs, roomId: String): Unit =
     val pb = SyncEngine.prevBatchOf(roomId)
     if pb != "" then
@@ -295,7 +292,7 @@ object Runtime:
 
   /** publish to the capacity-1 cell: drain (sole producer — never racing
    *  another send), then send; a reader between the two just sees "no snapshot
-   *  yet", exactly the Zig swap window. */
+   *  yet". */
   def publishSnapshot(c: MatrixClient): Unit =
     val snap = SyncEngine.buildSnapshot()
     sgo.selectOrDefault(c.snaps)((old: StateSnapshot) => ())(())
@@ -303,11 +300,11 @@ object Runtime:
     c.events.send(EvConn(Syncing()))
     c.events.send(EvSnapshot())
 
-  // ---- the action loop (sync_thread.zig actionThreadMain) ---------------------
+  // ---- the action loop -----------------------------------------------------------
 
   def actionLoop(c: MatrixClient): Unit =
     val creds = c.auth.recv()            // blocks; login failure closes -> zero creds
-    if creds.accessToken == "" then ()   // stand down (Zig: mailbox closed while waiting)
+    if creds.accessToken == "" then ()   // stand down (mailbox closed while waiting)
     else
       val hs = Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken)
       var run = true
@@ -324,7 +321,7 @@ object Runtime:
     case x: ActRedact   => execRedact(hs, x)
 
   def execReceipt(hs: Hs, r: ActReceipt): Boolean =
-    drop(MatrixHttp.sendReadReceipt(hs, r.roomId, r.eventId)) // best-effort (Zig catch {})
+    drop(MatrixHttp.sendReadReceipt(hs, r.roomId, r.eventId)) // best-effort, failure ignored
     true
 
   def execSendVoice(c: MatrixClient, hs: Hs, selfUid: String, m: ActSendVoice): Boolean =
@@ -343,8 +340,8 @@ object Runtime:
         else c.events.send(EvSendFailed(txn))
     true
 
-  /** DM-room resolution (sync_thread.zig / TS getOrCreateDmRoom parity): reuse
-   *  the first m.direct room for the contact, else create + tag m.direct. */
+  /** DM-room resolution: reuse the first m.direct room for the contact, else
+   *  create one and tag it in m.direct. */
   def resolveDmRoom(hs: Hs, selfUid: String, contactId: String): String =
     if contactId == "" then ""
     else
@@ -365,11 +362,10 @@ object Runtime:
     drop(MatrixHttp.setAccountData(hs, selfUid, "m.direct",
       MatrixHttp.mdirectWithRoom(existing, contactId, roomId)))
 
-  /** the download-play action (sync_thread.zig `.dl_play`): download; on failure
-   *  -> `EvPlaybackError`; on success -> route the Ogg bytes to the audio thread
-   *  (drop-on-full `trySend`, the Zig `_ = acq.send(.play)` bool-discard) when
-   *  audio is wired, else surface `EvPlaybackError` (the Zig `-Daudio=false` /
-   *  null-queue behavior — chunk 4's shape, still what the integ oracle pins). */
+  /** the download-play action: download; on failure -> `EvPlaybackError`; on
+   *  success -> route the Ogg bytes to the audio thread (drop-on-full
+   *  `trySend`) when audio is wired, else surface `EvPlaybackError` (the
+   *  headless-client behavior). */
   def execPlay(c: MatrixClient, hs: Hs, d: ActPlay): Boolean =
     val resp = MatrixHttp.downloadMedia(hs, d.mxcUrl)
     if resp.status != 200 then c.events.send(EvPlaybackError())
@@ -393,30 +389,24 @@ object Runtime:
 
   // ---- module state (single-client-per-process — see header) ------------------
 
-  // M9 ch.4a (CONC-10 migration): `val`-held Atomic cells (CONCURRENCY.md
-  // §4.3) — the single-client-per-process protocol is unchanged; the cells
-  // make the by-naming reachability DRF instead of conventional. `txnCounter`
-  // rides the native atomic word (`add` returns the new value — the old
-  // increment-then-read, now one RMW); `lastAuthV`/`snapVal` swap immutable
-  // case-class snapshots (boxed cells, one alloc per store).
+  // `val`-held Atomic cells: the single-client-per-process protocol makes
+  // reachability data-race-free by naming (each cell touched from exactly one
+  // goroutine except where noted). `txnCounter` rides the native atomic word
+  // (`add` returns the new value, one read-modify-write); `lastAuthC`/`snapC`
+  // swap immutable case-class snapshots (boxed cells, one alloc per store).
   private val txnCounterC: sgo.Atomic[Int] = sgo.atomic(0)
   private val lastAuthC: sgo.Atomic[AuthCreds] = sgo.atomic(AuthCreds("", ""))
-  /** the credentials the last login/resume produced (the app persists them as a
-   *  Session — config.json is the app/chunk-7 layer; the resume oracle reads
-   *  this AFTER the supervised scope joined). */
+  /** the credentials the last login/resume produced (the app persists them as
+   *  a `Session`; a caller reads this AFTER the supervised scope has joined). */
   def lastAuth: AuthCreds = lastAuthC.get()
 
-  // ---- non-blocking polls (M8 chunk 6: rewritten onto the pinned CONC-2
-  //      surface — `tryReceive`/`selectValue` RETURN values, killing the
-  //      chunk-4 stash-into-module-cells idiom, which only held under
-  //      one-goroutine-per-cell discipline and would rot) ----------------------
+  // ---- non-blocking polls -------------------------------------------------------
 
-  /** take one UI event if available (client.zig pollEvent). */
+  /** take one UI event if available. */
   def pollEvent(c: MatrixClient): Option[UiEvent] = c.events.tryReceive()
 
-  /** TAKE the latest snapshot if one is published (client.zig acquireSnapshot —
-   *  the cell empties, Zig's `swap(0)`). Also refreshes `lastSnap` (the
-   *  oracle's read-after-wait window). */
+  /** TAKE the latest snapshot if one is published (the cell empties on
+   *  read). Also refreshes `lastSnap`. */
   def pollSnap(c: MatrixClient): Option[StateSnapshot] =
     val o = c.snaps.tryReceive()
     o match
@@ -424,8 +414,7 @@ object Runtime:
       case None => ()
     o
 
-  /** the most recent snapshot `pollSnap`/`waitForSnapshot` saw (client.zig
-   *  keeps the acquired snapshot; the integ oracle reads it after a wait). */
+  /** the most recent snapshot `pollSnap`/`waitForSnapshot` saw. */
   def lastSnap: StateSnapshot = snapC.get()
   private val snapC: sgo.Atomic[StateSnapshot] = sgo.atomic(emptySnapshot())
 
@@ -433,13 +422,13 @@ object Runtime:
     StateSnapshot(Disconnected(), false, User("", ""), Nil,
       Nil, false, Family("", "", Nil))
 
-  /** non-blocking stop probe (a CLOSED channel's receive is always ready —
-   *  the M7 close-signal persistence). select-as-EXPRESSION: the taken arm's
-   *  value IS the answer, no cell. Sync-loop-only. */
+  /** non-blocking stop probe (a CLOSED channel's receive is always ready).
+   *  select-as-EXPRESSION: the taken arm's value IS the answer, no cell.
+   *  Sync-loop-only. */
   def isStopped(c: MatrixClient): Boolean =
     sgo.selectValue[Boolean, Boolean](c.stop)((b: Boolean) => true)(false)
 
-  // ---- wait helpers (client.zig waitForConnection / waitForSnapshot) ----------
+  // ---- wait helpers ---------------------------------------------------------------
 
   /** drain events until one is `EvConn(want)` or the deadline passes. */
   def waitForConnection(c: MatrixClient, want: ConnectionState, timeoutMs: Long): Boolean =
@@ -470,7 +459,7 @@ object Runtime:
   def sameConn(a: ConnectionState, b: ConnectionState): Boolean = connTag(a) == connTag(b)
 
   /** poll snapshots until `pred` matches (the match stays in `lastSnap`) or the
-   *  deadline passes; non-matching snapshots are discarded (Zig releases them). */
+   *  deadline passes; non-matching snapshots are simply discarded. */
   def waitForSnapshot(c: MatrixClient, pred: StateSnapshot => Boolean, timeoutMs: Long): Boolean =
     val deadline = c.clock.nowUnixMillis() + timeoutMs
     var found = false

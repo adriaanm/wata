@@ -2,7 +2,8 @@ import language.experimental.saferExceptions
 import ListOps.*
 import JsonNav.*
 
-/** M7 chunk 4 — `/sync` (sync.ts) + the long-poll (decision 4). THE CONC SHOWCASE.
+/** `/sync` and the long-poll wait. This is the most concurrency-sensitive file
+ *  in the server.
  *
  *  Two halves:
  *
@@ -18,21 +19,17 @@ import JsonNav.*
  *       over {waiter, timer} via `sgo.select2` + `go.time.After`. See store.scala
  *       for the waiter lifecycle and the no-lost-wake ordering.
  *
- *  SPEC-CORRECTED over dormant sync.ts (recorded in the chunk report):
- *   - sync.ts's incremental branch carries an `if (fullState)` sub-case that is
- *     DEAD: the function returns from the initial branch whenever `fullState` is
- *     true, so that arm is unreachable. We drop it; `fullState` always routes to
- *     the initial (full state + full timeline) shape, matching the reachable TS.
+ *  `fullState` always routes to the initial (full state + full timeline)
+ *  shape, whether or not a `since` token is present.
  *
  *  Subset idioms as elsewhere in wata-server: every list is built by prepending
  *  single conses onto a `var` and reversing (endObj / explicit reverse); every
- *  match arm is a single call to a Step function; object-field order follows the
- *  TS for readability (JSON order is not semantic; the oracle parses).
+ *  match arm is a single call to a Step function; JSON field order is not
+ *  semantic, so it is chosen for readability.
  */
 
 /** The three deltas a sync response is assembled from, kept as lists so
- *  `hasChangesOf` can test emptiness WITHOUT re-navigating JSON (the sync.ts
- *  `hasChanges(response)` re-reads the built object; we split it). */
+ *  `hasChangesOf` can test emptiness WITHOUT re-navigating the built JSON. */
 case class SyncParts(joins: List[(String, Json)], invites: List[(String, Json)], global: List[AcctData], upTo: scala.Long)
 
 object Sync:
@@ -53,18 +50,18 @@ object Sync:
     Right(syncResult(userId, hasSince, sinceSeq, fullState, timeoutMs))
 
   /** Build once; long-poll only when this is an incremental sync (`hasSince`)
-   *  with no changes and a positive timeout — mirrors sync.ts exactly. */
+   *  with no changes and a positive timeout. */
   def syncResult(userId: String, hasSince: Boolean, sinceSeq: scala.Long, fullState: Boolean, timeoutMs: scala.Int): Json =
     val parts = buildParts(userId, hasSince, sinceSeq, fullState)
     if hasSince && timeoutMs > 0 && !hasChangesOf(parts) then longPoll(userId, sinceSeq, fullState, timeoutMs)
     else partsToJson(parts)
 
-  /** The long-poll (decision 4). Register FIRST, then re-check: the registration
-   *  is the store-commit that the no-lost-wake argument pivots on (store.scala).
+  /** The long-poll. Register FIRST, then re-check: the registration is the
+   *  store-commit that the no-lost-wake argument pivots on (store.scala).
    *  If the re-check already has data, drop the waiter and return it; else wait
    *  on {waiter-close, timer}, then remove the waiter and rebuild. Whether the
-   *  wake was real, spurious, or the timer, we rebuild once and return (sync.ts
-   *  does not re-loop). */
+   *  wake was real, spurious, or the timer, we rebuild once and return — there
+   *  is no re-loop. */
   def longPoll(userId: String, sinceSeq: scala.Long, fullState: Boolean, timeoutMs: scala.Int): Json =
     val w = Store.registerWaiter(userId)
     val parts2 = buildParts(userId, true, sinceSeq, fullState)
@@ -110,11 +107,12 @@ object Sync:
   /** Capture the next_batch seq (`upTo`) BEFORE reading any timeline: the token
    *  must be <= the seq of every event NOT yet included, or an event committed
    *  between the timeline read and the token read would be skipped forever by the
-   *  next incremental sync (a lost message under concurrent sends — the
-   *  check-then-act-across-two-locks softness the chunk-3 report flagged). Reading
-   *  `upTo` first means any event with seq <= upTo was committed before we read the
-   *  timeline (so it is included), and any event with seq > upTo is caught next
-   *  sync. Including an event with seq > upTo is harmless (the client dedupes). */
+   *  next incremental sync (a lost message under concurrent sends, since each
+   *  store read below takes its own lock rather than one lock across the whole
+   *  builder). Reading `upTo` first means any event with seq <= upTo was
+   *  committed before we read the timeline (so it is included), and any event
+   *  with seq > upTo is caught next sync. Including an event with seq > upTo is
+   *  harmless (the client dedupes). */
   def buildParts(userId: String, hasSince: Boolean, sinceSeq: scala.Long, fullState: Boolean): SyncParts =
     val upTo = Store.globalSeq()
     if !hasSince || fullState then initialParts(userId, upTo)
@@ -172,14 +170,13 @@ object Sync:
     case h :: t => buildJoinsIncrStep(h, t, userId, sinceSeq, acc)
     case Nil  => ListOps.reverse(acc)
 
-  /** SPEC-CORRECTION over dormant sync.ts (recorded in the report): sync.ts
-   *  includes an incremental room block whenever it has ANY receipts ("receipts
-   *  should always be included ... even if unchanged"), which makes `hasChanges`
-   *  permanently true for any member of a room that ever got a receipt — so
-   *  long-poll NEVER engages for them (a wake that can't happen). We gate
-   *  inclusion on NEW timeline events OR NEW receipts (`getReceiptsSince`, the
-   *  store method sync.ts left unused), while still sending ALL current read
-   *  markers in the ephemeral block of an included room (the spec intent). */
+  /** Gate inclusion of an incremental room block on NEW timeline events OR NEW
+   *  receipts (`Store.receiptsSinceRoom`), rather than on having ANY receipts at
+   *  all: the latter would make `hasChanges` permanently true for any member of
+   *  a room that ever got a receipt, so long-poll would never engage for them
+   *  (a wake that can never happen). An included room still sends ALL current
+   *  read markers in its ephemeral block, matching the spec's intent that
+   *  receipts always be included once a block is sent. */
   def buildJoinsIncrStep(h: Room, t: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] =
     val newEvents = Store.timelineSince(h.roomId, sinceSeq)
     val allReceipts = Store.receiptsForRoom(h.roomId)
@@ -223,7 +220,7 @@ object Sync:
     buildInvites(t, acc2)
 
   /** incremental invites: only rooms whose member event for this user is NEWER
-   *  than the since-token (sync.ts's `inviteEvent._seq <= sinceSeq` skip). */
+   *  than the since-token. */
   def buildInvitesIncr(rooms: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] = rooms match
     case h :: t => buildInvitesIncrStep(h, t, userId, sinceSeq, acc)
     case Nil  => ListOps.reverse(acc)
@@ -287,8 +284,8 @@ object Sync:
   def timelineObj(events: Json, prevBatch: String): Json =
     obj3("events", events, "limited", JBool(false), "prev_batch", JStr(prevBatch))
 
-  /** sync.ts `stripSeqAndAddAge`: the wire event, with `unsigned.age = now - ts`
-   *  merged in (the internal `_seq`/`Event.seq` never crosses the wire). */
+  /** the wire event, with `unsigned.age = now - ts` merged in (the internal
+   *  `Event.seq` never crosses the wire). */
   def stripAndAge(ev: Event): Json =
     JsonNav.jsonSet(JsonNav.eventToJson(ev), "unsigned", ageMerge(ev.unsigned, ev.ts))
 
@@ -341,9 +338,9 @@ object Sync:
 
   // ---- ephemeral receipts (m.receipt edu) ------------------------------------
   //
-  // sync.ts `formatReceipts`: group by eventId → receiptType → userId → {ts},
-  // wrapped as [{type:"m.receipt", content: grouped}], or [] when empty. Built by
-  // folding the flat receipt list into a nested JObj via jsonSet.
+  // Group receipts by eventId → receiptType → userId → {ts}, wrapped as
+  // [{type:"m.receipt", content: grouped}], or [] when empty. Built by folding
+  // the flat receipt list into a nested JObj via jsonSet.
 
   def formatReceipts(rs: List[Receipt]): Json =
     if isEmptyR(rs) then JArr(Nil)

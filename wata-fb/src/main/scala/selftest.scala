@@ -1,18 +1,18 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 6 (decision 9) — `wata-fb --selftest echo|play|all`, the port of
- *  `audio_selftest.zig`: spawn the REAL production audio thread and drive it
- *  through its public command mailbox — exactly how the app does — so a passing
- *  selftest means the production audio path works end to end.
+/** `wata-fb --selftest echo|play|all`: spawn the REAL production audio thread
+ *  and drive it through its public command mailbox — exactly how the app
+ *  does — so a passing selftest means the production audio path works end
+ *  to end.
  *
  *  Stages:
  *   echo: record 2s -> encode -> decode -> play (primary gate: hear your voice).
  *   play: synthesize a 440Hz Ogg/Opus buffer with the PRODUCTION encoder + Ogg
  *         writer, then decode-and-play it (the Matrix-receive path; the tone is
- *         the Yeti-measurable stage).
+ *         easy to verify with a sound meter).
  *
  *  Prints `SELFTEST PASS` / `SELFTEST FAIL <stage>` (no os.Exit facade — the
- *  driving script greps, the integ PASS/FAIL precedent). */
+ *  driving script greps for the PASS/FAIL line). */
 object Selftest:
 
   def run(stageArg: String): Unit =
@@ -50,7 +50,7 @@ object Selftest:
       else println("SELFTEST FAIL")
 
   /** synthesize `durationMs` of 440Hz as Ogg/Opus via the PRODUCTION encoder +
-   *  Ogg writer (byte-identical to an app recording — Zig synthesizeOggTone). */
+   *  Ogg writer (byte-identical to an app recording). */
   def synthOggTone(durationMs: Int): Bytes throws sgo.GoError =
     val enc = go.audio.newEncoder()
     val nFrames = 48000 * durationMs / 1000 / 960
@@ -58,13 +58,13 @@ object Selftest:
     var frames: List[Bytes] = Nil
     var i = 0
     while i < nFrames do
-      val f = enc.encodeFrameAt(pcm, i) // hoisted: throwing calls val-bind
+      val f = enc.encodeFrameAt(pcm, i) // hoisted: a throwing call must be val-bound
       frames = GoBytes.toPortable(f) :: frames
       i += 1
     enc.close()
     Ogg.writeStream(ListOps.reverse(frames))
 
-  // ---- event waiting (audio_selftest.zig waitFor) ------------------------------
+  // ---- event waiting ------------------------------------------------------------
 
   /** integer tags for AudioEvt (target/error comparison without an eq surface):
    *  1 playback_done, 2 playback_error, 3 recording_done, 4 echo_done,
@@ -92,7 +92,7 @@ object Selftest:
   def isErrTag(t: Int): Boolean = t == 2 || t == 7 || t == 8
 
   /** poll the event mailbox until `target` (true) / an error tag or the
-   *  deadline (false), echoing every event (the Zig waitFor). */
+   *  deadline (false), echoing every event. */
   def waitFor(clock: Clock, evts: sgo.Chan[AudioEvt], target: Int, timeoutMs: Long): Boolean =
     val deadline = clock.nowUnixMillis() + timeoutMs
     var res = false

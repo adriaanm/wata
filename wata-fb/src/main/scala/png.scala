@@ -1,20 +1,20 @@
-/** M8 chunk 5 — a minimal DETERMINISTIC PNG encoder for the headless-host
- *  golden-frame oracle (decision 4). RGB565 pixel buffer -> a 24-bit truecolor
- *  PNG. Pure byte work over the portable `BytesBuilder` prelude; the image data
- *  rides a SINGLE stored (uncompressed) DEFLATE block, so the output is
- *  Go-version-independent and byte-stable — a golden compared in ci, regenerated
- *  designer-reviewed like a baseline. CRC-32 here is the zlib/PNG variant (the
- *  REFLECTED poly 0xEDB88320 — DISTINCT from ogg.zig's non-reflected 0x04C11DB7);
- *  Adler-32 covers the raw stream. Both carry a `Long` masked to 32 bits (the
- *  ogg.scala width-trap precedent). One stored block suffices: the raw stream is
- *  H*(1+W*3) = 128*481 = 61568 bytes < 65535.
+/** A minimal DETERMINISTIC PNG encoder for the headless-host golden-frame
+ *  oracle. RGB565 pixel buffer -> a 24-bit truecolor PNG. Pure byte work over
+ *  the portable `BytesBuilder` prelude; the image data rides a SINGLE stored
+ *  (uncompressed) DEFLATE block, so the output is Go-version-independent and
+ *  byte-stable — a golden compared in ci, regenerated and reviewed like a
+ *  baseline. CRC-32 here is the zlib/PNG variant (the REFLECTED poly
+ *  0xEDB88320 — DISTINCT from the Ogg writer's non-reflected 0x04C11DB7);
+ *  Adler-32 covers the raw stream. Both carry a `Long` masked to 32 bits (Go
+ *  has no unsigned `int32`, so 32-bit arithmetic that can carry into bit 31
+ *  needs an explicit mask to avoid sign-extension bugs). One stored block
+ *  suffices: the raw stream is H*(1+W*3) = 128*481 = 61568 bytes < 65535.
  *
  *  NB every helper builds a LOCAL `BytesBuilder` and RETURNS a `Bytes`; NONE
  *  mutates a passed-in builder. A `BytesBuilder` (like a `[]byte`) passed as a
  *  parameter and appended to does NOT propagate the appends back to the caller
  *  (the emitter lowers `add*` to `b = append(b, ...)` on a by-value slice) — a
- *  silent-wrong-Go trap this file deliberately sidesteps. See the chunk report
- *  (the shipped ogg.scala Ogg *writer* hits the same trap, latently). */
+ *  silent-wrong-Go trap this file deliberately sidesteps. */
 object Png:
   val CRC_POLY: Long = 0xedb88320L
   val MASK: Long = 0xffffffffL
@@ -78,7 +78,7 @@ object Png:
     d.result()
 
   /** filtered scanlines: each row = 1 filter byte (0 = none) + W*RGB, RGB565
-   *  expanded to 8-bit (bit-replication, the exact inverse of display.zig rgb). */
+   *  expanded to 8-bit via bit-replication (the exact inverse of `Color.rgb`). */
   def rawImage(px: go.Bytes): Bytes =
     val d = new BytesBuilder
     var y = 0

@@ -1,8 +1,7 @@
-/** M8 chunk 3 — the session/config record (decision 8), shape-compatible with
- *  fbclient `config.zig`'s `Session` so a device carries credentials across the
- *  Zig->Sgola swap: `{homeserver, username, access_token, user_id, device_id}`.
- *  PURE record + Json (de)serialization over the `json` module — NO file IO here
- *  (that is the app/config layer, chunk 4/7). ZERO `go`. */
+/** the session/config record: `{homeserver, username, access_token, user_id,
+ *  device_id}`, the credentials a device carries across restarts. A pure
+ *  record + Json (de)serialization — no file IO here (that lives in the app
+ *  layer, which decides where the config is stored). */
 case class Session(
   homeserver: String,
   username: String,
@@ -13,8 +12,7 @@ case class Session(
 
 object Sessions:
 
-  /** encode a `Session` to its `config.json` object (field order matches
-   *  config.zig's `saveSession` writer). */
+  /** encode a `Session` to its `config.json` object. */
   def toJson(s: Session): Json =
     var fs: List[(String, Json)] = Nil
     fs = ("device_id", JStr(s.deviceId)) :: fs

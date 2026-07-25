@@ -1,14 +1,13 @@
-/** M8 chunk 3 — the FIXTURE-ORACLE describer: feeds captured /sync responses
- *  (from the LIVE M7 wata-server — provenance in README + the capture script)
- *  through the engine and renders emitted events + accumulated state + the
- *  built snapshot as deterministic text. The app-side driver (`wata-fb syncfix`)
- *  reads the fixture FILES and calls `fixtureReport`; the expected output is
- *  pinned in `tools/wataclient-fixtures.expected.txt` (hand-checked against the
- *  Zig/TS semantics). PORTABLE — zero `go` facade use.
+/** the FIXTURE-ORACLE describer: feeds captured /sync responses (from a real
+ *  wata-server instance) through the engine and renders emitted events +
+ *  accumulated state + the built snapshot as deterministic text. The
+ *  app-side driver (`wata-fb syncfix`) reads the fixture FILES and calls
+ *  `fixtureReport`; the expected output is pinned in
+ *  `tools/wataclient-fixtures.expected.txt`. PORTABLE — zero `go` facade use.
  *
  *  Every helper RETURNS a String (a StringBuilder must never cross a def
- *  boundary — the emitter types a builder param `any`, a silent break; the
- *  chunk-3 DOGFOOD note). */
+ *  boundary — a builder parameter lowers to an untyped `any` here, which
+ *  silently breaks appends made through it). */
 object SyncDescribe:
 
   def boolStr(x: Boolean): String = if x then "true" else "false"

@@ -3,34 +3,33 @@ import ListOps.*
 import JsonNav.*
 import sgo.{Mutex, mutex}
 
-/** M7 chunk 2 — the in-memory store (decision 3): ONE store, ONE coarse lock.
- *  The TS server is a single-threaded event loop; the coarse lock reproduces
- *  that serialization under net/http's per-request goroutines (chunk-0's
- *  `HttpCounter` in miniature). An owning-goroutine/actor refactor waits on
- *  post-gate evidence.
+/** The in-memory store: ONE store, ONE coarse lock. An earlier reference
+ *  implementation this was ported from was a single-threaded event loop; the
+ *  coarse lock reproduces that serialization under net/http's per-request
+ *  goroutines. An owning-goroutine/actor refactor is a possible future
+ *  direction but isn't justified by anything observed so far.
  *
- *  M9 chunk 4b (decision 7, the store-shape decision): the `sync.RWMutex` + 14
- *  module `var`s migrate to ONE `Mutex[StoreState]` guarded cell — `StoreState`
- *  is a plain class whose `var` fields hold the EXISTING immutable HashMaps /
- *  cons lists (in-place field reseats under the lock; same ops, no facade types).
- *  Exclusive-only (`Mutex` has no RWMutex variant, §4.6): today's RWMutex was
- *  already one lock over all slices, the only concession being read-read on a
+ *  All server state lives behind ONE `Mutex[StoreState]` guarded cell —
+ *  `StoreState` is a plain class whose `var` fields hold immutable HashMaps /
+ *  cons lists (in-place field reseats under the lock; no facade types).
+ *  Exclusive-only (this dialect's `Mutex` has no RWMutex variant): a single
+ *  lock over all slices is not a regression from a prior reader/writer split,
+ *  since that split only bought read-read concurrency on an otherwise
  *  near-idle server — not worth a reader-parallel cell's soundness cost. The
  *  cell is a PRIVATE `val`; the public surface stays `Store.addDevice(...)`-shaped
- *  with `withLock` inside, so callers never see the lock and the leak-guard
- *  obligation (CONC-12 / separationChecking) is discharged in one module. Each
- *  former `mu.lock()`…`mu.unlock()` span is ONE `withLock` = ONE transaction;
- *  the side-effect-after-unlock discipline (updateMemberProfile, notifyUser)
- *  stays OUTSIDE the block (its snapshot crosses out as a pure value).
+ *  with `withLock` inside, so callers never see the lock, and every
+ *  lock/unlock span lives in one module. Each mutation is ONE `withLock` = ONE
+ *  transaction; the side-effect-after-unlock discipline (updateMemberProfile,
+ *  notifyUser) stays OUTSIDE the block (its snapshot crosses out as a pure
+ *  value).
  *
  *  State slices (auth + profile + account-data + rooms/events/aliases/media/
  *  receipts/txns + long-poll waiters), see `StoreState` below.
  */
 
-/** The guarded store state (M9 ch.4b): the 14 former `Store` module `var`s,
- *  now `var` fields of a plain class held behind ONE `Mutex`. Reseats are
- *  in-place under the lock (same HashMap/cons ops); NO facade types, NO
- *  write-back API (the mutable-fields class answers the whole-swap gap, ch.5). */
+/** The guarded store state: 13 `var` fields of a plain class held behind ONE
+ *  `Mutex`. Reseats are in-place under the lock (same HashMap/cons ops); no
+ *  facade types, no separate write-back API. */
 class StoreState:
   var devices: HashMap[String, Device] =
     HashMap.empty[String, Device](k => sgo.hash(k), (a, b) => a == b)
@@ -54,16 +53,17 @@ class StoreState:
   var waiterSeq: scala.Long = 0L
 
 /** A pure snapshot crossing out of `updateMemberProfile`'s `withLock` (the
- *  guarded room-id list + the user's profile, both immutable) — a named pure
- *  case class rather than a tuple (crossable, CONC-12). */
+ *  guarded room-id list + the user's profile, both immutable) — a named case
+ *  class rather than a tuple. */
 case class RoomsProfileSnap(ids: List[String], prof: Profile)
 
 object Store:
-  // the ONE guarded cell (a private val — the leak-guard is discharged here).
+  // the ONE guarded cell (a private val, so nothing outside this module can
+  // touch the store state without going through `withLock`).
   private val cell: Mutex[StoreState] = mutex(new StoreState())
 
-  /** seed the config users' default profiles (profile.ts `initProfiles`). The
-   *  two config users are seeded explicitly (see Config's List departure). */
+  /** seed the config users' default profiles. The two config users are seeded
+   *  explicitly (`Config` exposes them as a lookup, not a list). */
   def init(): Unit =
     cell.withLock { st =>
       st.profiles = seedProfile(st.profiles, "alice", "Alice")
@@ -81,8 +81,8 @@ object Store:
     val c = userId.indexOf(":")
     if c < 0 then userId.substring(1) else userId.substring(1, c)
 
-  /** crypto/rand + base64url (decision 5). No UUID dependency; token format is
-   *  `syt_<localpart>_<rand>` per the TS server, IDs are base64url random. */
+  /** crypto/rand + base64url. No UUID dependency; access tokens are formatted
+   *  `syt_<localpart>_<rand>`, other IDs are base64url random. */
   def randId(n: scala.Int): String =
     var out = ""
     val buf = go.makeSlice[Byte](n)
@@ -153,12 +153,11 @@ object Store:
     case s: Some[Profile] => s.value
     case None => Profile("", "")
 
-  /** profile.ts `updateMemberProfile`: rewrite the user's `m.room.member` state
-   *  event in every room they've joined with the freshly-stored profile, and
-   *  notify each room's members. Snapshots the room-id list + profile under the
-   *  lock (both PURE values — they cross out of the block), then does the
-   *  per-room reads/appends via their own transactions (the
-   *  side-effect-after-unlock discipline). */
+  /** rewrite the user's `m.room.member` state event in every room they've
+   *  joined with the freshly-stored profile, and notify each room's members.
+   *  Snapshots the room-id list + profile under the lock (both PURE values —
+   *  they cross out of the block), then does the per-room reads/appends via
+   *  their own transactions, outside the lock. */
   def updateMemberProfile(userId: String): Unit =
     val snap = cell.withLock(st => RoomsProfileSnap(st.roomIds, profileOr(HashMap.get(st.profiles, userId))))
     updateRooms(snap.ids, userId, snap.prof)
@@ -244,32 +243,30 @@ object Store:
   def bothRoom(a: AcctData, b: AcctData): Boolean =
     if b.hasRoom then a.roomId == b.roomId else false
 
-  // ---- long-poll waiters (M7 chunk 4, decision 4) ----------------------------
+  // ---- long-poll waiters ------------------------------------------------------
   //
-  // The wake channel is CLOSE-SIGNALLED, never sent to: the sgo surface has a
-  // non-blocking receive (`selectOrDefault`) but no non-blocking SEND, and a
+  // The wake channel is CLOSE-SIGNALLED, never sent to: this dialect's channel
+  // surface has a non-blocking receive but no non-blocking send, and a
   // blocking send would couple the notifying goroutine to the waiter's drain
   // (and deadlock a second notify on a size-1 buffer). `close` never blocks and
   // its effect is persistent (a later `recv`/`select` still observes it), so it
-  // is the exact analogue of the pinned "buffered(1) + non-blocking send" with
-  // ZERO new emitter surface. A channel is closed AT MOST ONCE because the
-  // waiter is REMOVED from the shared list under the write lock before closing:
-  // whoever removes a waiter under the lock OWNS it (notify removes+closes;
-  // `removeWaiter`, the timer path, removes+discards — H's own channel needs no
-  // close). See the report's no-lost-wake argument.
+  // gives the same effect as a buffered(1) non-blocking send without needing
+  // one. A channel is closed AT MOST ONCE because the waiter is REMOVED from
+  // the shared list under the write lock before closing: whoever removes a
+  // waiter under the lock OWNS it (notify removes+closes; `removeWaiter`, the
+  // timer path, removes+discards — a waiter's own channel needs no close from
+  // that path). This is what makes the no-lost-wake argument below hold.
   //
-  // M9 ch.4b: the waiter list holds `Chan`s (a non-crossable synchronizer
-  // field), so it must never leave the `withLock` block. `notifyUser` therefore
-  // CLOSES the dropped channels INSIDE the block (close cannot block — the
-  // "lock-vs-channel discipline" was a stylistic preference, not a correctness
-  // requirement; moving it in confines the non-crossable list, CONC-12).
+  // The waiter list holds `Chan`s, which cannot leave the `withLock` block, so
+  // `notifyUser` CLOSES the dropped channels INSIDE the block (closing a
+  // channel cannot block, so this is safe under the lock).
 
   /** Register a waiter for `userId`, returning a handle whose `ch` the caller
    *  selects on. The channel is unbuffered; the registration is the store-commit
    *  that the no-lost-wake argument pivots on (it precedes the caller's second
-   *  emptiness check). The Waiter (which holds a `Chan`, non-crossable) is
-   *  rebuilt OUTSIDE the block from the guarded seq — the block returns only the
-   *  pure `id`, so the guarded waiter list never crosses the lock (CONC-12). */
+   *  emptiness check). The returned `Waiter` (which holds a `Chan` and so can't
+   *  leave the lock) is rebuilt OUTSIDE the block from the guarded seq — the
+   *  block itself returns only the pure `id`. */
   def registerWaiter(userId: String): Waiter =
     val ch = sgo.makeChan[Boolean]()
     val id = cell.withLock { st =>
@@ -297,9 +294,8 @@ object Store:
   /** Wake every waiter for `userId`. Under the lock: snapshot the current waiter
    *  list, drop this user's waiters from the shared list (so a concurrent
    *  notify/timer never touches the same waiter), and CLOSE each dropped channel
-   *  — all in the one transaction (M9 ch.4b: the waiter list is non-crossable, so
-   *  it stays inside the block; `close` cannot block, so closing under the lock
-   *  is safe). */
+   *  — all in the one transaction (the waiter list can't leave the block, and
+   *  `close` cannot block, so closing under the lock is safe). */
   def notifyUser(userId: String): Unit =
     cell.withLock { st =>
       val old = st.waiters
@@ -325,17 +321,16 @@ object Store:
     closeUser(t, userId)
 
   /** Block the calling (request) goroutine until the waiter's channel is closed
-   *  (a wake) OR the timer fires — a real Go `select` over {waiter, timer}
-   *  (decision 4's "selects over {waiter, timer}"). Neither arm's value is used;
-   *  the caller rebuilds the sync response afterwards. NO lock is held here — the
-   *  select can block, and the lock-vs-channel discipline forbids blocking under
-   *  the lock. */
+   *  (a wake) OR the timer fires — a real Go `select` over {waiter, timer}.
+   *  Neither arm's value is used; the caller rebuilds the sync response
+   *  afterwards. NO lock is held here — the select can block, and channels must
+   *  never be waited on while holding the store lock. */
   def waitForEvents(w: Waiter, timeoutMs: scala.Int): Unit =
     sgo.select2(w.ch, go.time.After(go.time.milliseconds(timeoutMs)))(
       (b: Boolean) => (),
       (tm: go.time.Time) => ())
 
-  // ---- ID generation (decision 5) --------------------------------------------
+  // ---- ID generation ----------------------------------------------------------
 
   def genRoomId(): String = "!" + randId(9) + ":" + Config.serverName
   def genEventId(): String = "$" + randId(9) + ":" + Config.serverName
@@ -459,8 +454,9 @@ object Store:
     if h.eventId == eventId then Some(h) else findEv(t, eventId)
 
   /** redact the target event: content -> `{}`, `unsigned.redacted_because` -> the
-   *  redaction event (store.ts in-place mutation, here a rebuild of both the
-   *  timeline and the state map). Under the write lock. */
+   *  redaction event. Rebuilds both the timeline and the state map (these are
+   *  immutable persistent structures, so this is a replace, not an in-place
+   *  mutation). Under the write lock. */
   def redactTarget(roomId: String, eventId: String, red: Event): Unit =
     cell.withLock(st => redactLocked(st, roomId, eventId, red))
 
@@ -508,7 +504,7 @@ object Store:
   def getRoomIdByAlias(alias: String): Option[String] =
     cell.withLock(st => HashMap.get(st.aliases, alias))
 
-  // ---- media (decision 6) ----------------------------------------------------
+  // ---- media --------------------------------------------------------------
 
   def storeMedia(data: String, contentType: String): String =
     val id = genMediaId()
@@ -572,10 +568,10 @@ object Store:
       if Journal.enabled then Journal.rec(Journal.txnOp(key, eventId)) else ()
     }
 
-  // ---- notify fan-out (store.ts notifyRoomMembers) ---------------------------
+  // ---- notify fan-out ---------------------------------------------------------
 
-  /** notify every join/invite member of a room (chunk-4 wake; a no-op body via
-   *  notifyUser today, but the scan is live so chunk 4 only fills notifyUser). */
+  /** notify every join/invite member of a room by waking their long-poll
+   *  waiters via `notifyUser`. */
   def notifyRoomMembers(roomId: String): Unit = getRoom(roomId) match
     case s: Some[Room] => notifyMembers(s.value.state)
     case None => ()
@@ -597,25 +593,26 @@ object Store:
 
   // ---- wall clock (origin_server_ts) -----------------------------------------
 
-  /** int64 epoch ms. Always inline (never val-bound to a facade temp), so the
-   *  emitter renders `time.Now().UnixMilli()` — see the time-facade note. */
+  /** int64 epoch ms. Always inline (never val-bound to a temp), so the
+   *  compiler emits `time.Now().UnixMilli()` directly. */
   def nowMs(): scala.Long = go.time.nowUnixMilli()
 
-  // ---- /sync read accessors (M7 chunk 4) -------------------------------------
+  // ---- /sync read accessors ----------------------------------------------------
   //
   // Each takes ONE lock and snapshots an immutable value (the store's data is
-  // persistent case classes / cons lists, DATA-1), so /sync assembles from a
-  // consistent per-call snapshot per accessor. As noted in chunk 3, a /sync that
-  // reads across several such accessors can see a torn view under concurrent
-  // writes; this is invisible to the sequential oracle and self-corrects (the
-  // client re-syncs from next_batch), and the actor refactor stays post-gate.
+  // persistent case classes / cons lists), so /sync assembles from a
+  // consistent per-call snapshot per accessor. A /sync that reads across
+  // several such accessors can see a torn view under concurrent writes; this
+  // is invisible to sequential testing and self-corrects (the client re-syncs
+  // from next_batch), so an actor-based refactor to close that gap isn't
+  // currently justified.
 
   def globalSeq(): scala.Long =
     cell.withLock(st => st.seq)
 
-  /** store.ts `getRoomsForUser` — rooms whose membership for `userId` equals
-   *  `want` ("join"/"invite"), in stable creation order (roomIds is newest-first,
-   *  so reverse gives oldest-first). */
+  /** rooms whose membership for `userId` equals `want` ("join"/"invite"), in
+   *  stable creation order (roomIds is newest-first, so reverse gives
+   *  oldest-first). */
   def roomsForUser(userId: String, want: String): List[Room] =
     cell.withLock(st => collectRooms(st, ListOps.reverse(st.roomIds), userId, want, Nil))
 
@@ -643,7 +640,7 @@ object Store:
   def memberEvent(room: Room, userId: String): Option[Event] =
     lookupState(room.state, stateKeyOf("m.room.member", userId))
 
-  /** store.ts `getReceipts`: all receipts for a room (the flat list, filtered). */
+  /** all receipts for a room (the flat list, filtered). */
   def receiptsForRoom(roomId: String): List[Receipt] =
     cell.withLock(st => filterReceipts(st.receiptList, roomId, Nil))
 
@@ -656,10 +653,8 @@ object Store:
     if h.roomId == roomId then acc2 = h :: acc2 else ()
     filterReceipts(t, roomId, acc2)
 
-  /** store.ts `getReceiptsSince(roomId, sinceSeq)` (present but UNUSED in the TS —
-   *  its existence reveals the original intent that /sync's rot dropped): receipts
-   *  in a room NEWER than the since-token. /sync uses this to decide whether an
-   *  incremental room block is warranted (spec-correction, see sync.scala). */
+  /** receipts in a room NEWER than the since-token. /sync uses this to decide
+   *  whether an incremental room block is warranted (see sync.scala). */
   def receiptsSinceRoom(roomId: String, sinceSeq: scala.Long): List[Receipt] =
     cell.withLock(st => filterReceiptsSince(st.receiptList, roomId, sinceSeq, Nil))
 
@@ -672,8 +667,7 @@ object Store:
     if h.roomId == roomId && h.seq > sinceSeq then acc2 = h :: acc2 else ()
     filterReceiptsSince(t, roomId, sinceSeq, acc2)
 
-  /** store.ts `getTimelineEvents(roomId, sinceSeq)`: timeline events with
-   *  `seq > sinceSeq` (the incremental delta). */
+  /** timeline events with `seq > sinceSeq` (the incremental delta). */
   def timelineSince(roomId: String, sinceSeq: scala.Long): List[Event] =
     cell.withLock(st => timelineSinceLocked(st, roomId, sinceSeq))
 
@@ -690,8 +684,8 @@ object Store:
     if h.seq > sinceSeq then acc2 = h :: acc2 else ()
     filterSince(t, sinceSeq, acc2)
 
-  /** store.ts `getAllAccountData(userId, roomId?)`: all entries for a user in a
-   *  scope (global when `hasRoom` is false, per-room otherwise). */
+  /** all account-data entries for a user in a scope (global when `hasRoom` is
+   *  false, per-room otherwise). */
   def allAccountData(userId: String, hasRoom: Boolean, roomId: String): List[AcctData] =
     cell.withLock(st => filterAcct(st.acct, userId, hasRoom, roomId, Nil))
 
@@ -710,8 +704,8 @@ object Store:
     else if hasRoom then a.roomId == roomId
     else true
 
-  /** store.ts `getAccountDataSince(userId, sinceSeq)` filtered to GLOBAL entries
-   *  (roomId === null) — /sync's incremental account-data delta. */
+  /** account data for a user filtered to GLOBAL entries (not scoped to a room)
+   *  set after `sinceSeq` — /sync's incremental account-data delta. */
   def acctSinceGlobal(userId: String, sinceSeq: scala.Long): List[AcctData] =
     cell.withLock(st => filterAcctSince(st.acct, userId, sinceSeq, Nil))
 
@@ -724,15 +718,14 @@ object Store:
     if h.userId == userId && !h.hasRoom && h.seq > sinceSeq then acc2 = h :: acc2 else ()
     filterAcctSince(t, userId, sinceSeq, acc2)
 
-  // ---- persistence replay (M7 chunk 6, decision 8) ---------------------------
+  // ---- persistence replay -----------------------------------------------------
   //
   // Boot-only, single-threaded, applied in log == commit order. Each reinserts a
   // CONCRETE record verbatim (no id/token/ts/seq regeneration) and bumps `seq`
   // past any replayed seq so post-reboot mutations stay monotonic. `Journal.on`
   // is still false here, so the mutation helpers these reuse (redactRoom,
   // addToState) do NOT re-log. Replay runs BEFORE serving, but still takes the
-  // lock (M9 ch.4b: the state lives behind the cell now — one transaction per
-  // op, cheap and uncontended at boot).
+  // store lock (one transaction per op — cheap and uncontended at boot).
 
   def bumpSeq(st: StoreState, s: scala.Long): Unit = if s > st.seq then st.seq = s else ()
 

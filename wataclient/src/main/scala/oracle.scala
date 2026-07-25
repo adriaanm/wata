@@ -1,10 +1,10 @@
-/** M8 chunk 3 — the portable byte oracle (decision 11c). `report()` returns a
- *  deterministic multi-line String exercising CRC-32, the Ogg writer/reader
- *  round-trip, and the computed-Byte op surface. It is PORTABLE (Bytes/List/
- *  StringBuilder only, ZERO `go`), so the SAME code runs on sgola AND on plain
- *  scalac/JVM — the two reports must be byte-identical (the portable-conformance
- *  seed). Multi-byte values render as their unsigned LE byte tuples (the spike's
- *  string+ table has no `Long` operand, and the byte view is the sharper test). */
+/** the portable byte oracle. `report()` returns a deterministic multi-line
+ *  String exercising CRC-32, the Ogg writer/reader round-trip, and the
+ *  computed-Byte op surface. It is PORTABLE (Bytes/List/StringBuilder only,
+ *  zero `go`), so the SAME code runs on the sgola backend AND on plain
+ *  scalac/JVM — the two reports must be byte-identical. Multi-byte values
+ *  render as their unsigned LE byte tuples: string concatenation here has no
+ *  `Long` operand, and the byte view is the sharper test. */
 object OggOracle:
 
   /** a `Bytes` from a String's UTF-8/ASCII bytes (magic markers, CRC inputs). */
@@ -23,9 +23,8 @@ object OggOracle:
     b.result()
 
   /** the 4 little-endian bytes of a u32 as "a.b.c.d" (renders a CRC without a
-   *  Long->String). Returns a String — a builder never crosses a def boundary
-   *  (DATA-10: builders are function-local accumulators, build-and-return;
-   *  emitter-enforced since M8 chunk 5's completion cycle). */
+   *  Long->String). Returns a String — a builder never crosses a def
+   *  boundary; builders are function-local accumulators, build-and-return. */
   def u32Str(x: Long): String =
     val bb = new BytesBuilder
     bb.addU32LE(x.toInt)
@@ -121,7 +120,7 @@ object OggOracle:
     b.append(Ogg.frameCount(Bytes.empty)) // 0
     b.append('\n')
 
-    // ---- computed-Byte op surface (decision 11a) ------------------------------
+    // ---- computed-Byte op surface ----------------------------------------------
     b.append("byte narrow ")
     b.append(mk(300).toInt) // 44
     b.append('\n')
@@ -132,9 +131,9 @@ object OggOracle:
     b.append(boolStr(mk(200) < mk(10))) // -56 < 10 -> true (signed int8)
     b.append('\n')
 
-    // ---- raw-byte String bridge (M8 chunk 4 — the transport body currency):
-    //      Bytes -> String -> Bytes must be byte-exact over the full 0..255
-    //      range (Go: verbatim string bytes; JVM reference: ISO-8859-1).
+    // ---- raw-byte String bridge (the transport body currency): Bytes ->
+    //      String -> Bytes must be byte-exact over the full 0..255 range (Go:
+    //      verbatim string bytes; JVM reference: ISO-8859-1).
     val rb = rawProbe()
     val rs = rb.rawString
     b.append("rawstr len ")
@@ -144,16 +143,16 @@ object OggOracle:
     b.append(boolStr(Bytes.fromRawString(rs) == rb))
     b.append('\n')
 
-    // ---- M9 chunk 1 (decision 5/8, BUILD-4): freeze / toBytes / IArray. Portable
-    //      (Bytes/BytesBuilder/Array/IArray only), so the SAME code runs on plain
-    //      scalac/JVM AND on the sgola backend — byte-identical. The freeze-then-
-    //      append-more edge is the soundness pin (the frozen view never changes).
+    // ---- freeze / toBytes / IArray. Portable (Bytes/BytesBuilder/Array/IArray
+    //      only), so the SAME code runs on plain scalac/JVM AND on the sgola
+    //      backend — byte-identical. The freeze-then-append-more edge is the
+    //      soundness pin (the frozen view never changes).
     b.append(freezeReport())
 
     b.toString
 
-  /** freeze / toBytes / IArray conformance lines (BUILD-4). Kept portable so both
-   *  the JVM reference and the sgola emitter must agree byte-for-byte. */
+  /** freeze / toBytes / IArray conformance lines. Kept portable so both the
+   *  JVM reference and the sgola emitter must agree byte-for-byte. */
   def freezeReport(): String =
     val b = new StringBuilder
     // freeze: zero-copy snapshot; freeze-then-append-more (both windows) must not
@@ -273,17 +272,15 @@ object OggOracle:
         cur = tailOf(cur)
     result
 
-  // ---- M8 chunk 7 follow-up: the FOREIGN-CONTAINER fixture report -------------
-  // Guards the container-parsing half of the chunk-6 VOICEPLAY-FAIL regression
+  // ---- the FOREIGN-CONTAINER fixture report -----------------------------------
+  // Guards the container-parsing side of a past playback-failure regression
   // class in ci (host-side; the opus-decode half is the linux/arm Go test
   // go-pkgs/audio/foreign_decode_test.go over the SAME pinned fixture).
   // The fixture is TUI-shaped Ogg/Opus (60ms@16kHz packets = TOC config 11,
   // random serial, EOS page CARRIES audio — everything our own writer does
   // differently). Pinned bytes: go-pkgs/audio/testdata/tui-foreign.ogg;
-  // regenerate (designer-reviewed re-pin, needs node+tsx, NEVER at ci time):
-  //   cd ~/g/bq268/wata && node --import tsx/esm \
-  //     <spike>/tools/tui-encode.mts <spike>/go-pkgs/audio/testdata/tui-foreign.ogg
-  // Expected output pinned at tools/wataclient-foreign.expected.txt.
+  // regenerating it is a designer-reviewed manual re-pin step, never run at
+  // ci time. Expected output pinned at tools/wataclient-foreign.expected.txt.
 
   /** little-endian u64 at `pos` (the Ogg granule field). */
   def u64LE(d: Bytes, pos: Int): Long =

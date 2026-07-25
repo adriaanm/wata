@@ -1,9 +1,8 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 6 — the ON-DEVICE SHELL DRIVERS ("scripted actions, no UI yet"):
- *  the chunk-4 runtime + the chunk-6 audio thread wired together against a
- *  live M7 wata-server. Every subcommand prints a greppable PASS/FAIL line
- *  (the integ precedent).
+/** The ON-DEVICE SHELL DRIVERS ("scripted actions, no UI"): the sync runtime
+ *  + the audio thread wired together against a live wata-server. Every
+ *  subcommand prints a greppable PASS/FAIL line, matching `integ.scala`.
  *
  *    wata-fb login     <base> <user> <pass>                 provision/log in a user
  *    wata-fb voicesend <base> <user> <pass> <contact> <sec> record -> upload ->
@@ -32,7 +31,7 @@ object DevCli:
   def login(args: Array[String]): Unit =
     val c = Runtime.make(cfg(args(1), args(2), args(3)), FbCaps.httpDo(), FbCaps.clock())
     // result rides OUT of the scope as supervised's value (only Int vars have a
-    // captured-ref lowering — the integ phaseCfg pattern).
+    // captured-ref lowering — the same pattern integ.scala's phaseCfg uses).
     val ok = sgo.supervised {
       Runtime.start(c)
       val r = Runtime.waitForConnection(c, Syncing(), 15000L)
@@ -50,8 +49,8 @@ object DevCli:
     val c = Runtime.makeWithAudio(cfg(args(1), args(2), args(3)), FbCaps.httpDo(), clock)
     val ok = sgo.supervised {
       val evts = sgo.makeChan[AudioEvt](16)
-      // M9 ch.4a (CONC-8): hoist the command Chan out of the fork — the body
-      // needs only the channel (a synchronizer), not the whole client record.
+      // hoist the command Chan out of the fork — the body needs only the
+      // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       Runtime.start(c)
@@ -79,8 +78,8 @@ object DevCli:
     val c = Runtime.makeWithAudio(cfg(args(1), args(2), args(3)), FbCaps.httpDo(), clock)
     val ok = sgo.supervised {
       val evts = sgo.makeChan[AudioEvt](16)
-      // M9 ch.4a (CONC-8): hoist the command Chan out of the fork — the body
-      // needs only the channel (a synchronizer), not the whole client record.
+      // hoist the command Chan out of the fork — the body needs only the
+      // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       Runtime.start(c)
@@ -99,10 +98,10 @@ object DevCli:
     if ok then println("VOICEPLAY PASS") else println("VOICEPLAY FAIL")
 
   // ---- audiosoak: the REAL record/play workload under the live sync loop -------
-  // (the chunk-1 gate soaked a SIMULATION — tone playback + synthetic churn;
-  //  this is the true workload: capture -> opus -> Ogg -> upload -> /sync echo ->
-  //  download -> decode -> verified-discipline playback, repeated, with the
-  //  long-poll sync loop running throughout. GC numbers ride GODEBUG=gctrace=1.)
+  // (a synthetic tone-playback soak is not representative; this is the true
+  //  workload: capture -> opus -> Ogg -> upload -> /sync echo -> download ->
+  //  decode -> verified-discipline playback, repeated, with the long-poll sync
+  //  loop running throughout. GC numbers ride GODEBUG=gctrace=1.)
 
   def audiosoak(args: Array[String]): Unit =
     val soakSecs = atoiOr(args(5), 300)
@@ -116,8 +115,8 @@ object DevCli:
     var recFail = 0
     sgo.supervised {
       val evts = sgo.makeChan[AudioEvt](16)
-      // M9 ch.4a (CONC-8): hoist the command Chan out of the fork — the body
-      // needs only the channel (a synchronizer), not the whole client record.
+      // hoist the command Chan out of the fork — the body needs only the
+      // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       Runtime.start(c)
@@ -175,9 +174,8 @@ object DevCli:
 
   // ---- event/action waits (module out-cells for the recording payload) --------
 
-  // M9 ch.4a (CONC-10 migration): `val`-held Atomic cells (§4.3) — recDur
-  // rides the native atomic word; the recorded Ogg swaps immutable `Bytes`
-  // snapshots (the header boxes; contents immutable per DATA-11).
+  // `val`-held Atomic cells — recDur rides the native atomic word; the
+  // recorded Ogg swaps immutable `Bytes` snapshots through the cell.
   private val recDurC: sgo.Atomic[Long] = sgo.atomic(0L)
   def recDur: Long = recDurC.get()
 

@@ -2,24 +2,21 @@ import language.experimental.saferExceptions
 import ListOps.*
 import JsonNav.*
 
-/** M7 chunk 3 — the room / messaging / receipt / media handlers, ported from
- *  `handlers/rooms.ts`, `handlers/events.ts`, `handlers/receipts.ts`,
- *  `handlers/media.ts`. Same shape as chunk 2: every step returns
+/** The room / messaging / receipt / media handlers. Every step returns
  *  `Either[MErr, Json]`; the edge serializes it. Membership decisions go through
  *  the `Mem.transition` table (membership.scala). Media DOWNLOAD is the one
  *  raw-bytes response and is handled at the mux edge (server.scala `MediaEdge`),
  *  not here; UPLOAD returns JSON and flows through the normal pipeline.
  *
- *  Ported-with-simplification (recorded in the chunk report / README):
+ *  Known simplifications:
  *   - createRoom applies presets + is_direct + invite + name + alias; it does NOT
  *     yet apply `initial_state`, `creation_content`, or `power_level_content_
  *     override` (rarely used; deferred).
- *   - GET /messages (timeline pagination) and /publicRooms are deferred to a
- *     later chunk (not needed for the DM smoke; the age field is wall-clock).
+ *   - /publicRooms is not implemented.
  */
 object Rooms:
 
-  // ---- createRoom (rooms.ts handleCreateRoom) --------------------------------
+  // ---- createRoom --------------------------------------------------------
 
   def createRoom(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -44,7 +41,7 @@ object Rooms:
     Store.notifyUser(userId)
     Right(obj1("room_id", JStr(roomId)))
 
-  /** rooms.ts: preset ?? (visibility == 'public' ? 'public_chat' : 'private_chat'). */
+  /** preset ?? (visibility == 'public' ? 'public_chat' : 'private_chat'). */
   def presetOf(j: Json): String = getField(j, "preset") match
     case s: Some[Json] => strOr(s.value, presetFromVisibility(j))
     case None => presetFromVisibility(j)
@@ -158,7 +155,7 @@ object Rooms:
     Store.addEvent(roomId, etype, sender, content, true, sk, false, "", JNull())
     ()
 
-  // ---- join (rooms.ts handleJoinRoom / handleJoinRoomById) -------------------
+  // ---- join -----------------------------------------------------------------
 
   def joinRoute(r: go.net.http.Request): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -199,7 +196,7 @@ object Rooms:
     Store.notifyRoomMembers(roomId)
     Right(obj1("room_id", JStr(roomId)))
 
-  // ---- invite (rooms.ts handleInvite) ----------------------------------------
+  // ---- invite ---------------------------------------------------------------
 
   def inviteRoute(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -223,8 +220,8 @@ object Rooms:
     if target == "" then Left(MErr(400, M_BAD_JSON(), "Missing user_id"))
     else invite5(roomId, target)
 
-  /** spec-correction (membership.scala): gate the target through the transition
-   *  table; the TS overwrites unconditionally. */
+  /** gate the target through the membership transition table (membership.scala)
+   *  rather than overwriting their member event unconditionally. */
   def invite5(roomId: String, target: String): Either[MErr, Json] =
     Mem.transition(Store.getMembership(roomId, target), AInvite()) match
       case _: Denied => Left(MErr(403, M_FORBIDDEN(), "User cannot be invited"))
@@ -235,13 +232,13 @@ object Rooms:
     Store.notifyUser(target)
     Right(emptyObj)
 
-  // ---- resolve alias (rooms.ts handleResolveAlias) ---------------------------
+  // ---- resolve alias --------------------------------------------------------
 
   def resolveAlias(r: go.net.http.Request): Either[MErr, Json] = Store.getRoomIdByAlias(r.pathValue("roomAlias")) match
     case s: Some[String] => Right(obj2("room_id", JStr(s.value), "servers", arr1(JStr(Config.serverName))))
     case None => Left(MErr(404, M_NOT_FOUND(), "Room alias not found"))
 
-  // ---- send message (events.ts handleSendEvent) ------------------------------
+  // ---- send message ---------------------------------------------------------
 
   def sendEvent(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -280,11 +277,10 @@ object Rooms:
 
   def unsignedTxn(txnId: String): Json = obj1("transaction_id", JStr(txnId))
 
-  // ---- redaction (events.ts handleRedactEvent) -------------------------------
+  // ---- redaction ------------------------------------------------------------
   //
-  // TS FIDELITY: handleRedactEvent does NOT do a power-level check — it only
-  // requires the redactor be joined (the brief's "power-level check the TS does"
-  // does not exist in the source). We match the oracle: membership-join only.
+  // Redaction requires only that the redactor be joined to the room; there is
+  // no power-level check.
 
   def redact(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -321,7 +317,7 @@ object Rooms:
     case s: Some[Json] => obj2("redacts", JStr(eventId), "reason", s.value)
     case None => obj1("redacts", JStr(eventId))
 
-  // ---- receipts (receipts.ts handleReceipt) ----------------------------------
+  // ---- receipts -------------------------------------------------------------
 
   def receipt(r: go.net.http.Request): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -338,7 +334,7 @@ object Rooms:
     Store.notifyRoomMembers(roomId)
     Right(emptyObj)
 
-  // ---- media upload (media.ts handleUpload); download is at the edge ---------
+  // ---- media upload; download is handled at the edge -------------------------
 
   def upload(r: go.net.http.Request, rawBody: String): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -350,19 +346,18 @@ object Rooms:
 
   def ctOr(ct: String): String = if ct == "" then "application/octet-stream" else ct
 
-  // ---- GET /messages (timeline pagination, chunk 5) --------------------------
+  // ---- GET /messages (timeline pagination) -----------------------------------
   //
-  // The client (SyncEngine.backfillRoom) calls this with `from` = a /sync
-  // prev_batch token (an "sN" seq token, never an event id) and dir='b'. Matching
-  // the TS reference (messages.ts): when `from` is not an event id in the timeline
-  // we return an EMPTY chunk — the messages were already delivered by /sync
-  // (immediate consistency), so backfill is a no-op safety net here. When `from`
-  // IS an event id we paginate, for spec-correct clients.
+  // The client's backfill path calls this with `from` = a /sync prev_batch token
+  // (an "sN" seq token, never an event id) and dir='b'. When `from` is not an
+  // event id in the timeline we return an EMPTY chunk — the messages were
+  // already delivered by /sync (immediate consistency), so backfill is a no-op
+  // safety net here. When `from` IS an event id we paginate, for spec-correct
+  // clients.
   //
-  // The wire `chunk` is a FLAT array of events (the client's own
-  // GetMessagesResponse: `chunk: MatrixEvent[]`), NOT the TS reference's nested
-  // `[{room_id, events}]` — that shape is a dormant-server bug, contradicting both
-  // the client type and the Matrix spec, so the oracle (client) wins.
+  // The wire `chunk` is a FLAT array of events (matching the client's
+  // GetMessagesResponse type and the Matrix spec), not a nested
+  // `[{room_id, events}]` shape.
 
   def messages(r: go.net.http.Request): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)

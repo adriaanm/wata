@@ -1,12 +1,11 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 5 — evdev input, ported from fbclient `input.zig` (the `EvdevInput`
- *  backend; SDL is not ported, decision 4). Reads `struct input_event`s from
- *  `/dev/input/event{0,1,2}` (nonblocking) and maps the kernel key codes
- *  (linux/input-event-codes.h, per input.zig's HARDWARE.md table) to the app
- *  `Key` enum. The `Key`/`KeyState` "enums" are SEALED nullary case-class
- *  families (DATA-8 / domain.scala's ConnectionState precedent), not Scala 3
- *  `enum`s. Device-layer app code over the `go.syscall` facade. */
+/** evdev input. Reads `struct input_event`s from `/dev/input/event{0,1,2}`
+ *  (nonblocking) and maps the kernel key codes (linux/input-event-codes.h) to
+ *  the app `Key` enum. The `Key`/`KeyState` "enums" are SEALED nullary
+ *  case-class families, not Scala 3 `enum`s — matching the same style used
+ *  for `ConnectionState` in the portable domain model. Device-layer app code
+ *  over the `go.syscall` facade. */
 
 sealed trait Key derives CanEqual
 case class KUp() extends Key
@@ -33,7 +32,7 @@ object Evdev:
   val EV_KEY: scala.Int = 0x01
   val EVENT_SIZE: scala.Int = 16   // 32-bit ARM: tv_sec(4) tv_usec(4) type(2) code(2) value(4)
 
-  // key codes (linux/input-event-codes.h, matching input.zig)
+  // key codes (linux/input-event-codes.h)
   val KEY_ESC: scala.Int = 1       // Matrix keypad: Back
   val KEY_ENTER: scala.Int = 28    // Matrix keypad: Center
   val KEY_F1: scala.Int = 59       // GPIO: Main PTT
@@ -87,8 +86,8 @@ object Evdev:
 
   def u8(buf: go.Bytes, i: scala.Int): scala.Int = buf(i).toInt & 0xff
 
-  /** open /dev/input/event0..2 nonblocking; skip any that fail to open (Zig
-   *  EvdevInput.init — a dev host may have none). Returns the open fds. */
+  /** open /dev/input/event0..2 nonblocking; skip any that fail to open (a dev
+   *  host may have none). Returns the open fds. */
   def open(): List[scala.Int] =
     var acc: List[scala.Int] = Nil
     var i = 0
@@ -132,8 +131,8 @@ object Evdev:
         case Nil => going = false
     ListOps.reverse(acc)
 
-  /** drain one fd until EAGAIN (read throws) or a short read (Zig's `catch
-   *  break` / `n != size` break); prepend mapped key events onto `accIn`. */
+  /** drain one fd until EAGAIN (read throws) or a short read; prepend mapped
+   *  key events onto `accIn`. */
   def drainFd(fd: scala.Int, accIn: List[KeyEvent]): List[KeyEvent] =
     var acc = accIn
     val buf = go.makeSlice[Byte](EVENT_SIZE)

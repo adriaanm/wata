@@ -1,9 +1,6 @@
-/** M7 chunk 3 — room membership as the state machine it is.
- *
- *  store.ts models membership as a bare string read off `m.room.member` content
- *  and the join/invite rules are scattered across the handlers (rooms.ts). Here
- *  it is a SEALED FAMILY + an explicit `transition` table (LANGUAGE.md: types
- *  restrict; the ADT + state machine is the domain). Handlers ask `transition`
+/** Room membership as the state machine it is: a SEALED FAMILY + an explicit
+ *  `transition` table, rather than a bare membership string with ad hoc
+ *  join/invite rules scattered across the handlers. Handlers ask `transition`
  *  and turn a `Denied` into the Matrix `{errcode,error}` envelope.
  *
  *  The transition table (from × action -> allowed / denied / if-public):
@@ -15,20 +12,17 @@
  *    leave     if-public   allowed     allowed   allowed
  *    ban       denied      denied*     allowed   allowed
  *
- *  TS FIDELITY (dormancy caveat, recorded in the chunk report):
- *   - JOIN matches rooms.ts `joinRoom` exactly: from `invite` -> join; from
- *     none/leave -> join ONLY if the room's `join_rule == public` (`if-public`);
- *     from `ban` -> forbidden. Already-joined is handled by the caller (idempotent
- *     `{room_id}` return), so JOIN-from-join is `allowed` here for completeness.
- *   - INVITE is SPEC-CORRECTED (`*`): the TS `handleInvite` overwrites the target
- *     member event with NO check on the target's current membership (re-inviting a
- *     joined or banned user silently rewrites their state — rot). The spec makes
- *     inviting a joined/banned user `M_FORBIDDEN`; we deny those. Well-behaved
- *     clients only invite users not in the room (none/leave -> invite), so this is
- *     invisible to the suite; if a test re-invites a joined user, the designer
- *     adjudicates (chunk 5).
- *   - LEAVE/BAN have no wired handlers in the TS (no leave/kick/ban endpoints);
- *     the table lists them for completeness (both always `allowed`).
+ *  Notes:
+ *   - JOIN: from `invite` -> join; from none/leave -> join ONLY if the room's
+ *     `join_rule == public` (`if-public`); from `ban` -> forbidden.
+ *     Already-joined is handled by the caller (idempotent `{room_id}` return),
+ *     so JOIN-from-join is `allowed` here for completeness.
+ *   - INVITE (`*`): the spec makes inviting an already-joined or banned user
+ *     `M_FORBIDDEN`, so those are denied here rather than silently rewriting
+ *     the target's member event. Well-behaved clients only invite users not
+ *     currently in the room (none/leave -> invite).
+ *   - LEAVE/BAN have no wired HTTP endpoint (no leave/kick/ban route); the
+ *     table lists them for completeness (both always `allowed`).
  */
 sealed trait Membership
 case class MNone() extends Membership

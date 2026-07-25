@@ -3,21 +3,20 @@ import ListOps.*
 import JsonNav.*
 import sgo.{Mutex, mutex}
 
-/** M7 chunk 6 (decision 8, EARNED by the green gate) — append-only JSONL
- *  persistence.
+/** Append-only JSONL persistence.
  *
  *  OFF BY DEFAULT: enabled only when the `WATA_LOG` env var names a log file
- *  (`WATA_LOG=/path/to/log.jsonl wata-server :8008`). The jest oracle runs
- *  STATELESS (no env var) exactly as chunk 5 left it — `Journal.on` gates every
- *  write, so a stateless run pays one boolean read per mutation and nothing else.
+ *  (`WATA_LOG=/path/to/log.jsonl wata-server :8008`). The test suite runs
+ *  STATELESS (no env var) — `Journal.on` gates every write, so a stateless run
+ *  pays one boolean read per mutation and nothing else.
  *
  *  Design: every store mutation that must survive a restart appends ONE JSON
- *  line (the `json` module's writer, decision 1) describing the CONCRETE
- *  post-generation record — never the generator inputs, so replay reinserts
- *  verbatim without re-running `crypto/rand` or the wall clock (ids, tokens,
- *  timestamps, seqs are faithful across the reboot). On boot the log is read and
- *  replayed in file order (== commit order, since each `rec` fires under the
- *  store write lock) BEFORE serving; then the append handle opens and `on` flips.
+ *  line (the `json` module's writer) describing the CONCRETE post-generation
+ *  record — never the generator inputs, so replay reinserts verbatim without
+ *  re-running `crypto/rand` or the wall clock (ids, tokens, timestamps, seqs
+ *  are faithful across the reboot). On boot the log is read and replayed in
+ *  file order (== commit order, since each `rec` fires under the store write
+ *  lock) BEFORE serving; then the append handle opens and `on` flips.
  *
  *  What is logged (enough to make a reboot useful AND faithful):
  *   - `device` / `rmDevice`  — a client's access token survives a restart
@@ -25,23 +24,22 @@ import sgo.{Mutex, mutex}
  *   - `acct`                 — account data (carries its seq)
  *   - `room` / `event` / `redact` — rooms, their state + timeline, redactions
  *   - `alias`                — directory
- *   - `media`                — uploaded blobs; bytes as base64url (decision 6 +
- *                              the brief's explicit sanction — arbitrary media
- *                              bytes are not JSON-string-safe, so the byte-
- *                              preserving String is base64url'd via the existing
- *                              `encoding/base64` facade, decoded on replay)
+ *   - `media`                — uploaded blobs; bytes as base64url (arbitrary
+ *                              media bytes are not JSON-string-safe, so the
+ *                              byte-preserving String is base64url'd via the
+ *                              existing `encoding/base64` facade, decoded on
+ *                              replay)
  *   - `receipt`              — read receipts (carries its seq)
  *   - `txn`                  — per-device send idempotency
  *
  *  NOT logged (transient by nature): long-poll waiters (in-flight goroutines).
  */
-/** The journal's guarded state (M9 ch.4b): the former `Journal.on`/`path`
- *  module `var`s, now `var` fields behind a small SECOND `Mutex` (kept separate
- *  from `Store`'s cell so `Journal.rec`, called from INSIDE a `Store.withLock`
- *  span, acquires a DISTINCT mutex — no re-entrancy/deadlock, CONCURRENCY.md §3).
- *  Write-once-at-boot state read on every mutation; a `Mutex` (not two Atomics)
- *  keeps `on`/`path` reseated together in one transaction and stays faithful to
- *  the store-shape decision's guarded-store → `Mutex` mandate. */
+/** The journal's guarded state: the `Journal.on`/`path` fields behind a small
+ *  SECOND `Mutex`, kept separate from `Store`'s cell so `Journal.rec`, called
+ *  from INSIDE a `Store.withLock` span, acquires a DISTINCT mutex — no
+ *  re-entrancy/deadlock. Write-once-at-boot state read on every mutation; a
+ *  `Mutex` (not two atomics) keeps `on`/`path` reseated together in one
+ *  transaction. */
 class JournalState:
   var on: Boolean = false
   var path: String = ""
@@ -69,8 +67,8 @@ object Journal:
   /** append one op line (only when enabled). The gate read, path read, and file
    *  append are ONE transaction under the small Journal lock — serializing the
    *  appends preserves the log's commit order (a desirable property), and the
-   *  block returns `Unit`, so nothing leaks the guarded state (CONC-12). The JSON
-   *  is rendered OUTSIDE the lock (it touches no guarded state). */
+   *  block returns `Unit`, so nothing leaks the guarded state. The JSON is
+   *  rendered OUTSIDE the lock (it touches no guarded state). */
   def rec(op: Json): Unit =
     val line = Json.write(op) + "\n"
     cell.withLock(js => if js.on then go.sys.appendLine(js.path, line) else ())

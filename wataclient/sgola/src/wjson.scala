@@ -1,8 +1,7 @@
-/** M8 chunk 3 — read-side JSON navigation over the `json` module, PORTABLE
- *  (ZERO `go`). A trimmed sibling of wata-server's `JsonNav` (which lives in
- *  another module and pulls the `strconv` facade): field lookup walks the insertion-
- *  ordered `JObj` list; every match arm is a simple expr and every if-chain sits
- *  at def-body top level (the json module's flattening idiom). */
+/** read-side JSON navigation over the `json` module: field lookup walks the
+ *  insertion-ordered `JObj` list; every match arm is a simple expr and every
+ *  if-chain sits at def-body top level (the flattening the language subset
+ *  requires). */
 object WJson:
 
   /** object field lookup (insertion-ordered `List[(String, Json)]`). */
@@ -15,7 +14,7 @@ object WJson:
     case Nil  => None
 
   def lookupStep(p: (String, Json), t: List[(String, Json)], key: String): Option[Json] =
-    val k: String = p._1 // bind to a String local so `==` stays native (DOGFOOD)
+    val k: String = p._1 // bind to a String local so `==` stays native
     if k == key then Some(p._2) else lookupList(t, key)
 
   /** a string field, or the default when absent / non-string. */

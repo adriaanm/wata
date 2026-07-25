@@ -1,12 +1,12 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 5 — the framebuffer test driver: the deterministic golden pattern,
- *  the headless-host PNG dump (decision 4), and the on-device smoke.
+/** The framebuffer test driver: the deterministic golden pattern, the
+ *  headless-host PNG dump, and the on-device smoke test.
  *
  *  `dump` (host, ci): draw the pattern into an in-memory RGB565 buffer, encode
  *  it to PNG, and write the raw PNG bytes to fd 1 — NOTHING else goes to stdout
  *  in this mode, so `wata-fb fbdump > frame.png` is a clean, byte-stable golden.
- *  `smoke` (device only, [HUMAN-VERIFY]): the real fbdev/evdev/LED path. */
+ *  `smoke` (device only, manual verification): the real fbdev/evdev/LED path. */
 object FbTest:
 
   /** the deterministic golden pattern — exercises clear / fillRect / strokeRect
@@ -44,7 +44,7 @@ object FbTest:
     val png = Png.encode(px)
     go.syscall.write(1, go.bytes(png.rawString))
 
-  // -------- on-device smoke ([HUMAN-VERIFY]) --------------------------------
+  // -------- on-device smoke (manual verification) ---------------------------
 
   def smoke(): Unit =
     println("fbsmoke: opening /dev/fb0 ...")
@@ -55,8 +55,8 @@ object FbTest:
       runDevice(fd, mem)
     catch case e: sgo.GoError => println("fbsmoke: device unavailable: " + e.message)
 
-  /** blit the pixel buffer to the mmap'd fb (display.zig present — direct
-   *  160x128 blit, no stride fixup). */
+  /** blit the pixel buffer to the mmap'd fb — a direct 160x128 blit, no
+   *  stride fixup. */
   def present(mem: go.Bytes, px: go.Bytes): Unit =
     var i = 0
     val n = Display.BYTES

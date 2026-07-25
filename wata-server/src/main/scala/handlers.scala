@@ -1,19 +1,18 @@
 import ListOps.*
 import JsonNav.*
 
-/** M7 chunk 2 — routing + the auth / profile / account-data handlers, ported
- *  from `handlers/auth.ts`, `handlers/profile.ts`, `handlers/account-data.ts`.
+/** Routing + the auth / profile / account-data handlers.
  *
- *  Every handler step returns `Either[MErr, Json]` (decision 9, "returns the
- *  envelope value" arm): `Left` is a Matrix error, `Right` is the 200 body. The
- *  edge (`WataHandler.serveHTTP`, server.scala) serializes either to the wire.
- *  Access-token middleware is `requireAuth` — a check each handler calls (the
- *  natural Sgola shape given one dispatch handler; LANGUAGE.md direct style).
+ *  Every handler step returns `Either[MErr, Json]`: `Left` is a Matrix error,
+ *  `Right` is the 200 body. The edge (`WataHandler.serveHTTP`, server.scala)
+ *  serializes either to the wire. Access-token middleware is `requireAuth` — a
+ *  check each handler calls directly, since there is a single dispatch handler
+ *  rather than a middleware chain.
  *
  *  A single `WataHandler` is registered on the ServeMux for every route; the mux
  *  does the path + method match (Go 1.22 patterns) and param capture, and
  *  `route` re-derives which handler from method + path, reading params back with
- *  `Request.PathValue` (decision 2).
+ *  `Request.PathValue`.
  */
 object Router:
 
@@ -44,7 +43,7 @@ object Router:
   def isAcctPath(path: String): Boolean = path.contains("/account_data/")
   def isRoomAcct(path: String): Boolean = path.contains("/rooms/")
 
-  // ---- access-token middleware (utils.ts `authenticate`) ---------------------
+  // ---- access-token middleware -----------------------------------------------
 
   def requireAuth(r: go.net.http.Request): Either[MErr, Auth] =
     val h = r.header.get("Authorization")
@@ -69,7 +68,7 @@ object Router:
     vs = JStr("v1.1") :: vs
     obj2("versions", JArr(vs), "unstable_features", emptyObj)
 
-  // ---- auth (auth.ts) --------------------------------------------------------
+  // ---- auth ---------------------------------------------------------------
 
   def loginRoute(m: String, body: String): Either[MErr, Json] =
     if m == "GET" then Right(loginFlows()) else login(body)
@@ -141,7 +140,7 @@ object Router:
   def whoamiOk(a: Auth): Either[MErr, Json] =
     Right(obj2("user_id", JStr(a.userId), "device_id", JStr(a.deviceId)))
 
-  // ---- profile (profile.ts) --------------------------------------------------
+  // ---- profile ------------------------------------------------------------
 
   def profileRoute(path: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     if path.endsWith("/displayname") then setDisplayName(r, body)
@@ -191,7 +190,7 @@ object Router:
     Store.setAvatarUrl(userId, strField(j, "avatar_url", ""))
     Right(emptyObj)
 
-  // ---- account data (account-data.ts) ----------------------------------------
+  // ---- account data -------------------------------------------------------
 
   def acctRoute(m: String, path: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     if isRoomAcct(path) then roomAcctRoute(m, r, body)
@@ -227,7 +226,7 @@ object Router:
     else setAcct3(userId, r, body, hasRoom)
 
   /** spec (§Account Data): `m.fully_read` / `m.push_rules` are server-controlled
-   *  -> 405. (store.ts omits this; the spec + brief win — dormancy caveat.) */
+   *  -> 405. */
   def setAcct3(userId: String, r: go.net.http.Request, body: String, hasRoom: Boolean): Either[MErr, Json] =
     val dtype = r.pathValue("type")
     if serverControlled(dtype) then Left(MErr(405, M_BAD_JSON(), "Cannot set " + dtype + " through this API"))

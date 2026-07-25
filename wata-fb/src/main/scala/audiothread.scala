@@ -1,55 +1,55 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 6 — the AUDIO THREAD, ported from fbclient `audio_thread.zig`:
- *  background capture (PTT recording) and playback, driven by the portable
- *  `AudioCmd`/`AudioEvt` mailbox protocol (wataclient/audiocmd.scala) over
- *  capacity-16 `Chan`s. Every event send is `trySend` — drop-on-full, the Zig
- *  `Mailbox.send -> bool`-discard contract; mid-record/mid-play stop-polls are
- *  `tryReceive` (the Zig `tryReceive`) — this file is the canonical consumer
- *  the CONC-2 surface additions were pinned FOR.
+/** The AUDIO THREAD: background capture (PTT recording) and playback, driven
+ *  by the portable `AudioCmd`/`AudioEvt` mailbox protocol
+ *  (wataclient/audiocmd.scala) over capacity-16 `Chan`s. Every event send is
+ *  `trySend` — drop-on-full; mid-record/mid-play stop-polls are `tryReceive`.
  *
- *  PLAYBACK is `go.audio.playMessage` = THE chunk-1 verified discipline
- *  (patched tinyalsa, pre-opened vol ctl, start_threshold = ring, full-ring
- *  prime, 4-period chunks) — NOT alsa.zig's one-period start (decision 3;
- *  aplay parity is the reference, the Zig client's playback bug dies with it).
+ *  PLAYBACK is `go.audio.playMessage` — the verified discipline described in
+ *  `go-pkgs/audio/audio.go` (patched tinyalsa, pre-opened vol ctl,
+ *  start_threshold = ring, full-ring prime, 4-period chunks), not a naive
+ *  one-period start — `aplay`'s own playback behavior is the reference this
+ *  was tuned against, and this discipline is what fixes the stutter/replay
+ *  bug the original device client shipped with.
  *
- *  SHAPE NOTE (the throws/try discipline this port settled into): the emitter
+ *  SHAPE NOTE (the throws/try discipline this file settled into): the emitter
  *  val-binds a throwing call (a) as a DIRECT statement of a `try` block, or
  *  (b) at ANY depth inside a `throws`-declared function; a Unit-throwing call
- *  in statement position DROPS its error (M4 ch.7 write precedent). So: loops
- *  with throwing calls live in `throws` functions with each call hoisted to a
- *  `val`; resource tiers close-and-rethrow in their catch (hand-rolled
- *  exit-edge duplication — exactly ERR-5's pending lowering); the non-throws
- *  boundary catches once and turns failure into the error event.
+ *  in statement position DROPS its error. So: loops with throwing calls live
+ *  in `throws` functions with each call hoisted to a `val`; resource tiers
+ *  close-and-rethrow in their catch (hand-rolled exit-edge duplication); the
+ *  non-throws boundary catches once and turns failure into the error event.
  *
- *  DELIBERATE ZIG-BUG NON-PORTS (recorded in the chunk report):
- *   - Zig `doRecord` encodes ONE 960-sample Opus frame per 1920-frame period
- *     read, silently DROPPING the second half of every period (its own
- *     `doEchoTest` encodes both halves). We encode both subframes.
- *   - Zig `doPlayback` TRUNCATES the tail to a whole period (up to 40ms lost);
- *     `playMessage` zero-pads instead.
- *   - quit-mid-record in Zig returns from `doRecord` leaving the main loop
- *     blocked until the queue is closed; here the session returns a quit code
- *     and the main loop exits directly (same observable behavior, no limbo).
+ *  DELIBERATE NON-PORTS of quirks in the original client this was ported
+ *  from:
+ *   - the original's record path encodes ONE 960-sample Opus frame per
+ *     1920-frame period read, silently DROPPING the second half of every
+ *     period (its own echo-test path did not have this bug). We encode both
+ *     subframes.
+ *   - the original's playback path TRUNCATES the tail to a whole period (up
+ *     to 40ms lost); `playMessage` zero-pads instead.
+ *   - quit-mid-record in the original leaves its main loop blocked until the
+ *     queue is closed; here the session returns a quit code and the main
+ *     loop exits directly (same observable behavior, no limbo).
  *
- *  Matching Zig granularity, kept: `AcStopPlayback` is honored between DECODE
- *  steps only — once `playMessage` starts writing, the message plays out
- *  (Zig's single `writeFrames` sequence is equally uninterruptible). */
+ *  Kept faithfully: `AcStopPlayback` is honored between DECODE steps only —
+ *  once `playMessage` starts writing, the message plays out, matching the
+ *  same uninterruptible-write shape the original client used. */
 object AudioThread:
 
-  /** ASM "Playback 0 Volume" — the audio_experiments.md verified value. */
+  /** ASM "Playback 0 Volume" — the measured/verified value for this hardware. */
   val PlayVol = 8192
 
   /** session result codes: 0 = completed, 2 = quit arrived mid-session. */
   val CodeDone = 0
   val CodeQuit = 2
 
-  /** The thread body: block on the command mailbox, dispatch (Zig
-   *  `audioThreadMain`). Run as a `fork` in the app's supervised scope — the
-   *  blocking `recv` is scope-aware, so a sibling failure cancels it. */
+  /** The thread body: block on the command mailbox, dispatch. Run as a `fork`
+   *  in the app's supervised scope — the blocking `recv` is scope-aware, so a
+   *  sibling failure cancels it. */
   def mainLoop(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt]): Unit =
     // both mixer routes ONCE at startup — per-recording switching crashed the
-    // ADSP (Zig 5a64830; audio_experiments.md ADSP-churn warning).
+    // ADSP on this hardware.
     go.audio.setupMixer()
     var run = true
     while run do
@@ -64,9 +64,9 @@ object AudioThread:
     case _: AcEchoTest     => doEcho(evts)
     case _: AcQuit         => false
 
-  // ---- command polls during record/play (Zig cmd_queue.tryReceive()) ---------
+  // ---- command polls during record/play ----------------------------------------
 
-  /** 0 = continue, 1 = stop-recording, 2 = quit; other commands ignored (Zig). */
+  /** 0 = continue, 1 = stop-recording, 2 = quit; other commands ignored. */
   def recCtl(cmds: sgo.Chan[AudioCmd]): Int =
     cmds.tryReceive() match
       case s: Some[AudioCmd] => recCtlOf(s.value)
@@ -77,7 +77,7 @@ object AudioThread:
     case _: AcQuit       => 2
     case _               => 0
 
-  /** 0 = continue, 1 = stop-playback, 2 = quit; other commands ignored (Zig). */
+  /** 0 = continue, 1 = stop-playback, 2 = quit; other commands ignored. */
   def playCtl(cmds: sgo.Chan[AudioCmd]): Int =
     cmds.tryReceive() match
       case s: Some[AudioCmd] => playCtlOf(s.value)
@@ -88,7 +88,7 @@ object AudioThread:
     case _: AcQuit         => 2
     case _                 => 0
 
-  // ---- recording (Zig doRecord; capture -> opus -> Ogg -> AeRecordingDone) ----
+  // ---- recording (capture -> opus -> Ogg -> AeRecordingDone) ------------------
 
   /** the non-throws boundary: any GoError anywhere in the session becomes
    *  `AeRecordingError`. Returns keep-running (false = quit mid-record). */
@@ -103,8 +103,8 @@ object AudioThread:
       ()
     code != CodeQuit
 
-  /** capture tier: opens the pcm, closes it on BOTH edges (close-and-rethrow —
-   *  the hand-rolled ERR-5 exit-edge duplication). */
+  /** capture tier: opens the pcm, closes it on BOTH edges (close-and-rethrow,
+   *  a hand-rolled exit-edge duplication). */
   def recordSession(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt]): Int throws sgo.GoError =
     val cap = go.audio.openCapture()
     var code = 0
@@ -134,9 +134,10 @@ object AudioThread:
     code
 
   /** the capture loop: one 1920-frame period per read, BOTH 960-sample
-   *  subframes encoded (the Zig half-period-drop non-port), frames accumulated
-   *  portable-side for `Ogg.writeStream`. Emits `AeRecordingDone` itself on a
-   *  normal stop; quit discards the recording (Zig `writer.deinit`). */
+   *  subframes encoded (see the module doc's "deliberate non-ports" note),
+   *  frames accumulated portable-side for `Ogg.writeStream`. Emits
+   *  `AeRecordingDone` itself on a normal stop; quit discards the
+   *  recording. */
   def recordLoop(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt],
                  cap: go.audio.Capture, enc: go.audio.Encoder): Int throws sgo.GoError =
     var frames: List[Bytes] = Nil
@@ -166,7 +167,7 @@ object AudioThread:
     evts.trySend(AeRecordingDone(ogg, durMs))
     ()
 
-  // ---- playback (Zig doPlayback; Ogg -> opus decode -> playMessage) -----------
+  // ---- playback (Ogg -> opus decode -> playMessage) ---------------------------
 
   /** the non-throws boundary; returns keep-running (false = quit mid-play). */
   def doPlay(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt], ogg: Bytes): Boolean =
@@ -195,10 +196,9 @@ object AudioThread:
     dec.close()
     code
 
-  /** decode all frames (polling for stop/quit between frames, the Zig decode
-   *  loop), then hand the whole pcm to the verified-discipline playMessage.
-   *  A stop mid-decode still plays the decoded prefix (Zig `.stop_playback =>
-   *  break` then writes what it has); quit plays nothing. */
+  /** decode all frames (polling for stop/quit between frames), then hand the
+   *  whole pcm to the verified-discipline playMessage. A stop mid-decode
+   *  still plays the decoded prefix; quit plays nothing. */
   def playDec(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt],
               ogg: Bytes, dec: go.audio.Decoder): Int throws sgo.GoError =
     val pcmB = new BytesBuilder
@@ -235,9 +235,9 @@ object AudioThread:
       evts.trySend(AePlaybackError())
       ()
 
-  // ---- echo test (Zig doEchoTest: record 2s -> Ogg -> decode -> play) ---------
+  // ---- echo test (record 2s -> Ogg -> decode -> play) --------------------------
 
-  /** fixed 2s record then immediate playback; no command polling (Zig). */
+  /** fixed 2s record then immediate playback; no command polling. */
   def doEcho(evts: sgo.Chan[AudioEvt]): Boolean =
     evts.trySend(AeEchoRecording())
     val ogg = echoCapture()
@@ -284,8 +284,7 @@ object AudioThread:
     enc.close()
     out
 
-  /** 2 seconds = 96000 samples of periods, both subframes encoded (Zig
-   *  doEchoTest's own shape). */
+  /** 2 seconds = 96000 samples of periods, both subframes encoded. */
   def echoLoop(cap: go.audio.Capture, enc: go.audio.Encoder): Bytes throws sgo.GoError =
     var frames: List[Bytes] = Nil
     var total = 0L

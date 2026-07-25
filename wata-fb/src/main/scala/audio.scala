@@ -2,22 +2,16 @@ package go
 
 import language.experimental.saferExceptions
 
-/** `go.audio` — the APP-OWNED facade (M8 chunk 2) for the cgo opus + tinyalsa
- *  package `sgola.example/audio` (spike/go-pkgs/audio). Lives in the wata-fb
- *  module, NOT in core: the plugin/core carry zero app-tier knowledge — the
- *  binding is entirely `@go.bind`-annotation-driven (the import path rides the
- *  tree; the emitter never learns the name "audio"). The package itself rides
- *  the emitted app module as a plain Go dependency (require + local `replace`
- *  in go.mod, written by the sgo go.mod stage).
- *
- *  Bound surface (chunk 2 — the wata-fb skeleton's minimum): the constants, the
- *  `Encoder` (create/encode/close), the pure-Go `Tone` generator, and the PCM
- *  state names. `Decoder`, `Playback`/`Capture`/`VolCtl` (the tuned handles —
- *  `OpenPlaybackTuned`, `State`, …) are DEFERRED to chunk 6 (the device audio
- *  thread), which is where they are first exercised. */
+/** `go.audio` — the APP-OWNED facade for the cgo opus + tinyalsa package
+ *  `sgola.example/audio` (go-pkgs/audio). Lives in the wata-fb module, NOT in
+ *  core: the plugin/core carry zero app-tier knowledge — the binding is
+ *  entirely `@go.bind`-annotation-driven (the import path rides the tree; the
+ *  emitter never learns the name "audio"). The package itself rides the
+ *  emitted app module as a plain Go dependency (require + local `replace` in
+ *  go.mod, written by the sgo go.mod stage). */
 @go.bind("sgola.example/audio")
 object audio:
-  // --- constants (Go `const`; mirror opus.zig + alsa.zig) -----------------
+  // --- constants (Go `const`) ------------------------------------------------
   def SampleRate: scala.Int      = ??? // 48000 Hz — the only rate the Q6 accepts
   def Channels: scala.Int        = ??? // 1 (mono)
   def FrameSize: scala.Int       = ??? // 2 bytes/sample (S16_LE)
@@ -34,16 +28,15 @@ object audio:
     /** Encode one 960-sample S16_LE frame (`pcm`) into `out`; returns the
      *  encoded byte count. `(int, error)` — rides the throws val-bind lowering. */
     @go.name("Encode") def encode(pcm: go.Bytes, out: go.Bytes): scala.Int throws sgo.GoError = ???
-    /** M8 chunk 6: encode the `frameIdx`-th 960-sample frame of `pcm`, returning
-     *  an EXACT-SIZED packet — sub-slicing happens Go-side (the go.Slice
-     *  sub-slice gap never surfaces in Scala). */
+    /** encode the `frameIdx`-th 960-sample frame of `pcm`, returning an
+     *  EXACT-SIZED packet — sub-slicing happens Go-side. */
     @go.name("EncodeFrameAt") def encodeFrameAt(pcm: go.Bytes, frameIdx: scala.Int): go.Bytes throws sgo.GoError = ???
     @go.name("Close") def close(): Unit = ???
 
   /** `audio.NewEncoder()` — `(*Encoder, error)`. */
   def newEncoder(): go.audio.Encoder throws sgo.GoError = ???
 
-  // --- opus decoder (M8 chunk 6: the play path) ----------------------------
+  // --- opus decoder (the play path) -----------------------------------------
   /** Opaque cgo handle for `*audio.Decoder` (48kHz mono). */
   final class Decoder private[go] ():
     /** decode one Opus packet -> EXACT-SIZED pcm (1920 bytes for a full frame). */
@@ -53,7 +46,7 @@ object audio:
   /** `audio.NewDecoder()` — `(*Decoder, error)`. */
   def newDecoder(): go.audio.Decoder throws sgo.GoError = ???
 
-  // --- tinyalsa capture (M8 chunk 6: the record path) ----------------------
+  // --- tinyalsa capture (the record path) ------------------------------------
   /** Opaque cgo handle for `*audio.Capture` (PCM_IN hw:0,0, small ring). */
   final class Capture private[go] ():
     /** read one period (1920 frames = 40ms) into `buf` (>= PeriodBytes bytes);
@@ -64,17 +57,17 @@ object audio:
   /** `audio.OpenCapture()` — `(*Capture, error)`. */
   def openCapture(): go.audio.Capture throws sgo.GoError = ???
 
-  // --- mixer + the verified playback discipline (M8 chunk 6) ---------------
-  /** one-time playback+capture mixer routes (alsa.zig setupMixer; per-recording
-   *  switching caused ADSP crashes — call ONCE at audio-thread start). */
+  // --- mixer + the verified playback discipline ------------------------------
+  /** one-time playback+capture mixer routes (per-recording switching caused
+   *  ADSP crashes — call ONCE at audio-thread start). */
   def setupMixer(): Unit = ???
 
-  /** play a whole decoded S16_LE mono buffer with THE chunk-1 verified
+  /** play a whole decoded S16_LE mono buffer with the verified playback
    *  discipline (pre-opened vol ctl, start_threshold=ring, full-ring prime,
    *  explicit start only for shorter-than-ring messages, ASM volume post-start,
    *  4-period chunks, drain). `vol <= 0` skips the ASM volume set. Returns
    *  frames played — `(int, error)` so callers VAL-BIND it (a Unit-throwing
-   *  statement drops the error, the M4 chunk 7 write precedent). */
+   *  statement would drop the error). */
   def playMessage(pcm: go.Bytes, vol: scala.Int): scala.Int throws sgo.GoError = ???
 
   /** the previous playMessage's pacing numbers (diagnostics line). */

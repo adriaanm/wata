@@ -1,48 +1,46 @@
-/** M8 chunk 3 — the SYNC ENGINE, ported from fbclient `sync_engine.zig`
- *  (SyncProcessor), cross-read against `sync-engine.ts`. A pure state machine:
- *  sync-response `Json` in -> state delta + `SyncEvent`s out. PORTABLE (ZERO
- *  `go` facade use); the `json` module is the wire currency.
+/** the SYNC ENGINE: a pure state machine, sync-response `Json` in -> state
+ *  delta + `SyncEvent`s out. PORTABLE (zero `go` facade use); the `json`
+ *  module is the wire currency.
  *
- *  DEPARTURES (dormancy caveat — spec + taste win; the adjudication list):
- *   - Zig's SyncProcessor is an allocator-carrying struct; the subset has no
- *     plain mutable classes (only case classes / objects), so the engine is a
- *     module `object` with private `var` state + `reset()` — wata-server
- *     `Store`'s exact idiom. One engine per process (the real client has
+ *  Notes on the representation:
+ *   - There are no plain mutable classes in this language subset (only case
+ *     classes / objects), so the engine is a module `object` with private
+ *     `var` state + `reset()`. One engine per process (the real client has
  *     exactly one; tests `reset()` between scenarios).
- *   - Zig's `StringArrayHashMap`s (rooms/members/receipts/m_direct) become
- *     insertion-ordered `List`s with replace-keeps-position upsert — the SAME
- *     iteration semantics (ArrayHashMap preserves insertion order, and
- *     buildSnapshot's contact/conversation order depends on it). Linear scans;
- *     wata sizes are family-sized.
- *   - `?[]const u8` options (`next_batch`, `canonical_alias`, `prev_batch`,
+ *   - The rooms/members/receipts/m_direct collections are insertion-ordered
+ *     `List`s with replace-keeps-position upsert, matching insertion-ordered
+ *     map semantics — `buildSnapshot`'s contact/conversation order depends on
+ *     this. Lookups are linear scans; wata's room/member counts are
+ *     family-sized, so this is not a scaling concern here.
+ *   - Optional wire fields (`next_batch`, `canonical_alias`, `prev_batch`,
  *     `redacts`, `state_key`) become "" -or- has-flag pairs. Where PRESENCE
- *     matters (canonical_alias clearing, state_key gating) the port tests
+ *     matters (canonical_alias clearing, state_key gating) the code tests
  *     field presence via `WJson.getField`, not ""-ness; `redacts`/`prev_batch`
  *     use "" as none ("" is not a valid event id / batch token).
- *   - Zig takes a TYPED, pre-parsed `SyncResponse` (std.json struct decode);
- *     we walk the `Json` tree directly (json_types.zig's shapes inlined as
- *     `WJson` field reads — same tolerant absent-field defaults as Zig's
- *     `= null` struct fields with `ignore_unknown_fields`).
- *   - Zig test-only accessors (`dupe`, arena plumbing) die with the GC.
- *   - TS-vs-Zig: the TS engine also processes `rooms.leave` (removes rooms) and
- *     timeline `limited`/backfill; the Zig client ignores both, and the spec
- *     needs neither for wata's flows — ZIG scope kept (recorded for designer).
+ *   - The sync response is walked directly as a `Json` tree rather than
+ *     through a typed pre-parsed struct — `WJson` field reads apply the same
+ *     tolerant absent-field defaulting a typed decode with optional fields
+ *     would.
+ *   - The engine intentionally does not process `rooms.leave` (it never
+ *     removes rooms) or the standard `limited`/backfill trigger inside
+ *     `process()` itself — wata's flows don't need either; see
+ *     `Runtime.backfillNewJoins`/`backfillIfLimited` for how backfill is
+ *     actually triggered.
  *
- *  Event emission ORDER is Zig's exactly (asserted by the fixture oracle):
- *  account_data first, then joined rooms in wire order (state membership events,
- *  timeline events, receipt events, then `room_updated` LAST per room), then
- *  invited rooms (invite_state membership events, `room_updated`).
+ *  Event emission ORDER is asserted by the fixture oracle: account_data
+ *  first, then joined rooms in wire order (state membership events, timeline
+ *  events, receipt events, then `room_updated` LAST per room), then invited
+ *  rooms (invite_state membership events, `room_updated`).
  */
 object SyncEngine:
 
-  // ---- the processor state (SyncProcessor's fields) --------------------------
-  // M9 ch.4a (CONC-10 migration): module-level mutable state lives in
-  // `val`-held Atomic cells (CONCURRENCY.md §4.3) — the engine stays
-  // single-goroutine by protocol (one sync loop per process), but the cells
-  // make the by-naming reachability DRF instead of conventional. Reads keep
-  // their old names via private accessor defs (zero churn at ~50 read sites);
-  // writes go through `.set`. Whole-record swaps of immutable snapshots — the
-  // engine's existing discipline, now checker-visible.
+  // ---- the processor state ------------------------------------------------------
+  // Module-level mutable state lives in `val`-held Atomic cells — the engine
+  // stays single-goroutine by protocol (one sync loop per process), but the
+  // cells make the by-naming reachability data-race-free rather than merely
+  // conventional. Reads go through private accessor defs; writes go through
+  // `.set`. Whole-record swaps of immutable snapshots is the engine's
+  // discipline throughout.
   private val roomsC: sgo.Atomic[List[RoomState]] = sgo.atomic(Nil)
   private val selfUserIdC: sgo.Atomic[String] = sgo.atomic("")
   private val batchC: sgo.Atomic[String] = sgo.atomic("")
@@ -58,7 +56,7 @@ object SyncEngine:
     batchC.set("")
     mDirectC.set(Nil)
 
-  /** set after login/whoami (client.zig sets `proc.self_user_id`). */
+  /** set after login/whoami. */
   def setSelfUser(uid: String): Unit = selfUserIdC.set(uid)
 
   def nextBatch: String = batch
@@ -152,7 +150,7 @@ object SyncEngine:
     if k == m.userId then acc2 = m :: acc2 else acc2 = h :: acc2
     replaceMember(t, m, acc2)
 
-  /** joinedMemberCount (RoomState accessor in Zig). */
+  /** the count of joined members in a room. */
   def joinedMemberCount(r: RoomState): Int =
     var n = 0
     var cur = r.members
@@ -199,7 +197,7 @@ object SyncEngine:
     case _: Some[ReceiptEntry] => replaceReceipt(res, e, Nil)
     case None => ListOps.reverse(e :: ListOps.reverse(res))
 
-  // ---- backfill (M8 chunk 4, sync_thread.zig `backfillRoom`) -------------------
+  // ---- backfill ---------------------------------------------------------------
 
   /** the room's stored `prev_batch` pagination token, "" when the room is
    *  unknown / none stored (the loop's backfill gate). */
@@ -207,11 +205,10 @@ object SyncEngine:
     case s: Some[RoomState] => s.value.prevBatch
     case None => ""
 
-  /** ingest ONE backfilled event from a GET /messages chunk — exactly the Zig
-   *  per-event body: timeline DEDUP + `m.room.message` voice extraction, and
-   *  NOTHING else (no state processing, no SyncEvent emission — backfill repairs
-   *  message history, it does not replay the room's life). Requires the room to
-   *  already exist (Zig `rooms.getPtr orelse return`). */
+  /** ingest ONE backfilled event from a GET /messages chunk: timeline DEDUP +
+   *  `m.room.message` voice extraction, and NOTHING else (no state
+   *  processing, no SyncEvent emission — backfill repairs message history, it
+   *  does not replay the room's life). Requires the room to already exist. */
   def ingestBackfill(roomId: String, ev: Json): Unit =
     if hasRoom(roomId) then ingestBackfill1(roomId, ev)
 
@@ -268,10 +265,10 @@ object SyncEngine:
     if etype != "m.direct" then evs0
     else
       rebuildDirect(WJson.getField(ev, "content"))
-      AccountDataUpdated("m.direct") :: evs0             // emitted even w/o content (Zig)
+      AccountDataUpdated("m.direct") :: evs0             // emitted even without content
 
   /** clear-and-rebuild m_direct from `{userId: [roomIds]}` (non-array values
-   *  SKIP the user entirely — Zig's `.array` arm is the only one that puts). */
+   *  SKIP the user entirely — only an array value is accepted per user). */
   def rebuildDirect(content: Option[Json]): Unit = content match
     case s: Some[Json] => rebuildDirectFrom(s.value)
     case None => ()
@@ -388,7 +385,7 @@ object SyncEngine:
     evs
 
   /** invited rooms: process stripped invite_state (DM detection via is_direct
-   *  BEFORE auto-join — parity with TS processInvitedRoom). */
+   *  BEFORE auto-join). */
   def invitedRoom(p: (String, Json), evs0: List[SyncEvent]): List[SyncEvent] =
     val roomId: String = p._1
     ensureRoom(roomId)
@@ -425,7 +422,7 @@ object SyncEngine:
         r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.isDm))
 
   /** canonical_alias: an alias string sets it; a PRESENT content without one
-   *  CLEARS it (Zig's `else` arm); an absent content changes nothing. */
+   *  CLEARS it; an absent content changes nothing. */
   def stateAlias(roomId: String, ev: Json): Unit = WJson.getField(ev, "content") match
     case s: Some[Json] => stateAliasSet(roomId, s.value)
     case None => ()
@@ -440,11 +437,11 @@ object SyncEngine:
         r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.isDm))
 
   def stateMember(roomId: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
-    if !hasField(ev, "state_key") then evs0                 // Zig: state_key orelse return
+    if !hasField(ev, "state_key") then evs0                 // no state_key: not a state event
     else stateMemberKeyed(roomId, WJson.strField(ev, "state_key", ""), ev, evs0)
 
   def stateMemberKeyed(roomId: String, uid: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
-    WJson.getField(ev, "content") match                     // Zig: whole block inside if(content)
+    WJson.getField(ev, "content") match                     // no content: nothing to apply
       case s: Some[Json] => stateMemberContent(roomId, uid, s.value, evs0)
       case None => evs0
 
@@ -454,7 +451,7 @@ object SyncEngine:
     val isDirect = WJson.boolField(content, "is_direct")
     val r = roomOr(roomId, emptyRoom(roomId))
     val newMembers = upsertMember(r.members, MemberInfo(uid, display, membership, isDirect))
-    val newDm = if isDirect then true else r.isDm           // sticky (TS hasIsDirectFlag)
+    val newDm = if isDirect then true else r.isDm           // sticky once set
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, newMembers,
       r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, newDm))
     MembershipChanged(roomId, uid, membership) :: evs0
@@ -495,8 +492,9 @@ object SyncEngine:
       if hasEid then evs = TimelineEventE(roomId, eid) :: evs
       evs
 
-  /** extractVoiceMessageOwned: msgtype m.audio + url + event_id + sender all
-   *  required; ts defaults 0; duration from content.info.duration (>0 else 0). */
+  /** extract a voice message: msgtype m.audio + url + event_id + sender all
+   *  required; timestamp defaults to 0; duration from content.info.duration
+   *  (>0 else 0). */
   def extractVoice(roomId: String, ev: Json): Unit =
     val content = WJson.objField(ev, "content")
     val msgtype = WJson.strField(content, "msgtype", "")
@@ -523,7 +521,7 @@ object SyncEngine:
     if target == "" then target = WJson.strField(WJson.objField(ev, "content"), "redacts", "")
     if target != "" then removeVoice(roomId, target)
 
-  /** drop ALL voice messages with the redacted event id (Zig removeVoiceMessage). */
+  /** drop ALL voice messages with the redacted event id. */
   def removeVoice(roomId: String, targetId: String): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
@@ -592,7 +590,7 @@ object SyncEngine:
       r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.isDm))
     ReceiptUpdated(roomId, eventId) :: evs0
 
-  /** append every user key (no dedup — Zig appends unconditionally). */
+  /** append every user key (no dedup — duplicates are appended as-is). */
   def appendUserKeys(uids: List[String], users: List[(String, Json)]): List[String] =
     var acc = uids
     var cur = users

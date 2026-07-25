@@ -2,21 +2,21 @@ package go
 
 import language.experimental.saferExceptions
 
-/** `go.syscall` — the APP-OWNED device-layer facade (M8 chunk 5) for the raw
- *  Linux syscalls the framebuffer / evdev / LED-sysfs ports need, bound entirely
- *  via `@go.bind("syscall")` (the chunk-2 annotation mechanism; the plugin/core
- *  carry ZERO knowledge of it — the import path rides the tree). Device-layer
- *  code is app-side and MAY use facades (the portability tripwire only guards
- *  the wataclient module). `syscall.*` exists on BOTH darwin and linux, so this
- *  compiles on the host (`sgo ci`) even though the device paths only *run* on
- *  the BQ268 (the host uses the PNG backend, decision 4).
+/** `go.syscall` — the APP-OWNED device-layer facade for the raw Linux syscalls
+ *  the framebuffer / evdev / LED-sysfs code needs, bound entirely via
+ *  `@go.bind("syscall")` (the import path rides the tree; the emitter never
+ *  learns the name "syscall" itself). Device-layer code is app-side and MAY
+ *  use facades directly (the portability tripwire only guards the wataclient
+ *  module). `syscall.*` exists on BOTH darwin and linux, so this compiles on
+ *  the host even though the device paths only *run* on the target hardware
+ *  (the host uses the PNG backend instead of a real framebuffer).
  *
- *  Enumerated binds (report): syscall.{Open,Close,Read,Write,Mmap,Munmap} +
- *  the O_* / PROT_* / MAP_* constants. `Close`/`Write`/`Munmap` declare `Unit`
- *  and drop their `error`/`n` returns (best-effort, the `os.File.Close` drop
- *  precedent); `Read`/`Mmap`/`Open` ride the `(T, error)` throws val-bind
- *  lowering. `perm` is always passed as the literal `0` at call sites (no
- *  O_CREAT is used) so it lands as an untyped constant into Go's `uint32`. */
+ *  Bound surface: syscall.{Open,Close,Read,Write,Mmap,Munmap} + the O_* /
+ *  PROT_* / MAP_* constants. `Close`/`Write`/`Munmap` declare `Unit` and drop
+ *  their `error`/`n` returns (best-effort); `Read`/`Mmap`/`Open` ride the
+ *  `(T, error)` throws val-bind lowering. `perm` is always passed as the
+ *  literal `0` at call sites (no O_CREAT is used) so it lands as an untyped
+ *  constant into Go's `uint32`. */
 @go.bind("syscall")
 object syscall:
   // --- open flags (Go untyped constants) ----------------------------------

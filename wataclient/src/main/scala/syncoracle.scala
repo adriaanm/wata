@@ -1,14 +1,13 @@
-/** M8 chunk 3 — the sync-engine UNIT ORACLE: the 15 embedded tests of
- *  `sync_engine.zig` (lines ~893-1362), ported as a deterministic report. Each
- *  block resets the engine, drives it through `process()` with the SAME JSON the
- *  Zig test used (tests that poked processor state directly are driven through
- *  equivalent sync responses — the only public seam here; noted per test), and
- *  prints the values the Zig test asserted. `tools/wataclient-sync.expected.txt`
- *  pins the output (hand-checked against the Zig/TS semantics); ci step 14 diffs.
+/** the sync-engine UNIT ORACLE: 15 scripted scenarios rendered as a
+ *  deterministic report. Each block resets the engine, drives it through
+ *  `process()` with a hand-built sync response, and prints the resulting
+ *  events/state/snapshot values. `tools/wataclient-sync.expected.txt` pins
+ *  the output; ci diffs against it.
  *
- *  Zig test 15 ("strings survive after JSON parse is freed") is arena-lifetime
- *  machinery — GC makes it vacuous; kept as a state-persistence probe (process,
- *  then read back). PORTABLE — zero `go` facade use (Json.tryParse only). */
+ *  Scenario 15 ("state persists across processes") probes that engine state
+ *  survives across an intervening empty sync round, i.e. that a later,
+ *  unrelated sync doesn't clobber earlier state. PORTABLE — zero `go` facade
+ *  use (Json.tryParse only). */
 object SyncOracle:
 
   def parse(s: String): Json = Json.tryParse(s) match
@@ -216,7 +215,7 @@ object SyncOracle:
       case Nil  => b.append("<none>")
     b.append('\n')
 
-    // -- 5. buildSnapshot contacts from m.direct (Zig pokes state; driven via sync) --
+    // -- 5. buildSnapshot contacts from m.direct --------------------------------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js5 = "{\"next_batch\":\"b5\"," +
@@ -374,7 +373,7 @@ object SyncOracle:
     b.append("t13 unplayed: n "); b.append(conv13.unplayedCount)
     b.append(" m0 "); b.append(boolStr(firstMessage(conv13).isPlayed)); b.append('\n')
 
-    // -- 14. redaction removes the voice message (Zig covers via removeVoiceMessage) --------
+    // -- 14. redaction removes the voice message ----------------------------------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     SyncEngine.process(parse(js13))               // two voice messages
@@ -387,7 +386,7 @@ object SyncOracle:
     b.append("t14 redact: msgs "); b.append(msgCount(conv14))
     b.append(" first "); b.append(firstMessage(conv14).id); b.append('\n')
 
-    // -- 15. state persists across processes (Zig: arena survival; GC makes it vacuous) ----
+    // -- 15. state persists across processes (a later, unrelated sync round) --------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js15 = "{\"next_batch\":\"batch_survive\",\"rooms\":{\"join\":{\"!room1:test\":{" +

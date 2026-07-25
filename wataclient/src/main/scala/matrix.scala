@@ -1,13 +1,13 @@
-/** M8 chunk 3 — Matrix Client-Server API SHAPING over the `json` module, ported
- *  from fbclient `json_types.zig` / `client.zig` request builders. Request +
- *  response RECORD shapes and their Json encode/decode; NO transport (that is the
- *  `HttpDo` capability, driven in chunk 4). PORTABLE — ZERO `go`.
+/** Matrix Client-Server API SHAPING over the `json` module: request and
+ *  response RECORD shapes and their Json encode/decode. No transport here —
+ *  that is the `HttpDo` capability, driven from the runtime layer.
  *
- *  Bodies are built with the json module's var-prepend idiom (a multi-cons `::`
- *  literal in arg position lowers to a broken value-IIFE — DOGFOOD); responses
- *  are read through `WJson`. */
-// ---- response records (json_types.zig) — TOP LEVEL (debt 2: a case class
-// nested in an object lifts to a `$`-mangled Go name, a designed loud error). ----
+ *  Bodies are built by prepending to a `var` list bound to a local rather than
+ *  writing a `::` chain directly in argument position (a multi-cons `::`
+ *  literal in argument position does not lower correctly here); responses are
+ *  read through `WJson`. */
+// ---- response records — kept at TOP LEVEL (a case class nested in an object
+// lifts to a `$`-mangled Go name). ----
 case class LoginResult(userId: String, accessToken: String, deviceId: String)
 case class WhoamiResult(userId: String, deviceId: String)
 case class SendResult(eventId: String)
@@ -44,9 +44,8 @@ object Matrix:
     fs = ("type", JStr("m.login.password")) :: fs
     JObj(fs)
 
-  /** an `m.audio` voice-message event content (fbclient `client.zig`
-   *  sendVoiceMessage): `{msgtype:"m.audio", body, url, info:{duration, mimetype,
-   *  size}}`. */
+  /** an `m.audio` voice-message event content: `{msgtype:"m.audio", body, url,
+   *  info:{duration, mimetype, size}}`. */
   def voiceContent(mxcUrl: String, durationMs: Long, size: Int): Json =
     var info: List[(String, Json)] = Nil
     info = ("size", JInt(size.toLong)) :: info
@@ -82,7 +81,7 @@ object Matrix:
     if since == "" then "?timeout=" + intStr(timeoutMs)
     else "?since=" + since + "&timeout=" + intStr(timeoutMs)
 
-  /** a small non-negative int as decimal (STR-1: no `Long`; timeouts fit `Int`).
+  /** a small non-negative int as decimal (timeouts fit `Int`, no `Long` needed).
    *  Portable (no `strconv` facade): build digits then reverse. */
   def intStr(n: Int): String =
     if n == 0 then "0"

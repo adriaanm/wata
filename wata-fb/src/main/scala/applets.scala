@@ -1,40 +1,34 @@
-/** M9 chunk 0 (fix a proof) — DE-CO-LOCATED from shell.scala. M8 chunk 7
- *  merged applets.scala INTO shell.scala because a cross-unit module-val read
- *  (`Color.cyan`/`Font.ROWS`/`Display.W` from a "cold" unit) emitted dotted,
- *  invalid Go. The all-units module-val pre-scan (GoEmitter.collectModuleVals)
- *  fixes that resolution, so the applets live in their own compilation unit
- *  again — the split compiling + running through ci IS the fix's proof. The
- *  content below is verbatim the chunk-7 applets block; see shell.scala for the
- *  UI-half port notes. */
+/** This file is a separate compilation unit from shell.scala deliberately: a
+ *  cross-unit module-val read (`Color.cyan`/`Font.ROWS`/`Display.W` from a
+ *  unit that hadn't otherwise been referenced) used to emit invalid Go before
+ *  the emitter's module-val pre-scan was fixed to look across all units; the
+ *  applets stayed split out as the regression check for that fix. See
+ *  shell.scala for the UI-half notes. */
 
-/** M8 chunk 7 — the two gate applets (decision 6), ported from
- *  `applets/wata.zig` + `applets/settings.zig`. Device-layer app code.
+/** The two gate applets: `wata` (contacts + conversation, PTT record/play)
+ *  and `settings` (menu of device options). Device-layer app code.
  *
- *  M10 chunk 5 (the trait tier's in-corpus consumer): the applet layer now
- *  fronts an `Applet` TRAIT — each applet is a `final class` holding its own
- *  immutable state record behind the interface, dispatched dynamically from
- *  Shell. The pure transition functions below are UNCHANGED in body, renamed
- *  `WataLogic`/`SettingsLogic` (formerly `object WataApplet`/`SettingsApplet`
- *  function bags); the impl classes are thin 3-method shells over them. The
- *  per-frame CONTEXT is now ONE unified `FrameCtx` record (formerly the
- *  heterogeneous `WataCtx`/`SettingsCtx`), passed as PARAMETERS, not held in
- *  the record — it changes every frame and the queues are owned by the UI
- *  goroutine (send is fine from here; the Zig `setContext` seam).
+ *  The applet layer fronts an `Applet` TRAIT — each applet is a `final class`
+ *  holding its own immutable state record behind the interface, dispatched
+ *  dynamically from Shell. The pure transition functions below are plain
+ *  function bags, `WataLogic`/`SettingsLogic`; the impl classes are thin
+ *  3-method shells over them. The per-frame CONTEXT is ONE unified `FrameCtx`
+ *  record passed as a PARAMETER, not held in the applet's own state — it
+ *  changes every frame and the queues it carries are owned by the UI
+ *  goroutine.
  *
- *  FONT: decision 5 = bitmap only (no freetype). The Zig wata applet prefers a
- *  12px FreeType face and falls back to the 5x8 bitmap font when freetype is
- *  unavailable; the cross-compiled device build ALWAYS takes that fallback
- *  (`use_freetype = false`), so we port the bitmap-font branch — grid (col,row)
- *  coordinates, the chunk-5 Font/Draw layer. */
+ *  FONT: bitmap only, no vector/TrueType rendering — the wata applet renders
+ *  through the 5x8 bitmap font exclusively (grid (col,row) coordinates, the
+ *  Font/Draw layer in display.scala). */
 
-// ---- view selector (wata.zig View) -------------------------------------------
+// ---- view selector -------------------------------------------------------------
 sealed trait WataView derives CanEqual
 case class VContacts() extends WataView
 case class VConversation() extends WataView
 
-/** wata applet state (wata.zig State — the UI-only fields; snapshot/queues are
- *  per-frame params). `pttHeld`/`pttHoldTime` drive the record overlay;
- *  send/play status flash for `statusTimer` seconds then clears. */
+/** wata applet state (the UI-only fields; snapshot/queues are per-frame
+ *  params). `pttHeld`/`pttHoldTime` drive the record overlay; send/play
+ *  status flash for `statusTimer` seconds then clears. */
 case class WataState(
   view: WataView,
   selected: scala.Int,
@@ -97,7 +91,7 @@ object WataLogic:
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, timer)
 
-  // ---- input (wata.zig handleInput) — needs the snapshot + queues -----------
+  // ---- input (needs the snapshot + queues) -----------------------------------
   /** full input with per-frame context (snapshot + queues). Returns new state. */
   def handleInput(s: WataState, k: Key, ks: KeyState, ctx: FrameCtx): WataState =
     if isPtt(k) then pttInput(s, ks, ctx)
@@ -111,8 +105,8 @@ object WataLogic:
     case _      => false
 
   /** PTT: press starts recording, release stops + (via the audio thread) sends.
-   *  The effect (trySend) runs in statement position; the result rides a `var`
-   *  (the led.scala if-as-expression idiom — no If in value position). */
+   *  The effect (trySend) runs in statement position; the result rides a
+   *  `var` (the same if-as-expression idiom used in led.scala). */
   def pttInput(s: WataState, ks: KeyState, ctx: FrameCtx): WataState = ks match
     case Pressed()  => pttPress(s, ctx)
     case Released() => pttRelease(s, ctx)
@@ -197,7 +191,7 @@ object WataLogic:
         s
       case None => s
 
-  // ---- receipts (wata.zig pushReadReceipt / sendReadReceiptForConversation) --
+  // ---- receipts ------------------------------------------------------------------
   def sendReceiptForConversation(ctx: FrameCtx, idx: scala.Int): Unit =
     convAt(ctx.snap, idx) match
       case c: Some[Conversation] => receiptLatest(ctx, c.value)
@@ -211,7 +205,7 @@ object WataLogic:
   def pushReceipt(ctx: FrameCtx, roomId: String, eventId: String): Unit =
     if roomId != "" && eventId != "" then Runtime.sendAction(ctx.client, ActReceipt(roomId, eventId))
 
-  // ---- per-frame update (wata.zig update) -----------------------------------
+  // ---- per-frame update --------------------------------------------------------
   /** tick hold-time + status flash; drain audio events (recording-done -> send;
    *  playback done/error; the settings echo events belong to the other applet). */
   def update(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
@@ -247,9 +241,9 @@ object WataLogic:
     case _: AePlaybackError  => withPlayErr(s, false, true, 2.0)
     case _                   => s // echo events -> settings applet
 
-  /** upload+send the recorded voice message to the current/selected conversation
-   *  (wata.zig uploadRecording). roomId "" -> the runtime resolves/creates the
-   *  DM for the contact. */
+  /** upload+send the recorded voice message to the current/selected
+   *  conversation. roomId "" -> the runtime resolves/creates the DM for the
+   *  contact. */
   def uploadRecording(ctx: FrameCtx, s: WataState, ogg: Bytes, durationMs: Long): Unit =
     val idx = convIdxForSend(s)
     convAt(ctx.snap, idx) match
@@ -262,7 +256,7 @@ object WataLogic:
     case _: VConversation => s.convContactIdx
     case _: VContacts     => s.selected
 
-  // ---- send/play status feedback (from main.zig UiEvents) --------------------
+  // ---- send/play status feedback (from the runtime's UiEvents) ----------------
   def notifySend(s: WataState, isError: Boolean): WataState =
     var out = withFlash(s, s.pttHoldTime, 1.5, false, true, s.playError)
     if isError then out = withFlash(s, s.pttHoldTime, 2.0, true, false, s.playError)
@@ -270,7 +264,7 @@ object WataLogic:
 
   def notifyPlayError(s: WataState): WataState = withFlash(s, s.pttHoldTime, 2.0, s.sendError, s.sendOk, true)
 
-  // ---- render (wata.zig render, bitmap-font branch) --------------------------
+  // ---- render (bitmap-font only) -----------------------------------------------
   def render(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
     s.view match
       case _: VContacts     => renderContacts(s, px, ctx)
@@ -478,12 +472,11 @@ object WataLogic:
     case h2 :: t2 => lastMsgStep(h2, t2)
     case Nil    => Some(h)
 
-/** M10 chunk 5: the UNIFIED per-frame context (main.zig setContext), one
- *  record for every applet: the live snapshot, the connection, the matrix
- *  client (action queue), and the audio thread's command/event mailboxes.
- *  (Formerly the wata-only `WataCtx`; `SettingsCtx` was the same minus
- *  `connection` — the settings applet simply ignores that field.) Built once
- *  per frame by the UI loop and passed through the `Applet` interface. */
+/** the UNIFIED per-frame context, one record for every applet: the live
+ *  snapshot, the connection, the matrix client (action queue), and the audio
+ *  thread's command/event mailboxes. The settings applet simply ignores the
+ *  `connection` field it doesn't need. Built once per frame by the UI loop
+ *  and passed through the `Applet` interface. */
 case class FrameCtx(
   snap: StateSnapshot,
   connection: ConnectionState,
@@ -492,16 +485,15 @@ case class FrameCtx(
   audioEvts: sgo.Chan[AudioEvt]
 )
 
-/** M10 chunk 5 — the `Applet` interface (the tier's in-corpus consumer,
- *  decision 8): each applet is an IMMUTABLE object holding its OWN typed state
- *  record behind the interface; input/update transitions return a NEW applet
- *  (the wither style, one level up), so applets stay snapshots inside the UI's
- *  `Atomic[ShellState]` cell (CONCURRENCY.md §4.3 — no in-place mutation).
- *  Derives the `Shareable` marker: the ShellState field `IArray[Applet]` is
- *  then CONC-4/CONC-7-admissible, and each impl's fields are in turn obliged
- *  pure (they are: one pure state record each). Dynamic dispatch through this
- *  interface replaces Shell's three hand-rolled `if active == SETTINGS`
- *  two-arm dispatch sites; adding an applet = one list append in
+/** the `Applet` interface: each applet is an IMMUTABLE object holding its OWN
+ *  typed state record behind the interface; input/update transitions return
+ *  a NEW applet (the wither style, one level up), so applets stay snapshots
+ *  inside the UI's `Atomic[ShellState]` cell — no in-place mutation. Derives
+ *  the `Shareable` marker: the ShellState field `IArray[Applet]` is then
+ *  admissible, and each impl's fields are in turn obliged pure (they are:
+ *  one pure state record each). Dynamic dispatch through this interface
+ *  replaces a hand-rolled `if active == SETTINGS` two-arm check at each of
+ *  Shell's three dispatch sites; adding an applet = one list append in
  *  `Shell.initial()`. */
 trait Applet extends Shareable:
   def handleInput(k: Key, ks: KeyState, ctx: FrameCtx): Applet
@@ -519,7 +511,7 @@ final class WataApplet(val state: WataState) extends Applet:
     WataLogic.render(state, px, ctx)
 
 // ============================================================================
-// settings applet (settings.zig) — bitmap font, echo test, brightness, info
+// settings applet — bitmap font, echo test, brightness, info
 // ============================================================================
 
 sealed trait EchoState derives CanEqual
@@ -550,8 +542,8 @@ final class SettingsApplet(val state: SettingsState) extends Applet:
     SettingsLogic.render(state, px, ctx)
 
 object SettingsLogic:
-  // menu items (settings.zig MenuItem): 0 echo, 1 brightness, 2 screen_off,
-  // 3 display_name, 4 disconnect, 5 info.
+  // menu items: 0 echo, 1 brightness, 2 screen_off, 3 display_name,
+  // 4 disconnect, 5 info.
   val N_ITEMS = 6
   val ECHO = 0
   val BRIGHTNESS = 1
@@ -590,7 +582,7 @@ object SettingsLogic:
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, c)
 
-  // ---- input (settings.zig handleInput) — press-only ------------------------
+  // ---- input (press-only) ------------------------------------------------------
   def handleInput(s: SettingsState, k: Key, ks: KeyState, ctx: FrameCtx): SettingsState =
     if !Shell.isPressed(ks) then s
     else k match
@@ -634,8 +626,8 @@ object SettingsLogic:
     Runtime.sendAction(ctx.client, ActSetName(displayName(s.nameIdx)))
     s
 
-  /** disconnect network only (settings.zig): stop sync loop + close actions.
-   *  Reconnect requires an app restart (the runtime's threads don't respawn). */
+  /** disconnect network only: stop sync loop + close actions. Reconnect
+   *  requires an app restart (the runtime's threads don't respawn). */
   def doDisconnect(s: SettingsState, ctx: FrameCtx): SettingsState =
     var out = s
     if s.connected then
@@ -675,7 +667,7 @@ object SettingsLogic:
     Led.setBacklight(b)
     withBrightness(s, b)
 
-  // ---- update (settings.zig update: drain echo events) ----------------------
+  // ---- update (drain echo events) -----------------------------------------------
   def update(s: SettingsState, dt: scala.Double, ctx: FrameCtx): SettingsState =
     var st = s
     var run = true
@@ -692,7 +684,7 @@ object SettingsLogic:
     case _: AeEchoError     => withEcho(s, EchoErr())
     case _                  => s // wata events
 
-  // ---- render (settings.zig render) -----------------------------------------
+  // ---- render --------------------------------------------------------------------
   def render(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
     renderMenu(s, px)
     renderDetail(s, px, ctx)

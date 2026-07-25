@@ -1,16 +1,15 @@
-/** M8 chunk 3 — the Ogg/Opus container, ported from fbclient `ogg.zig` (BOTH
- *  directions). Pure byte work over the portable `Bytes`/`BytesBuilder` prelude
- *  (decision 11) — ZERO `go` imports. This is the chunk's byte oracle: our
- *  writer's output round-trips through our reader byte-exact, the page CRC checks
- *  out, and the golden CRC-32 vectors match an independent reference (computed by
- *  the same poly-0x04C11DB7/init-0/no-reflection algorithm ogg.zig uses).
+/** the Ogg/Opus container reader and writer. Pure byte work over the portable
+ *  `Bytes`/`BytesBuilder` prelude — no `go` imports. The writer's output
+ *  round-trips through the reader byte-exact, the page CRC checks out, and
+ *  the golden CRC-32 vectors match an independent reference (computed by the
+ *  same poly-0x04C11DB7/init-0/no-reflection algorithm).
  *
- *  CRC note: ogg.zig uses a 256-entry lookup table; we use the mathematically
- *  IDENTICAL bit-serial MSB-first form (verified byte-for-byte against the golden
- *  vectors). The bit-serial form is a pure function with NO module-level table
- *  state (the determinism law) and sidesteps the 32-bit-Int-on-64-bit-Go width
- *  trap by carrying the CRC as a `Long` (Go int64) masked to 32 bits each step —
- *  a 256-entry table would hit the same trap at construction time.
+ *  CRC note: this uses a bit-serial MSB-first form rather than a lookup
+ *  table (verified byte-for-byte against the golden vectors). The bit-serial
+ *  form is a pure function with no module-level table state, and it sidesteps
+ *  a 32-bit-Int-on-64-bit-Go width trap by carrying the CRC as a `Long` (Go
+ *  int64) masked to 32 bits each step — a lookup table would hit the same
+ *  trap at construction time.
  */
 
 object Crc:
@@ -97,11 +96,10 @@ object Ogg:
     b.result()
 
   /** one complete page, CRC patched into bytes 22..26 (the 4-byte field).
-   *  Build-and-return (DATA-10, M8 chunk 5 completion cycle: the original
-   *  `writePage(out: BytesBuilder, …)` mutated a PARAMETER — on sgola the
-   *  builder lowers to a by-value `[]byte`, so the appends were silently lost
-   *  and `writeStream` returned an empty stream; builders are function-local
-   *  accumulators, now emitter-enforced). */
+   *  Build-and-return, not mutate-a-parameter: a `BytesBuilder` parameter
+   *  lowers to a by-value `[]byte` on this backend, so appending to it would
+   *  be silently lost by the caller — builders must be function-local
+   *  accumulators that are built and returned. */
   def page(payload: Bytes, granule: Long, headerType: Int, seq: Int): Bytes =
     val pre = pageNoCrc(payload, granule, headerType, seq)
     val crc = Crc.crc32(pre)
@@ -150,8 +148,9 @@ object Ogg:
       i += 1
     total
 
-  /** extract every AUDIO frame (skipping BOS/OpusTags/empty pages, exactly as
-   *  ogg.zig's `nextFrame`: BOS by flag, the SECOND page by count, empty by size). */
+  /** extract every AUDIO frame, skipping BOS/OpusTags/empty pages: BOS is
+   *  identified by its flag, OpusTags by being the second page, and empty
+   *  pages by payload size. */
   def readFrames(data: Bytes): List[Bytes] =
     var acc: List[Bytes] = Nil
     var pos = 0

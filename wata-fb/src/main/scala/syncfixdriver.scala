@@ -1,11 +1,11 @@
 import language.experimental.saferExceptions
 
-/** M8 chunk 3 — the app-side fixture-oracle driver (`wata-fb syncfix`). Reads
- *  captured /sync fixture FILES (go.sys.readFile — the app layer may use `go.*`
- *  freely; only wataclient is portable) and feeds them to the PORTABLE
+/** The app-side fixture-oracle driver (`wata-fb syncfix`). Reads captured
+ *  /sync fixture FILES (go.sys.readFile — the app layer may use `go.*` freely;
+ *  only wataclient is portable) and feeds them to the PORTABLE
  *  `SyncDescribe.fixtureReport`. Arg format: `<selfUserId>=<path>` per fixture,
- *  in order; the path doubles as the fixture name in the report (ci passes
- *  spike-relative paths, so the output is deterministic). */
+ *  in order; the path doubles as the fixture name in the report (callers pass
+ *  repo-relative paths, so the output is deterministic). */
 object SyncFixDriver:
   def run(args: Array[String]): Unit =
     var fixtures: List[(String, String, String)] = Nil
