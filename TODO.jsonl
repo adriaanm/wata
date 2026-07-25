@@ -1,0 +1,16 @@
+{"key":"SRV-POWER-LEVELS","title":"no power-level check on send or redact — any joined member can overwrite m.room.power_levels, name, join rules","doc":"docs/design/wata-server.md","inProgress":false}
+{"key":"SRV-BODY-LIMIT","title":"serveHTTP readAll has no request body size limit — one request can exhaust memory","doc":"docs/design/wata-server.md","inProgress":false}
+{"key":"SRV-MEDIA-UNBOUNDED","title":"media blobs never evicted or capped, and are base64'd into the journal — unbounded memory and boot-replay time","doc":"docs/design/wata-server.md","inProgress":false}
+{"key":"FB-M8-LITERALS","title":"drop the three M8 milestone literals (fbtest/main/applets); regenerate tools/fb-golden.png and the affected .expected.txt oracles in the same commit","doc":"docs/design/wata-fb.md","inProgress":false}
+{"key":"TOOLS-RESTRUCTURE","title":"execute plan 0001: tools/test.py groups, hand the compiler-regression scripts to sgola, rewrite the remaining script headers","doc":"docs/plans/0001-tools-restructure.md","inProgress":false}
+{"key":"CLI-BACKFILL-BOUND","title":"backfillTail fetches 50 events and never paginates — history gaps larger than that are lost for good","doc":"docs/design/wataclient.md","inProgress":false}
+{"key":"CLI-BACKFILL-BLOCKING","title":"backfill issues blocking /messages calls serially inside processRound, delaying the snapshot publish and the next long-poll","doc":"docs/design/wataclient.md","inProgress":false}
+{"key":"FB-SYSCALL-SILENT","title":"led.scala/syscall.scala swallow every syscall error — a real device LED failure is indistinguishable from absent hardware","doc":"docs/design/wata-fb.md","inProgress":false}
+{"key":"FB-UI-UNTESTED","title":"no automation covers Ui.run, shell.scala, or applet input routing — that whole layer is manual-test-only","doc":"docs/design/wata-fb.md","inProgress":false}
+{"key":"MODULE-PATHS","title":"needs its own plan: sgola.spike/wata-{server,fb} and sgola.example/audio -> github.com/adriaanm/wata/* (moves go.mod and the committed payload together)","doc":"docs/plans/0001-tools-restructure.md","inProgress":false}
+{"key":"SRV-ROUTE-SUBSTRING","title":"Router.route re-dispatches on raw-path substrings under the mux's exact patterns — redundant, looser, and a misrouting trap for the next added route","doc":"docs/design/wata-server.md","inProgress":false}
+{"key":"CLI-RETRY-CLAMP","title":"retryAfterMs honors an arbitrarily large server-supplied retry_after_ms with no upper clamp, stalling the sync loop","doc":"docs/design/wataclient.md","inProgress":false}
+{"key":"FB-PNG-BLOCK","title":"Png.zlib emits one DEFLATE stored block and underflows nlen above 65535 raw bytes — breaks silently if the panel size ever changes","doc":"docs/design/wata-fb.md","inProgress":false}
+{"key":"SRV-WRITE-ERR-SILENT","title":"Respond.writeBody discards its write error unlogged, making partial-response bugs invisible in server logs","doc":"docs/design/wata-server.md","inProgress":false}
+{"key":"SRV-HARDENING","title":"password/token compares are plain string equality (not constant-time) and CORS is unconditionally wide open with no knob","doc":"docs/design/wata-server.md","inProgress":false}
+{"key":"CLI-RAND-DEAD","title":"the Rand capability has no consumer (txn ids come from an Atomic counter) — wire it or trim the contract","doc":"docs/design/wataclient.md","inProgress":false}
