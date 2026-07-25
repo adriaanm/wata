@@ -30,11 +30,12 @@ active development tree — never build against it; a toolchain change must
 be a commit here.
 
 ```
-tools/toolchain.py sync      # clone/checkout the pin, build the toolchain
-tools/toolchain.py status    # what's present, does it match the pin
-tools/toolchain.py pin <sha> # bump (then sync)
-
-cd wata-server && ../tools/sgo build     # or run, emit, ...
+just            # every recipe this repo has
+just sync       # clone/checkout the pin, build the toolchain
+just status     # what's present, does it match the pin
+just pin <sha>  # bump (then `just sync`)
+just build      # both apps;  also build-server, build-fb, server, emit-payload
+just smoke      # also persist, fb-smoke, golden, client-tests, integ, ci
 ```
 
 `tools/sgo` is the pinned driver plus the right environment; use it rather
@@ -48,7 +49,7 @@ A preset `$SGOLA_HOME` overrides the pin, so sgola can drive wata as a
 proving consumer — real code against an in-development compiler:
 
 ```
-SGOLA_HOME=/path/to/sgola tools/wata-smoke.sh
+SGOLA_HOME=/path/to/sgola just smoke
 ```
 
 Nothing needs installing in wata first. Every script sources
@@ -120,6 +121,13 @@ code got here — git holds that.
 
 Scripts over ~10 lines are Python, not bash.
 
+**Repeated tasks are code, and are treated as such.** A command you run
+twice belongs in the `justfile` — named, documented in one line, and
+reviewed like anything else here. `just` lists what this repo can do; a
+command that lives only in someone's shell history is undiscoverable and
+drifts silently. Recipes stay thin: the logic goes in `tools/`, the
+justfile just gives it a name.
+
 ## Docs
 
 | doc | what it covers |
@@ -127,6 +135,7 @@ Scripts over ~10 lines are Python, not bash.
 | [docs/design/wata-server.md](docs/design/wata-server.md) | homeserver: routing, store, sync, persistence |
 | [docs/design/wataclient.md](docs/design/wataclient.md) | client core: sync engine, domain model, transport, audio |
 | [docs/design/wata-fb.md](docs/design/wata-fb.md) | device client: display, input, audio, cross-build, deploy |
+| [justfile](justfile) | every repeatable operation, one recipe each (`just` to list) |
 | [TODO.jsonl](TODO.jsonl) | the open-work queue (protocol above) |
 | [WATA-TODO.md](WATA-TODO.md) | known debt |
 | [docs/plans/](docs/plans/) | plan docs, newest last |
