@@ -24,6 +24,18 @@ status:
 pin COMMIT:
     tools/toolchain.py pin {{COMMIT}}
 
+# ── IDE ───────────────────────────────────────────────────────────────────────
+
+# Metals speaks BSP to `sgo bsp` — one build target per Sgola module, so open a
+# MODULE dir (wataclient/, wata-server/, wata-fb/) as the editor workspace, not
+# the repo root.
+#
+# write the .bsp/sgo.json launch files Metals discovers (rerun after `just sync`)
+ide:
+    tools/sgo bsp install --dir wataclient
+    tools/sgo bsp install --dir wata-server
+    tools/sgo bsp install --dir wata-fb
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 # build both apps

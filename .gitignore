@@ -13,3 +13,7 @@ go-pkgs/audio/audiocheck
 .toolchain/
 # python bytecode from tools/
 __pycache__/
+# IDE state: .bsp/sgo.json names an absolute path to the pinned sgo binary
+# (regenerate with `just ide`); .metals/ is the Metals cache
+.bsp/
+.metals/

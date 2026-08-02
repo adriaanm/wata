@@ -46,6 +46,7 @@ just pin <sha>  # bump (then `just sync`)
 just build      # both apps;  also build-server, build-fb, server
 just ci         # the whole gate: smoke, persist, fb-smoke, client-tests,
                 #   integ, golden, amd64-smoke — each runnable on its own
+just ide        # Metals BSP launch files (open a module dir as the workspace)
 ```
 
 `tools/sgo` is the pinned driver plus the right environment; use it rather
