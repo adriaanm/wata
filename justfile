@@ -30,11 +30,10 @@ pin COMMIT:
 # MODULE dir (wataclient/, wata-server/, wata-fb/) as the editor workspace, not
 # the repo root.
 #
-# write the .bsp/sgo.json launch files Metals discovers (rerun after `just sync`)
+# write the .bsp/sgo.json launch files Metals discovers, and bridge the dep
+# TASTy paths the BSP shim expects (rerun after `just sync`)
 ide:
-    tools/sgo bsp install --dir wataclient
-    tools/sgo bsp install --dir wata-server
-    tools/sgo bsp install --dir wata-fb
+    tools/ide-setup.py
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
