@@ -26,9 +26,10 @@ pin COMMIT:
 
 # ── IDE ───────────────────────────────────────────────────────────────────────
 
-# Metals speaks BSP to `sgo bsp` — one build target per Sgola module, so open a
-# MODULE dir (wataclient/, wata-server/, wata-fb/) as the editor workspace, not
-# the repo root.
+# Metals speaks BSP to `sgo bsp` — one build target per Sgola module. In VS
+# Code, open wata.code-workspace (multi-root: one folder per module, one BSP
+# session each). In a single-root editor, open a MODULE dir (wataclient/,
+# wata-server/, wata-fb/), not the repo root.
 #
 # write the .bsp/sgo.json launch files Metals discovers, and bridge the dep
 # TASTy paths the BSP shim expects (rerun after `just sync`)

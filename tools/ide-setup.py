@@ -4,8 +4,10 @@
 Two pieces:
 
 1. `sgo bsp install` writes `.bsp/sgo.json` into each module dir, so Metals
-   discovers and launches `sgo bsp` (one build target per module — open a
-   module dir, not the repo root, as the editor workspace).
+   discovers and launches `sgo bsp` (one build target per module). In VS Code
+   open `wata.code-workspace` — a multi-root workspace with one folder per
+   module, so Metals runs one BSP session per folder; in a single-root editor
+   open a module dir, not the repo root.
 
 2. The BSP shim's classpath names each in-link dep's early.jar at
    `$SGOLA_HOME/<dep>/target/scala-<v>/early/early.jar`, but nothing builds
@@ -70,7 +72,8 @@ def main():
     sv = scala_version(home)
     for dep, src in DEP_SOURCES.items():
         link_dep_early(home, dep, src(home), sv)
-    print("ide-setup: done — open a module dir (not the repo root) in the editor")
+    print("ide-setup: done — open wata.code-workspace (VS Code) "
+          "or a module dir (single-root editors)")
 
 
 if __name__ == "__main__":
