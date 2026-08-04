@@ -29,10 +29,12 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  SCRIPT LANGUAGE — one directive per line, `#` comments and blank lines
  *  ignored:
  *
- *    family <peerUserId>       create the `#family:` room out of band (a
- *                              direct login + createRoom, bypassing the UI):
- *                              the bootstrap that gives both users a
- *                              conversation to talk in
+ *    family <peer> [peer ...]  create the `#family:` room out of band (a
+ *                              direct login + createRoom + invites, bypassing
+ *                              the UI): the bootstrap that gives every user a
+ *                              conversation to talk in — the first peer rides
+ *                              the createRoom invite, the rest are invited
+ *                              one by one
  *    advance <n>               run n frames
  *    idle <n>                  run n frames with NO real pause between them —
  *                              a timer expiring needs simulated time, not
@@ -195,7 +197,7 @@ object UiScript:
     else if cmd == "checkpoint" then
       err = checkpoint(nth(ts, 1), px)
     else if cmd == "family" then
-      err = family(nth(ts, 1))
+      err = family(restOf(ts))
     else err = "unknown directive '" + cmd + "'"
     err
 
@@ -312,26 +314,45 @@ object UiScript:
 
   // ---- the family-room bootstrap ---------------------------------------------------
 
-  /** create `#family:<server>` with the peer invited, by direct Matrix HTTP
+  /** create `#family:<server>` with the peers invited, by direct Matrix HTTP
    *  outside the client runtime — the same out-of-band setup `integ.scala`'s
-   *  family scenario does. Both users then have the family conversation AND,
-   *  through the family roster, a roomless DM row for each other, which is what
-   *  gives the scripted UI something to select and send into. */
-  def family(peerUserId: String): String =
+   *  family scenario does. Every user then has the family conversation AND,
+   *  through the family roster, a roomless DM row for each joined member,
+   *  which is what gives the scripted UI something to select and send into.
+   *  The first peer rides the createRoom invite; any further peers are
+   *  invited one by one into the created room. */
+  def family(peers: List[String]): String = peers match
+    case first :: rest => familyCreate(first, rest)
+    case Nil => "family wants a peer user id"
+
+  def familyCreate(peerUserId: String, rest: List[String]): String =
     var err = ""
-    if peerUserId == "" then err = "family wants a peer user id"
+    val anon = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
+    val lr = MatrixHttp.login(anon, userC.get(), passC.get())
+    if lr.status != 200 then err = "family: login status " + lr.status
     else
-      val anon = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
-      val lr = MatrixHttp.login(anon, userC.get(), passC.get())
-      if lr.status != 200 then err = "family: login status " + lr.status
+      val tok = Matrix.parseLogin(MatrixHttp.parseOrNull(lr.body)).accessToken
+      if tok == "" then err = "family: no access token"
       else
-        val tok = Matrix.parseLogin(MatrixHttp.parseOrNull(lr.body)).accessToken
-        if tok == "" then err = "family: no access token"
-        else
-          val hs = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), tok)
-          val cr = MatrixHttp.createRoomWithAlias(hs, "family", peerUserId)
-          if cr.status != 200 then err = "family: createRoom status " + cr.status
+        val hs = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), tok)
+        val cr = MatrixHttp.createRoomWithAlias(hs, "family", peerUserId)
+        if cr.status != 200 then err = "family: createRoom status " + cr.status
+        else err = inviteRest(hs, MatrixHttp.parseRoomId(cr.body), rest)
     err
+
+  /** invite each remaining peer into the freshly created family room. */
+  def inviteRest(hs: Hs, roomId: String, peers: List[String]): String =
+    if roomId == "" then "family: createRoom returned no room_id"
+    else peers match
+      case h :: t => inviteStep(hs, roomId, h, t)
+      case Nil => ""
+
+  def inviteStep(hs: Hs, roomId: String, peer: String, t: List[String]): String =
+    val resp = MatrixHttp.request(hs, "POST",
+      "/_matrix/client/v3/rooms/" + roomId + "/invite", "application/json",
+      "{\"user_id\":\"" + peer + "\"}")
+    if resp.status != 200 then "family: invite " + peer + " status " + resp.status
+    else inviteRest(hs, roomId, t)
 
   // ---- probes ------------------------------------------------------------------------
 
@@ -437,6 +458,11 @@ object UiScript:
         acc = rest.substring(0, at) :: acc
         rest = rest.substring(at + sep.length)
     ListOps.reverse(acc)
+
+  /** every token after the directive word. */
+  def restOf(ts: List[String]): List[String] = ts match
+    case _ :: t => t
+    case Nil  => Nil
 
   def nth(xs: List[String], i: scala.Int): String =
     if i < 0 then ""

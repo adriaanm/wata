@@ -1,0 +1,15 @@
+# family-three, phase 1: alice bootstraps `#family:localhost` with BOTH bob
+# and charlie invited (charlie exists because this scenario's server boots
+# from a three-user $WATA_USERS file), then sends the first clip into the
+# family room. No checkpoints — later phases pin the pixels.
+
+family @bob:localhost @charlie:localhost
+
+wait syncing 1 900
+wait convs 1 900
+
+# PTT into the selected (family) conversation
+key ptt press
+advance 4
+key ptt release
+wait msgs 1 1500

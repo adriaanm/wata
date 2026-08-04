@@ -1,0 +1,12 @@
+# family-three, phase 2: bob auto-joins the family, sees alice's clip, and
+# adds his own — the middle voice of the interleaving that phase 4 pins.
+
+wait syncing 1 900
+# the invite auto-joins; the roster is [Family, Alice]
+wait convs 2 900
+wait msgs 1 2000
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 2 1500

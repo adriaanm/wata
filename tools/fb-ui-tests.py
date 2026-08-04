@@ -20,6 +20,7 @@ reviewed baselines: regenerate with --update and eyeball the images.
 Hermetic — no device, no network beyond localhost.
 """
 
+import json
 import os
 import random
 import shutil
@@ -47,6 +48,10 @@ PASSWORD = "testpass123"
 # holds. Each scenario gets its own config store (see run_scenario), so a
 # resume phase can only see what an earlier phase of the same scenario wrote.
 # Optional keys:
+#   "users": ["alice", "bob", "charlie"] — write a $WATA_USERS accounts file
+#       for this scenario's server (password PASSWORD, displayname the
+#       capitalized localpart, matching the built-in alice/bob pair). Without
+#       it the server boots its compiled-in two accounts.
 #   "hooks": True — start the scenario's server with WATA_TEST_HOOKS=1 (the
 #       fail-on-demand media hook; scripts arm it with the `failnext`
 #       directive). Every scenario's server is probed for the hook route
@@ -74,6 +79,16 @@ SCENARIOS = [
             ("alice", "alice-dm-send.txt"),
             ("bob", "bob-dm-roundtrip.txt"),
             ("alice", "alice-dm-verify.txt"),
+        ],
+    },
+    {
+        "name": "family-three",
+        "users": ["alice", "bob", "charlie"],
+        "phases": [
+            ("alice", "family3-alice.txt"),
+            ("bob", "family3-bob.txt"),
+            ("charlie", "family3-charlie.txt"),
+            ("alice", "family3-alice2.txt"),
         ],
     },
     {
@@ -181,6 +196,13 @@ def run_scenario(scenario, fb, server_bin, env, outdir, update):
     server_env = dict(env)
     if hooks:
         server_env["WATA_TEST_HOOKS"] = "1"
+    users = scenario.get("users")
+    if users:
+        upath = os.path.join(outdir, "users.json")
+        with open(upath, "w") as f:
+            json.dump([{"user": u, "password": PASSWORD,
+                        "displayname": u.capitalize()} for u in users], f)
+        server_env["WATA_USERS"] = upath
     proc, log = start_server(server_bin, logs, server_env)
     if proc is None:
         stop_server(proc, log)

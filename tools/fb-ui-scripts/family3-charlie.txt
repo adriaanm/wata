@@ -1,0 +1,24 @@
+# family-three, phase 3: charlie — the third account, from $WATA_USERS —
+# auto-joins, pins his roster (the family plus TWO DM-able contacts, the
+# thing a two-user scenario can never show), sends the third clip, and opens
+# the conversation to pin three-way sender attribution.
+
+wait syncing 1 900
+# [Family, Alice, Bob]: every joined family member gets a roomless DM row
+wait convs 3 900
+wait msgs 2 2000
+advance 30
+checkpoint fam3-charlie-roster
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 3 1500
+
+# outrun the SENT flash, then open the family conversation — which receipts
+# its latest (charlie's own) message
+advance 120
+tap enter
+wait played 1 2000
+advance 30
+checkpoint fam3-charlie-conv
