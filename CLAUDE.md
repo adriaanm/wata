@@ -48,6 +48,14 @@ drains its inbox into its own `TODO.jsonl`; queue order stays its
 designer's act. Mirror the item in `WATA-TODO.md`'s waiting-on-sgola list,
 and when the fix lands upstream, remove the workaround.
 
+The loop closes in both directions: after a repin that consumes an
+upstream fix passes the full gate, file a verification ticket back in
+the sgola inbox — which fixes are confirmed green in a real consumer,
+which workarounds came out, and anything the fix visibly changed (a
+retry that stopped being needed is stronger evidence than a green run).
+sgola's whole question is whether the compiler holds up downstream;
+a fix that was verified only by its own scenario is half-verified.
+
 The channel is symmetric: this repo has an `inbox/` too (gitignored).
 The sgola agent drops completion notices and heads-ups there — "fix
 landed at `<sha>`, repin", a facade change that will hit our code, a
