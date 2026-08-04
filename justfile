@@ -69,3 +69,20 @@ fb-test-integration: conduit-down conduit-up
 # DM rooms from prior runs; tolerant tests only).
 fb-test-integration-fast: conduit-up
     cd src/fbclient && {{zig}} build test-integration --summary all
+
+# --- iroh-tunnel (connectivity spike; see docs/planning/connectivity-iroh.md) ---
+
+# Server side: run next to the homeserver. Prints a stable NodeID to provision
+# into clients, then tunnels accepted iroh connections to the local homeserver.
+tunnel-listen *FLAGS:
+    cd src/iroh-tunnel && cargo run --release -- listen --to 127.0.0.1:8008 {{FLAGS}}
+
+# Client side: listen on 127.0.0.1:8009 and tunnel to the given homeserver NodeID.
+# Point the client's homeserver URL at http://127.0.0.1:8009. Usage:
+#   just tunnel-connect <NodeID>
+tunnel-connect node *FLAGS:
+    cd src/iroh-tunnel && cargo run --release -- connect --node {{node}} --local 127.0.0.1:8009 {{FLAGS}}
+
+# Build the tunnel binary (release).
+tunnel-build:
+    cd src/iroh-tunnel && cargo build --release

@@ -58,6 +58,14 @@ _(No open tasks)_
 
 ## Backend / Infrastructure
 
+### Connectivity (Iroh — client↔server NAT traversal without cloud hosting)
+See `docs/planning/connectivity-iroh.md`. Decision: keep Matrix client-server, tunnel transport over iroh; not fully P2P.
+- [x] Spike: `iroh-tunnel` Rust sidecar (`src/iroh-tunnel/`) — `listen`/`connect` modes, dial-by-NodeID, stable persisted key. Compiles against iroh 1.0.2; endpoint + relay + NodeID verified locally. `just tunnel-listen` / `just tunnel-connect <NodeID>`.
+- [ ] E2E test: TUI ↔ wata-server across two real networks (home box + phone hotspot); confirm direct hole-punch then relay fallback.
+- [ ] NodeID provisioning UX — QR from the server box into clients.
+- [ ] Per-client integration: Android foreground-service tunnel; on-device (BQ268) tunnel; evaluate in-process linking (@number0/iroh for Node, Kotlin binding for Android).
+- [ ] Evaluate self-hosted relay + DNS (`iroh-relay`, `iroh-dns-server`) to drop the n0 infra dependency.
+
 ### Backlog
 - [ ] Push notifications — requires switching from Conduit to Synapse (Conduit lacks push rule support).
 - [ ] App store build — remove hardcoded credentials from all clients, add provisioning flow.
