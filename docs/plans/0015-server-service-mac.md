@@ -1,6 +1,6 @@
 # 0015 — wata-server as a macOS service
 
-Status: accepted
+Status: done
 
 ## Problem
 

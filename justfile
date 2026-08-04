@@ -115,6 +115,30 @@ fixtures:
 fb-deploy *FLAGS:
     bash tools/fb-deploy.sh {{FLAGS}}
 
+# macOS service (plan 0015, [SRV-PACKAGE]): package wata-server, no sudo
+server-package *FLAGS:
+    python3 tools/server-service.py package {{FLAGS}}
+
+# install the newest staged release at /usr/local/wata (needs sudo; `just server-package` first)
+server-install *FLAGS:
+    python3 tools/server-service.py install {{FLAGS}}
+
+# bootout + remove the daemon files (needs sudo; add --purge to also drop data)
+server-uninstall *FLAGS:
+    python3 tools/server-service.py uninstall {{FLAGS}}
+
+# layout/daemon/journal state
+server-status *FLAGS:
+    python3 tools/server-service.py status {{FLAGS}}
+
+# launchctl kickstart the daemon (needs sudo) — after an etc/wata.env edit
+server-restart *FLAGS:
+    python3 tools/server-service.py restart {{FLAGS}}
+
+# no-sudo gate: package, install into a temp root, boot, serve, check the journal
+server-selftest:
+    python3 tools/server-service.py selftest
+
 # linux/amd64 server smoke — the always-on box is a real target
 amd64-smoke:
     bash tools/linux-amd64-smoke.sh

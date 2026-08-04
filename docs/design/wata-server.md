@@ -582,6 +582,101 @@ that gate on every run: each scenario's server is probed with a
 `POST /_wata/v1/test/fail` right after readiness and must answer 404 (200
 for the one scenario that opts into hooks).
 
+## Running as a service (macOS)
+
+`[SRV-PACKAGE]` `tools/server-service.py` (plan
+[0015](../plans/0015-server-service-mac.md)) packages `wata-server` as a
+launchd **LaunchDaemon** — the flavor that survives both reboot and logout —
+so the family homeserver runs like an appliance instead of a terminal tab.
+
+**Layout**, versioned code separated from stable data so an upgrade never
+touches the journal:
+
+```
+/usr/local/wata/
+  releases/<version>/wata-server     one dir per packaged build
+  current -> releases/<version>      the running release (rollback = re-point)
+  bin/wata-server-run                stable wrapper the daemon execs
+  etc/wata.env                       config as env lines (sourced by the wrapper)
+  etc/users.json                     provisioned accounts (WATA_USERS)
+  data/                              WATA_DATA: journal.jsonl, media/, FORMAT
+  log/wata-server.log                daemon stdout+stderr
+/Library/LaunchDaemons/net.wata.server.plist
+/etc/newsyslog.d/wata-server.conf   size-based rotation of the daemon log
+```
+
+`<version>` is `<yyyymmdd>-<git-short-sha>` from the wata checkout at package
+time, `-dirty` suffixed when the tree has uncommitted changes. `install`
+never overwrites an existing `etc/wata.env`, `etc/users.json`, or anything
+under `data/` — those hold the human's config and the journal, not the
+package. The wrapper, plist, and newsyslog conf ARE regenerated on every
+install (they are infrastructure, not config); `releases/<version>` is
+replaced in place if the same version is reinstalled.
+
+The plist itself is a **constant** — launchd cannot source an env file, so
+baking config into it would turn every settings change into a sudo plist
+regen. It just execs `bin/wata-server-run`, which does the sourcing:
+
+```bash
+set -a; source etc/wata.env; set +a
+exec current/wata-server "${WATA_LISTEN:-:8008}"
+```
+
+`Main.addrOf` (`server.scala`) reads the listen address from `argv(0)`,
+defaulting to `:8008` — that argument, not an env var, is the server's actual
+listen-address mechanism, so the wrapper supplies it positionally. The
+`WATA_LISTEN` env var is the wrapper's own override knob (not part of the
+shipped `wata.env`): the daemon plist relies on the `:8008` default, while
+`selftest` exports `WATA_LISTEN` to grab a free port without touching any
+file.
+
+Restart-on-failure is `KeepAlive.SuccessfulExit=false` plus
+`ThrottleInterval` 10 — a crash loop retries forever but slowly; a clean
+`launchctl bootout` (i.e. `uninstall`) stays down. The daemon runs as the
+installing user (`UserName` in the plist), not root — 8008 needs no
+privileged bind, and the data dir stays owned by whoever administers it.
+Log rotation is newsyslog's job (5 MB, keep 5, gzip-compressed); the journal
+is never rotated — it's the database, not a log.
+
+**Lifecycle** (`sudo` is required for anything that touches the real
+`/usr/local`, `/Library`, or `/etc`; the tool never calls `sudo` itself —
+it checks for real root and refuses politely if absent):
+
+```
+just server-package             # build, stages under .service-stage/ (no sudo)
+sudo just server-install        # newest staged release -> layout + launchctl bootstrap
+just server-status               # layout, current release, journal size, launchd state
+sudo just server-restart         # launchctl kickstart -k, after an etc/wata.env edit
+sudo just server-uninstall                    # bootout, remove plist + newsyslog conf
+sudo just server-uninstall --purge --yes      # also delete /usr/local/wata (data included)
+```
+
+Editing `etc/wata.env` or `etc/users.json` and running `server-restart` is
+the whole config-change workflow — no plist regen, no reinstall.
+`tools/server-service.py prune` deletes every release except the one
+`current` points at, when old builds pile up. A real-root `install`
+deliberately does **not** build: it consumes the newest staged release from
+a prior unprivileged `server-package`, because building under sudo would
+root-own the `.sgo` emit tree, the Go build cache, and the toolchain clone.
+
+**Testing without sudo**: every subcommand that touches system paths accepts
+`--root <dir>`, which re-roots the install prefix, `/Library/LaunchDaemons`,
+and `/etc/newsyslog.d` under `<dir>` — with `--root`, `launchctl` and
+`newsyslog` are never invoked, only files are written. `just server-selftest`
+(`tools/server-service.py selftest`) is the no-sudo gate: it packages a
+plain (non-iroh) build, installs into a fresh `mkdtemp` root, `plutil -lint`s
+the generated plist, runs the wrapper in the foreground against a free
+localhost port, polls `GET /_matrix/client/versions` until it answers, logs
+in as `alice` (proving `etc/users.json` — the default alice/bob pair from
+"Accounts" above — is actually read), asserts `data/journal.jsonl` exists
+and is non-empty, then `SIGTERM`s the process and confirms it exits. It
+prints a `SRV-PACKAGE SELFTEST PASS`/`FAIL` line and a non-zero exit on
+failure.
+
+The real `sudo just server-install` on the mac that hosts the family server
+is a human step outside this gate; `just server-status` afterward is the
+acceptance check for that run.
+
 ## File-by-file map
 
 - **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and the canonical-DM values (`DmPair`, `DmPeer`, `DmRoom`, `StateSeed`).

@@ -95,6 +95,8 @@ go-pkgs/audio/clib/
 go-pkgs/audio/audiocheck
 # pinned sgola toolchain clone (tools/toolchain.py sync)
 .toolchain/
+# tools/server-service.py package staging (build product)
+.service-stage/
 # python bytecode from tools/
 __pycache__/
 # IDE state: .bsp/sgo.json names an absolute path to the pinned sgo binary
