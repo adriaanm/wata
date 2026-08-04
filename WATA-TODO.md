@@ -54,10 +54,10 @@ blocks + git log; each entry cites where it was recorded.*
   definition (not a facade — facade lone-`error` shapes like `exec.Cmd.Run`
   lower fine as of pin `9d4f544`) is a loud wall — give such a def a
   non-Unit result (or keep it a facade) until the fix lands.
-- Emitter trap (upstream-known, filed NATIVEVIEW-LOCAL-TYPE-INFERENCE):
-  a local bound to `go.makeSlice[T](n)` needs an explicit type ascription
-  (`var xs: go.Slice[T] = ...`) or the element type degrades — keep
-  ascriptions on native-view locals until the fix lands.
+- Emitter trap (upstream-known, filed FACADE-TYPE-ONLY-IMPORT-MISSING): a
+  bound facade type referenced ONLY as a type, with no call into its
+  package anywhere in the same unit, can miss its Go import — the symptom
+  is `undefined: <pkg>` at `go build`. Stopgap: any call into the package.
 - Emitter trap (residual of the fixed CATCH-ERR-SHADOW): a *parameter*
   literally named `err` still bypasses the emitter's rename machinery —
   avoid that spelling for params until PARAM-ERR-COLLISION lands. Local
