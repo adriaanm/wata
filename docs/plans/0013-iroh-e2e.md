@@ -65,6 +65,31 @@ sound). It rides this config format but must not gate the tunnel.
    reconnecting) so a kid can see why the radio went quiet
    ([FB-CONN-STATUS]). Each cellular flip test costs a reboot (the
    one-data-call-per-boot kernel constraint above).
+
+   Design for the status element (ruled 2026-08-05):
+   - **Placement**: the wata applet's header, right end — the slot the
+     `ok`/`..`/`ERR`/`off` indicator occupies today; this element
+     *replaces* that indicator rather than sitting beside it (two
+     truth-claims about the connection would have to agree).
+   - **Two inputs, one glyph + one word.** The *pipe* comes from the
+     diagnostics sources settings already polls every ~5s
+     (`Diag.wlanIp` for wlan0, the ppp0 sysfs node for cellular): a
+     wifi glyph (font 0x80-0x8B already has one) or a new `CELL` glyph
+     (one font-table addition, regenerated the way the table documents).
+     The *health* comes from `wataclient`'s `ConnectionState`, which is
+     the only honest source — an interface with an IP whose sync is
+     erroring is "reconnecting", not "on wifi".
+   - **States a kid sees**: glyph alone (connected via that pipe);
+     glyph + `..` alternating at the existing tick rate (reconnecting —
+     `Connecting`/`ConnError` with an interface up); `OFF` (no
+     interface has an address); the 1px status line keeps its existing
+     colors and stays consistent with the header by deriving from the
+     same computed state.
+   - **Off-device** (host builds, sim, uitest): the diag sources answer
+     `n/a`, which maps to a plain `NET` label with the same health
+     states, so goldens stay deterministic without faking interfaces;
+     a uitest scenario pins connected/reconnecting/off frames by
+     scripting the connection state.
 5. **Allowlist enforcement**: an unenrolled node id is refused at
    accept (E2E negative test). DONE (2026-08-04): lives as the
    `allowlist-negative` leg of `just tunnel-smoke`, so every `just ci`
