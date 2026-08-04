@@ -133,6 +133,16 @@ configured). Cross-repo spec handed to `bq268-alpine`. The
 on-device checkpoint. Runs in parallel with the Mac server deployment
 hardening from phase 4's sweep.
 
+System-menu retires outright (ruling 2026-08-04): wata is then the
+only framebuffer occupant, which is what makes the tty1 swap clean.
+The bare minimum of its diagnostics moves into wata's settings applet
+first — current IP, cellular data status, battery percent (already in
+Device Info), and power actions (power off / reboot to bootloader /
+reboot to EDL) — mirroring system-menu's own sources for each. The
+info rows are host-simulable and land with sim coverage ahead of the
+rootfs work; the power actions are device-only and verify in this
+phase's on-device checkpoint. `[FB-SETTINGS-DIAG]` in the queue.
+
 **Phase 6 — Family deployment.** Raspberry Pi target (arm64 build +
 service unit, extending `amd64-smoke`), journal-on by default with
 compaction, provisioning the actual family accounts, invite security
