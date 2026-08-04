@@ -57,7 +57,14 @@ sound). It rides this config format but must not gate the tunnel.
 4. **Roaming**: hotspot to LAN mid-session; reconnect rides the
    client's existing sync backoff; record recovery time.
 5. **Allowlist enforcement**: an unenrolled node id is refused at
-   accept (E2E negative test).
+   accept (E2E negative test). DONE (2026-08-04): lives as the
+   `allowlist-negative` leg of `just tunnel-smoke`, so every `just ci`
+   run proves it — a server allowlisting one key refuses an intruder
+   key's dial at accept while the positive scenarios pass. Observed:
+   the QUIC close reason (401 "not allowlisted") does not propagate
+   into the intruder's client error text, which reads as a generic
+   closed connection — enforcement is server-side at accept, which is
+   the property that matters.
 
 **Milestone 1 outcome**: done (merged) — `go-pkgs/irohnet` proves out on
 darwin; `just tunnel-smoke` joins `just ci`.

@@ -173,6 +173,58 @@ def main():
                 proc.kill()
             log.close()
 
+    # ---- 6. the allowlist NEGATIVE (plan 0013 milestone 5): a server that
+    # allowlists only cli_key must refuse a different node id at accept
+    # (QUIC close 401 "not allowlisted", before any stream). The intruder's
+    # integ run must NOT pass — and the refusal should be the loud kind.
+    if ok:
+        intruder_key = keygen(env, str(keygen_bin))
+        sdir = tmp / "allowlist-negative"
+        sdir.mkdir()
+        announce = sdir / "announce.json"
+        srv_cfg = sdir / "server.json"
+        srv_cfg.write_text(json.dumps({
+            "secretKey": srv_key["secretKey"],
+            "relay": "none",
+            "allowlist": [cli_key["id"]],
+            "announceFile": str(announce),
+        }))
+        proc, log = start_server(str(server_bin), env, srv_cfg, sdir / "server.log")
+        try:
+            for _ in range(100):
+                if announce.exists():
+                    break
+                time.sleep(0.1)
+            ann = json.loads(announce.read_text())
+            v4 = [a for a in ann["addrs"] if not a.startswith("[")]
+            bad_cfg = sdir / "intruder.json"
+            bad_cfg.write_text(json.dumps({
+                "secretKey": intruder_key["secretKey"],
+                "relay": "none",
+                "peer": ann["id"],
+                "peerAddrs": v4,
+            }))
+            r = subprocess.run(
+                [str(client_bin), "integ", "login-syncing", "http://wata.iroh"],
+                env={**env, "WATA_IROH_CONFIG": str(bad_cfg)},
+                cwd=WATA, capture_output=True, text=True, timeout=60,
+            )
+            refused = "INTEG PASS" not in r.stdout
+            loud = "not allowlisted" in (r.stdout + r.stderr)
+            print(f"tunnel-smoke: allowlist-negative: "
+                  f"{'PASS' if refused else 'FAIL'} (refusal loud: {loud})")
+            if not refused:
+                print("---- intruder output (should have been refused!) ----")
+                print(r.stdout + r.stderr)
+                ok = False
+        finally:
+            proc.send_signal(signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            log.close()
+
     if ok:
         shutil.rmtree(tmp, ignore_errors=True)
         print("TUNNEL-SMOKE PASS (embedded iroh, relay none, no TCP port)")
