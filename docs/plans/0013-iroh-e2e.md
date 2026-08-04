@@ -90,6 +90,22 @@ sound). It rides this config format but must not gate the tunnel.
      states, so goldens stay deterministic without faking interfaces;
      a uitest scenario pins connected/reconnecting/off frames by
      scripting the connection state.
+
+   Status: the element LANDED (the flip test itself is still owed).
+   `wata-fb/src/main/scala/netstatus.scala` computes one `NetState` per
+   frame — pipe from the diag sources on their ~5s cadence, health from
+   `ConnectionState` — and both the wata applet's header slot (the old
+   `ok`/`..`/`ERR`/`off` indicator is gone, not moved) and the 1px
+   status line draw from it, so they cannot disagree. The cellular mast
+   went into the font table by hand at 0x8C (the generator script is
+   absent; the table says so). The `conn-status` uitest scenario pins
+   live / reconnecting on both phases of the `..` / disconnected /
+   wifi / cellular / `OFF`, using two uitest-only overrides (`conn`,
+   `netpipe`) because the sync loop republishes `Syncing` every
+   snapshot and a host has no wlan0 to point at. What remains for this
+   milestone is the roaming flip itself on hardware — the element is
+   what makes that test readable. See docs/design/wata-fb.md, "The
+   connectivity element".
 5. **Allowlist enforcement**: an unenrolled node id is refused at
    accept (E2E negative test). DONE (2026-08-04): lives as the
    `allowlist-negative` leg of `just tunnel-smoke`, so every `just ci`

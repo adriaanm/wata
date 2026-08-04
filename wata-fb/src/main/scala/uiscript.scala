@@ -55,6 +55,18 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              like `family`): the next n media
  *                              uploads/downloads answer 500 — how the SEND
  *                              FAILED / PLAY FAILED flashes get provoked
+ *    conn <state>              force the connection every later frame reports
+ *                              (off|connecting|connected|syncing|error, or
+ *                              `live` to hand it back to the client), then one
+ *                              frame. The sync loop republishes `Syncing` on
+ *                              every snapshot, so a bad-connection frame
+ *                              cannot be pinned any other way
+ *    netpipe <pipe>            force the connectivity element's interface pipe
+ *                              (wifi|cell|none|auto), then one frame — the
+ *                              device-only renderings (the wifi and cellular
+ *                              glyphs, `OFF`) pinned without faking
+ *                              interfaces under `Diag`, which would make the
+ *                              goldens depend on the host's network
  *
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
@@ -207,6 +219,10 @@ object UiScript:
       err = family(restOf(ts))
     else if cmd == "failnext" then
       err = failNext(num(nth(ts, 1), 1))
+    else if cmd == "conn" then
+      err = connDirective(nth(ts, 1), c, clock, evts, dev, px)
+    else if cmd == "netpipe" then
+      err = pipeDirective(nth(ts, 1), c, clock, evts, dev, px)
     else err = "unknown directive '" + cmd + "'"
     err
 
@@ -298,6 +314,50 @@ object UiScript:
     var err = ""
     if got < want then err = "expect " + name + " >= " + want + ", got " + got
     err
+
+  // ---- the connectivity overrides ------------------------------------------------
+
+  /** force the connection state the frames report, then advance one frame so
+   *  the forced state is what the next checkpoint draws. The frame also
+   *  restarts the reconnecting animation's phase (a health change resets it),
+   *  which is what makes the `..` alternation reproducible from a script. */
+  def connDirective(name: String, c: MatrixClient, clock: Clock,
+                    evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
+    val tag = connTagOf(name)
+    var err = ""
+    if tag == -2 then err = "conn wants off|connecting|connected|syncing|error|live"
+    else
+      Ui.forceConn(tag)
+      step(c, clock, evts, dev, px)
+    err
+
+  def connTagOf(name: String): scala.Int =
+    if name == "live" then -1
+    else if name == "off" then 0
+    else if name == "connecting" then 1
+    else if name == "connected" then 2
+    else if name == "syncing" then 3
+    else if name == "error" then 4
+    else -2
+
+  /** force the interface pipe, then advance one frame. */
+  def pipeDirective(name: String, c: MatrixClient, clock: Clock,
+                    evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
+    val tag = pipeTagOf(name)
+    var err = ""
+    if tag == -2 then err = "netpipe wants wifi|cell|none|auto"
+    else
+      NetStatus.forcePipe(tag)
+      step(c, clock, evts, dev, px)
+    err
+
+  def pipeTagOf(name: String): scala.Int =
+    if name == "auto" then -1
+    else if name == "wifi" then NetStatus.P_WIFI
+    else if name == "cell" then NetStatus.P_CELL
+    else if name == "none" then NetStatus.P_NONE
+    else if name == "net" then NetStatus.P_UNKNOWN
+    else -2
 
   // ---- checkpoints ---------------------------------------------------------------
 

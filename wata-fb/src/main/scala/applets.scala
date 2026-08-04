@@ -334,7 +334,7 @@ object WataLogic:
     if !ctx.snap.hasSelfUser && convCount(ctx.snap) == 0 then renderConnecting(px, ctx.connection)
     else
       Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
-      Font.drawText(px, connStr(ctx.connection), Font.COLS - 3, 0, connColor(ctx.connection), false, 0)
+      renderNet(px, ctx.net)
       val count = convCount(ctx.snap)
       if count == 0 then
         Font.drawText(px, "No contacts", 3, 4, Color.midGray, false, 0)
@@ -421,19 +421,25 @@ object WataLogic:
   def renderConnecting(px: go.Bytes, c: ConnectionState): Unit =
     Font.drawText(px, connectingMsg(c), 1, 2, Color.midGray, false, 0)
 
+  /** the CONNECTIVITY element, right-aligned in the header — the slot the old
+   *  `ok`/`..`/`ERR`/`off` indicator held, replacing it rather than sitting
+   *  beside it (two indicators would have to agree). One pipe mark (the wifi
+   *  or cellular glyph on the device, a plain `NET` off it, `OFF` when no
+   *  interface has an address) plus `..` while the client is reconnecting,
+   *  alternating on the blink phase. The 1px status line derives from the same
+   *  `NetState` (`ShellStatus.fromNet`), so the two always agree. */
+  def renderNet(px: go.Bytes, net: NetState): Unit =
+    val g = NetStatus.glyph(net.pipe)
+    val text = if g >= 0 then "" else NetStatus.label(net.pipe)
+    val dots = if NetStatus.showsDots(net) then ".." else ""
+    val markCols = if g >= 0 then 1 else text.length
+    val col = Font.COLS - markCols - dots.length
+    val fg = NetStatus.color(net)
+    if g >= 0 then Font.drawChar(px, g, col * Font.GLYPH_W, 1, fg, false, 0)
+    else Font.drawText(px, text, col, 0, fg, false, 0)
+    if dots != "" then Font.drawText(px, dots, col + markCols, 0, fg, false, 0)
+
   // ---- string / snapshot helpers --------------------------------------------
-  def connStr(c: ConnectionState): String = c match
-    case _: Syncing      => "ok"
-    case _: Connected    => ".."
-    case _: Connecting   => ".."
-    case _: ConnError    => "ERR"
-    case _: Disconnected => "off"
-
-  def connColor(c: ConnectionState): scala.Int = c match
-    case _: Syncing   => Color.green
-    case _: ConnError => Color.red
-    case _            => Color.midGray
-
   def connectingMsg(c: ConnectionState): String = c match
     case _: Disconnected => "Disconnected"
     case _: Connecting   => "Connecting..."
@@ -531,13 +537,16 @@ object WataLogic:
     case Nil    => Some(h)
 
 /** the UNIFIED per-frame context, one record for every applet: the live
- *  snapshot, the connection, the matrix client (action queue), and the audio
- *  thread's command/event mailboxes. The settings applet simply ignores the
- *  `connection` field it doesn't need. Built once per frame by the UI loop
- *  and passed through the `Applet` interface. */
+ *  snapshot, the connection, the frame's computed connectivity (netstatus.scala
+ *  — the header element and the status line both read it, so they cannot
+ *  disagree), the matrix client (action queue), and the audio thread's
+ *  command/event mailboxes. The settings applet simply ignores the fields it
+ *  doesn't need. Built once per frame by the UI loop and passed through the
+ *  `Applet` interface. */
 case class FrameCtx(
   snap: StateSnapshot,
   connection: ConnectionState,
+  net: NetState,
   client: MatrixClient,
   audioCmds: sgo.Chan[AudioCmd],
   audioEvts: sgo.Chan[AudioEvt]

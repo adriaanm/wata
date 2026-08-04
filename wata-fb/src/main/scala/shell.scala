@@ -40,6 +40,15 @@ object ShellStatus:
     case _: StErr          => Color.red
     case _: StDisconnected => Color.red
 
+  /** the 1px line's status, from the SAME computed connectivity the wata
+   *  applet's header element draws (netstatus.scala): a device with no
+   *  interface holding an address is down whatever the sync loop last
+   *  managed to say, and otherwise the connection's own state carries the
+   *  colors it always had. Deriving both from one `NetState` is what keeps
+   *  the line and the header from making disagreeing claims. */
+  def fromNet(n: NetState, c: ConnectionState): Status =
+    if NetStatus.isNoPipe(n.pipe) then StDisconnected() else fromConnection(c)
+
   /** connection -> status. */
   def fromConnection(c: ConnectionState): Status = c match
     case _: Disconnected => StDisconnected()

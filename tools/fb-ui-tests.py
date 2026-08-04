@@ -108,6 +108,12 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "conn-status",
+        "phases": [
+            ("alice", "alice-conn-status.txt"),
+        ],
+    },
+    {
         "name": "settings-walk",
         "phases": [
             ("alice", "alice-settings.txt"),

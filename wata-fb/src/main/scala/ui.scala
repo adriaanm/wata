@@ -82,8 +82,14 @@ object Ui:
   private val lastMsC: sgo.Atomic[Long] = sgo.atomic(0L)
   // one config write per session: set once the credentials are known good.
   private val savedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  // the scripted driver's connection override (uitest only): -1 = report the
+  // live connection, else a `Runtime.connTag` the frame loop reports instead.
+  // The sync loop republishes `Syncing` on every snapshot, so a scripted
+  // reconnecting/disconnected frame cannot be pinned by writing the live cell
+  // — the override is read where the frame reads the state.
+  private val connForceC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
   private def stateV: ShellState = stateC.get()
-  private def connV: ConnectionState = connC.get()
+  private def connV: ConnectionState = connOf(connForceC.get(), connC.get())
   private def idleTime: scala.Double = idleC.get()
   private def displayOff: Boolean = offC.get()
 
@@ -93,8 +99,22 @@ object Ui:
   def frameSnap: StateSnapshot = snapC.get()
   /** is the screensaver holding the panel blanked? */
   def screenOff: Boolean = offC.get()
-  /** the connection the status line and the LEDs are mirroring. */
-  def connection: ConnectionState = connC.get()
+  /** the connection the status line and the LEDs are mirroring (the override
+   *  included — this is what the frame drew). */
+  def connection: ConnectionState = connV
+
+  /** force the connection the frames report (uitest only; -1 = the live one). */
+  def forceConn(tag: scala.Int): Unit = connForceC.set(tag)
+
+  def connOf(tag: scala.Int, live: ConnectionState): ConnectionState =
+    if tag < 0 then live else stateOfTag(tag)
+
+  def stateOfTag(tag: scala.Int): ConnectionState =
+    if tag == 0 then Disconnected()
+    else if tag == 1 then Connecting()
+    else if tag == 2 then Connected()
+    else if tag == 3 then Syncing()
+    else ConnError()
 
   // Session tallies of the terminal UI events — what a wait-timeout in the
   // scripted driver reports, so "the echo never came" is distinguishable
@@ -180,6 +200,8 @@ object Ui:
     sendFailC.set(0)
     playFailC.set(0)
     connErrC.set(0)
+    connForceC.set(-1)
+    NetStatus.reset()
 
   /** seed the frame clock — every driver calls this once before its first
    *  `frameStep`, so the first frame's dt is a frame and not the epoch. */
@@ -212,8 +234,15 @@ object Ui:
     // send/play -> wata flash)
     drainUiEvents(c, dev)
 
+    // this frame's connectivity: the interface pipe (re-read on its own ~5s
+    // cadence) plus the client's health, computed ONCE — the header element
+    // and the status line both draw from it. `poll` advances the refresh
+    // countdown and the reconnecting blink, so it belongs here, once a frame.
+    val conn = connV
+    val net = NetStatus.poll(conn)
+
     // build this frame's context: ONE unified FrameCtx shared by every applet
-    val ctx = FrameCtx(snapC.get(), connV, c, c.audioCmds, evts)
+    val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts)
 
     // poll input; a quit edge (back in contacts) ends the loop
     val keyEvents = dev.pollInput()
@@ -223,7 +252,7 @@ object Ui:
       idleC.set(tickIdle(dt, keyEvents, dev))
       // update + render + present (skip render when display off)
       stateC.set(Shell.update(stateV, dt, ctx))
-      stateC.set(Shell.withStatus(stateV, ShellStatus.fromConnection(connV)))
+      stateC.set(Shell.withStatus(stateV, ShellStatus.fromNet(net, conn)))
       if !displayOff then
         Draw.clear(px, Color.black)
         Shell.render(stateV, px, ctx)

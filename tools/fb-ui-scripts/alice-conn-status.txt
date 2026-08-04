@@ -1,0 +1,53 @@
+# conn-status: the header's connectivity element and the 1px status line it
+# shares its computed state with (netstatus.scala, plan 0013 milestone 4).
+# One phase, alice only — nothing here needs a peer beyond a family room to
+# render a contact list under the header.
+#
+# The connection is forced with the `conn` directive rather than provoked: the
+# sync loop republishes `Syncing` on every snapshot, so a bad-connection frame
+# is not otherwise pinnable. The pipe is forced with `netpipe` for the same
+# reason in the other direction — off-device the diagnostics sources honestly
+# answer `n/a` (there is no wlan0/ppp0 to ask), so the wifi/cellular/OFF
+# renderings would never appear on a host.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
+# directive vocabulary.
+
+family @bob:localhost
+
+wait syncing 1 900
+wait convs 1 900
+advance 30
+
+# connected, on a host: the plain `NET` label in green, status line cyan.
+checkpoint conn-live
+
+# reconnecting: yellow, with the `..` on the FIRST phase of the alternation —
+# the phase counter restarts on the health change, so this is the same frame
+# every run.
+conn error
+checkpoint conn-reconnect-dots
+
+# ... and BLINK_FRAMES later the same state is on the off phase: the mark
+# alone, no dots. The pair is the alternation.
+idle 15
+checkpoint conn-reconnect-blank
+
+# disconnected (the settings applet's Network item, or a session that never
+# came up): red, no animation.
+conn off
+checkpoint conn-down
+
+# the device-only pipes. Health back to live, then each interface in turn:
+# the wifi glyph, then the cellular mast glyph (font 0x8C).
+conn syncing
+netpipe wifi
+checkpoint conn-wifi
+netpipe cell
+checkpoint conn-cell
+
+# no interface holds an address: `OFF` in red, and the status line goes red
+# with it even though the client still believes it is syncing — the pipe is
+# the stronger claim, and both marks derive from the one computed state.
+netpipe none
+checkpoint conn-off
