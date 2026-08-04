@@ -410,12 +410,8 @@ object Store:
   def pairHi(a: String, b: String): String = if strLess(a, b) then b else a
 
   /** the canonical room for this pair, if one has been claimed. */
-  // The `Option[String]` is derived OUTSIDE the block: a `withLock` lambda whose
-  // result is a DIFFERENT Option instantiation than the one it reads gets the
-  // two mixed up at link time (`Option__R does not implement Option__S`), so the
-  // block returns the Option it looked up and the mapping happens here.
   def dmRoomFor(a: String, b: String): Option[String] =
-    roomOfPair(cell.withLock(st => findPair(st.dmPairs, pairLo(a, b), pairHi(a, b))))
+    cell.withLock(st => roomOfPair(findPair(st.dmPairs, pairLo(a, b), pairHi(a, b))))
 
   def roomOfPair(p: Option[DmPair]): Option[String] = p match
     case s: Some[DmPair] => Some(s.value.roomId)
