@@ -668,33 +668,29 @@ object Integ:
       case cv: Some[Conversation] => runMatches(cv.value.messages, firstDur, n)
       case None => false
 
-  // NB the accumulator must NOT be named `ok`: it is assigned inside a match
-  // case, and the emitter's type-assertion temp for a case is also `ok` — the
-  // Go if-scope shadows the user var, so the assignment lands on the temp and
-  // the result is silently wrong (WATA-MATCH-CASE-OK-VAR-SHADOW).
   def runMatches(ms: List[VoiceMessage], firstDur: Long, n: Int): Boolean =
     var cur = ms
     var want = firstDur
     var left = n
-    var good = true
+    var ok = true
     var going = true
     while going do
       cur match
         case m :: t =>
           if left == 0 then
-            good = false
+            ok = false
             going = false
           else if m.durationMs != want then
-            good = false
+            ok = false
             going = false
           else
             want += 1L
             left -= 1
             cur = t
         case Nil =>
-          if left != 0 then good = false
+          if left != 0 then ok = false
           going = false
-    good
+    ok
 
   /** the dialect endpoint, out of band; "" on failure. */
   def dmRoomId(token: String, peer: String): String =

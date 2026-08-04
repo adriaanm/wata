@@ -49,11 +49,6 @@ blocks + git log; each entry cites where it was recorded.*
   GRADUATION-BRIEF consumer-driven ledger.
 - ADT-valued `Atomic` cells / RWMutex reader-parallel cell — same
   ledger, first-consumer-triggered (Wata is the likely consumer).
-- Facade-subclass trap (upstream-known, audited clean here): BODY
-  val/var fields of a class extending a `go.*` facade trait are silently
-  Go-zeroed at construction (only ctor params are seated) — keep Handler
-  state in ctor params or on an object until
-  FACADE-SUBCLASS-BODY-FIELD-SILENT-ZERO lands.
 - Emitter trap (residual of the fixed CATCH-ERR-SHADOW): a *parameter*
   literally named `err` still bypasses the emitter's rename machinery —
   avoid that spelling for params until PARAM-ERR-COLLISION lands. Local
@@ -64,11 +59,9 @@ blocks + git log; each entry cites where it was recorded.*
   (`List(KeyDown(...), KeyUp(...))`) fails at `go build` (concrete slice
   vs collapsed `[]any` template param) — build such lists via cons until
   LIST-VARARGS-FAMILY-ELEM-COLLAPSE lands.
-- Emitter trap (from the backfill-oracle build): a mutable user variable
-  literally named `ok`, assigned inside a pattern-match case body, is
-  silently shadowed by the case's own type-assertion temp (`if x, ok :=
-  scrut.(*T); ok { ... }`) — the assignment lands on the temp, the
-  computation is silently wrong, and everything compiles clean. Avoid
-  `var ok` wherever a match case assigns it (any other name is safe)
-  until MATCH-CASE-OK-VAR-SHADOW lands. Filed:
-  `MATCH-CASE-OK-VAR-SHADOW`.
+- Emitter trap (residual): locals in *generic/template* bodies bypass the
+  emitter's rename funnel, so reserved-name protection (`ok`, `err`
+  suffixing) does not apply there — avoid Go-reserved-looking local names
+  in generic code until TEMPLATE-LOCALS-NO-RENAME-FUNNEL lands.
+  (Ordinary, non-generic bodies are safe: `ok` is reserved and locals are
+  auto-renamed as of pin `a95b8b2`.)
