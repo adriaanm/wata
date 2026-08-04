@@ -1,0 +1,19 @@
+# session-resume, phase 2: the same user, started with NO credentials — the
+# harness passes `-` in every credential slot, so the homeserver, the username
+# and the access token all come from the config file phase 1 wrote, and the
+# sync loop resumes on the stored token instead of logging in.
+#
+# The oracle is the run itself as much as the frames: with nothing stored, an
+# empty-credential login fails, the connection goes to error, and `wait
+# syncing` times out the phase.
+
+wait syncing 1 900
+wait convs 1 900
+advance 30
+checkpoint resume-contacts
+
+# and the resumed session is a fully working one, not just a connected one:
+# opening the conversation is the same input path the argument-driven run has.
+tap enter
+advance 30
+checkpoint resume-conversation

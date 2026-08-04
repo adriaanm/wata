@@ -46,8 +46,9 @@ routes to one of about a dozen subcommands — there is no subcommand
 framework, just a chain of `if/else if`. The two "real product"
 entry points are:
 
-- `wata-fb ui <base> <user> <pass>` — the actual on-device client
-  (`Ui.run`).
+- `wata-fb ui [base] [user] [pass]` — the actual on-device client
+  (`Ui.run`). Every credential is optional: what the arguments do not
+  give comes from the stored session (see "Session persistence").
 - `wata-fb login|voicesend|voiceplay|audiosoak ...` — scripted,
   non-interactive drivers used for development and load testing
   (`DevCli`, `devcli.scala:20`).
@@ -341,6 +342,46 @@ in `Ui.tickIdle` (`ui.scala:180`) turns the backlight and button
 backlight off after that timeout, restoring them on the next input
 (`Ui.wake`, `ui.scala:172`).
 
+## Session persistence
+
+The device is meant to boot straight into the client with nobody
+typing a homeserver, so the credentials survive restarts in a config
+file. `wataclient` owns the record and its JSON (`Session`,
+`Sessions`) but deliberately no file IO — where a config lives is the
+app layer's decision. `config.scala` is that decision:
+
+- **Path**: `$WATA_FB_CONFIG` when set, otherwise
+  `/etc/wata/config.json`. One binary therefore covers the device and
+  a dev host, and every test run points the env var at its own file
+  rather than sharing the operator's.
+- **Contents**: `{homeserver, username, access_token, user_id,
+  device_id}` — the Zig client's file shape.
+- **Read** is best-effort in every direction: absent file, unreadable
+  file and malformed JSON all resolve to the empty session, which
+  `Sessions.isValid` rejects, which sends the sync loop down the
+  password-login path exactly as if nothing were stored.
+- **Write** is best-effort too: the parent directory is created if it
+  can be, the file is opened 0600, and any failure is a silent no-op.
+  A device that cannot persist still runs; it logs in again next boot.
+- **When**: `Ui.persistSession`, on the first `Connected` event of a
+  session and only when `Runtime.lastAuth` carries a non-empty token.
+  Once per session — a stale store is never overwritten with nothing.
+
+`FbConfig.resolve` is what every UI entry point builds its
+`ClientConfig` from. Explicitly given arguments win; a slot that is
+empty or `-` falls back to the store, so `wata-fb ui` and `wata-fb
+sim` take their credentials positionally and all of them are now
+optional. `-` exists because those arguments are positional and an
+unset one still needs a spelling — it is what the scripted driver
+passes for a phase that must resume rather than log in.
+
+The stored session is offered to `loginOrResume` only when its
+homeserver **and** its username match the run's, so naming a different
+user explicitly forces a password login instead of resuming on the
+previous user's token. That rule is what lets two phases of one
+scripted scenario share a config file without impersonating each
+other.
+
 ## Matrix integration
 
 This module does not implement the Matrix protocol itself — that
@@ -392,9 +433,9 @@ All of these are subcommands dispatched from `main.scala`:
 | `integ <scenario> <baseUrl>` | `integ.scala` | ten scenarios (login, two-user sync, voice send/receive, read receipts, ordering, redaction, download-byte-equality, the family room, session resume) run against a live `wata-server`, each driven through `wataclient`'s real `Runtime`/action queue, printing `INTEG PASS/FAIL <scenario>`. |
 | `--selftest [echo\|play\|all]` | `selftest.scala` | on-device audio-thread selftest described above. |
 | `login\|voicesend\|voiceplay\|audiosoak ...` | `devcli.scala` | scripted, non-interactive actions against a live server: provision/login a user, record-and-send a clip, sync-and-play the newest clip, or run a long record/send/sync/download/play soak loop (intended to run under `GODEBUG=gctrace=1` to watch GC pressure — `devcli.scala:105`). |
-| `sim <base> <user> <pass> [--once]` | `sim.scala` | the host simulator: the real frame loop drawn into a terminal — see below. |
-| `uitest <script> <base> <user> <pass> <outdir>` | `uiscript.scala` | one scripted, deterministic UI session with PNG checkpoints — see below. |
-| `ui <base> <user> <pass>` | `ui.scala` | the actual product: the full on-device client. |
+| `sim [base] [user] [pass] [--once]` | `sim.scala` | the host simulator: the real frame loop drawn into a terminal — see below. |
+| `uitest <script> <base> <user> <pass> <outdir>` (`-` in a credential slot = resume from the store) | `uiscript.scala` | one scripted, deterministic UI session with PNG checkpoints — see below. |
+| `ui [base] [user] [pass]` | `ui.scala` | the actual product: the full on-device client. |
 
 `integ` (ten scenarios, `wataclient`'s `Runtime` directly) and
 `fb-ui-tests` (scripted runs of the real frame loop) are this module's
@@ -488,9 +529,10 @@ rewrites its row here.
 | feature | Zig | wata-fb | status |
 |---|---|---|---|
 | **Session / boot** ||||
-| session store (`config.json`: homeserver, username, access_token, user_id, device_id) | `config.zig` | none | **GAP** — nothing in this module reads or writes a config file |
-| boot with no credentials | yes | no | **GAP** — `ui`/`sim` demand `<base> <user> <pass>` every run |
-| session written after login | yes | no | **GAP** — `ClientConfig` is always built with an empty `Session` |
+| session store (`config.json`: homeserver, username, access_token, user_id, device_id) | `config.zig` | `config.scala` | same file shape; `device_id` is written empty (see below) |
+| config path | compile-time (`/etc/wata` vs a dev path) | `$WATA_FB_CONFIG`, else `/etc/wata/config.json` | an env var, so one binary serves both |
+| boot with no credentials | yes | yes | same |
+| session written after login | yes | yes | same |
 | **Conversation view** ||||
 | contact list: select, scroll window, family accent | yes | yes | same |
 | unplayed-count badge, right-aligned | yes | yes | same |
@@ -521,7 +563,14 @@ rewrites its row here.
 | snake / clock / charmap applets | yes | no | toys, out of scope |
 | FreeType text rendering | optional | no | bitmap font only |
 
-Two things the audit turned up that are worth stating outright:
+Three things worth stating outright:
+
+- **`device_id` is stored but never populated.** `wataclient`'s
+  `loginOrResume` publishes `AuthCreds(accessToken, userId)` and drops
+  the login response's device id, so this module writes `""` there.
+  Nothing reads it back — `Sessions.isValid` wants a homeserver and a
+  token — and the field is kept only because the Zig client's
+  `config.json` has it.
 
 - **The settings detail area renders off the bottom of the panel.** The
   menu is six items at two-row spacing (grid rows 2..12); the detail
@@ -565,7 +614,8 @@ is enough.
 | file | lines | what it does |
 |---|---|---|
 | `main.scala` | 93 | Top-level subcommand dispatcher; also has the pre-device "skeleton" smoke check that exercises the cgo path with a synthesized tone. |
-| `syscall.scala` | 44 | `go.syscall` facade: thin binds for `Open/Close/Read/Write/Mmap/Munmap` plus the flag/prot/map constants, used by every device-layer file that touches `/dev/fb0`, `/dev/input/*`, or sysfs. |
+| `syscall.scala` | 52 | `go.syscall` facade: thin binds for `Open/Close/Read/Write/Mmap/Munmap/Mkdir` plus the flag/prot/map constants, used by every device-layer file that touches `/dev/fb0`, `/dev/input/*`, or sysfs. |
+| `config.scala` | 130 | The session store: `$WATA_FB_CONFIG` / `/etc/wata/config.json` read and write over `go.sys`/`go.syscall`, and `FbConfig.resolve`, the arguments-override-the-store rule every UI entry point builds its `ClientConfig` with. |
 | `caps.scala` | 83 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`. |
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 404 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |

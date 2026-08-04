@@ -1,0 +1,13 @@
+# session-resume, phase 1: an ordinary argument-driven login whose only job is
+# to leave a session behind in $WATA_FB_CONFIG for phase 2 to boot from.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
+# directive vocabulary.
+
+# out-of-band room setup, so the resumed run has a conversation to render.
+family @bob:localhost
+
+wait syncing 1 900
+wait convs 1 900
+advance 30
+checkpoint resume-first-login

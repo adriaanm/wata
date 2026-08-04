@@ -107,13 +107,18 @@ object UiScript:
       clkC.set(0L)
       pendC.set(Nil)
       outC.set(outdir)
-      baseC.set(base)
-      userC.set(user)
-      passC.set(pass)
+      // `-` in a credential slot means "resume from the config store" — the
+      // arguments are positional, so an unset one still needs a spelling. The
+      // resolved values are what the out-of-band `family` bootstrap logs in
+      // with, so a resuming phase cannot also bootstrap (it has no password),
+      // which is the intended shape: bootstrap once, resume afterwards.
+      val cfg = FbConfig.resolve(base, user, pass, 1000)
+      baseC.set(cfg.homeserver)
+      userC.set(cfg.username)
+      passC.set(cfg.password)
       Ui.resetCells()
       val lines = splitLines(body)
       val clock = ScriptClock()
-      val cfg = ClientConfig(base, user, pass, 1000, Session("", "", "", "", ""))
       val c = Runtime.makeWithAudio(cfg, FbCaps.httpDo(), FbCaps.clock())
       val dev = ScriptDevice()
       val px = Draw.newBuffer()

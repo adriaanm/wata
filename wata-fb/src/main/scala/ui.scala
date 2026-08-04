@@ -81,6 +81,8 @@ object Ui:
   // now, so `frameStep` is one self-contained frame any driver can call.
   private val snapC: sgo.Atomic[StateSnapshot] = sgo.atomic(Runtime.emptySnapshot())
   private val lastMsC: sgo.Atomic[Long] = sgo.atomic(0L)
+  // one config write per session: set once the credentials are known good.
+  private val savedC: sgo.Atomic[Boolean] = sgo.atomic(false)
   private def stateV: ShellState = stateC.get()
   private def connV: ConnectionState = connC.get()
   private def idleTime: scala.Double = idleC.get()
@@ -93,22 +95,28 @@ object Ui:
   /** the connection the status line and the LEDs are mirroring. */
   def connection: ConnectionState = connC.get()
 
+  /** every credential is optional: what the arguments do not give,
+   *  `FbConfig.resolve` takes from the stored session, which is what lets the
+   *  device boot straight into the client. */
   def run(args: Array[String]): Unit =
-    if args.length < 4 then println("ui: want  wata-fb ui <base> <user> <pass>")
-    else runUi(args(1), args(2), args(3))
+    runUi(FbConfig.argAt(args, 1), FbConfig.argAt(args, 2), FbConfig.argAt(args, 3))
 
   def runUi(base: String, user: String, pass: String): Unit =
+    val cfg = FbConfig.resolve(base, user, pass, 5000)
+    if cfg.homeserver == "" then println(FbConfig.noServerMsg("ui"))
+    else openAndLoop(cfg)
+
+  def openAndLoop(cfg: ClientConfig): Unit =
     println("ui: opening /dev/fb0 ...")
     try
       val fd = go.syscall.open("/dev/fb0", go.syscall.O_RDWR, 0)
       val mem = go.syscall.mmap(fd, 0L, Display.BYTES,
         go.syscall.PROT_READ | go.syscall.PROT_WRITE, go.syscall.MAP_SHARED)
-      loopWithDevice(base, user, pass, fd, mem)
+      loopWithDevice(cfg, fd, mem)
     catch case e: sgo.GoError => println("ui: device unavailable: " + e.message)
 
-  def loopWithDevice(base: String, user: String, pass: String, fd: scala.Int, mem: go.Bytes): Unit =
+  def loopWithDevice(cfg: ClientConfig, fd: scala.Int, mem: go.Bytes): Unit =
     val clock = FbCaps.clock()
-    val cfg = ClientConfig(base, user, pass, 5000, Session("", "", "", "", ""))
     val c = Runtime.makeWithAudio(cfg, FbCaps.httpDo(), clock)
     resetCells()
     val fds = Evdev.open()
@@ -149,6 +157,7 @@ object Ui:
     offC.set(false)
     snapC.set(Runtime.emptySnapshot())
     lastMsC.set(0L)
+    savedC.set(false)
 
   /** seed the frame clock — every driver calls this once before its first
    *  `frameStep`, so the first frame's dt is a frame and not the epoch. */
@@ -177,7 +186,8 @@ object Ui:
       case s: Some[StateSnapshot] => snapC.set(s.value)
       case None => ()
 
-    // drain UI events (connection -> status/LEDs, send/play -> wata flash)
+    // drain UI events (connection -> status/LEDs + session persist,
+    // send/play -> wata flash)
     drainUiEvents(c, dev)
 
     // build this frame's context: ONE unified FrameCtx shared by every applet
@@ -265,20 +275,35 @@ object Ui:
     var run = true
     while run do
       Runtime.pollEvent(c) match
-        case e: Some[UiEvent] => onUiEvent(e.value, dev)
+        case e: Some[UiEvent] => onUiEvent(c, e.value, dev)
         case None => run = false
 
-  def onUiEvent(e: UiEvent, dev: UiDevice): Unit = e match
-    case cs: EvConn        => onConn(cs.state, dev)
+  def onUiEvent(c: MatrixClient, e: UiEvent, dev: UiDevice): Unit = e match
+    case cs: EvConn        => onConn(c, cs.state, dev)
     case _: EvSendComplete => stateC.set(Shell.notifyWataSend(stateV, false))
     case _: EvSendFailed   => stateC.set(Shell.notifyWataSend(stateV, true))
     case _: EvPlaybackError => stateC.set(Shell.notifyWataPlayError(stateV))
     case _: EvSnapshot     => () // snapshot is picked up via pollSnap
 
-  /** connection change -> mirror on the red/green LEDs. */
-  def onConn(cs: ConnectionState, dev: UiDevice): Unit =
+  /** connection change -> mirror on the red/green LEDs, and — the first time a
+   *  session actually comes up — write the credentials to the config store so
+   *  the next boot resumes without arguments. */
+  def onConn(c: MatrixClient, cs: ConnectionState, dev: UiDevice): Unit =
     connC.set(cs)
     dev.leds(isLive(cs), isBad(cs))
+    if isLive(cs) then persistSession(c)
+
+  /** `Runtime.lastAuth` is set immediately before the runtime publishes
+   *  `Connected`, so by the time this frame drains that event the credentials
+   *  are there. Written once per session (`savedC`), and only when the token
+   *  is non-empty — a failed login publishes `ConnError`, never `Connected`,
+   *  but the guard keeps a stale store from being overwritten with nothing. */
+  def persistSession(c: MatrixClient): Unit =
+    if !savedC.get() then
+      val creds = Runtime.lastAuth
+      if creds.accessToken != "" then
+        savedC.set(true)
+        FbConfig.saveLogin(c.cfg.homeserver, c.cfg.username, creds)
 
   def isLive(cs: ConnectionState): Boolean = cs match
     case _: Syncing   => true

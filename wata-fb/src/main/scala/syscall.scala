@@ -45,3 +45,7 @@ object syscall:
   @go.name("Mmap") def mmap(fd: scala.Int, offset: scala.Long, length: scala.Int, prot: scala.Int, flags: scala.Int): go.Bytes throws sgo.GoError = ???
   /** `syscall.Munmap(b)` — error dropped. */
   @go.name("Munmap") def munmap(b: go.Bytes): Unit = ???
+  /** `syscall.Mkdir(path, mode)` — error dropped (best-effort: "already
+   *  exists" is the common and desired outcome at the one call site, the
+   *  config store's parent directory). */
+  @go.name("Mkdir") def mkdir(path: String, mode: scala.Int): Unit = ???

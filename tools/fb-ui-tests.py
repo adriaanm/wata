@@ -37,12 +37,23 @@ BASE = f"http://127.0.0.1:{PORT}"
 PASSWORD = "testpass123"
 
 # A scenario: a name and the phases to run in order, each (user, script file).
+# A phase user of "-" means "start with no credentials": the driver is handed
+# `-` in every credential slot and has to resume the session the config store
+# holds. Each scenario gets its own config store (see run_scenario), so a
+# resume phase can only see what an earlier phase of the same scenario wrote.
 SCENARIOS = [
     {
         "name": "voice-alice-to-bob",
         "phases": [
             ("alice", "alice-send.txt"),
             ("bob", "bob-view.txt"),
+        ],
+    },
+    {
+        "name": "session-resume",
+        "phases": [
+            ("alice", "alice-login.txt"),
+            ("-", "alice-resume.txt"),
         ],
     },
 ]
@@ -110,11 +121,15 @@ def run_scenario(scenario, fb, server_bin, env, outdir, update):
     if proc is None:
         stop_server(proc, log)
         return False, "server never became ready"
+    # Every scenario gets its own session store, so a run never reads or writes
+    # the operator's real /etc/wata/config.json and phases only see each other.
+    env = dict(env, WATA_FB_CONFIG=os.path.join(outdir, "config.json"))
     try:
         for user, script in scenario["phases"]:
             path = os.path.join(SCRIPTS, script)
+            password = PASSWORD if user != "-" else "-"
             r = subprocess.run(
-                [fb, "uitest", path, BASE, user, PASSWORD, outdir],
+                [fb, "uitest", path, BASE, user, password, outdir],
                 capture_output=True, text=True, env=env, timeout=300)
             tail = (r.stdout + r.stderr).strip().splitlines()
             passed = any(line.startswith("UITEST PASS") for line in tail)

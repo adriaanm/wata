@@ -195,16 +195,26 @@ object Sim:
   private val redC: sgo.Atomic[Boolean] = sgo.atomic(false)
   private val dirtyC: sgo.Atomic[Boolean] = sgo.atomic(true)
 
+  /** the credentials are optional here too — `wata-fb sim` with none resumes
+   *  the stored session, the same way the device's `ui` does. `--once` is
+   *  found by scanning rather than by position, so it works with any number
+   *  of credential arguments. */
   def run(args: Array[String]): Unit =
-    if args.length < 4 then println("sim: want  wata-fb sim <base> <user> <pass> [--once]")
-    else
-      var once = false
-      if args.length > 4 && args(4) == "--once" then once = true
-      loop(args(1), args(2), args(3), once)
+    val cfg = FbConfig.resolve(FbConfig.argAt(args, 1), FbConfig.argAt(args, 2),
+      FbConfig.argAt(args, 3), 5000)
+    if cfg.homeserver == "" then println(FbConfig.noServerMsg("sim"))
+    else loop(cfg, hasOnce(args))
 
-  def loop(base: String, user: String, pass: String, once: Boolean): Unit =
+  def hasOnce(args: Array[String]): Boolean =
+    var out = false
+    var i = 1
+    while i < args.length do
+      if args(i) == "--once" then out = true
+      i = i + 1
+    out
+
+  def loop(cfg: ClientConfig, once: Boolean): Unit =
     val clock = FbCaps.clock()
-    val cfg = ClientConfig(base, user, pass, 5000, Session("", "", "", "", ""))
     val c = Runtime.makeWithAudio(cfg, FbCaps.httpDo(), clock)
     Ui.resetCells()
     resetCells()
