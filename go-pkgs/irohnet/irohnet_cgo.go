@@ -1,8 +1,11 @@
-//go:build darwin && iroh
+//go:build iroh && (darwin || (linux && arm))
 
 // The real implementation: cgo over the vendored Rust staticlib (rust/,
-// crate irohnet-ffi). Build the lib first: ./mklib.py (writes
-// clib/darwin/libirohnet_ffi.a; clib/ is a build artifact, gitignored).
+// crate irohnet-ffi). Build the lib first: ./mklib.py for the host
+// (clib/darwin/), ./mklib.py arm for the device cross-build
+// (clib/linux_arm/, armv7-unknown-linux-musleabihf); clib/ is a build
+// artifact, gitignored. Building with `-tags iroh` and no staged lib fails
+// loudly at link time — the stub covers only builds without the tag.
 //
 // Blocking model: every C call that can block parks the calling goroutine on
 // the lib's internal tokio runtime; Go's scheduler is unaffected (cgo calls
@@ -12,7 +15,12 @@
 package irohnet
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/clib/darwin -lirohnet_ffi -framework Security -framework SystemConfiguration -framework CoreFoundation -framework CoreWLAN
+#cgo darwin LDFLAGS: -L${SRCDIR}/clib/darwin -lirohnet_ffi -framework Security -framework SystemConfiguration -framework CoreFoundation -framework CoreWLAN
+#cgo linux,arm LDFLAGS: -L${SRCDIR}/clib/linux_arm -lirohnet_ffi -lunwind
+
+// -lunwind: Rust std's panic machinery references _Unwind_* — on the armv7
+// musl cross-link `zig cc` (the device C toolchain) satisfies it with its
+// bundled LLVM libunwind, statically. Darwin gets unwinding from libSystem.
 
 #include <stdlib.h>
 #include <stdint.h>

@@ -41,8 +41,9 @@ the default), or, when `WATA_IROH_CONFIG=<json>` is set, an embedded iroh
 listener (`go.irohnet.serve`, plan 0013) — the server IS the iroh endpoint,
 the node-id allowlist is enforced at accept inside `go-pkgs/irohnet`, and no
 TCP port exists. The handler surface is identical in both modes. The real
-iroh transport is compiled in only on darwin with the `iroh` Go build tag
-(`just tunnel-smoke` builds it); every other build links the package's
+iroh transport is compiled in only with the `iroh` Go build tag on the wired
+targets — darwin (`just tunnel-smoke` builds it) and linux/arm, the device
+cross-build (`just iroh-lan-smoke`); every other build links the package's
 loud-error stub, so ordinary builds need no cargo.
 
 ## Scope
