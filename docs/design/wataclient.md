@@ -339,7 +339,7 @@ checked against a separately pinned expected-output file in CI.
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |
 | `oracle.scala` | 398 | Portable byte-level self-test report (CRC, Ogg round trip, `Bytes`/`IArray` conformance) plus a foreign-container fixture walker. |
-| `runtime.scala` | 486 | `MatrixClient` handle, `Runtime` object: construction, sync loop, action loop, backfill orchestration, polling helpers. |
+| `runtime.scala` | 443 | `MatrixClient` handle, `Runtime` object: construction, sync loop, action loop, backfill orchestration, polling helpers. |
 | `session.scala` | 41 | `Session` record (stored login credentials) and its JSON (de)serialization. |
 | `syncdescribe.scala` | 306 | Renders engine state/events/snapshot as deterministic text, driven by real captured fixtures. |
 | `syncengine.scala` | 932 | The sync engine: `process()` (ingest) and `buildSnapshot()` (derive UI view). The core of the module. |

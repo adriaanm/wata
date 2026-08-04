@@ -7,20 +7,23 @@ compiles to Go source — see the repo root for the toolchain) and built as an
 `wata-server/go.mod`). There is no JVM at runtime: `sgo build` emits Go, which
 is compiled and run like any other Go program.
 
-The source lives entirely in `wata-server/src/main/scala/` — 9 files, ~2900
+The source lives entirely in `wata-server/src/main/scala/` — 12 files, ~3500
 lines:
 
 | file | lines | role |
 |---|---|---|
-| `model.scala` | 131 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts, config |
-| `membership.scala` | 89 | the room-membership state machine (join/invite/leave/ban transitions) |
-| `jsonnav.scala` | 194 | JSON object/field helpers over the `json` module's `Json` type |
-| `store.scala` | 802 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, long-poll waiter bookkeeping |
-| `persist.scala` | 280 | append-only JSONL journal + boot-time replay |
-| `handlers.scala` | 249 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
-| `rooms.scala` | 457 | createRoom/join/invite/send/redact/receipt/upload/messages handlers |
-| `sync.scala` | 398 | `/sync` (initial + incremental) and the long-poll wait |
-| `server.scala` | 302 | HTTP boot, mux registration, request edge, `SelfCheck` |
+| `model.scala` | 102 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts |
+| `config.scala` | 112 | the accounts, loaded once at boot from `$WATA_USERS`; `serverName` |
+| `membership.scala` | 86 | the room-membership state machine (join/invite/leave/ban transitions) |
+| `power.scala` | 80 | the `m.room.power_levels` authorization table |
+| `jsonnav.scala` | 202 | JSON object/field helpers over the `json` module's `Json` type |
+| `store.scala` | 822 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, long-poll waiter bookkeeping |
+| `persist.scala` | 278 | append-only JSONL journal + boot-time replay |
+| `handlers.scala` | 253 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
+| `keys.scala` | 83 | the E2EE device-key routes, as no-op stubs |
+| `rooms.scala` | 672 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
+| `sync.scala` | 506 | `/sync` (initial + incremental + leave) and the long-poll wait |
+| `server.scala` | 314 | HTTP boot, mux registration, request edge, `SelfCheck` |
 
 ## Scope
 
@@ -358,6 +361,13 @@ writes. Each replayed record bumps the store's global `seq` past whatever it
 carries (`Store.bumpSeq`, `store.scala:737`) so that post-reboot mutations
 stay strictly monotonic relative to anything replayed. A malformed line is
 silently skipped (best-effort, not validated).
+
+Every mutation added since — the generic state PUT, and the `m.room.member`
+writes behind leave/kick/ban — is an ordinary `Store.addEvent`, so it is
+already carried by the `event` op with no new record kind. `tools/wata-persist-smoke.sh`
+pins that: it sets a topic through `PUT /state/...` and bans a user before the
+`kill -9`, and asserts after the reboot that the topic is in the room's state
+and that the banned user still cannot join.
 
 ## File-by-file map
 

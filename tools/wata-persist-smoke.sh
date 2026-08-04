@@ -10,6 +10,8 @@
 #   - the uploaded media downloads BYTE-IDENTICAL (base64url round-trip)
 #   - /sync serves the joined room (derived from replayed state)
 #   - the redaction survives (target content emptied)
+#   - a state event set through PUT /state/... survives
+#   - a ban survives (the banned user still cannot join after the reboot)
 # Deterministic: asserts on stable facts (booleans / known bodies), never a
 # volatile id. Exit non-zero on any failure.
 #
@@ -71,6 +73,10 @@ curl -s -X POST "${B[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/receipt/m.read/$E
 printf 'OggS\x00\x02\x00\xff\xfe\x01\x02\x03VOICE' > "$TMP/voice.ogg"
 CU=$(curl -s -X POST "${A[@]}" -H "Content-Type: audio/ogg" --data-binary @"$TMP/voice.ogg" "$BASE/_matrix/media/v3/upload" | jget content_uri)
 MID="${CU##*/}"
+# the generic state route and a membership eviction: both are ordinary
+# m.room.member / state events in the journal, so this is what proves it.
+curl -s -X PUT "${A[@]}" -d '{"topic":"family channel"}' "$BASE/_matrix/client/v3/rooms/$ROOM/state/m.room.topic/" >/dev/null
+curl -s -X POST "${A[@]}" -d '{"user_id":"@bob:localhost","reason":"persist-test"}' "$BASE/_matrix/client/v3/rooms/$ROOM/ban" >/dev/null
 LINES=$(wc -l < "$LOG" | tr -d ' ')
 
 # ---- crash + reboot from the log -------------------------------------------
@@ -94,6 +100,11 @@ curl -s -o "$TMP/dl.ogg" "${A[@]}" "$BASE/_matrix/media/v3/download/localhost/$M
 check "media-bytes-match"       "$(cmp -s "$TMP/voice.ogg" "$TMP/dl.ogg" && echo true || echo false)"                     "true"
 check "sync-serves-room"        "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
                                     | python3 -c 'import json,sys; print("'"$ROOM"'" in json.load(sys.stdin).get("rooms",{}).get("join",{}))')" "True"
+check "state-put-survives"      "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
+                                    | python3 -c 'import json,sys
+st=json.load(sys.stdin)["rooms"]["join"]["'"$ROOM"'"]["state"]["events"]
+print([e["content"].get("topic") for e in st if e["type"]=="m.room.topic"]==["family channel"])')" "True"
+check "ban-survives"            "$(curl -s -o /dev/null -w '%{http_code}' -X POST "${B[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/join")" "403"
 # idempotency replayed: re-sending tx1 returns the SAME event id
 check "txn-idempotency-survives" "$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.text","body":"persist-me"}' \
                                     "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx1" | jget event_id)"       "$EVID"

@@ -1,6 +1,6 @@
 # 0005 — server conformance: real tokens, full room lifecycle, config users
 
-Status: accepted
+Status: done
 
 `[SRV-CONFORMANCE]`
 
