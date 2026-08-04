@@ -34,20 +34,21 @@ and redaction today deletes the event but strands the blob forever.
 - **Redaction reclaims**: redacting a voice message deletes its blob
   file (the only referrer is the event; media ids are not shared).
 
-## The retention question (needs a product call)
+## Retention (product ruling, 2026-08-04)
 
-The mechanism above bounds *memory and replay*, not *disk*. Options:
+**Wata is ephemeral by design** — a walkie-talkie, not an archive;
+memories can also be stored in brains. Voice media older than
+`WATA_MEDIA_RETAIN_DAYS` (default **7**) is swept: blob file deleted,
+the event redacted server-side, so clients render the same
+message-removed row a manual redaction produces. `0` disables the
+sweep for anyone who wants an archive. The sweep runs at boot and
+daily thereafter, and is journaled like any redaction so a replay
+converges.
 
-1. **No automatic deletion** (recommended start): a family's voice
-   history is potentially precious — kids grow up — and disk is the
-   cheapest resource on both a Pi and a VPS. Add a `just media-usage`
-   style report so growth is visible, revisit if a deployment ever
-   shows a problem.
-2. Age-based sweep (`WATA_MEDIA_RETAIN_DAYS`), off by default.
-
-Option 1 keeps deletion a deliberate human act (redaction); option 2
-is one env var away if wanted later. The plan implements 1 and leaves
-2 designed-but-unbuilt.
+A future "favorite a message" is the intended way to *keep* one —
+favoriting would exempt the event and its blob from the sweep. That
+mechanism (a state marker + UI) is out of scope here; the sweep just
+needs to leave a seam for an exempt-set so favorites can slot in.
 
 ## What changes (file-level)
 
@@ -63,10 +64,14 @@ is one env var away if wanted later. The plan implements 1 and leaves
 
 - Journal compaction (separate mechanism; this plan only stops NEW
   payload growth and migrates old payloads out at boot).
-- Any client change (media fetch surface is unchanged).
-- Retention option 2 implementation.
+- The favorite-a-message mechanism (the sweep leaves the exempt-set
+  seam; the marker and UI are a future plan).
+- Any client change (media fetch surface is unchanged; the swept
+  events arrive as ordinary redactions).
 
 ## Verification
 
-`just persist` extended as above; `just ci` green; `just conformance`
+`just persist` extended as above (incl. a sweep case: an aged blob is
+reclaimed and its event reads as redacted after replay); `just ci`
+green; `just conformance`
 84/84 (media upload/download suites exercise the new path end to end).
