@@ -121,6 +121,12 @@ SCENARIOS = [
             ("-", "alice-resume.txt"),
         ],
     },
+    {
+        "name": "snake",
+        "phases": [
+            ("alice", "alice-snake.txt"),
+        ],
+    },
 ]
 
 

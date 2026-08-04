@@ -8,8 +8,10 @@ import language.experimental.saferExceptions
  *  used elsewhere in this codebase (e.g. the sync engine). The live cell is
  *  ONE module var (`stateV`) touched by ONE goroutine (the UI/main loop).
  *
- *  APPLET SET: `wata` (index 0) + `settings` (index 1). dot1/dot2 switch
- *  applets; PTT always routes to wata regardless of the active applet.
+ *  APPLET SET: `wata` (index 0) + `settings` (index 1) + `snake` (index 2).
+ *  dot1/dot2 switch applets; PTT always routes to wata regardless of the
+ *  active applet; red pressed in the snake applet returns to wata (the
+ *  red-goes-back convention — the game itself never sees the key).
  *
  *  dot2 CAVEAT: input handling opens ONLY /dev/input/event{0,1,2} — the SAME
  *  three devices Evdev.open() opens. It binds dot2 (KEY_F10) but discovers no
@@ -58,13 +60,15 @@ case class ShellState(active: scala.Int, status: Status, applets: IArray[Applet]
 object Shell:
   val WATA = 0
   val SETTINGS = 1
+  val SNAKE = 2
 
   /** the boot state. The settings applet starts from the STORED preferences,
    *  so brightness and screen timeout survive a restart; everything else
    *  starts from its own defaults. */
   def initial(prefs: FbPrefs): ShellState =
     ShellState(WATA, StIdle(),
-      IArray[Applet](WataApplet(WataLogic.initial()), SettingsApplet(SettingsLogic.restored(prefs))))
+      IArray[Applet](WataApplet(WataLogic.initial()), SettingsApplet(SettingsLogic.restored(prefs)),
+        SnakeApplet(SnakeLogic.initial())))
 
   // ---- record withers (no `.copy` on sgola — see WataLogic) -------------------
   def withActive(s: ShellState, a: scala.Int): ShellState =
@@ -104,6 +108,7 @@ object Shell:
   def handleInput(s: ShellState, k: Key, ks: KeyState, ctx: FrameCtx): ShellState =
     if isPressed(ks) && isDot(k) then switchApplet(s, k)
     else if isPtt(k) then routeWata(s, k, ks, ctx)   // PTT is global
+    else if isPressed(ks) && isSnakeBack(s, k) then withActive(s, WATA)
     else routeActive(s, k, ks, ctx)
 
   def isPressed(ks: KeyState): Boolean = ks match
@@ -118,6 +123,15 @@ object Shell:
   def isPtt(k: Key): Boolean = k match
     case KPtt() => true
     case _      => false
+
+  /** red pressed while the snake applet is active: leave the game, back to
+   *  wata (the release then lands on wata's contacts view, a no-op). */
+  def isSnakeBack(s: ShellState, k: Key): Boolean =
+    s.active == SNAKE && isBackKey(k)
+
+  def isBackKey(k: Key): Boolean = k match
+    case KBack() => true
+    case _       => false
 
   def switchApplet(s: ShellState, k: Key): ShellState = k match
     case KDot2() => withActive(s, (s.active + 1) % s.applets.length)
@@ -139,8 +153,9 @@ object Shell:
 
   // ---- per-frame update --------------------------------------------------------
   /** Drain the audio-event mailbox ONCE, here, routing each event to its
-   *  owning applet by type — then tick every applet (both applets are updated
-   *  on every frame regardless of which one is displayed). The single drain is
+   *  owning applet by type — then tick every applet (the wata and settings
+   *  applets are updated on every frame regardless of which one is displayed;
+   *  the snake alone ticks only while active — see `tickOne`). The single drain is
    *  load-bearing: two per-applet drains on the one channel would each eat the
    *  other's events, and which drain won depended on when the audio goroutine's
    *  send landed inside the frame — an `AeRecordingDone` falling between them
@@ -149,8 +164,15 @@ object Shell:
   def update(s: ShellState, dt: scala.Double, ctx: FrameCtx): ShellState =
     val d = drainAudio(s, ctx)
     ShellState(d.active, d.status, IArray.tabulate(d.applets.length)(i => tickOne(d, i, dt, ctx)))
+  /** every applet ticks every frame — EXCEPT the snake, which ticks only
+   *  while it is the active applet: the Zig shell ticks the active applet
+   *  alone, so switching away from its snake implicitly pauses the game, and
+   *  an always-ticking port would instead run it into a wall unwatched. The
+   *  always-tick rule exists for the audio-event routing (plan 0009), which
+   *  the snake takes no part in. */
   def tickOne(s: ShellState, i: scala.Int, dt: scala.Double, ctx: FrameCtx): Applet =
-    s.applets(i).update(dt, ctx)
+    if i == SNAKE && s.active != SNAKE then s.applets(i)
+    else s.applets(i).update(dt, ctx)
 
   /** the ONE consumer of `ctx.audioEvts`: every pending event, routed. */
   def drainAudio(s0: ShellState, ctx: FrameCtx): ShellState =

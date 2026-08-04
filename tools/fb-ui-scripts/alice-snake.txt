@@ -1,0 +1,36 @@
+# snake, phase 1: the snake applet end to end — open, steer, eat, die, restart.
+# Everything after the applet opens is pure virtual-clock work (`idle`): the
+# game ticks on the frame clock and its food PRNG is fixed-seed (SEED 88), so
+# the frame counts below land on exact game states. The counts were designed
+# with tools/snake-frames.py, which mirrors SnakeLogic frame for frame.
+
+wait syncing 1 900
+advance 5
+
+# dot1 = prev applet: wata (0) wraps straight to snake (2). The press frame
+# already ticks the now-active game, so the tap costs the 2 frames the design
+# mirror models. Fresh board: 3 cells at center heading right, food at (20,7).
+tap dot1
+checkpoint snake-open
+
+# 7 cells straight ahead to the food: eaten on exactly the 30th frame after
+# the tap — score 0010, length 4, next food at (20,8), tick now 145ms.
+idle 30
+checkpoint snake-eat
+
+# turn up and run into the top wall: dead after 33 more frames. The board
+# freezes on death (update early-returns), so the 6 frames of margin cannot
+# move a pixel. GAME OVER overlay + the final score.
+tap up
+idle 39
+checkpoint snake-gameover
+
+# OK restarts, CONTINUING the PRNG: fresh center board, score 0000, and the
+# next food in the sequence at (13,12) — visibly a new game, not a replay.
+tap enter
+checkpoint snake-restart
+
+# red leaves the game: back on the wata applet, snake frozen behind it.
+tap back
+advance 5
+checkpoint snake-left
