@@ -58,8 +58,7 @@ object Selftest:
     var frames: List[Bytes] = Nil
     var i = 0
     while i < nFrames do
-      val f = enc.encodeFrameAt(pcm, i) // hoisted: a throwing call must be val-bound
-      frames = GoBytes.toPortable(f) :: frames
+      frames = GoBytes.toPortable(enc.encodeFrameAt(pcm, i)) :: frames
       i += 1
     enc.close()
     Ogg.writeStream(ListOps.reverse(frames))

@@ -98,8 +98,5 @@ object Diag:
     else println("diag: not on device; skipping " + cmd)
 
   def runNow(cmd: String): Unit =
-    try
-      val c = go.exec.command(cmd)
-      val raw = c.output()
-      if raw.length < 0 then println("diag: unreachable")
+    try go.exec.command(cmd).run()
     catch case e: sgo.GoError => println("diag: " + cmd + ": " + e.message)

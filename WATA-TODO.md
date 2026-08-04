@@ -49,12 +49,11 @@ blocks + git log; each entry cites where it was recorded.*
   GRADUATION-BRIEF consumer-driven ledger.
 - ADT-valued `Atomic` cells / RWMutex reader-parallel cell — same
   ledger, first-consumer-triggered (Wata is the likely consumer).
-- Emitter trap (lowering edges from the settings-diagnostics build, all
-  loud; filed THROWS-CALL-IN-ARG-POSITION): a throws-lowered call inline
-  in argument position mis-emits (hoist to a val); an ignored `(T, error)`
-  result trips Go's unused-variable check; a lone-`error` facade method
-  (e.g. `exec.Cmd.Run`) gets no throws lowering — curate a `(T, error)`
-  shape such as `Output()` instead.
+- Emitter trap (residual of the fixed THROWS-CALL-IN-ARG-POSITION; loud;
+  upstream ticket UNIT-THROWS-DEF): a USER-WRITTEN `def f(): Unit throws E`
+  definition (not a facade — facade lone-`error` shapes like `exec.Cmd.Run`
+  lower fine as of pin `9d4f544`) is a loud wall — give such a def a
+  non-Unit result (or keep it a facade) until the fix lands.
 - Emitter trap (upstream-known, filed NATIVEVIEW-LOCAL-TYPE-INFERENCE):
   a local bound to `go.makeSlice[T](n)` needs an explicit type ascription
   (`var xs: go.Slice[T] = ...`) or the element type degrades — keep

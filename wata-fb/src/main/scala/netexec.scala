@@ -5,16 +5,16 @@ import language.experimental.saferExceptions
 /** `go.exec` — the APP-OWNED facade over `os/exec`, bound the same `@go.bind`
  *  way as `go.syscall` (app-side device-layer code may bind stdlib packages
  *  directly). Curated to the one shape the settings applet's diagnostics
- *  need: build a command, run it to completion, read its stdout — how the
- *  power rows run poweroff / reboot-* , the same commands system-menu runs. */
+ *  need: build a command and run it to completion — how the power rows run
+ *  poweroff / reboot-* , the same commands system-menu runs. */
 @go.bind("os/exec")
 object exec:
   /** Facade class for Go `*exec.Cmd`. */
   final class Cmd private[go] ():
-    /** `Cmd.Output()` — `([]byte, error)`: runs the command, waits, returns
-     *  stdout. Chosen over `Run()` because its `(T, error)` shape rides the
-     *  ordinary throws val-bind lowering (a lone-`error` return does not). */
-    @go.name("Output") def output(): go.Bytes throws sgo.GoError = ???
+    /** `Cmd.Run()` — lone `error`: runs the command and waits. The power
+     *  rows never read stdout, so the run-to-completion shape is the whole
+     *  curation. */
+    @go.name("Run") def run(): Unit throws sgo.GoError = ???
 
   /** `exec.Command(name)` — `name` without a path separator is resolved
    *  through `$PATH` (how "poweroff" finds /sbin/poweroff). */
