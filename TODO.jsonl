@@ -1,3 +1,4 @@
 {"key": "FB-BOOT-LOGO", "title": "boot logo end to end: aboot splash partition frame, kernel quiet/fbcon-logo suppression, hand-off to wata-fb's first frame", "doc": "docs/plans/0003-parity-and-beyond.md", "inProgress": false}
 {"key": "FB-EARLY-BOOT", "title": "start wata-fb as early as init allows; UI presents a calm starting-up/waiting-for-network state over the existing backoff instead of an error surface", "doc": "docs/plans/0003-parity-and-beyond.md", "inProgress": false}
 {"key": "FB-SNAKE", "title": "port the Zig client's snake game applet (parity gap found by the first kid field test)", "doc": "docs/design/wata-fb.md", "inProgress": false}
+{"key": "FB-CONN-STATUS", "title": "wifi/cellular/reconnecting status in the wata UI proper (not just settings rows) \u2014 M4's UI-clarity condition; then the M4 flip test", "doc": "docs/plans/0013-iroh-e2e.md", "inProgress": false}

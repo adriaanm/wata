@@ -54,8 +54,17 @@ sound). It rides this config format but must not gate the tunnel.
 3. **Foreign-network E2E (the acceptance bar)**: device on a phone
    hotspot, full walkie-talkie round trip both directions; record
    connect latency, PTT-to-played latency, relay-vs-direct path.
-4. **Roaming**: hotspot to LAN mid-session; reconnect rides the
-   client's existing sync backoff; record recovery time.
+4. **Roaming**: a network flip mid-session (cellular to LAN or back);
+   reconnect rides the client's existing sync backoff — transport-level
+   reconnect, NOT seamless QUIC path migration (ruled 2026-08-04:
+   seamless migration explicitly out of scope; PTT messages are async,
+   so seconds of reconnect are acceptable). Acceptance: after the flip,
+   sync resumes within 30s of the new network being usable, no messages
+   lost, and — the ruling's condition — the UI is clear about it: the
+   wata UI grows a connectivity status element (wifi / cellular /
+   reconnecting) so a kid can see why the radio went quiet
+   ([FB-CONN-STATUS]). Each cellular flip test costs a reboot (the
+   one-data-call-per-boot kernel constraint above).
 5. **Allowlist enforcement**: an unenrolled node id is refused at
    accept (E2E negative test). DONE (2026-08-04): lives as the
    `allowlist-negative` leg of `just tunnel-smoke`, so every `just ci`
