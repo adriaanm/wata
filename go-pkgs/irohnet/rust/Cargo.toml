@@ -1,0 +1,17 @@
+[package]
+name = "irohnet-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI over iroh for the Go irohnet package: blocking endpoint/stream calls suitable for net.Conn glue."
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+iroh = "=1.0.2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+data-encoding = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
