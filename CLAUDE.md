@@ -197,6 +197,9 @@ durable content lives in the docs.
   in `doc`; grep it there rather than reading the whole doc.
 - **`doc`** — a design doc, or a plan doc for work that has one.
 - **`inProgress`** — true while someone is on it.
+- **`blocked`** — optional: the `key` of the item this one waits on, or a
+  short phrase for an external dependency. A blocked item stays in the
+  queue (the dependency is the durable part) but is not up for grabs.
 
 **Lifecycle.** Finishing an item, or deciding it is out of scope, means
 **deleting its line** and reflecting the outcome in its `doc` — the fix
