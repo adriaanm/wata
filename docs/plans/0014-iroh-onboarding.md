@@ -1,6 +1,6 @@
 # 0014 — enrolling a device onto the family's iroh network
 
-Status: **proposed**
+Status: **accepted**
 
 ## The problem
 
@@ -31,50 +31,58 @@ That reframing matters: the audio-modem idea was born when enrolment
 looked like "deliver a config to the device". It is a much better fit
 for the small remaining job than for the original one.
 
-## Getting the device's id to the server
+## Getting the device's id to the server — the phone approach
 
-The device has a screen, which is the asset to use.
+Ruled 2026-08-05: **the device displays, the parent's phone scans.**
 
-- **Device displays, phone scans.** The device shows a QR of its node
-  id; the parent scans it with their phone, which posts it to the
-  server. The BQ268 has no camera, but nothing here needs it to have
-  one — the camera is on the parent's phone. 128×160 is enough for a
-  ~32-byte payload at a readable module size.
-- **Device displays a short code.** A 6–8 character code derived from
-  the pending node id, typed into a web page or the tui. No optics, no
-  alignment, works when the screen is scratched; the code is a
-  reference to a pending enrolment the device also announces, not the
-  id itself.
+The device shows a QR of its node id plus a short-lived enrolment
+nonce; the parent scans it with the phone they already have and
+approves. The handset needs no camera — the camera is on the phone —
+and 128×160 is enough for a ~32-byte payload at a readable module
+size. The server grows an allowlist entry only on that approval, so
+approval is the security boundary: it needs a short expiry and a rate
+limit, and the pending entry is a *reference* to an announced id, not
+a way to inject one.
 
-Both want a *pending enrolment* endpoint on the server: the device
-announces "I am id X, code ABC-123, awaiting approval", the parent
-approves out of band, the allowlist grows by one. Approval is the
-security boundary, so it needs a rate limit and a short expiry.
+A short typed code stays available as the fallback for a scratched or
+dim screen, using the same pending-enrolment endpoint — it is the same
+handshake with a different reader.
 
 ## Getting the server's id to the device
 
-- **Baked into the image.** A family's own server id written at flash
-  time. Zero UX, and honest for the first sweep — we build the images.
-- **Audio.** The proven path: `src/shared/lib/audiocode.ts` in the
-  original repo does 16-MFSK, 1500–3375 Hz, 4 bits/symbol, 35 ms/symbol
-  with Reed-Solomon at 100% redundancy — 111 bytes in 13.3 s, which
-  comfortably carries a 32-byte node id. A phone browser plays it; the
-  device already has the microphone and the Opus path. Its real value
-  is *re-provisioning a device we did not flash* — a second-hand
-  handset, a factory reset, a server that moved.
-- **Rendezvous.** A well-known bootstrap node the device asks. Most
-  convenient, most infrastructure, and it puts a third party in the
-  trust path. Not for the family tier.
+**Baked into the image at flash time.** We build the family's images,
+so the family's own server id is known then. Zero UX, honest for the
+first sweep, and nothing to design.
 
-## Recommendation
+## Audio: dropped (recorded, not forgotten)
 
-Start with device-minted keys plus the pending-enrolment endpoint, and
-bake the server id at flash time. That makes the first family sweep
-work with no new hardware and no new protocol. Add the QR display
-next, since it is a small change to a screen we control. Keep the
-audio channel as the answer to re-provisioning, and port `audiocode.ts`
-when that need is real — the TS implementation is the oracle, the same
-way the Ogg writer was.
+The audio modem was the original idea here, and it is dropped as an
+onboarding transport — ruled 2026-08-05 after the reframing above.
+Once the device mints its own keypair, nothing secret needs to cross
+the gap, and the job shrinks to moving two public ids. A phone camera
+does that in a second, against 13.3 s of tones that need quiet, a
+working speaker, and a working microphone. Audio only won when
+enrolment meant *delivering a config*, and it no longer does.
+
+What that reasoning does not cover is a device we did not flash — a
+second-hand handset, a factory reset, a server that moved — where the
+server id has to arrive some other way. If that need becomes real, the
+proven implementation is still there to port: `audiocode.ts` in the
+original repo (16-MFSK, 1500–3375 Hz, 4 bits/symbol, 35 ms/symbol,
+Reed-Solomon at 100% redundancy, 111 bytes in 13.3 s), with the TS
+version as its oracle the way the Ogg writer had one. Until then it is
+not built.
+
+## Milestones
+
+1. **Device-minted identity**: the device generates its keypair on
+   first boot and persists it with the rest of its config; nothing
+   mints keys by hand any more.
+2. **Pending enrolment**: the server takes an announced id + nonce,
+   holds it with an expiry, and grows the allowlist on approval.
+3. **The QR**: rendered on the device's own framebuffer, goldened like
+   every other frame, plus the approval page the phone lands on.
+4. **The typed-code fallback** over the same endpoint.
 
 ## Out of scope
 
