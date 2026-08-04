@@ -1,6 +1,6 @@
 # 0011 — UI flow coverage: the main use cases, pixel-pinned
 
-Status: proposed
+Status: accepted
 
 `[UI-FLOWS]`
 
