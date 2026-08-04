@@ -33,8 +33,7 @@ events, read receipts, media upload/download, and `/sync` including
 long-polling. Deliberately absent: any encryption (no
 `m.room.encrypted` handling, no device-key endpoints), federation, user
 registration (users are a fixed, hardcoded pair — `wata-server/src/main/scala/model.scala:120-131`),
-power-level enforcement on ordinary state/message events (only membership is
-checked — see "Known gaps" below), `/publicRooms`, and `createRoom`'s
+`/publicRooms`, and `createRoom`'s
 `initial_state`/`creation_content`/`power_level_content_override` fields
 (`rooms.scala:13-18`).
 
@@ -155,6 +154,30 @@ is optional in the path. Clients write the key three ways — omitted, empty (a
 trailing slash), or present — and a plain `{stateKey}` segment matches none of
 the first two, so the route is registered twice, the second time with a
 trailing wildcard `{stateKey...}` that also matches an empty remainder.
+
+**Power levels** (`power.scala`) are the second half of every authorization
+decision: `Mem.transition` says whether a change is legal at all, `Power` says
+whether *this actor* may drive it, and handlers ask them in that order. The
+whole module is lookups with defaults out of the room's one
+`m.room.power_levels` state event, compared with `>=`; the defaults are the
+spec's, and are also what `Rooms.powerLevels` writes into a new room —
+`users_default` 0, `events_default` 0, `state_default` 50, `invite` 0,
+`kick`/`ban`/`redact` 50, creator 100. A room with no power-levels event falls
+through to those defaults, which leaves message sending open and state setting
+closed.
+
+| attempt | check |
+|---|---|
+| `PUT /send/{eventType}` | `Power.canSend(..., isState = false)` — `events[type]`, else `events_default` |
+| `PUT /state/{eventType}/…` | `Power.canSend(..., isState = true)` — `events[type]`, else `state_default` |
+| `PUT /redact/{eventId}` | `Power.canRedact` — the `m.room.redaction` send level, plus the `redact` level when the target is someone else's event |
+| `POST /invite` | `Power.canInvite` — the `invite` level |
+| `POST /kick` / `/ban` | `Power.canKick`/`canBan` — the named level, AND the actor must strictly outrank the target, so equals cannot evict equals |
+
+A failure is `403 M_FORBIDDEN`. Membership events the server writes on a user's
+own behalf — joining, and the display-name fan-out that rewrites
+`m.room.member` in every joined room — do not go through the state route and
+are not power-checked; membership rules govern those.
 
 **Account data** (`AcctData`, `model.scala:58`) is one flat list for both
 global and per-room entries, disambiguated by a `(hasRoom, roomId)` pair
@@ -309,6 +332,7 @@ silently skipped (best-effort, not validated).
 - **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and `Config` (the two hardcoded users, `serverName = "localhost"`).
 - **`membership.scala`** — the membership sealed types and the join/invite/leave/ban transition table; every row is reachable from an HTTP route.
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
+- **`power.scala`** — `Power`: the `m.room.power_levels` authorization table (send/state/redact/invite/kick/ban).
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, and per-op-kind (de)serialization.
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
@@ -323,16 +347,6 @@ the unscheduled `/sync` allocation cost, and the
 explicitly-deferred actor-store refactor), reading the code surfaced the following. Items with a `[KEY]` tag have a
 line in `TODO.jsonl`; grep the key here for the body.
 
-- `[SRV-POWER-LEVELS]` **No power-level enforcement on ordinary events.** `Rooms.sendEvent`
-  (`rooms.scala:246-259`) and `Rooms.redact` (`rooms.scala:289-297`) only
-  check that the sender is `MJoin` in the room — there is no check against
-  `m.room.power_levels` at all for sending messages, sending arbitrary state
-  events, or redacting. The comment at `rooms.scala:284-287` explicitly notes
-  redaction fidelity to an earlier reference implementation that also skipped
-  the power-level check, but the same gap silently applies to every event
-  type sent through `send5`, including state events like
-  `m.room.power_levels` itself — any joined member can currently overwrite
-  the power levels, name, join rules, etc. of a room they didn't create.
 - `[SRV-MEDIA-UNBOUNDED]` **Unbounded memory and journal growth for media.** `Store.storeMedia`
   (`store.scala:513`) never evicts, caps, or expires blobs; with persistence
   on, every upload is also base64-encoded into the JSONL log

@@ -99,6 +99,16 @@ object JsonNav:
     case s: JStr => s.s
     case _       => dflt
 
+  /** an int64 field, or the default when absent / not an integer (the
+   *  power-levels table is read entirely through this). */
+  def longOrDflt(j: Json, key: String, dflt: scala.Long): scala.Long = getField(j, key) match
+    case s: Some[Json] => longValOr(s.value, dflt)
+    case None => dflt
+
+  def longValOr(j: Json, dflt: scala.Long): scala.Long = j match
+    case i: JInt => i.v
+    case _       => dflt
+
   /** is this JSON value an object (spec: account-data bodies must be objects). */
   def isObj(j: Json): Boolean = j match
     case _: JObj => true

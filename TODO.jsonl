@@ -1,6 +1,5 @@
 {"key": "PIN-BUMP-BLOCKED", "title": "toolchain bump to sgola b0d02aef parked on branch pin-bump-b0d02aef — new pin miscompiles upsertRoomList tuple (JArr cast to JStr); repin+merge when sgola fixes it", "doc": "WATA-TODO.md", "inProgress": false}
 {"key": "FB-SIM-DEVICE-VERIFY", "title": "human pass: just fb-deploy + on-device check that the UiDevice refactor left the real fbdev/evdev path intact", "doc": "docs/design/wata-fb.md", "inProgress": false}
-{"key": "SRV-POWER-LEVELS", "title": "no power-level check on send or redact — any joined member can overwrite m.room.power_levels, name, join rules", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "SRV-BODY-LIMIT", "title": "serveHTTP readAll has no request body size limit — one request can exhaust memory", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "SRV-MEDIA-UNBOUNDED", "title": "media blobs never evicted or capped, and are base64'd into the journal — unbounded memory and boot-replay time", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "FB-M8-LITERALS", "title": "drop the three M8 milestone literals (fbtest/main/applets); regenerate tools/fb-golden.png and the affected .expected.txt oracles in the same commit", "doc": "docs/design/wata-fb.md", "inProgress": false}

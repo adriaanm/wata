@@ -209,8 +209,16 @@ object Rooms:
   def invite1(userId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     val roomId = r.pathValue("roomId")
     Store.getMembership(roomId, userId) match
-      case _: MJoin => invite2(roomId, body)
+      case _: MJoin => invitePower(userId, roomId, body)
       case _        => Left(MErr(403, M_FORBIDDEN(), "You are not in this room"))
+
+  def invitePower(userId: String, roomId: String, body: String): Either[MErr, Json] = Store.getRoom(roomId) match
+    case s: Some[Room] => invitePower2(s.value, userId, roomId, body)
+    case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+
+  def invitePower2(room: Room, userId: String, roomId: String, body: String): Either[MErr, Json] =
+    if Power.canInvite(room, userId) then invite2(roomId, body)
+    else Left(MErr(403, M_FORBIDDEN(), "You don't have permission to invite users"))
 
   def invite2(roomId: String, body: String): Either[MErr, Json] = Json.tryParse(body) match
     case Right(j) => invite3(roomId, j)
@@ -295,7 +303,20 @@ object Rooms:
   def evict4(actor: String, roomId: String, target: String, reason: String, act: MAction, to: String): Either[MErr, Json] =
     Mem.transition(Store.getMembership(roomId, target), act) match
       case _: Denied => Left(MErr(403, M_FORBIDDEN(), "User cannot be removed from this room"))
-      case _         => evict5(actor, roomId, target, reason, to)
+      case _         => evictPower(actor, roomId, target, reason, to)
+
+  /** the transition is legal; may THIS actor drive it. */
+  def evictPower(actor: String, roomId: String, target: String, reason: String, to: String): Either[MErr, Json] =
+    Store.getRoom(roomId) match
+      case s: Some[Room] => evictPower2(s.value, actor, roomId, target, reason, to)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+
+  def evictPower2(room: Room, actor: String, roomId: String, target: String, reason: String, to: String): Either[MErr, Json] =
+    if mayEvict(room, actor, target, to) then evict5(actor, roomId, target, reason, to)
+    else Left(MErr(403, M_FORBIDDEN(), "You don't have permission to remove that user"))
+
+  def mayEvict(room: Room, actor: String, target: String, to: String): Boolean =
+    if to == "ban" then Power.canBan(room, actor, target) else Power.canKick(room, actor, target)
 
   def evict5(actor: String, roomId: String, target: String, reason: String, to: String): Either[MErr, Json] =
     depart(roomId, actor, target, to, reason)
@@ -337,8 +358,12 @@ object Rooms:
 
   def setState2(userId: String, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     Store.getMembership(roomId, userId) match
-      case _: MJoin => setState3(userId, roomId, r, body)
+      case _: MJoin => statePower(userId, roomId, r, body)
       case _        => Left(MErr(403, M_FORBIDDEN(), "User is not in the room"))
+
+  def statePower(userId: String, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
+    if mayPost(roomId, userId, r.pathValue("eventType"), true) then setState3(userId, roomId, r, body)
+    else Left(MErr(403, M_FORBIDDEN(), "You don't have permission to set that state event"))
 
   def setState3(userId: String, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     Json.tryParse(body) match
@@ -378,8 +403,18 @@ object Rooms:
 
   def send2(auth: Auth, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     Store.getMembership(roomId, auth.userId) match
-      case _: MJoin => send3(auth, roomId, r, body)
+      case _: MJoin => sendPower(auth, roomId, r, body)
       case _        => Left(MErr(403, M_FORBIDDEN(), "User is not in the room"))
+
+  /** `/send/` carries no state key, so the event needs the `events_default`
+   *  level (0 in a default room) rather than `state_default`. */
+  def sendPower(auth: Auth, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
+    if mayPost(roomId, auth.userId, r.pathValue("eventType"), false) then send3(auth, roomId, r, body)
+    else Left(MErr(403, M_FORBIDDEN(), "You don't have permission to post that event type"))
+
+  def mayPost(roomId: String, userId: String, etype: String, isState: Boolean): Boolean = Store.getRoom(roomId) match
+    case s: Some[Room] => Power.canSend(s.value, userId, etype, isState)
+    case None => false
 
   def send3(auth: Auth, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     val txnId = r.pathValue("txnId")
@@ -405,8 +440,9 @@ object Rooms:
 
   // ---- redaction ------------------------------------------------------------
   //
-  // Redaction requires only that the redactor be joined to the room; there is
-  // no power-level check.
+  // The redactor must be joined AND clear `Power.canRedact`: the send level for
+  // `m.room.redaction` for their own event, plus the room's `redact` level (50
+  // by default) for anyone else's.
 
   def redact(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]  => Left(l.left)
@@ -425,8 +461,16 @@ object Rooms:
   def redact3(auth: Auth, roomId: String, r: go.net.http.Request, j: Json): Either[MErr, Json] =
     val eventId = r.pathValue("eventId")
     Store.getEventById(roomId, eventId) match
-      case _: Some[Event] => redact4(auth, roomId, r, eventId, j)
+      case s: Some[Event] => redactPower(auth, roomId, r, eventId, j, s.value)
       case None => Left(MErr(404, M_NOT_FOUND(), "Event not found"))
+
+  def redactPower(auth: Auth, roomId: String, r: go.net.http.Request, eventId: String, j: Json, target: Event): Either[MErr, Json] =
+    if mayRedact(roomId, auth.userId, target) then redact4(auth, roomId, r, eventId, j)
+    else Left(MErr(403, M_FORBIDDEN(), "You don't have permission to redact that event"))
+
+  def mayRedact(roomId: String, userId: String, target: Event): Boolean = Store.getRoom(roomId) match
+    case s: Some[Room] => Power.canRedact(s.value, userId, target)
+    case None => false
 
   def redact4(auth: Auth, roomId: String, r: go.net.http.Request, eventId: String, j: Json): Either[MErr, Json] =
     val txnId = r.pathValue("txnId")
