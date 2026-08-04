@@ -98,7 +98,28 @@ sound). It rides this config format but must not gate the tunnel.
    the QUIC close reason (401 "not allowlisted") does not propagate
    into the intruder's client error text, which reads as a generic
    closed connection — enforcement is server-side at accept, which is
-   the property that matters.
+   the property that matters. Surfacing the reason is queued as
+   [IROH-REFUSAL-LOUD]; design ruled 2026-08-05 after reading the FFI:
+
+   - Where it is lost: the server `conn.close(401, b"not allowlisted")`
+     lands on the client as a `ConnectionError::ApplicationClosed`
+     carrying code+reason, but `irohnet_client_dial`
+     (`go-pkgs/irohnet/rust/src/lib.rs`) flattens every connect/open_bi
+     failure to `format!("{e:?}")` — and the cached-connection branch
+     (`Err(_) => *guard = None`) drops the close error entirely before
+     redialing.
+   - Fix at the layer that has the information: match
+     `ApplicationClosed` in both dial branches and format
+     `"server refused: <code> <reason-utf8>"`; remember the last
+     refusal on the client handle so the redial loop stays quiet after
+     the first loud line.
+   - Go/caps: the dial error string already reaches `go.irohnet` and
+     the app edge; log it once per distinct reason (the portable core's
+     `HttpResponse(0, "")` contract stays — the core never sees Go
+     errors). A distinguishable "NOT ENROLLED" UI state rides the
+     FB-CONN-STATUS element later, gated on enrolment existing (plan
+     0014) — until a device *can* enrol, a dedicated screen for "not
+     enrolled" has no action to offer beyond the log line.
 
 **Milestone 1 outcome**: done (merged) — `go-pkgs/irohnet` proves out on
 darwin; `just tunnel-smoke` joins `just ci`.
