@@ -12,7 +12,10 @@ import JsonNav.*
  *       state-vs-timeline split, summary/heroes, unread counts, ephemeral
  *       receipts (m.receipt edu), and global account-data deltas. Assembled from
  *       the store's persistent snapshots via the JsonNav builders. Deterministic
- *       modulo the wall-clock `unsigned.age`.
+ *       modulo the wall-clock `unsigned.age`. Global account data goes out
+ *       through the DM compat projection (`Dm.project`), which re-asserts the
+ *       server's canonical pairs over whatever the client last wrote to
+ *       `m.direct` — client writes are stored, never load-bearing.
  *
  *   (2) The LONG-POLL: a per-request waiter channel registered when an
  *       incremental sync finds no changes and `timeout > 0`; the handler selects
@@ -145,7 +148,7 @@ object Sync:
   def initialParts(userId: String, upTo: scala.Long): SyncParts =
     val joins = buildJoinsInitial(Store.roomsForUser(userId, "join"), userId, Nil)
     val invites = buildInvites(Store.roomsForUser(userId, "invite"), Nil)
-    val global = Store.allAccountData(userId, false, "")
+    val global = Dm.project(userId, Store.allAccountData(userId, false, ""))
     SyncParts(joins, invites, Nil, global, upTo)
 
   def buildJoinsInitial(rooms: List[Room], userId: String, acc: List[(String, Json)]): List[(String, Json)] = rooms match
@@ -174,7 +177,7 @@ object Sync:
     val joins = buildJoinsIncr(Store.roomsForUser(userId, "join"), userId, sinceSeq, Nil)
     val invites = buildInvitesIncr(Store.roomsForUser(userId, "invite"), userId, sinceSeq, Nil)
     val leaves = buildLeaves(Store.roomsLeftBy(userId), userId, sinceSeq, Nil)
-    val global = Store.acctSinceGlobal(userId, sinceSeq)
+    val global = Dm.project(userId, Store.acctSinceGlobal(userId, sinceSeq))
     SyncParts(joins, invites, leaves, global, upTo)
 
   def buildJoinsIncr(rooms: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] = rooms match
