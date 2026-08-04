@@ -83,11 +83,14 @@ object Respond:
     w.writeHeader(go.Int.of(200))
     writeBody(w, data)
 
+  /** write the body; a failed write — usually the client hanging up mid-response
+   *  — is logged (one line, like every other server log) and dropped, since the
+   *  connection is already gone. */
   def writeBody(w: go.net.http.ResponseWriter, body: String): Unit =
     try
       w.write(go.bytes(body))
       ()
-    catch case e: sgo.GoError => ()
+    catch case e: sgo.GoError => println("wata: response write failed: " + e.message)
 
 object Server:
   def serve(addr: String): Unit =

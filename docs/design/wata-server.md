@@ -123,7 +123,11 @@ elsewhere) — there is no admin/impersonation concept.
 Response envelope: every JSON response goes through `Respond.finish`
 (`server.scala:54`), which sets `Content-Type: application/json` and
 wide-open CORS headers (`Access-Control-Allow-Origin: *`, plus explicit
-methods/headers) unconditionally, then writes the status and body. `NotFound`
+methods/headers) unconditionally, then writes the status and body. A body
+write that fails (`Respond.writeBody` — usually the client hanging up
+mid-response) is logged as one `wata: response write failed: …` line and
+dropped; the connection is already gone, but the line keeps partial-response
+bugs visible in server logs. `NotFound`
 (`server.scala:46`) answers unmatched paths with a Matrix 404 envelope, and
 answers `OPTIONS` (CORS preflight) with 204 — this is the *only* place CORS
 preflight is handled, and it only works because `"/"` catches every otherwise
@@ -523,7 +527,3 @@ line in `TODO.jsonl`; grep the key here for the body.
   write** (`store.scala`, throughout — e.g. `findAcct`, `filterReceipts`,
   `lookupState`). Documented as an accepted tradeoff for small/toy room and
   user counts, but worth naming as the load-bearing scalability ceiling.
-- `[SRV-WRITE-ERR-SILENT]` **`Respond.writeBody`'s write error is silently swallowed**
-  (`server.scala:71-75`, `catch case e: sgo.GoError => ()`) — a failed write
-  to the client is not logged anywhere, which would make partial-response
-  bugs hard to diagnose from server-side logs alone.
