@@ -43,6 +43,17 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
+- Backend crash (filed 2026-08-05, `wata-thicket-recursive-unit-walk`):
+  a `Unit`-returning self-recursive list walk crashes `sgolaBackend`
+  ("unsupported expression (Thicket)"); file-context-dependent, does not
+  repro in isolation. Workaround everywhere: `while` over a `var cur`.
+- Facade gap (filed 2026-08-05, `wata-variadic-facade-gap`): no lowering
+  into Go `...T` variadic params — `exec.Command` is bound as five
+  explicit arities in `wata-tui/src/main/scala/facades.scala`.
+- Ruling wanted (filed 2026-08-05, `wata-try-stmt-shape-sensitivity`):
+  throwing calls in nested statement positions inside `try` are rejected
+  until val-bound on their own line; defect or intended restriction?
+
 - `go.Slice[T]` sub-slicing (blocked the Opus decoder consumer) —
   GRADUATION-BRIEF ch.D.
 - cgo cross-targets beyond linux/arm (a second device target) —
