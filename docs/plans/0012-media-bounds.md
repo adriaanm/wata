@@ -1,6 +1,6 @@
 # 0012 — media out of the journal, and a retention decision
 
-Status: proposed
+Status: accepted
 
 `[MEDIA-BOUNDS]`
 
