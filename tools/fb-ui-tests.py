@@ -101,6 +101,13 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "send-play-failed",
+        "hooks": True,
+        "phases": [
+            ("alice", "alice-fail.txt"),
+        ],
+    },
+    {
         "name": "settings-walk",
         "phases": [
             ("alice", "alice-settings.txt"),

@@ -101,11 +101,14 @@ object Ui:
   // from "the send failed" and "sync fell into error backoff" after the fact.
   private val sendOkC: sgo.Atomic[scala.Int] = sgo.atomic(0)
   private val sendFailC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  private val playFailC: sgo.Atomic[scala.Int] = sgo.atomic(0)
   private val connErrC: sgo.Atomic[scala.Int] = sgo.atomic(0)
   /** sends completed this session (`EvSendComplete` count). */
   def sendOks: scala.Int = sendOkC.get()
   /** sends failed this session (`EvSendFailed` count). */
   def sendFails: scala.Int = sendFailC.get()
+  /** plays failed this session (`EvPlaybackError` count). */
+  def playFails: scala.Int = playFailC.get()
   /** `ConnError` transitions this session (each one = sync-loop backoff). */
   def connErrs: scala.Int = connErrC.get()
 
@@ -175,6 +178,7 @@ object Ui:
     savedC.set(false)
     sendOkC.set(0)
     sendFailC.set(0)
+    playFailC.set(0)
     connErrC.set(0)
 
   /** seed the frame clock — every driver calls this once before its first
@@ -304,7 +308,9 @@ object Ui:
     case _: EvSendFailed   =>
       tally(sendFailC)
       stateC.set(Shell.notifyWataSend(stateV, true))
-    case _: EvPlaybackError => stateC.set(Shell.notifyWataPlayError(stateV))
+    case _: EvPlaybackError =>
+      tally(playFailC)
+      stateC.set(Shell.notifyWataPlayError(stateV))
     case _: EvSnapshot     => () // snapshot is picked up via pollSnap
 
   /** bump a tally cell, discarding `add`'s returned new value (a bare value

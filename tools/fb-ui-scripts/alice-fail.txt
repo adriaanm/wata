@@ -1,0 +1,54 @@
+# send-play-failed: the two failure flashes, rendered against a real server
+# that fails on demand. The scenario's server runs with WATA_TEST_HOOKS=1;
+# `failnext <n>` arms its counter so the next n media uploads/downloads
+# answer 500, and the counter disarms itself as it is consumed — so the
+# retry after each failure exercises the same path succeeding. One phase,
+# alice only: bob's invite stays outstanding, the family room is a target.
+
+family @bob:localhost
+
+wait syncing 1 900
+wait convs 1 900
+
+# ---- SEND FAILED -------------------------------------------------------------
+# arm one failure: the PTT send's upload answers 500 -> EvSendFailed -> the
+# 2s SEND FAILED flash. The session's sendfail tally is the deterministic
+# wait; the flash outlasts the few frames to the dump by a wide margin.
+failnext 1
+key ptt press
+advance 20
+key ptt release
+wait sendfail 1 1500
+advance 3
+checkpoint fail-send
+
+# the flash runs 2s of frame time; let it clear, then resend — the counter
+# disarmed itself, so this send lands
+advance 70
+key ptt press
+advance 20
+key ptt release
+wait msgs 1 1500
+advance 120
+checkpoint fail-send-recovered
+
+# ---- PLAY FAILED -------------------------------------------------------------
+# open the conversation (which receipts the one message), then arm one
+# failure and OK the row: the download answers 500 -> EvPlaybackError ->
+# the PLAY FAILED flash.
+tap enter
+wait played 1 1500
+failnext 1
+tap enter
+wait playfail 1 1500
+advance 3
+checkpoint fail-play
+
+# flash clears; the retry's download succeeds and plays through the sim
+# audio actor. waitmax pins the tally at EXACTLY one failure — a second
+# failed play would time it out.
+advance 70
+tap enter
+advance 30
+waitmax playfail 1 1
+checkpoint fail-play-recovered

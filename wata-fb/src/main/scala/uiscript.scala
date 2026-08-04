@@ -50,13 +50,20 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              already satisfies `wait`)
  *    expect <probe> <n>        fail unless probe >= n right now
  *    checkpoint <name>         write <outdir>/<name>.png from the live frame
+ *    failnext <n>              arm the server's WATA_TEST_HOOKS=1
+ *                              fail-on-demand counter (an out-of-band POST,
+ *                              like `family`): the next n media
+ *                              uploads/downloads answer 500 — how the SEND
+ *                              FAILED / PLAY FAILED flashes get provoked
  *
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
  *  msgs (messages in the conversation the wata applet is pointing at), played
  *  (of those, how many are marked played), nameset (1 once the self user's
  *  display name equals the settings applet's currently picked preset),
- *  screenoff (1 while the screensaver has the panel blanked). */
+ *  screenoff (1 while the screensaver has the panel blanked), sendfail /
+ *  playfail (the session's failed-send / failed-play tallies — what a script
+ *  waits on after provoking a failure with `failnext`). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -198,6 +205,8 @@ object UiScript:
       err = checkpoint(nth(ts, 1), px)
     else if cmd == "family" then
       err = family(restOf(ts))
+    else if cmd == "failnext" then
+      err = failNext(num(nth(ts, 1), 1))
     else err = "unknown directive '" + cmd + "'"
     err
 
@@ -281,7 +290,8 @@ object UiScript:
    *  error backoff, or the echo simply never arrived. */
   def diag(): String =
     "; conn=" + Runtime.connTag(Ui.connection) + " sendok=" + Ui.sendOks +
-      " sendfail=" + Ui.sendFails + " connerr=" + Ui.connErrs
+      " sendfail=" + Ui.sendFails + " playfail=" + Ui.playFails +
+      " connerr=" + Ui.connErrs
 
   def expect(name: String, want: scala.Int): String =
     val got = probe(name)
@@ -354,6 +364,16 @@ object UiScript:
     if resp.status != 200 then "family: invite " + peer + " status " + resp.status
     else inviteRest(hs, roomId, t)
 
+  /** arm the server's fail-on-demand hook (testhooks.scala, wata-server;
+   *  registered only under WATA_TEST_HOOKS=1): the next `n` media
+   *  uploads/downloads answer 500. Out-of-band and unauthenticated, like the
+   *  hook itself. */
+  def failNext(n: scala.Int): String =
+    val hs = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
+    val resp = MatrixHttp.request(hs, "POST", "/_wata/v1/test/fail",
+      "application/json", "{\"count\":" + n + "}")
+    if resp.status != 200 then "failnext: status " + resp.status else ""
+
   // ---- probes ------------------------------------------------------------------------
 
   def probe(name: String): scala.Int =
@@ -363,6 +383,8 @@ object UiScript:
     else if name == "played" then playedCount(Ui.frameSnap, curConvIdx())
     else if name == "nameset" then nameSetProbe()
     else if name == "screenoff" then boolProbe(Ui.screenOff)
+    else if name == "sendfail" then Ui.sendFails
+    else if name == "playfail" then Ui.playFails
     else -1
 
   def boolProbe(b: Boolean): scala.Int =
