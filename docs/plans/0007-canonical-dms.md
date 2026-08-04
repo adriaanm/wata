@@ -1,6 +1,6 @@
 # 0007 — canonical DM rooms: the pair is the key
 
-Status: accepted
+Status: done
 
 `[CANONICAL-DM]`
 
@@ -100,6 +100,29 @@ so uniqueness is a map lookup, not a distributed protocol.
   (named, with the reason, in the design doc) rather than blocking the
   design. Suites failing for any other reason still block.
 - Sync oracle fixtures re-recorded (`just fixtures`, reviewed diff).
+
+## Outcome
+
+Landed as specified. Notes worth keeping:
+
+- **No create-timestamp tracking was needed.** The boot migration scans
+  rooms in creation order (`roomIds` reversed) and never overwrites a
+  claim, so "oldest wins" falls out without a new field.
+- **A canonical DM is co-owned**: both members at power level 100, since
+  either side may resolve the room first. Neither can kick or ban the
+  other out of their own DM — `tools/wata-persist-smoke.sh` grew an
+  ordinary private room for its ban assertion because of it.
+- **The endpoint also accepts a pending invite**, joining the caller if
+  they only hold one, so the peer's first send needs no join round-trip.
+- **`just conformance` is 84/84 GREEN.** The clean-design-overrides-compat
+  escape hatch was not needed: the compat projection carries every jest
+  suite, including the DM-creation, DM-reuse and "m.direct sync" cases.
+- **`dm-restart` lives in the persist smoke**, not the integ list: the
+  integ harness has no journal or restart facility, and the persist smoke
+  is exactly a kill -9 + replay. The other two scenarios
+  (`dm-idempotent`, `dm-stock-create`) are live integ scenarios.
+- **Deleted**: 234 lines from `syncengine.scala` and 66 from
+  `mhttp.scala`, against 107 and 14 added.
 
 ## Out of scope
 

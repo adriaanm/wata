@@ -60,7 +60,7 @@ down; the enclosing `supervised` scope is the join point.
 
 ## The sync engine — the heart of the module
 
-`syncengine.scala` (932 lines) is a **pure state machine**: it turns a
+`syncengine.scala` (~800 lines) is a **pure state machine**: it turns a
 parsed `/sync` response `Json` into a state delta plus a list of
 `SyncEvent`s, with zero transport or time dependency. It is implemented
 as a Sgola `object` (`SyncEngine`) holding module-level mutable state in
@@ -72,20 +72,22 @@ different users' streams).
 
 ### State it tracks
 
-Four atomic cells hold everything (`syncengine.scala:46-53`):
+THREE atomic cells hold everything:
 
 - `rooms: List[RoomState]` — one entry per room the engine knows about, in
-  insertion order. `RoomState` (`domain.scala:80`) carries `name`,
-  `hasAlias`/`alias`, `members` (`List[MemberInfo]`), `timelineEventIds`
-  (a dedup set), `voiceMessages` (accumulated `VoiceMessageRaw`s in
-  timeline order), `receipts`, `prevBatch` (pagination token), and a
-  sticky `isDm` flag.
+  insertion order. `RoomState` carries `name`, `hasAlias`/`alias`,
+  `members` (`List[MemberInfo]`), `timelineEventIds` (a dedup set),
+  `voiceMessages` (accumulated `VoiceMessageRaw`s in timeline order),
+  `receipts`, `prevBatch` (pagination token), and `dmMembers` — the
+  `net.wata.dm` pair, empty when the room is not a DM.
 - `selfUserId: String` — set once after login via `setSelfUser`.
 - `batch: String` — the `next_batch` token to send on the next `/sync`
   call.
-- `mDirect: List[DirectEntry]` — the parsed `m.direct` account-data map
-  (`userId -> [roomIds]`), rebuilt wholesale every time an `m.direct`
-  account-data event arrives.
+
+There is deliberately no `m.direct` state. DM identity belongs to the
+server (`docs/plans/0007-canonical-dms.md`); the `m.direct` the server
+still emits is a compat projection for stock clients, and this engine
+ignores it.
 
 All of these are `List`s with **insertion-order, replace-keeps-position**
 update semantics: updating an existing room/member/receipt swaps it in
@@ -101,23 +103,41 @@ room/member counts but would not scale to a large multi-room client.
 is the entry point. It always:
 
 1. Updates `next_batch`.
-2. Walks `account_data.events`, looking for `m.direct` — on a match it
-   rebuilds `mDirect` from scratch and emits `AccountDataUpdated`.
-3. Walks `rooms.join`, once per room: state events, then timeline events
+2. Walks `rooms.join`, once per room: state events, then timeline events
    (dedup against `timelineEventIds`, then dispatch by type: `m.room.name`
-   updates the room name, `m.room.member` upserts a `MemberInfo` and emits
-   `MembershipChanged`, `m.room.message` with `msgtype: m.audio` extracts a
-   `VoiceMessageRaw`, `m.room.redaction` removes any voice message it
-   redacts), then ephemeral events (`m.receipt`, appending user ids to a
-   `ReceiptEntry` and emitting `ReceiptUpdated`), then emits `RoomUpdated`
-   for the room.
-4. Walks `rooms.invite` similarly (state comes from `invite_state`) and
+   updates the room name, `net.wata.dm` records the room's DM pair,
+   `m.room.member` upserts a `MemberInfo` and emits `MembershipChanged`,
+   `m.room.message` with `msgtype: m.audio` extracts a `VoiceMessageRaw`,
+   `m.room.redaction` removes any voice message it redacts), then
+   ephemeral events (`m.receipt`, appending user ids to a `ReceiptEntry`
+   and emitting `ReceiptUpdated`), then emits `RoomUpdated` for the room.
+3. Walks `rooms.invite` similarly (state comes from `invite_state`) and
    emits `RoomUpdated`.
 
+`account_data` is not walked at all.
+
 Event emission order is deliberate and pinned by the fixture oracle
-(`syncdescribe.scala`): account_data events first, then joined rooms in
-wire order (state events, then timeline events, then receipt events, then
-`RoomUpdated` last for that room), then invited rooms the same way.
+(`syncdescribe.scala`): joined rooms in wire order (state events, then
+timeline events, then receipt events, then `RoomUpdated` last for that
+room), then invited rooms the same way.
+
+### DM classification
+
+A room is a DM exactly when its state carries the server's `net.wata.dm`
+event, whose `content.members` pair says who it is with (`stateDm`). That
+is the whole rule. The engine infers nothing from `is_direct` — a room
+carrying only that flag is not classified — and nothing is sticky, because
+a structural state event needs no stickiness: it either is in the room's
+state or it is not.
+
+What this replaced is worth recording, since it was most of the module's
+historical brittleness: an `m.direct` ingest that rebuilt a
+`userId -> [roomIds]` map wholesale on every account-data event, an
+append-only `m.direct` serializer in `mhttp.scala`, a sticky `isDm` flag
+inferred from `is_direct`, an inference pass that synthesized
+conversations for rooms `m.direct` did not cover, and two *different*
+"primary room" rules — one in `resolveDmRoom`, one in `buildSnapshot`.
+All of it is gone.
 
 ### `buildSnapshot`: deriving the UI view
 
@@ -125,29 +145,27 @@ wire order (state events, then timeline events, then receipt events, then
 derives the immutable `StateSnapshot` from the accumulated state on
 demand (it is not incrementally maintained). The derivation, in order:
 
-1. **Contacts from `m.direct`** (`contactsFromDirect`): one `Contact` per
-   `m.direct` entry, excluding self, with a display name resolved from
-   the first room in that entry's room list where the room is known and
-   the user is a member.
-2. **Conversations from `m.direct`** (`convsFromDirect`): for each
-   `m.direct` entry, find the first room id in its list that we have
-   actually joined (`firstJoinedRoom`) — earlier ("stale") room ids in the
-   list that we don't have are skipped. An entry whose rooms are *all*
-   stale produces no conversation at all.
-3. **Sticky DM inference** (`inferDmConvs`): rooms with `isDm == true`
-   (set the first time any state-member event on that room carried
-   `is_direct: true`, and never cleared) that are *not* already covered by
-   an `m.direct` conversation get one synthesized from the room's "peer"
-   member (the first joined/invited member that isn't self). `m.direct` is
-   always authoritative when both exist.
-4. **Family room** (`findFamily`): the first room whose canonical alias
+It derives from exactly two things: the rooms the server classified, and
+the family roster.
+
+1. **Conversations from the classified DM rooms** (`dmConvs`): each room
+   whose `dmMembers` pair names *us* is the conversation with the other
+   member (`dmPeerOf`), and that member is a `Contact` with the display
+   name their member event carries in that room. A pair that does not name
+   us is somebody else's DM and is skipped. If two rooms name the same
+   peer — possible only for a room that lost the server's pair claim and
+   stayed joined — the first in room order wins.
+2. **Family room** (`findFamily`): the first room whose canonical alias
    starts with `"#family:"` becomes the family conversation, prepended at
-   index 0. Its joined members (excluding self) become `Family.members`.
-5. **Roomless family conversations** (`roomlessFamilyConvs`): family
-   members who don't yet have a DM conversation get a placeholder
-   `Conversation` with `roomId == ""` — the room is created lazily on
-   first send (see `Runtime.resolveDmRoom`).
-6. **Self display name** (`resolveSelfDisplay`): the first room where self
+   index 0. Its joined members (excluding self) become `Family.members`,
+   and every one of them is a contact whether or not a DM room exists yet
+   (`rosterContacts`).
+3. **Roomless family conversations** (`roomlessFamilyConvs`): a roster
+   member with no DM conversation yet gets a placeholder `Conversation`
+   with `roomId == ""`. The first send resolves the pair through the
+   server's DM endpoint, which is what fills the room in (see
+   `Runtime.resolveDmRoom`).
+4. **Self display name** (`resolveSelfDisplay`): the first room where self
    has a non-empty display name different from the raw user id.
 
 `is_played` on a `VoiceMessage` (`isPlayed`, `syncengine.scala:756`) is
@@ -159,9 +177,9 @@ computed as "self's user id appears in that event's receipt user-id list"
 These are not part of the engine's runtime behavior; they exist purely to
 pin the engine's behavior deterministically in CI.
 
-- **`syncoracle.scala`** (`SyncOracle`, 408 lines) is a self-contained set
-  of 15 scripted scenarios (hand-built JSON sync responses covering empty
-  syncs, joins, voice messages, `m.direct` handling, family rooms, dedup,
+- **`syncoracle.scala`** (`SyncOracle`) is a self-contained set of 15
+  scripted scenarios (hand-built JSON sync responses covering empty syncs,
+  joins, voice messages, DM classification, family rooms, dedup,
   redactions, read receipts, etc.), each driving `SyncEngine.process` /
   `buildSnapshot` directly and rendering the resulting event names, room
   state, and snapshot into a deterministic text report (`report()`). This
@@ -192,15 +210,15 @@ snapshot are built from:
 - `User`/`Contact`/`VoiceMessage`/`Conversation`/`Family` are the
   snapshot-facing, already-resolved types — e.g. `Conversation.roomId ==
   ""` specifically means "no DM room created yet."
-- `MemberInfo`/`VoiceMessageRaw`/`ReceiptEntry`/`DirectEntry`/`RoomState`
-  are the engine's internal working representations, later resolved into
-  the snapshot types by `buildSnapshot`.
+- `MemberInfo`/`VoiceMessageRaw`/`ReceiptEntry`/`RoomState` are the
+  engine's internal working representations, later resolved into the
+  snapshot types by `buildSnapshot`.
 - ID types (room id, user id, event id, mxc url) are all plain `String` —
   there is no newtype/opaque-alias layer distinguishing them at the type
   level.
-- `SyncEvent` (sealed, 5 cases: `RoomUpdated`, `TimelineEventE`,
-  `MembershipChanged`, `ReceiptUpdated`, `AccountDataUpdated`) is the
-  engine's per-`process()`-call output vocabulary.
+- `SyncEvent` (sealed, 4 cases: `RoomUpdated`, `TimelineEventE`,
+  `MembershipChanged`, `ReceiptUpdated`) is the engine's
+  per-`process()`-call output vocabulary.
 
 ## HTTP transport and JSON handling
 
@@ -218,9 +236,9 @@ bytes over a socket":
 - **`mhttp.scala`** (225 lines, `Hs` + object `MatrixHttp`) is the actual
   Matrix Client-Server API surface: one function per endpoint (`login`,
   `sync`, `setDisplayName`, `redactEvent`, `sendReadReceipt`,
-  `uploadMedia`, `downloadMedia`, `joinRoom`, `createRoom`,
-  `createRoomWithAlias`, `getAccountData`, `setAccountData`,
-  `getMessagesTail`, `getMessages`, `sendVoiceMessage`), all going through
+  `uploadMedia`, `downloadMedia`, `joinRoom`, `dmRoom`,
+  `createRoomWithAlias`, `createRoomStockDm`, `getMessages`,
+  `sendVoiceMessage`), all going through
   a single `request`/`send1` chokepoint that adds the bearer token and
   content-type header and retries on HTTP 429 (up to 3 times, honoring
   `retry_after_ms` from the response body, defaulting to 1000ms). `Hs`
@@ -402,15 +420,6 @@ touching the surrounding code, not as work owed.
   `txnCounterC.add(1)`) rather than randomness. Not necessarily a bug,
   just dead surface worth knowing about if the capability contract is
   ever trimmed.
-- **`resolveDmRoom` (`runtime.scala:348-358`) has a benign but real race
-  window**: it fetches `m.direct`, and if no room is found, creates one
-  and writes it back — two round trips with no compare-and-swap. Two
-  concurrent `ActSendVoice` actions targeting the same not-yet-existing
-  contact (not currently possible since there is one action loop per
-  client, but worth flagging if that assumption ever changes) could each
-  create a room. Given the single-action-loop-per-process design this is
-  currently unreachable, but the function's contract doesn't defend
-  against it if that changes.
 - `[CLI-RETRY-CLAMP]` **`retryAfterMs` (`mhttp.scala:43-45`) treats a non-positive
   `retry_after_ms` as the 1000ms default**, but does not cap an
   attacker/bug-supplied *huge* value — a malicious or buggy homeserver

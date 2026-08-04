@@ -7,21 +7,22 @@ compiles to Go source — see the repo root for the toolchain) and built as an
 `wata-server/go.mod`). There is no JVM at runtime: `sgo build` emits Go, which
 is compiled and run like any other Go program.
 
-The source lives entirely in `wata-server/src/main/scala/` — 12 files, ~3500
+The source lives entirely in `wata-server/src/main/scala/` — 13 files, ~3900
 lines:
 
 | file | lines | role |
 |---|---|---|
-| `model.scala` | 102 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts |
+| `model.scala` | 121 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts, DM pairs |
 | `config.scala` | 112 | the accounts, loaded once at boot from `$WATA_USERS`; `serverName` |
 | `membership.scala` | 86 | the room-membership state machine (join/invite/leave/ban transitions) |
 | `power.scala` | 80 | the `m.room.power_levels` authorization table |
 | `jsonnav.scala` | 202 | JSON object/field helpers over the `json` module's `Json` type |
-| `store.scala` | 822 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, long-poll waiter bookkeeping |
+| `store.scala` | 963 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping |
 | `persist.scala` | 278 | append-only JSONL journal + boot-time replay |
 | `handlers.scala` | 253 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
 | `keys.scala` | 83 | the E2EE device-key routes, as no-op stubs |
-| `rooms.scala` | 672 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
+| `dm.scala` | 274 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
+| `rooms.scala` | 700 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
 | `sync.scala` | 506 | `/sync` (initial + incremental + leave) and the long-poll wait |
 | `server.scala` | 314 | HTTP boot, mux registration, request edge, `SelfCheck` |
 
@@ -126,12 +127,13 @@ or PUT.
 
 All server state lives in one process-wide guarded cell:
 `Store.cell: Mutex[StoreState]` (`store.scala:63`). `StoreState`
-(`store.scala:34`) is a plain mutable-field class — 13 `var`s — covering
+(`store.scala:34`) is a plain mutable-field class — 14 `var`s — covering
 devices/tokens (two HashMaps, one for lookup by id and one by token),
 profiles, a flat `List[AcctData]` for all account data (global and per-room),
 rooms (`HashMap[String, Room]`), aliases, media, a flat `List[Receipt]`, a
 `HashMap` for per-device transaction idempotency, the ordered list of room
-ids (newest-first), a global monotonic `seq` counter, and a flat
+ids (newest-first), a flat `List[DmPair]` of canonical DM claims, a global
+monotonic `seq` counter, and a flat
 `List[Waiter]` for long-poll registrations plus its own sequence counter.
 
 Every operation on the store — reads and writes alike — takes the *same*
@@ -219,6 +221,90 @@ global and per-room entries, disambiguated by a `(hasRoom, roomId)` pair
 rather than `Option[String]`; each entry carries the `seq` at which it was
 last set, which is what makes `/sync`'s incremental account-data delta
 possible (`Store.acctSinceGlobal`, `store.scala:715`).
+
+## Canonical DMs
+
+Matrix has no first-class DMs: `m.direct` is client-written account data,
+`is_direct` is a hint on an invite, and nothing enforces uniqueness. wata does
+not live with that. **The server owns DM identity**: at most one room per
+unordered pair of users, and the pair *is* the key (`dm.scala`; the reasoning
+is `docs/plans/0007-canonical-dms.md`).
+
+**The pair map.** `StoreState.dmPairs` is a flat `List[DmPair]` — the pair
+stored sorted (`a < b`, via `Store.strLess`), so the two orderings are one
+entry — alongside the acct and receipt slices. It is a list rather than a map
+because it is also walked *per user* (`Store.dmPeersOf`), and is family-sized
+either way.
+
+**Get-or-create is ONE transaction.** `Store.dmGetOrCreate` does the lookup,
+the room mint, the alias registration, every seed state event (via
+`addEventLocked`), and the pair claim inside a *single* `withLock`. That is
+what makes concurrent first sends from the two sides converge: there is no
+window in which two callers both find the pair unclaimed. The events are built
+as pure `StateSeed` values before the lock is taken; the after-effects (the
+compat `m.direct` write, the two long-poll wakes) run after it, and only for
+the call that actually created the room.
+
+**Identity lives in room state.** Every canonical DM carries a `net.wata.dm`
+state event, `{"members": [a, b]}` sorted, and the canonical alias
+`#dm.<a>.<b>:server` with sorted localparts. A client classifies a room the
+moment its state arrives — no account data, no ordering race, no inference.
+There is deliberately no custom `m.room.create` `type`: Element hides rooms of
+an unknown type, which would kill the degraded stock-client mode.
+
+**The endpoint.** `POST /_wata/v1/dm/{userId}` → `{"room_id": …}`, auth
+required. Idempotent get-or-create of *the* room for (caller, userId): the
+server joins the caller, invites the peer, and stamps the identity. Repeat
+calls, and calls from the two sides, all return the same room. `{userId}` may
+be a bare localpart or a full MXID; one that names nobody with an account here
+— unknown, or another server, since there is no federation — is `404
+M_NOT_FOUND`, and a self-DM is `403 M_FORBIDDEN`. A caller holding only an
+invite (the peer's side of a room the other minted) is *joined* by the answer,
+so a first send needs no separate join round-trip; a ban is the one membership
+this does not walk over.
+
+**Power levels are symmetric.** A DM's `m.room.power_levels` puts both members
+at 100 (the `trusted_private_chat` shape): either side may resolve the room
+first, so an asymmetric owner would be arbitrary. The consequence worth
+knowing is that neither side can kick or ban the other out of their own DM —
+`Power.canKick`/`canBan` require the actor to strictly outrank the target.
+
+**The compat projection** is one-way and disposable. Stock clients know only
+`m.direct`, so the server derives it. `Dm.assertDirect` writes it for both
+users when a pair is claimed — a real account-data write, so the change rides
+the ordinary incremental `/sync` delta — and `Dm.project` re-asserts the
+server's pairs *on top of* whatever the client last wrote, at emission time,
+for both the initial and the incremental account-data block. Client writes to
+`m.direct` are accepted and stored but never load-bearing: a client that
+overwrites the entry is corrected on its next sync. `is_direct` is likewise
+derived rather than echoed — it now rides the join as well as the invite
+(`Rooms.joinPerform`, `Rooms.inviteContentFor`), keyed off the room's stamp,
+which is what fixed the old asymmetry where only one side of a DM carried the
+flag. Deleting this whole projection later touches nothing in the core.
+
+**Stock-client creation stays safe.** A DM-shaped `createRoom` — `is_direct`
+with exactly one invitee who has an account here — is answered with the
+canonical room for that pair, minting it on first ask
+(`Rooms.createMaybeDm`). So even a client that never heard of the dialect
+endpoint cannot produce a duplicate DM. Any other shape takes the ordinary
+`createPlain` path.
+
+**Persistence and migration.** The claim is journalled as a `dmpair` op, so DM
+identity survives a restart with no re-derivation. Boot then runs
+`Dm.migrate()` over the rooms already in the store (after replay), oldest room
+first; a claim never overwrites, so the oldest room wins a contested pair and
+the losers stay joined but unmapped — nothing deletes a room. A room qualifies
+if it carries the `net.wata.dm` stamp, or is in the legacy shape a stock
+client leaves behind: exactly two join/invite members with `is_direct` on a
+member event. Creation order is read off `roomIds` (newest-first, reversed),
+so no create-timestamp tracking was needed.
+
+**Conformance.** `just conformance` — the original TypeScript wata's jest
+suites run against this binary — is **84/84 green** with all of the above in
+place, including the suites that exercise DM creation, DM reuse, and "bob
+should recognize DM room after joining (m.direct sync)". The compat
+projection is what holds them up; no suite had to be recorded as exercising
+the retired client-authored mechanism.
 
 **Media** (`MediaItem`, `model.scala:91`) is stored as a byte-preserving
 `String` (Go's `string([]byte)` round-trips arbitrary bytes including invalid
@@ -341,7 +427,8 @@ timestamp, and seq, never the generator inputs — so replay reinserts state
 verbatim without re-invoking `crypto/rand` or the wall clock (`persist.scala:14-21`).
 Fourteen op kinds are logged: `device`, `rmDevice`, `profile`, `acct`,
 `room`, `event`, `redact`, `alias`, `media` (bytes base64url-encoded, since
-raw bytes aren't JSON-string-safe), `receipt`, `txn`. Long-poll waiters are
+raw bytes aren't JSON-string-safe), `receipt`, `txn`, `dmpair` (a canonical
+DM's pair -> room claim). Long-poll waiters are
 explicitly *not* logged (they're in-flight goroutines, transient by nature).
 
 The journal has its own, separate `Mutex[JournalState]` (`persist.scala:45`),
@@ -367,11 +454,14 @@ writes behind leave/kick/ban — is an ordinary `Store.addEvent`, so it is
 already carried by the `event` op with no new record kind. `tools/wata-persist-smoke.sh`
 pins that: it sets a topic through `PUT /state/...` and bans a user before the
 `kill -9`, and asserts after the reboot that the topic is in the room's state
-and that the banned user still cannot join.
+and that the banned user still cannot join. It also resolves a canonical DM
+before the kill and asserts afterwards that re-resolving the pair — from
+either side, and through a DM-shaped `createRoom` — returns the *same* room
+rather than minting a second one, and that its alias still resolves.
 
 ## File-by-file map
 
-- **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`.
+- **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and the canonical-DM values (`DmPair`, `DmPeer`, `DmRoom`, `StateSeed`).
 - **`config.scala`** — `Config`: the accounts, loaded once at boot from `WATA_USERS` (built-in alice/bob otherwise), and `serverName`.
 - **`membership.scala`** — the membership sealed types and the join/invite/leave/ban transition table; every row is reachable from an HTTP route.
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
@@ -381,7 +471,8 @@ and that the banned user still cannot join.
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
 - **`keys.scala`** — `Keys`: the three E2EE device-key routes as authenticated no-op stubs; `/keys/upload` tallies the one-time-key counts back per algorithm, which matrix-dart-sdk requires, and discards the keys.
 - **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
-- **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental) and the long-poll orchestration.
+- **`dm.scala`** — `Dm`: canonical DMs. The `POST /_wata/v1/dm/{userId}` endpoint, the `net.wata.dm`/alias identity, the boot migration, and the one-way `m.direct` compat projection.
+- **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental, account data through `Dm.project`) and the long-poll orchestration.
 - **`server.scala`** — `WataHandler`/`MediaEdge`/`NotFound`/`Respond` (the HTTP edge), `Server` (boot + route table), `Main`, and `SelfCheck` (a deterministic smoke test of the store/handler logic, diffed against a golden file by the build's smoke script).
 
 ## Known gaps / debt

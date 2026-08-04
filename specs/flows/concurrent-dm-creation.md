@@ -1,5 +1,11 @@
 # Concurrent DM Creation Flow - Race Condition Handling
 
+> **Retired mechanism.** This describes the client-authored `m.direct` DM
+> mechanism, which wata no longer uses: the server owns DM identity, keyed
+> by the user pair (`docs/plans/0007-canonical-dms.md`,
+> `docs/design/wata-server.md` § Canonical DMs). Kept as the record of what
+> the rules used to be and why they were needed.
+
 ## Overview
 
 This flow covers the edge case where both Alice and Bob simultaneously create DM rooms with each other, resulting in two DM rooms. DMRoomService's deterministic selection ensures both clients converge on the same primary room.
