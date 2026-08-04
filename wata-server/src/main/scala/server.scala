@@ -129,6 +129,7 @@ object Respond:
 object Server:
   def serve(addr: String): Unit =
     Store.init()
+    MediaFiles.boot()                   // before Journal.boot: replay migrates blobs out
     Journal.boot()
     Dm.migrate()                        // derive the pair map from replayed rooms
     val mux = go.net.http.newServeMux()

@@ -7,7 +7,15 @@
 #   - the pre-restart access TOKEN still authenticates (devices/tokens replayed)
 #   - the displayname set before the crash survives (profile replayed)
 #   - the message is in the room timeline (room + events replayed, seq faithful)
-#   - the uploaded media downloads BYTE-IDENTICAL (base64url round-trip)
+#   - the uploaded media downloads BYTE-IDENTICAL, served from its BLOB FILE
+#     ($WATA_DATA/media/<mediaId>, here derived from the journal's directory);
+#     the journal itself carries only {media_id, content_type, size}
+#   - redacting a media message RECLAIMS its blob (file deleted, download 404),
+#     and the reclaim survives the replay
+#   - an OLD-STYLE journal (base64url `data` payload in the media op) is
+#     MIGRATED on boot: the blob is written out to the media dir and serves
+#   - a media op whose blob file is MISSING replays as log-and-skip (404 on
+#     fetch, boot not aborted)
 #   - /sync serves the joined room (derived from replayed state)
 #   - the redaction survives (target content emptied)
 #   - a state event set through PUT /state/... survives
@@ -79,6 +87,15 @@ curl -s -X POST "${B[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/receipt/m.read/$E
 printf 'OggS\x00\x02\x00\xff\xfe\x01\x02\x03VOICE' > "$TMP/voice.ogg"
 CU=$(curl -s -X POST "${A[@]}" -H "Content-Type: audio/ogg" --data-binary @"$TMP/voice.ogg" "$BASE/_matrix/media/v3/upload" | jget content_uri)
 MID="${CU##*/}"
+# a voice MESSAGE referencing the blob (the retention sweep, session 3, needs a
+# referring event; harmless to the earlier assertions).
+AEV=$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.audio","body":"voice","url":"'"$CU"'"}' "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx4" | jget event_id)
+# a second blob + message, redacted LIVE: redaction must reclaim the blob file.
+printf 'OggS\x00\x02DOOMEDVOICE' > "$TMP/voice2.ogg"
+CU2=$(curl -s -X POST "${A[@]}" -H "Content-Type: audio/ogg" --data-binary @"$TMP/voice2.ogg" "$BASE/_matrix/media/v3/upload" | jget content_uri)
+MID2="${CU2##*/}"
+DAEV=$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.audio","body":"doomed","url":"'"$CU2"'"}' "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx5" | jget event_id)
+curl -s -X PUT "${A[@]}" -d '{"reason":"reclaim"}' "$BASE/_matrix/client/v3/rooms/$ROOM/redact/$DAEV/tx6" >/dev/null
 # the generic state route and a membership eviction: both are ordinary
 # m.room.member / state events in the journal, so this is what proves it.
 curl -s -X PUT "${A[@]}" -d '{"topic":"family channel"}' "$BASE/_matrix/client/v3/rooms/$ROOM/state/m.room.topic/" >/dev/null
@@ -91,6 +108,20 @@ LINES=$(wc -l < "$LOG" | tr -d ' ')
 # ---- crash + reboot from the log -------------------------------------------
 kill_server
 echo "persist-smoke: killed server; $LINES journal lines; rebooting from log…"
+# seed two crafted media ops for the reboot to chew on:
+#  - an OLD-STYLE base64url op (a journal written before the file-backed
+#    store): boot must MIGRATE the blob out to the media dir
+#  - a SLIM op whose blob file does not exist: boot must log and SKIP it
+python3 - "$LOG" <<'EOF'
+import base64, json, sys
+with open(sys.argv[1], "a") as f:
+    payload = base64.urlsafe_b64encode(b"OggS\x00LEGACYVOICE").decode()
+    f.write(json.dumps({"op": "media", "media_id": "legacymid1",
+                        "content_type": "audio/ogg", "data": payload}) + "\n")
+    f.write(json.dumps({"op": "media", "media_id": "ghostmid1",
+                        "content_type": "audio/ogg", "size": 11}) + "\n")
+EOF
+printf 'OggS\x00LEGACYVOICE' > "$TMP/legacy.ogg"
 boot || exit 1
 
 # ---- assertions: state served back -----------------------------------------
@@ -107,6 +138,20 @@ red=[e for e in c if e.get("event_id")=="'"$DOOMED"'"]
 print(bool(red) and red[0].get("content")=={})')" "True"
 curl -s -o "$TMP/dl.ogg" "${A[@]}" "$BASE/_matrix/media/v3/download/localhost/$MID"
 check "media-bytes-match"       "$(cmp -s "$TMP/voice.ogg" "$TMP/dl.ogg" && echo true || echo false)"                     "true"
+# the blob rides a FILE next to the journal, and the journal op is slim
+# (no base64 payload) — the whole point of plan 0012.
+check "media-file-backed"       "$(cmp -s "$TMP/voice.ogg" "$TMP/media/$MID" && echo true || echo false)"                 "true"
+check "journal-media-slim"      "$(grep '"op":"media"' "$LOG" | grep -v legacymid1 | grep -c '"data"' | tr -d ' ')"       "0"
+# the live redaction reclaimed blob 2, and the reclaim survived the replay.
+check "reclaim-file-deleted"    "$([ ! -e "$TMP/media/$MID2" ] && echo true)"                                             "true"
+check "reclaim-download-404"    "$(curl -s -o /dev/null -w '%{http_code}' "${A[@]}" "$BASE/_matrix/media/v3/download/localhost/$MID2")" "404"
+# the crafted old-style op was migrated out to a file and serves.
+curl -s -o "$TMP/legacy-dl.ogg" "${A[@]}" "$BASE/_matrix/media/v3/download/localhost/legacymid1"
+check "old-journal-migrated"    "$(cmp -s "$TMP/legacy.ogg" "$TMP/media/legacymid1" && echo true || echo false)"          "true"
+check "migrated-blob-serves"    "$(cmp -s "$TMP/legacy.ogg" "$TMP/legacy-dl.ogg" && echo true || echo false)"             "true"
+# the crafted file-less slim op was skipped with a log line, not fatal.
+check "missing-blob-404"        "$(curl -s -o /dev/null -w '%{http_code}' "${A[@]}" "$BASE/_matrix/media/v3/download/localhost/ghostmid1")" "404"
+check "missing-blob-logged"     "$(grep -c 'media blob missing on replay, skipping ghostmid1' "$TMP/server.log" | tr -d ' ')" "1"
 check "sync-serves-room"        "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
                                     | python3 -c 'import json,sys; print("'"$ROOM"'" in json.load(sys.stdin).get("rooms",{}).get("join",{}))')" "True"
 check "state-put-survives"      "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \

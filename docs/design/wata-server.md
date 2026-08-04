@@ -338,12 +338,22 @@ should recognize DM room after joining (m.direct sync)". The compat
 projection is what holds them up; no suite had to be recorded as exercising
 the retired client-authored mechanism.
 
-**Media** (`MediaItem`, `model.scala:91`) is stored as a byte-preserving
-`String` (Go's `string([]byte)` round-trips arbitrary bytes including invalid
-UTF-8) rather than a byte slice, to keep the case class free of an opaque Go
-type. There is no eviction, size cap, or expiry: every uploaded blob lives in
-the `HashMap` for the life of the process (and, if persistence is on,
-forever in the journal too — see "Known gaps").
+**Media** (`MediaItem`, model.scala) is file-backed whenever persistence is
+on: an upload writes the blob to `<dataDir>/media/<mediaId>` (`MediaFiles`,
+mediafiles.scala — the data dir is `$WATA_DATA`, defaulting to the `$WATA_LOG`
+journal file's directory) *before* the store/journal transaction, so a crash
+between the two leaves an orphan file, never a journal ref to a missing blob.
+The in-memory `HashMap` then holds metadata only (`data` = "") and
+`Store.getMedia` reads the file on demand (voice blobs are ~15 KB; no cache
+until profiling says so). Media bytes travel as a byte-preserving `String`
+(Go's `string([]byte)` round-trips arbitrary bytes including invalid UTF-8)
+rather than a byte slice, to keep the case class free of an opaque Go type.
+Stateless runs (no `WATA_LOG`/`WATA_DATA`) keep the bytes in the `HashMap` as
+before. **Redaction reclaims the blob**: `Store.redactRoom` keys on the
+target event's `url` field and, when it names a stored media id, drops the
+metadata entry and deletes the file (`reclaimMedia` — the event is the only
+referrer; media ids are not shared). The reclaim runs on live redactions and
+on replayed ones alike, so a reboot converges.
 
 **Long-poll waiters.** `Waiter` (`model.scala:109`) pairs a monotonic `id`
 with an *unbuffered* `Chan[Boolean]` that is used purely as a
@@ -458,10 +468,20 @@ method calls `Journal.rec` with a small `Json` object describing the
 timestamp, and seq, never the generator inputs — so replay reinserts state
 verbatim without re-invoking `crypto/rand` or the wall clock (`persist.scala:14-21`).
 Fourteen op kinds are logged: `device`, `rmDevice`, `profile`, `acct`,
-`room`, `event`, `redact`, `alias`, `media` (bytes base64url-encoded, since
-raw bytes aren't JSON-string-safe), `receipt`, `txn`, `dmpair` (a canonical
+`room`, `event`, `redact`, `alias`, `media` (metadata only —
+`{media_id, content_type, size}`; the bytes live in the blob file, written
+before the op — see "Media" above), `receipt`, `txn`, `dmpair` (a canonical
 DM's pair -> room claim). Long-poll waiters are
 explicitly *not* logged (they're in-flight goroutines, transient by nature).
+
+Replaying a `media` op probes the blob file rather than decoding a payload; a
+missing file logs one line and skips the metadata insert, so fetches of that
+id 404 — degraded, not fatal. A journal written before the file-backed store
+carries the bytes base64url-encoded in a `data` field; replay *migrates* such
+an op by writing the blob out to the media dir (`Journal.migrateMedia`). The
+write truncates and the journal is not compacted (out of scope in plan 0012),
+so the migration re-runs idempotently on every boot until a compaction
+mechanism exists.
 
 The journal has its own, separate `Mutex[JournalState]` (`persist.scala:45`),
 distinct from the store's — `Journal.rec` is called from *inside* a
@@ -490,6 +510,13 @@ and that the banned user still cannot join. It also resolves a canonical DM
 before the kill and asserts afterwards that re-resolving the pair — from
 either side, and through a DM-shaped `createRoom` — returns the *same* room
 rather than minting a second one, and that its alias still resolves.
+
+The same script pins the media file-store behaviors: an uploaded blob serves
+back byte-identical from its blob file after the reboot while the journal's
+`media` ops stay payload-free; a live redaction of a media message deletes
+the blob (and stays deleted across the replay); a crafted old-style base64
+`media` op is migrated out to the media dir on boot and serves; and a crafted
+slim op with no blob file replays as a logged skip whose id then 404s.
 
 ## Test hooks
 
@@ -524,7 +551,9 @@ for the one scenario that opts into hooks).
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
 - **`power.scala`** — `Power`: the `m.room.power_levels` authorization table (send/state/redact/invite/kick/ban).
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
-- **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, and per-op-kind (de)serialization.
+- **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
+- **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
+- **`osfile.scala`** — `go.osfile`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove`) the blob store needs; perms passed as literals, errors dropped (best-effort).
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
 - **`keys.scala`** — `Keys`: the three E2EE device-key routes as authenticated no-op stubs; `/keys/upload` tallies the one-time-key counts back per algorithm, which matrix-dart-sdk requires, and discards the keys.
 - **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
@@ -540,11 +569,6 @@ the unscheduled `/sync` allocation cost, and the
 explicitly-deferred actor-store refactor), reading the code surfaced the following. Items with a `[KEY]` tag have a
 line in `TODO.jsonl`; grep the key here for the body.
 
-- `[SRV-MEDIA-UNBOUNDED]` **Unbounded memory and journal growth for media.** `Store.storeMedia`
-  (`store.scala:513`) never evicts, caps, or expires blobs; with persistence
-  on, every upload is also base64-encoded into the JSONL log
-  (`Journal.mediaOp`, `persist.scala:153`) with no size check, so a handful of
-  large uploads could make the journal (and boot-replay time) balloon.
 - **Every list-shaped store slice (`acct`, `receiptList`, `roomIds`,
   `waiters`, room `state`/`timeline`) is scanned linearly on every read and
   write** (`store.scala`, throughout — e.g. `findAcct`, `filterReceipts`,

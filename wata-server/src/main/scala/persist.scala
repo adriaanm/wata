@@ -24,11 +24,16 @@ import sgo.{Mutex, mutex}
  *   - `acct`                 — account data (carries its seq)
  *   - `room` / `event` / `redact` — rooms, their state + timeline, redactions
  *   - `alias`                — directory
- *   - `media`                — uploaded blobs; bytes as base64url (arbitrary
- *                              media bytes are not JSON-string-safe, so the
- *                              byte-preserving String is base64url'd via the
- *                              existing `encoding/base64` facade, decoded on
- *                              replay)
+ *   - `media`                — blob METADATA only ({media_id, content_type,
+ *                              size}); the bytes live in the blob file
+ *                              (MediaFiles), written BEFORE this op. Replay
+ *                              probes the file instead of decoding a payload;
+ *                              a journal from before the file-backed store
+ *                              carries the bytes base64url'd in a `data`
+ *                              field, which replay MIGRATES by writing the
+ *                              blob out to the media dir (idempotent — the
+ *                              write truncates — since the journal is not
+ *                              compacted)
  *   - `receipt`              — read receipts (carries its seq)
  *   - `txn`                  — per-device send idempotency
  *   - `dmpair`               — a canonical DM's pair -> room claim, so DM
@@ -149,14 +154,14 @@ object Journal:
     fs = ("room_id", JStr(roomId)) :: fs
     endObj(fs)
 
-  /** media bytes -> base64url (the byte-preserving String is not JSON-safe). */
-  def mediaOp(id: String, data: String, contentType: String): Json =
-    val enc = go.encoding.base64.URLEncoding.encodeToString(go.bytes(data))
+  /** media METADATA; the bytes are already on disk (MediaFiles) when this op
+   *  is appended. */
+  def mediaOp(id: String, contentType: String, size: scala.Long): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("op", JStr("media")) :: fs
     fs = ("media_id", JStr(id)) :: fs
     fs = ("content_type", JStr(contentType)) :: fs
-    fs = ("data", JStr(enc)) :: fs
+    fs = ("size", JInt(size)) :: fs
     endObj(fs)
 
   def receiptOp(rc: Receipt): Json =
@@ -263,17 +268,37 @@ object Journal:
     Receipt(strField(j, "room_id", ""), strField(j, "user_id", ""), strField(j, "event_id", ""),
       longField(j, "ts"), strField(j, "receipt_type", ""), longField(j, "seq"))
 
-  def applyMedia(j: Json): Unit =
-    val id = strField(j, "media_id", "")
-    val ct = strField(j, "content_type", "")
-    val enc = strField(j, "data", "")
+  /** two generations of `media` op:
+   *   - OLD (base64url `data` payload): MIGRATE — write the blob out to the
+   *     media dir once per boot (the write truncates, so re-running over the
+   *     same uncompacted journal converges) and keep metadata only. Without a
+   *     media dir (`Journal.bootWith` outside `Server.serve`) the bytes stay
+   *     in memory, the pre-file-store behavior.
+   *   - SLIM (`{media_id, content_type, size}`): probe the blob file; a
+   *     missing file logs and SKIPS the metadata insert, so fetches of the id
+   *     404 — degraded, not fatal. */
+  def applyMedia(j: Json): Unit = getField(j, "data") match
+    case _: Some[Json] => migrateMedia(strField(j, "media_id", ""), strField(j, "content_type", ""), strField(j, "data", ""))
+    case None => applySlimMedia(strField(j, "media_id", ""), strField(j, "content_type", ""))
+
+  def migrateMedia(id: String, ct: String, enc: String): Unit =
     var raw: go.Bytes = go.makeSlice[Byte](0)
     try
       val v = go.encoding.base64.URLEncoding.decodeString(enc)
       raw = v
       ()
     catch case e: sgo.GoError => ()
-    Store.replayMedia(id, go.string(raw), ct)
+    if MediaFiles.enabled then migrateMediaOut(id, ct, go.string(raw))
+    else Store.replayMedia(id, go.string(raw), ct)
+
+  def migrateMediaOut(id: String, ct: String, data: String): Unit =
+    MediaFiles.write(id, data)
+    Store.replayMediaMeta(id, ct)
+
+  def applySlimMedia(id: String, ct: String): Unit =
+    if MediaFiles.enabled && !MediaFiles.exists(id) then
+      println("wata: media blob missing on replay, skipping " + id)
+    else Store.replayMediaMeta(id, ct)
 
   // ---- field accessors (JInt / nested Json) ----------------------------------
 

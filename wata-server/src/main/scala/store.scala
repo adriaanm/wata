@@ -631,10 +631,29 @@ object Store:
     case None => ()
 
   def redactRoom(st: StoreState, room: Room, roomId: String, eventId: String, red: Event): Unit =
+    reclaimMedia(st, findEv(room.timeline, eventId))
     st.rooms = HashMap.put(st.rooms, roomId,
       Room(room.roomId, room.version, redactState(room.state, eventId, red, Nil),
         redactTL(room.timeline, eventId, red, Nil)))
     if Journal.enabled then Journal.rec(Journal.redactOp(roomId, eventId, red.eventId)) else ()
+
+  /** redacting a media message reclaims its blob: drop the metadata entry and
+   *  delete the file (the event is the only referrer — media ids are not
+   *  shared). Runs inside the redact transaction, before the content is
+   *  emptied; keyed on the target's `url` field, so non-media redactions and
+   *  already-redacted targets (content `{}`) fall through. Idempotent across
+   *  a journal replay (file delete of a missing file is a no-op). */
+  def reclaimMedia(st: StoreState, target: Option[Event]): Unit = target match
+    case s: Some[Event] => reclaimMediaOf(st, mediaIdOfMxc(strField(s.value.content, "url", "")))
+    case None => ()
+
+  def reclaimMediaOf(st: StoreState, mediaId: String): Unit =
+    if mediaId != "" && mediaKnown(HashMap.get(st.media, mediaId)) then reclaimMediaGo(st, mediaId)
+    else ()
+
+  def reclaimMediaGo(st: StoreState, mediaId: String): Unit =
+    st.media = HashMap.remove(st.media, mediaId)
+    if MediaFiles.enabled then MediaFiles.delete(mediaId) else ()
 
   def redactTL(xs: List[Event], eventId: String, red: Event, acc: List[Event]): List[Event] = xs match
     case h :: t => redactTLStep(h, t, eventId, red, acc)
@@ -671,17 +690,63 @@ object Store:
     cell.withLock(st => HashMap.get(st.aliases, alias))
 
   // ---- media --------------------------------------------------------------
+  //
+  // File-backed when persistence is on (MediaFiles, mediafiles.scala): the
+  // blob file is written BEFORE the store/journal transaction, so a crash
+  // between the two leaves an orphan file, never a journal ref to a missing
+  // blob. The store then holds METADATA only (`data` = ""), and the journal op
+  // carries `{media_id, content_type, size}`. Stateless runs (no WATA_LOG /
+  // WATA_DATA) keep the bytes in memory exactly as before.
 
   def storeMedia(data: String, contentType: String): String =
     val id = genMediaId()
+    if MediaFiles.enabled then MediaFiles.write(id, data) else ()
     cell.withLock { st =>
-      st.media = HashMap.put(st.media, id, MediaItem(id, data, contentType))
-      if Journal.enabled then Journal.rec(Journal.mediaOp(id, data, contentType)) else ()
+      st.media = HashMap.put(st.media, id, mediaMeta(id, data, contentType))
+      if Journal.enabled then Journal.rec(Journal.mediaOp(id, contentType, data.length.toLong)) else ()
     }
     id
 
+  /** metadata-only in file-backed mode; the full item otherwise. */
+  def mediaMeta(id: String, data: String, contentType: String): MediaItem =
+    if MediaFiles.enabled then MediaItem(id, "", contentType)
+    else MediaItem(id, data, contentType)
+
   def getMedia(mediaId: String): Option[MediaItem] =
-    cell.withLock(st => HashMap.get(st.media, mediaId))
+    loadMedia(cell.withLock(st => HashMap.get(st.media, mediaId)))
+
+  /** in file-backed mode, read the blob on demand (voice blobs are ~15 KB; no
+   *  cache until profiling says so). A metadata entry whose file is gone
+   *  serves a 404, same as an unknown id. */
+  def loadMedia(m: Option[MediaItem]): Option[MediaItem] = m match
+    case s: Some[MediaItem] => loadMediaItem(s.value)
+    case None => None
+
+  def loadMediaItem(mi: MediaItem): Option[MediaItem] =
+    if MediaFiles.enabled then loadMediaFile(mi)
+    else Some(mi)
+
+  def loadMediaFile(mi: MediaItem): Option[MediaItem] = MediaFiles.load(mi.mediaId) match
+    case s: Some[String] => Some(MediaItem(mi.mediaId, s.value, mi.contentType))
+    case None => None
+
+  def hasMedia(mediaId: String): Boolean =
+    cell.withLock(st => mediaKnown(HashMap.get(st.media, mediaId)))
+
+  def mediaKnown(m: Option[MediaItem]): Boolean = m match
+    case _: Some[MediaItem] => true
+    case None => false
+
+  /** the media id of an `mxc://<server>/<mediaId>` url, "" when it isn't one.
+   *  Only the LAST path segment matters — wata's own uploads mint the url, so
+   *  the server part is ours by construction. */
+  def mediaIdOfMxc(url: String): String =
+    if url.startsWith("mxc://") then afterLastSlash(url)
+    else ""
+
+  def afterLastSlash(s: String): String =
+    val i = MediaFiles.lastSlash(s, 0, -1)
+    if i < 0 || i + 1 >= s.length then "" else s.substring(i + 1)
 
   // ---- receipts --------------------------------------------------------------
 
@@ -971,6 +1036,15 @@ object Store:
   def replayAlias(alias: String, roomId: String): Unit =
     cell.withLock(st => st.aliases = HashMap.put(st.aliases, alias, roomId))
 
+  /** metadata-only reinsert (file-backed mode: the bytes live in the blob
+   *  file; persist.scala verified — or just wrote — the file first). */
+  def replayMediaMeta(id: String, contentType: String): Unit =
+    cell.withLock(st => st.media = HashMap.put(st.media, id, MediaItem(id, "", contentType)))
+
+  /** full reinsert with bytes — the in-memory fallback for a replay that runs
+   *  without a media dir (not reachable from `Server.serve`, which boots
+   *  MediaFiles before the journal; kept so `Journal.bootWith` alone stays
+   *  correct). */
   def replayMedia(id: String, data: String, contentType: String): Unit =
     cell.withLock(st => st.media = HashMap.put(st.media, id, MediaItem(id, data, contentType)))
 

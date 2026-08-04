@@ -86,7 +86,10 @@ case class Event(
  *  event log. */
 case class Room(roomId: String, version: String, state: List[(String, Event)], timeline: List[Event])
 
-/** An uploaded media blob, bytes as a byte-preserving String (see above). */
+/** An uploaded media blob. In file-backed mode (MediaFiles enabled) the store
+ *  holds METADATA only — `data` is "" and the bytes live in the blob file,
+ *  read on demand by `Store.getMedia`; stateless runs keep the bytes here, as
+ *  a byte-preserving String (see above). */
 case class MediaItem(mediaId: String, data: String, contentType: String)
 
 /** A read receipt, with `roomId` embedded so the whole set is ONE flat list
