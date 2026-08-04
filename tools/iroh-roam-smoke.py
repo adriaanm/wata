@@ -42,7 +42,7 @@ SERIAL = os.environ.get("BQ268_SERIAL", "/dev/cu.usbmodem000000001")
 CC = os.environ.get("FB_CC", "zig cc -target arm-linux-musleabihf")
 REMOTE_BIN = "/dev/shm/wata-fb-iroh"
 REMOTE_CFG = "/dev/shm/wata-fb-iroh.json"
-SCENARIO = "login-syncing"
+SCENARIOS = ["login-syncing", "voice-to-bob"]   # tunnel-smoke's pair: sync + voice round trip
 
 
 def run(cmd, env, cwd=None, **kw):
@@ -210,6 +210,8 @@ def main():
         ser = Serial(SERIAL)
         ser.write("\x03\n")                            # clear any stuck foreground job
         ser.drain(1.0)
+        ser.write("stty -echo\n")                       # console wraps at 80 cols; echoed
+        ser.drain(1.0)                                  # long commands break marker parsing
         rc, out = ser.cmd("echo SER-OK")
         if "SER-OK" not in out and rc != 0:
             fail(f"serial console not answering: {out[:200]}")
@@ -256,15 +258,22 @@ def main():
             fail("cellular (ppp0) does not pass traffic after 8 probes")
         ser.cmd("echo 'nameserver 1.1.1.1' > /etc/resolv.conf")
         print(f"iroh-roam-smoke: dialing {ann['id'][:16]}… via relay n0 over cellular…")
-        rc, out = ser.cmd(
-            f"WATA_IROH_CONFIG={REMOTE_CFG} {REMOTE_BIN} integ {SCENARIO} http://wata.iroh "
-            f"> /dev/shm/roam.out 2>&1; echo RUN=$?", timeout=240)
-        rc2, body = ser.cmd("cat /dev/shm/roam.out", timeout=20)
-        print(body)
-        ok = f"INTEG PASS {SCENARIO}" in body
-        if not ok:
-            print("---- server log ----")
-            print(log_path.read_text())
+        ok = True
+        for scenario in SCENARIOS:
+            t0 = time.time()
+            rc, out = ser.cmd(
+                f"WATA_IROH_CONFIG={REMOTE_CFG} {REMOTE_BIN} integ {scenario} http://wata.iroh "
+                f"> /dev/shm/roam.out 2>&1; echo RUN=$?", timeout=240)
+            dt = time.time() - t0
+            rc2, body = ser.cmd("cat /dev/shm/roam.out", timeout=20)
+            print(body)
+            print(f"iroh-roam-smoke: {scenario} wall time {dt:.1f}s "
+                  f"(includes endpoint bring-up + discovery + relay dial)")
+            if f"INTEG PASS {scenario}" not in body:
+                ok = False
+                print("---- server log ----")
+                print(log_path.read_text())
+                break
     finally:
         if ser is not None:
             # ---- 7. restore, regardless of outcome -------------------------
@@ -285,6 +294,7 @@ def main():
                 print("iroh-roam-smoke: WARNING — wpa not associated after restart; "
                       "if ssh stays dead, reboot the device (clears the CAF wedge)")
             ser.cmd(f"rm -f {REMOTE_BIN} {REMOTE_CFG} /dev/shm/roam.out /dev/shm/resolv.saved")
+            ser.write("stty echo\n")
             for i in range(30):
                 r = run(["ssh", "-o", "ConnectTimeout=4", f"root@{HOST}", "true"], env,
                         capture_output=True)
