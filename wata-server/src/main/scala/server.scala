@@ -109,6 +109,15 @@ object Server:
     mux.handle("POST /_matrix/client/v3/rooms/{roomIdOrAlias}/join", h)
     mux.handle("POST /_matrix/client/v3/join/{roomIdOrAlias}", h)
     mux.handle("POST /_matrix/client/v3/rooms/{roomId}/invite", h)
+    mux.handle("POST /_matrix/client/v3/rooms/{roomId}/leave", h)
+    mux.handle("POST /_matrix/client/v3/rooms/{roomId}/kick", h)
+    mux.handle("POST /_matrix/client/v3/rooms/{roomId}/ban", h)
+    // The state key is optional in the path. Clients write it three ways —
+    // omitted, empty (a trailing slash), or present — and a plain `{stateKey}`
+    // segment matches none of the first two, so the second pattern is a
+    // trailing WILDCARD (`{stateKey...}`), which matches an empty remainder.
+    mux.handle("PUT /_matrix/client/v3/rooms/{roomId}/state/{eventType}", h)
+    mux.handle("PUT /_matrix/client/v3/rooms/{roomId}/state/{eventType}/{stateKey...}", h)
     mux.handle("GET /_matrix/client/v3/rooms/{roomId}/messages", h)
     mux.handle("GET /_matrix/client/v1/directory/room/{roomAlias}", h)
     mux.handle("PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}", h)

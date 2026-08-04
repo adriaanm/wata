@@ -28,9 +28,10 @@ import JsonNav.*
  *  semantic, so it is chosen for readability.
  */
 
-/** The three deltas a sync response is assembled from, kept as lists so
+/** The four deltas a sync response is assembled from, kept as lists so
  *  `hasChangesOf` can test emptiness WITHOUT re-navigating the built JSON. */
-case class SyncParts(joins: List[(String, Json)], invites: List[(String, Json)], global: List[AcctData], upTo: scala.Long)
+case class SyncParts(joins: List[(String, Json)], invites: List[(String, Json)],
+                     leaves: List[(String, Json)], global: List[AcctData], upTo: scala.Long)
 
 /** One room block's timeline window: the events actually sent, whether older
  *  ones were withheld (`limited`), and the `prev_batch` position the client
@@ -124,25 +125,28 @@ object Sync:
     else incrParts(userId, sinceSeq, upTo)
 
   def hasChangesOf(p: SyncParts): Boolean =
-    notEmptyPairs(p.joins) || notEmptyPairs(p.invites) || notEmptyAcct(p.global)
+    notEmptyPairs(p.joins) || notEmptyPairs(p.invites) || notEmptyPairs(p.leaves) || notEmptyAcct(p.global)
 
   def partsToJson(p: SyncParts): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("next_batch", JStr("s" + JsonNav.longStr(p.upTo))) :: fs
-    fs = ("rooms", roomsObj(p.joins, p.invites)) :: fs
+    fs = ("rooms", roomsObj(p.joins, p.invites, p.leaves)) :: fs
     fs = ("account_data", obj1("events", acctEventsArr(p.global))) :: fs
     endObj(fs)
 
-  def roomsObj(joins: List[(String, Json)], invites: List[(String, Json)]): Json =
-    obj3("join", JObj(joins), "invite", JObj(invites), "leave", emptyObj)
+  def roomsObj(joins: List[(String, Json)], invites: List[(String, Json)], leaves: List[(String, Json)]): Json =
+    obj3("join", JObj(joins), "invite", JObj(invites), "leave", JObj(leaves))
 
   // ---- initial sync ----------------------------------------------------------
 
+  /** An initial sync reports no `leave` rooms: the client is being told what it
+   *  IS in, and a room it left has no place in a from-scratch view. Departures
+   *  are a DELTA fact, so they are reported incrementally (`buildLeaves`). */
   def initialParts(userId: String, upTo: scala.Long): SyncParts =
     val joins = buildJoinsInitial(Store.roomsForUser(userId, "join"), userId, Nil)
     val invites = buildInvites(Store.roomsForUser(userId, "invite"), Nil)
     val global = Store.allAccountData(userId, false, "")
-    SyncParts(joins, invites, global, upTo)
+    SyncParts(joins, invites, Nil, global, upTo)
 
   def buildJoinsInitial(rooms: List[Room], userId: String, acc: List[(String, Json)]): List[(String, Json)] = rooms match
     case h :: t => buildJoinsInitialStep(h, t, userId, acc)
@@ -169,8 +173,9 @@ object Sync:
   def incrParts(userId: String, sinceSeq: scala.Long, upTo: scala.Long): SyncParts =
     val joins = buildJoinsIncr(Store.roomsForUser(userId, "join"), userId, sinceSeq, Nil)
     val invites = buildInvitesIncr(Store.roomsForUser(userId, "invite"), userId, sinceSeq, Nil)
+    val leaves = buildLeaves(Store.roomsLeftBy(userId), userId, sinceSeq, Nil)
     val global = Store.acctSinceGlobal(userId, sinceSeq)
-    SyncParts(joins, invites, global, upTo)
+    SyncParts(joins, invites, leaves, global, upTo)
 
   def buildJoinsIncr(rooms: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] = rooms match
     case h :: t => buildJoinsIncrStep(h, t, userId, sinceSeq, acc)
@@ -268,6 +273,38 @@ object Sync:
 
   def inviteBlock(room: Room): Json =
     obj1("invite_state", obj1("events", strippedInviteArr(room.state)))
+
+  // ---- left / banned rooms ---------------------------------------------------
+  //
+  // A room the user left (or was kicked or banned from) within this delta. The
+  // block carries the departing `m.room.member` event itself and nothing else:
+  // it exists so the client learns the room is gone, and nothing downstream of
+  // a departure needs the room's history.
+
+  def buildLeaves(rooms: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] = rooms match
+    case h :: t => buildLeavesStep(h, t, userId, sinceSeq, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def buildLeavesStep(h: Room, t: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] =
+    var acc2: List[(String, Json)] = acc
+    if memberEventIsNew(h, userId, sinceSeq) then acc2 = (h.roomId, leaveBlock(h, userId, sinceSeq)) :: acc2 else ()
+    buildLeaves(t, userId, sinceSeq, acc2)
+
+  def leaveBlock(room: Room, userId: String, sinceSeq: scala.Long): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("state", obj1("events", JArr(Nil))) :: fs
+    fs = ("timeline", timelineObj(eventsArr(departure(room, userId)), false, tok(sinceSeq))) :: fs
+    fs = ("account_data", obj1("events", JArr(Nil))) :: fs
+    endObj(fs)
+
+  def departure(room: Room, userId: String): List[Event] = Store.memberEvent(room, userId) match
+    case s: Some[Event] => oneEvent(s.value)
+    case None => Nil
+
+  def oneEvent(ev: Event): List[Event] =
+    var xs: List[Event] = Nil
+    xs = ev :: xs
+    xs
 
   // ---- summary / heroes / member counts --------------------------------------
 

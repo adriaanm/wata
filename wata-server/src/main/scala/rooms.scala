@@ -236,6 +236,128 @@ object Rooms:
     Store.notifyUser(target)
     Right(emptyObj)
 
+  // ---- leave / kick / ban ---------------------------------------------------
+  //
+  // The three membership actions the transition table (membership.scala) covers
+  // besides join and invite. LEAVE moves the CALLER out; KICK and BAN move the
+  // `user_id` from the body out, with the caller as the event's sender. All
+  // three write an ordinary `m.room.member` state event, so /sync, the journal,
+  // and the state map need no special case.
+  //
+  // A departure is notified to the room AND to the departed user explicitly:
+  // once their member event says leave/ban, `notifyRoomMembers` no longer counts
+  // them, so their own long-poll would otherwise sit until timeout instead of
+  // waking on the `rooms.leave` block that tells them they are gone.
+
+  def leaveRoute(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
+    case l: Left[MErr, Auth]  => Left(l.left)
+    case rr: Right[MErr, Auth] => leave1(rr.right.userId, r, body)
+
+  def leave1(userId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
+    val roomId = r.pathValue("roomId")
+    Store.getRoom(roomId) match
+      case _: Some[Room] => leave2(userId, roomId, body)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+
+  def leave2(userId: String, roomId: String, body: String): Either[MErr, Json] =
+    Mem.transition(Store.getMembership(roomId, userId), ALeave()) match
+      case _: Denied => Left(MErr(403, M_FORBIDDEN(), "You cannot leave this room"))
+      case _         => leave3(userId, roomId, body)
+
+  def leave3(userId: String, roomId: String, body: String): Either[MErr, Json] =
+    depart(roomId, userId, userId, "leave", reasonOf(body))
+    Right(emptyObj)
+
+  def kickRoute(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
+    case l: Left[MErr, Auth]  => Left(l.left)
+    case rr: Right[MErr, Auth] => evict1(rr.right.userId, r, body, ALeave(), "leave")
+
+  def banRoute(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
+    case l: Left[MErr, Auth]  => Left(l.left)
+    case rr: Right[MErr, Auth] => evict1(rr.right.userId, r, body, ABan(), "ban")
+
+  def evict1(actor: String, r: go.net.http.Request, body: String, act: MAction, to: String): Either[MErr, Json] =
+    val roomId = r.pathValue("roomId")
+    Store.getMembership(roomId, actor) match
+      case _: MJoin => evict2(actor, roomId, body, act, to)
+      case _        => Left(MErr(403, M_FORBIDDEN(), "You are not in this room"))
+
+  def evict2(actor: String, roomId: String, body: String, act: MAction, to: String): Either[MErr, Json] =
+    Json.tryParse(body) match
+      case Right(j) => evict3(actor, roomId, j, act, to)
+      case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
+
+  def evict3(actor: String, roomId: String, j: Json, act: MAction, to: String): Either[MErr, Json] =
+    val target = strField(j, "user_id", "")
+    if target == "" then Left(MErr(400, M_BAD_JSON(), "Missing user_id"))
+    else evict4(actor, roomId, target, strField(j, "reason", ""), act, to)
+
+  def evict4(actor: String, roomId: String, target: String, reason: String, act: MAction, to: String): Either[MErr, Json] =
+    Mem.transition(Store.getMembership(roomId, target), act) match
+      case _: Denied => Left(MErr(403, M_FORBIDDEN(), "User cannot be removed from this room"))
+      case _         => evict5(actor, roomId, target, reason, to)
+
+  def evict5(actor: String, roomId: String, target: String, reason: String, to: String): Either[MErr, Json] =
+    depart(roomId, actor, target, to, reason)
+    Right(emptyObj)
+
+  /** write the departing member event and wake both the room and the departed. */
+  def depart(roomId: String, sender: String, target: String, to: String, reason: String): Unit =
+    addStateEvent(roomId, sender, "m.room.member", target, memberLeaveContent(to, reason))
+    Store.notifyRoomMembers(roomId)
+    Store.notifyUser(target)
+
+  def memberLeaveContent(to: String, reason: String): Json =
+    if reason == "" then obj1("membership", JStr(to))
+    else obj2("membership", JStr(to), "reason", JStr(reason))
+
+  /** an optional `reason` from a body that may not even be JSON (leave takes an
+   *  empty body from most clients). */
+  def reasonOf(body: String): String = Json.tryParse(body) match
+    case Right(j) => strField(j, "reason", "")
+    case Left(_)  => ""
+
+  // ---- state events ---------------------------------------------------------
+  //
+  // PUT /rooms/{roomId}/state/{eventType}/{stateKey} — the generic state-setting
+  // endpoint. The state key is optional in the path; absent means "". Content
+  // must be a JSON object; the event goes through the same `Store.addEvent` as
+  // everything else, so the room's state map, /sync, and the journal all pick it
+  // up with no special case.
+
+  def setState(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
+    case l: Left[MErr, Auth]  => Left(l.left)
+    case rr: Right[MErr, Auth] => setState1(rr.right.userId, r, body)
+
+  def setState1(userId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
+    val roomId = r.pathValue("roomId")
+    Store.getRoom(roomId) match
+      case _: Some[Room] => setState2(userId, roomId, r, body)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+
+  def setState2(userId: String, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
+    Store.getMembership(roomId, userId) match
+      case _: MJoin => setState3(userId, roomId, r, body)
+      case _        => Left(MErr(403, M_FORBIDDEN(), "User is not in the room"))
+
+  def setState3(userId: String, roomId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
+    Json.tryParse(body) match
+      case Right(j) => setState4(userId, roomId, r, j)
+      case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
+
+  def setState4(userId: String, roomId: String, r: go.net.http.Request, j: Json): Either[MErr, Json] =
+    if !isObj(j) then Left(MErr(400, M_BAD_JSON(), "Request body is not a JSON object"))
+    else setState5(userId, roomId, r.pathValue("eventType"), r.pathValue("stateKey"), j)
+
+  def setState5(userId: String, roomId: String, etype: String, sk: String, j: Json): Either[MErr, Json] =
+    Store.addEvent(roomId, etype, userId, j, true, sk, false, "", JNull()) match
+      case s: Some[Event] => setState6(roomId, s.value)
+      case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+
+  def setState6(roomId: String, ev: Event): Either[MErr, Json] =
+    Store.notifyRoomMembers(roomId)
+    Right(obj1("event_id", JStr(ev.eventId)))
+
   // ---- resolve alias --------------------------------------------------------
 
   def resolveAlias(r: go.net.http.Request): Either[MErr, Json] = Store.getRoomIdByAlias(r.pathValue("roomAlias")) match

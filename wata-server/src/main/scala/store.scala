@@ -635,6 +635,29 @@ object Store:
   def membershipStrOf(room: Room, userId: String): String =
     Mem.str(memInState(room.state, stateKeyOf("m.room.member", userId)))
 
+  /** rooms this user has left or been banned from — /sync's `leave` block.
+   *  One pass over the same id list, since "left" is two membership values. */
+  def roomsLeftBy(userId: String): List[Room] =
+    cell.withLock(st => collectLeft(st, ListOps.reverse(st.roomIds), userId, Nil))
+
+  def collectLeft(st: StoreState, ids: List[String], userId: String, acc: List[Room]): List[Room] = ids match
+    case h :: t => collectLeftStep(st, h, t, userId, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def collectLeftStep(st: StoreState, h: String, t: List[String], userId: String, acc: List[Room]): List[Room] =
+    var acc2: List[Room] = acc
+    acc2 = keepIfLeft(HashMap.get(st.rooms, h), userId, acc2)
+    collectLeft(st, t, userId, acc2)
+
+  def keepIfLeft(ro: Option[Room], userId: String, acc: List[Room]): List[Room] = ro match
+    case s: Some[Room] => keepIfLeft2(s.value, userId, acc)
+    case None => acc
+
+  def keepIfLeft2(room: Room, userId: String, acc: List[Room]): List[Room] =
+    if hasLeft(membershipStrOf(room, userId)) then room :: acc else acc
+
+  def hasLeft(m: String): Boolean = m == "leave" || m == "ban"
+
   /** the member event for `userId` in a room's state (used by /sync's new-invite
    *  test: is this invite newer than the since-token). */
   def memberEvent(room: Room, userId: String): Option[Event] =

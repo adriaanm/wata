@@ -27,9 +27,10 @@ lines:
 Implemented: password login (`m.login.password`) against two hardcoded users
 (alice/bob — `model.scala:120-131`, `Config.userByLocalpart`), device/access-token
 sessions, profile (displayname/avatar_url), global and per-room account data,
-room creation with the common presets, join (by id or alias), invite, sending
-and redacting `m.room.*` events, read receipts, media upload/download, and
-`/sync` including long-polling. Deliberately absent: any encryption (no
+room creation with the common presets, join (by id or alias), invite, leave,
+kick, ban, setting arbitrary state events, sending and redacting `m.room.*`
+events, read receipts, media upload/download, and `/sync` including
+long-polling. Deliberately absent: any encryption (no
 `m.room.encrypted` handling, no device-key endpoints), federation, user
 registration (users are a fixed, hardcoded pair — `wata-server/src/main/scala/model.scala:120-131`),
 power-level enforcement on ordinary state/message events (only membership is
@@ -131,12 +132,29 @@ current `m.room.member` state event's `content.membership` string
 (`Store.getMembership`, `store.scala:380`, via `Mem.parse` in
 `membership.scala:52`). `membership.scala` defines the actual state machine —
 a sealed `Membership`/`MAction`/`Trans` family and a `transition` table
-(`Mem.transition`, `membership.scala:71`) — that handlers consult before
-allowing a join or invite (`Mem.joinFrom`/`Mem.inviteFrom`). `leave` and
-`ban` have transition rows for completeness but **no HTTP endpoint calls
-them** — there is no `/leave`, `/kick`, or `/ban` route registered in
-`server.scala`, so `MLeave`/`MBan` can currently only be reached by direct
-store manipulation (e.g. `SelfCheck`), never by a real client.
+(`Mem.transition`) — that handlers consult before allowing a membership
+change. All four actions are reachable: `AJoin` from `POST /join`, `AInvite`
+from `POST /invite`, `ALeave` from both `POST /leave` (the caller moves
+themselves out) and `POST /kick` (a member moves someone else out), and
+`ABan` from `POST /ban`. `ALeave`/`ABan` are always `allowed` in the table —
+*who* may perform them is a power-level question (`Power.canKick`/`canBan`),
+not a from-state one.
+
+Each of the three writes an ordinary `m.room.member` state event through
+`Store.addEvent`, so the state map, `/sync`, and the journal need no special
+case. A departure is notified to the room *and* to the departed user
+explicitly (`Rooms.depart`): once their member event says `leave`/`ban`,
+`notifyRoomMembers` no longer counts them, so their own long-poll would
+otherwise sit until timeout instead of waking on the `rooms.leave` block that
+tells them they are gone.
+
+**`PUT /rooms/{roomId}/state/{eventType}/{stateKey}`** (`Rooms.setState`) is
+the generic state-setting endpoint: caller must be joined and have the power
+level for that event type, the body must be a JSON object, and the state key
+is optional in the path. Clients write the key three ways — omitted, empty (a
+trailing slash), or present — and a plain `{stateKey}` segment matches none of
+the first two, so the route is registered twice, the second time with a
+trailing wildcard `{stateKey...}` that also matches an empty remainder.
 
 **Account data** (`AcctData`, `model.scala:58`) is one flat list for both
 global and per-room entries, disambiguated by a `(hasRoom, roomId)` pair
@@ -289,12 +307,12 @@ silently skipped (best-effort, not validated).
 ## File-by-file map
 
 - **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and `Config` (the two hardcoded users, `serverName = "localhost"`).
-- **`membership.scala`** — the membership sealed types and the join/invite transition table; `leave`/`ban` rows exist but have no reachable HTTP endpoint.
+- **`membership.scala`** — the membership sealed types and the join/invite/leave/ban transition table; every row is reachable from an HTTP route.
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, and per-op-kind (de)serialization.
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
-- **`rooms.scala`** — `Rooms`: createRoom, join, invite, send/redact events, receipts, media upload, and `GET /messages` pagination.
+- **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
 - **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental) and the long-poll orchestration.
 - **`server.scala`** — `WataHandler`/`MediaEdge`/`NotFound`/`Respond` (the HTTP edge), `Server` (boot + route table), `Main`, and `SelfCheck` (a deterministic smoke test of the store/handler logic, diffed against a golden file by the build's smoke script).
 

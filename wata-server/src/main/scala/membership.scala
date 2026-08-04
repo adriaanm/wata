@@ -21,8 +21,11 @@
  *     `M_FORBIDDEN`, so those are denied here rather than silently rewriting
  *     the target's member event. Well-behaved clients only invite users not
  *     currently in the room (none/leave -> invite).
- *   - LEAVE/BAN have no wired HTTP endpoint (no leave/kick/ban route); the
- *     table lists them for completeness (both always `allowed`).
+ *   - LEAVE is the action behind both `POST /rooms/{id}/leave` (the caller
+ *     moves themselves out) and `POST /rooms/{id}/kick` (a joined member moves
+ *     someone else out); BAN is `POST /rooms/{id}/ban`. Both are always
+ *     `allowed` here — who may perform them is a POWER-LEVEL question, checked
+ *     separately (`Power.canKick`/`canBan`), not a from-state one.
  */
 sealed trait Membership
 case class MNone() extends Membership
