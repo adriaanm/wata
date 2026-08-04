@@ -110,9 +110,12 @@ voice round trip) 30.3s wall — each including a cold endpoint
 bring-up, n0 discovery, and the relay dial.
 
 Device-layer constraints the gate encodes (bq268 kernel/alpine side,
-outside this repo): ONE data call per boot — the second `cell-data up`
-oopses the vendor 4.4 kernel in `smd_tty_tiocmset` (stale pointer in
-the SMD tty close/reopen path), so a rerun needs a reboot first; the
+outside this repo): the one-data-call-per-boot limit is FIXED as of
+kernel `dde87bce66ae` (`smd_tty` had no `.hangup`, so a closed port
+was never torn down; see the alpine repo's kernel-fixes doc) — on an
+older kernel the second `cell-data up` oopses and a rerun needs a
+reboot first, on a fixed one cellular cycles freely, which is what
+makes the milestone-4 flip test affordable; the
 PPP ip-up hook installs no peer DNS, so the smoke sets public DNS for
 the wifi-down window; wifi restore leaves the whole bring-up to the
 wifi service (a bare `ifconfig up` first can wedge the CAF driver's
