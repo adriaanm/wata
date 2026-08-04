@@ -1,0 +1,488 @@
+# wata-fb — design notes
+
+`wata-fb` is the client that runs on the physical device: a small
+handheld (product code name BQ268, a Qualcomm MSM8909 board) with a
+160x128 ST7735S-class color LCD, a keypad, a push-to-talk button, a
+microphone, and a speaker. From a user's point of view it is a
+walkie-talkie: pick a contact or the family room, hold a button to
+record and send a voice clip, and incoming clips show up as a list
+you can scroll and play back. All of it rides Matrix as the transport
+— sending a voice message is uploading an Opus/Ogg file and posting an
+`m.audio`-shaped event into a room; receiving is `/sync` plus
+download. The device also has a "family room" concept (a shared room
+everyone auto-joins) alongside 1:1 DMs.
+
+The module is a Sgola (restricted Scala 3 → Go) application. It is
+built with `../tools/sgo build` from `wata-fb/`, links `core`
+(implicit), `json`, and `wataclient` (the portable Matrix client
+engine that lives in a sibling module and is NOT owned by this repo
+area), and pulls in one cgo Go dependency, `go-pkgs/audio`, for Opus
+and ALSA (tinyalsa) access. `wata-fb/sgo.build` and `sgo.deps`
+describe this; see `wata-fb/go.mod` for the Go-level requires.
+
+wata-fb builds two ways:
+
+- **Native (dev host, e.g. darwin)**: `sgo build`/`sgo run` compile
+  everything, including the framebuffer/evdev/LED code (Linux
+  syscalls happen to also exist as no-ops or errors on darwin because
+  `go.syscall` binds the `syscall` package, present on both), but the
+  `go-pkgs/audio` cgo package is replaced by `audio_stub.go` (see
+  `go-pkgs/audio/audio_stub.go:1`), whose build tag excludes
+  `linux && arm`. Every audio entry point returns an error
+  immediately, so the process doesn't hang or crash, but nothing can
+  actually run end to end without the device.
+- **Cross-compiled (linux/arm, the actual device)**: built with
+  `zig cc -target arm-linux-musleabihf` as the C compiler (see
+  `tools/fb-deploy.sh:29`), which lets the toolchain cross-compile
+  cgo without a native ARM sysroot. `go-pkgs/audio/audio_linux.go`
+  and the vendored, prebuilt static libs under
+  `go-pkgs/audio/clib/arm/` provide the real opus + tinyalsa objects.
+
+## Process structure
+
+`main.scala` is a flat command dispatcher (`object Main.main`,
+`wata-fb/src/main/scala/main.scala:15`): it inspects `args(0)` and
+routes to one of about a dozen subcommands — there is no subcommand
+framework, just a chain of `if/else if`. The two "real product"
+entry points are:
+
+- `wata-fb ui <base> <user> <pass>` — the actual on-device client
+  (`Ui.run`, `ui.scala:43`).
+- `wata-fb login|voicesend|voiceplay|audiosoak ...` — scripted,
+  non-interactive drivers used for development and load testing
+  (`DevCli`, `devcli.scala:20`).
+
+Everything else (`synctest`, `oggtest`, `oggforeign`, `fbdump`,
+`fbsmoke`, `syncfix`, `integ`, `--selftest`) is test/oracle tooling,
+covered under "dev/test surface" below.
+
+`Ui.runUi` (`ui.scala:47`) is the process shape for the live client:
+it opens and mmaps `/dev/fb0`, builds a `wataclient` `MatrixClient`
+via `Runtime.makeWithAudio`, then runs everything inside one
+`sgo.supervised { ... }` structured-concurrency scope
+(`ui.scala:71`). Inside that scope:
+
+- the **audio thread** runs as a `fork` of `AudioThread.mainLoop`
+  (`audiothread.scala:50`), driven by a command channel
+  (`sgo.Chan[AudioCmd]`) and reporting back on an event channel
+  (`sgo.Chan[AudioEvt]`);
+- `Runtime.start(c)` (owned by `wataclient`, not this module) spins up
+  the sync loop and the action-queue loop as further forks;
+- the **UI/main loop** (`Ui.frameLoop`, `ui.scala:96`) runs on the
+  calling goroutine itself — it is not forked. It polls the newest
+  state snapshot, drains UI events, polls input devices, updates the
+  shell/applet state machine, renders, and presents a frame, at a
+  fixed ~33ms sleep (~30fps).
+
+If any of the sibling forks fails, the whole `supervised` scope is
+cancelled (structured concurrency) and the process unwinds through
+the ordinary teardown path (screen cleared, LEDs off, fb unmapped).
+
+Shared mutable state between the UI loop and the forked threads is
+held in a handful of module-level `sgo.Atomic` cells (`ui.scala:34-41`
+— `stateC`, `connC`, `idleC`, `offC`), read only by the UI goroutine
+by convention and written from event handlers. `shell.scala:56-63`
+documents the same discipline for `ShellState`, which additionally
+derives `Shareable` so it type-checks as safe to publish across the
+atomic cell.
+
+## The display stack
+
+Geometry is fixed at 160x128 (`display.scala:17`) — there is no ioctl
+probe of the framebuffer's actual size. The pixel buffer is a
+`go.Bytes` of `W*H*2` bytes in RGB565, little-endian
+(`display.scala:19`), so:
+
+- presenting a frame to hardware is a raw byte copy into the mmap'd
+  `/dev/fb0` (`FbTest.present`, `fbtest.scala:60`);
+- the same buffer, read back on the host where there is no real
+  framebuffer, becomes a PNG via a hand-rolled encoder
+  (`png.scala`) for golden-frame testing.
+
+`Draw` (`display.scala:39`) is a set of free functions over a passed
+buffer — `setPixel`, `clear`, `fillRect`, `hline`, `strokeRect` — not
+methods on a class; there's no object wrapping the buffer.
+`Color` (`display.scala:23`) holds precomputed RGB565 constants plus
+an `rgb()` helper for dynamic colors.
+
+Text uses a 5x8 bitmap font (`Font`, `display.scala:92`), a 256-glyph
+table baked in as an `IArray[Int]` literal (`display.scala:112`) —
+mostly ASCII plus a handful of custom icon glyphs at 0x80-0x8B
+(battery, checkmark, wifi) and a couple of block-element glyphs. There
+is no vector/TrueType font path; the font table comment says it was
+generated by a `scratchpad/genfont.py` script that is not present in
+this module. `Font.drawText`/`drawTextCentered` lay text out on a
+26-column x 15-row character grid (`display.scala:96-97`) below a
+1-pixel status line.
+
+`Png.scala` is a minimal, deliberately simple PNG encoder: single
+IDAT chunk, one stored (uncompressed) DEFLATE block, standard
+zlib/PNG CRC-32 and Adler-32 checksums. It exists purely so the host
+build can produce a byte-stable "golden frame" without needing a real
+display or a general-purpose compression library.
+
+A frame gets composed like this each UI tick (`Ui.frameLoop`,
+`ui.scala:96`): pick up the latest `StateSnapshot` from
+`wataclient`'s Runtime, drain UI events (connection state, send/play
+results) into LED and status updates, build a `FrameCtx` bundling
+that frame's snapshot/connection/queues, poll input, route it into
+the shell/applet state machine (`Shell.handleInput`,
+`shell.scala:109`), tick per-applet timers (`Shell.update`,
+`shell.scala:149`), and finally `Shell.render` writes into the pixel
+buffer and `FbTest.present` blits it to the framebuffer — skipped
+entirely while the screen is blanked by the idle timeout.
+
+The **UI/applet model** (`shell.scala`, `applets.scala`) is a small,
+explicit state machine, not a generic widget framework:
+
+- `Shell` (`shell.scala:65`) holds an `IArray[Applet]` and an active
+  index; `Applet` (`applets.scala:506`) is a three-method interface
+  (`handleInput`, `update`, `render`) implemented by immutable,
+  wither-style state records rather than mutation. There are exactly
+  two applets today: `WataApplet`/`WataLogic` (contacts + conversation
+  view, PTT recording, playback — `applets.scala:38-479`) and
+  `SettingsApplet`/`SettingsLogic` (menu: audio echo test,
+  brightness, screen timeout, display name, disconnect, info —
+  `applets.scala:532-769`).
+- Input routing has two special cases outside the generic per-applet
+  dispatch: the PTT button always targets the wata applet regardless
+  of which applet is active, and the two "dot" buttons cycle the
+  active applet (`Shell.handleInput`, `shell.scala:109`).
+- Every applet's `update` is called every frame even when inactive
+  (`Shell.update`, `shell.scala:149`) — this matters because the wata
+  applet must keep draining recording-done audio events (to trigger
+  the actual upload+send) even while the user is sitting in the
+  settings menu.
+
+## Input
+
+`Evdev` (`input.scala`) opens exactly `/dev/input/event0`,
+`/dev/input/event1`, `/dev/input/event2` non-blocking
+(`Evdev.open`, `input.scala:92`), reads raw 16-byte
+`struct input_event`s (32-bit-ARM layout: 4+4+2+2+4 bytes,
+`input.scala:34`), and maps kernel key codes to an app-level `Key`
+sum type (`input.scala:11-22`): d-pad, enter/back, PTT (F1), a
+headset/spare PTT (F2), and two "dot" buttons (F3/F10) used to switch
+applets. `KeyState` distinguishes pressed/released/repeat.
+
+**Known gap, called out in the code itself**: only three input
+devices are opened. `shell.scala:21-27` documents that this mirrors a
+gap in the original device firmware this was ported from — the
+reference client also only opens `event0..2` and therefore also never
+discovers whichever bus the second "dot" button's hardware sits on,
+if it's on a fourth device node. This module reproduces that
+behavior rather than fixing it; `WATA-TODO.md` tracks it as an open
+item ("dot2 input bus undiscovered").
+
+## Audio
+
+Audio is split into a Sgola-side facade (`audio.scala`, binding
+`github.com/adriaanm/wata/go-pkgs/audio` via `@go.bind`) and the actual
+Go/cgo package at `go-pkgs/audio/`, which this repo may read but not edit.
+
+**The cgo boundary.** `go-pkgs/audio/audio.go` is hand-written,
+ordinary Go — not code generated by any Sgola tooling. It defines the
+shared constants (48kHz mono S16_LE, 960-sample/20ms Opus frames,
+40ms/1920-frame ALSA periods, an 8-period/320ms playback ring) and a
+handful of build-tag-independent helpers (`Tone`, `EncodeFrameAt`,
+`DecodeFrame`, `PlayMessage`, `StateName`) that are shared between two
+mutually exclusive implementations selected by Go build tags:
+`audio_linux.go` (linux/arm, real cgo over opus + tinyalsa) and
+`audio_stub.go` (every other platform, `go-pkgs/audio/audio_stub.go:1`
+— every call returns an error immediately). The Sgola side never
+knows which one it's linked against; `audio.scala` types
+(`Encoder`, `Decoder`, `Capture`) are opaque cgo handles
+(`private[go]` constructors, `??? `-bodied binds resolved by the
+`@go.bind` annotation).
+
+`DecodeFrame`'s output buffer is sized for `MaxDecodeSamples = 5760`
+(120ms), not the device's own 20ms encode frame
+(`go-pkgs/audio/audio.go:38`) — a fix for a real bug: a foreign
+encoder (a different client implementation) can send 60ms@16kHz
+packets that decode to 2880 samples at 48kHz, which is longer than
+this device's own 20ms frames and used to make `opus_decode` return
+`OPUS_BUFFER_TOO_SMALL`. `oggforeign.scala` and
+`go-pkgs/audio/foreign_decode_test.go` exist specifically to guard
+this: a pinned Ogg fixture from that foreign encoder
+(`go-pkgs/audio/testdata/tui-foreign.ogg`) is decoded on-device and
+checked byte-for-byte.
+
+**Playback discipline.** `go.audio.playMessage` /
+`go-pkgs/audio/audio.go:140` (`PlayMessage`) encodes a specific,
+carefully tuned ALSA usage pattern rather than the more naive
+one-period-at-a-time write the code was originally ported from:
+open the volume control once up front (never mid-stream — opening it
+walks ~700 mixer controls on this hardware), set
+`start_threshold = stop_threshold = ring size`, prime the entire ring
+before starting playback so the kernel auto-starts once the threshold
+is met, only call an explicit `Start()` for messages shorter than the
+ring, apply volume only after the stream is running, and write the
+remaining body in fixed 4-period (160ms) chunks because a single
+large write can hit `ETIMEDOUT` on this ADSP. `audiothread.scala:11-14`
+notes this deliberately diverges from the original playback code's
+one-period-start approach — the Opus recording/playback code in this
+module was ported from a prior implementation, and that implementation
+had at least three quirks this port deliberately does NOT
+reproduce (`audiothread.scala:25-33`):
+1. the original encodes only one 960-sample Opus subframe per
+   1920-frame period read, silently dropping the second half of every
+   period during normal recording (its own echo-test path did not
+   have this bug) — this port encodes both subframes;
+2. the original truncates playback to a whole period, discarding up
+   to 40ms of trailing audio — this port zero-pads instead;
+3. a quit-mid-record edge case that left the original's main loop
+   blocked until a queue was closed — this port returns a quit code
+   and exits directly.
+
+**The audio thread** (`AudioThread`, `audiothread.scala:38`) is a
+single goroutine driven by a command mailbox (`AudioCmd`) and an
+event mailbox (`AudioEvt`), both capacity-16 channels, defined in the
+portable `wataclient` module (not owned by this repo area). It runs
+`go.audio.setupMixer()` exactly once at startup — switching playback
+and capture mixer routes per-recording used to crash the audio DSP
+(`audiothread.scala:52`) — then loops on `cmds.recv()` dispatching to
+`doRecord`, `doPlay`, or `doEcho` (`audiothread.scala:59`). Recording
+reads one 40ms period at a time from `go.audio.Capture`, Opus-encodes
+both 20ms halves, and accumulates encoded frames; on a normal stop it
+Ogg-muxes them (`Ogg.writeStream`, in `wataclient`) and emits
+`AeRecordingDone`. Playback does the reverse: split the incoming Ogg
+into Opus packets (`Ogg.readFrames`), decode each into PCM, and hand
+the whole buffer to `playMessage`. `AcStopPlayback` is only honored
+between decode steps — once `playMessage` starts writing to the
+speaker, the message plays to completion, matching the same
+uninterruptible-write shape used elsewhere in this codebase's
+lower-level write loop.
+
+**The vendored tinyalsa patch.** `go-pkgs/audio/vendor/tinyalsa/src/pcm.c`
+carries a local patch (search for `SGOLA PATCH`) to `pcm_start` and
+`pcm_state`. Background: `pcm_sync_ptr`'s flags argument controls
+which fields of the kernel/userspace shared state are *pushed*
+(userspace → kernel) versus merely *read* (kernel → userspace) —
+`flags = 0` pushes everything, including `appl_ptr`. That's correct
+on the MMAP path (userspace owns and advances `appl_ptr` directly via
+`pcm_mmap_commit`), but wrong on non-MMAP ("RW"/ioctl) hardware where
+the fallback `sync_ptr` path is used instead — `appl_ptr` is never
+advanced locally, so pushing zeroes the kernel's copy on every
+`pcm_start`/`pcm_state` call, which manifests as `EPIPE` and a
+corrupted ring buffer (repeated xrun-restarts, i.e. playback stutter
+and roughly doubled wall-clock playtime). The patch makes those two
+functions only push on true MMAP handles and pull (GET-only) flags
+otherwise, matching normal kernel `sync_ptr` semantics.
+
+The patch is not going upstream. `go-pkgs/audio/vendor/tinyalsa/` is a
+**maintained in-repo fork**, not a pristine vendored copy waiting to be
+un-forked: the fix is specific to non-MMAP hardware that upstream does
+not target, and carrying it here costs less than tracking an upstream
+review. Changes to the fork are ordinary commits in this repo, marked
+`SGOLA PATCH` in the C source so a re-vendor from upstream can find and
+re-apply them.
+
+**Selftest** (`selftest.scala`, `wata-fb --selftest echo|play|all`)
+spawns the *real* production `AudioThread` and drives it through its
+normal public command mailbox rather than calling audio functions
+directly, specifically so a passing selftest is evidence the
+production path works end to end. `echo` records 2 seconds and plays
+it back (a "hear your own voice" check); `play` synthesizes a 1.5s
+440Hz tone through the production encoder and Ogg writer, then
+decodes and plays it (a tone is easier to verify with a sound meter
+than speech).
+
+## LEDs and peripherals
+
+`Led` (`led.scala`) drives backlight, red LED, green LED, and button
+backlight via sysfs writes (`/sys/class/leds/.../brightness`) through
+`go.syscall` (`open`/`write`/`close`, `syscall.scala`). Every call is
+best-effort: failures are silently swallowed (`led.scala:31`), which
+means there is no way to detect from this code whether an LED write
+actually succeeded — deliberate, since the dev host has no such sysfs
+tree at all and the code needs to run unmodified there.
+
+`Ui.onConn` (`ui.scala:212`) maps connection state onto the LEDs: green
+while syncing/connected, red on error/disconnected. The backlight
+brightness is user-configurable through the settings applet
+(`SettingsLogic.brightnessUp/Down`, `applets.scala:664-676`,
+30-second-to-never idle screen-off timeout,
+`SettingsLogic.timeoutSecs`, `applets.scala:564`) and the idle timer
+in `Ui.tickIdle` (`ui.scala:180`) turns the backlight and button
+backlight off after that timeout, restoring them on the next input
+(`Ui.wake`, `ui.scala:172`).
+
+## Matrix integration
+
+This module does not implement the Matrix protocol itself — that
+logic (HTTP client, `/sync` long-poll loop, room/event model, the
+`MatrixClient`/`Runtime`/`StateSnapshot` types, `AudioCmd`/`AudioEvt`,
+etc.) lives entirely in the `wataclient` module, which is out of
+scope for this repo area (read-only). `wata-fb` supplies:
+
+- **Capability implementations** (`caps.scala`): `FbClock` over
+  `go.time`, and `FbHttp` over Go's `net/http` client, both
+  implementing traits `wataclient` defines. A thrown `GoError` from
+  the HTTP path is turned into `HttpResponse(0, "")` rather than
+  propagated — `wataclient`'s portable core is never allowed to see a
+  raw Go error (`caps.scala:20-21`).
+- **The UI's use of the client**: `Ui.runUi` constructs a
+  `MatrixClient` via `Runtime.makeWithAudio`, starts it, and each
+  frame calls `Runtime.pollSnap` (take the newest immutable state
+  snapshot) and `Runtime.pollEvent` (drain UI-relevant events —
+  connection changes, send/play completion or failure) to update the
+  shell and LEDs. Outgoing actions (`ActSendVoice`, `ActPlay`,
+  `ActReceipt`, `ActRedact`, `ActSetName`) are enqueued via
+  `Runtime.sendAction` from applet input handlers
+  (e.g. `WataLogic.uploadRecording`, `applets.scala:253`;
+  `WataLogic.playSelected`, `applets.scala:185`).
+
+Received messages become UI state purely through the snapshot: the
+sync loop (inside `wataclient`) updates server state and publishes a
+new `StateSnapshot`; the UI loop picks it up next frame and the
+applet render functions (`WataLogic.renderContactRows`,
+`renderMsgRows`, `applets.scala:293-353`) draw from it directly —
+there is no separate "apply message" step in this module. Playing a
+received clip is a full round-trip: `ActPlay(mxcUrl)` goes to
+`wataclient`, which downloads and hands PCM/Ogg bytes back through the
+`AudioEvt` channel, and `WataLogic.onAudioEvent`
+(`applets.scala:241`) reacts to `AePlaybackDone`/`AePlaybackError`.
+
+## Dev/test surface
+
+All of these are subcommands dispatched from `main.scala`:
+
+| command | file | purpose |
+|---|---|---|
+| `synctest` | uses `wataclient`'s `SyncOracle` | prints a fixed report from a portable unit-test oracle for the sync engine; no device needed. |
+| `syncfix f1 f2 ...` | `syncfixdriver.scala` | feeds captured `/sync` JSON fixture files (`<selfUserId>=<path>`) to `wataclient`'s `SyncDescribe.fixtureReport`; this app layer only does the file I/O, the portable module does the describing. |
+| `oggtest` | uses `wataclient`'s `OggOracle` | byte-oracle check of the Ogg/Opus container writer, run again here (Go-emitted) after already running once on the reference JVM implementation, to catch codegen-only drift. |
+| `oggforeign <fixture.ogg>` | `oggforeign.scala` | decodes a pinned Ogg fixture produced by a different (foreign) encoder and prints a report — the host-side half of the `OPUS_BUFFER_TOO_SMALL` regression guard described above; the actual on-device Opus decode is exercised separately by `go-pkgs/audio/foreign_decode_test.go`. |
+| `fbdump` | `fbtest.scala:41` | draws the deterministic test pattern into an in-memory buffer and writes a PNG to stdout — the host-side "golden frame" check, no real display involved. |
+| `fbsmoke` | `fbtest.scala:49` | on-device only: opens the real framebuffer, draws the pattern, blinks LEDs, and echoes evdev key presses for ~20s — a manual hardware smoke test. |
+| `integ <scenario> <baseUrl>` | `integ.scala` | ten scenarios (login, two-user sync, voice send/receive, read receipts, ordering, redaction, download-byte-equality, the family room, session resume) run against a live `wata-server`, each driven through `wataclient`'s real `Runtime`/action queue, printing `INTEG PASS/FAIL <scenario>`. |
+| `--selftest [echo\|play\|all]` | `selftest.scala` | on-device audio-thread selftest described above. |
+| `login\|voicesend\|voiceplay\|audiosoak ...` | `devcli.scala` | scripted, non-interactive actions against a live server: provision/login a user, record-and-send a clip, sync-and-play the newest clip, or run a long record/send/sync/download/play soak loop (intended to run under `GODEBUG=gctrace=1` to watch GC pressure — `devcli.scala:105`). |
+| `ui <base> <user> <pass>` | `ui.scala` | the actual product: the full on-device client. |
+
+Ten `integ` scenarios are the closest thing this module has to an
+end-to-end test suite; they require a running `wata-server` and are
+invoked by shell scripts elsewhere in the repo (`tools/`), not from
+this module directly.
+
+## Cross-compilation and deployment
+
+`tools/fb-deploy.sh` is the one-command path from source to a running
+binary on the device: it builds `sgo` itself if needed, cross-builds
+`wata-fb` for `linux/arm` with `zig cc -target arm-linux-musleabihf`
+as the C compiler (this is what makes cross-compiling the cgo
+dependency possible without a native ARM toolchain — see
+`tools/fb-deploy.sh:29`), `scp`s the resulting binary to the device's
+`/dev/shm` (a 192MB tmpfs — the device's root filesystem has only
+about 9MB free), remounts `/dev/shm` executable (it's `noexec` by
+default), runs it over ssh with output streamed back live, and then
+deletes it. There is no persistent install path in this script —
+deployment is deliberately transient; a binary surviving reboot would
+need to be copied somewhere durable manually. `BQ268_HOST` and
+`FB_CC` are overridable via environment variables; the device's SSH
+host alias is expected to be `bq268` in the operator's `~/.ssh/config`.
+
+The static opus/tinyalsa libraries for the ARM target are prebuilt
+and checked in under `go-pkgs/audio/clib/arm/` (built by
+`go-pkgs/audio/mklibs.sh`), so a normal cross-build does not need to
+recompile C/C++ vendor sources — a plain `linux/arm` cgo build against
+the checked-in `.a` files and `zig cc` as the linker/compiler driver
+is enough.
+
+## File-by-file map
+
+| file | lines | what it does |
+|---|---|---|
+| `main.scala` | 93 | Top-level subcommand dispatcher; also has the pre-device "skeleton" smoke check that exercises the cgo path with a synthesized tone. |
+| `syscall.scala` | 44 | `go.syscall` facade: thin binds for `Open/Close/Read/Write/Mmap/Munmap` plus the flag/prot/map constants, used by every device-layer file that touches `/dev/fb0`, `/dev/input/*`, or sysfs. |
+| `caps.scala` | 83 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`. |
+| `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
+| `display.scala` | 404 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |
+| `png.scala` | 127 | Minimal deterministic PNG encoder (CRC-32, Adler-32, one stored DEFLATE block) used only for the host-side golden-frame dump. |
+| `input.scala` | 153 | `/dev/input/event{0,1,2}` reader: raw `input_event` decoding, kernel-keycode → `Key`/`KeyState` mapping. |
+| `led.scala` | 31 | Backlight/LED control via sysfs writes; best-effort, errors swallowed. |
+| `oggforeign.scala` | 22 | `wata-fb oggforeign` driver: reads a fixture file and prints `wataclient`'s foreign-Ogg oracle report. |
+| `syncfixdriver.scala` | 28 | `wata-fb syncfix` driver: reads captured `/sync` fixture files and feeds them to `wataclient`'s sync-fixture oracle. |
+| `audiothread.scala` | 342 | The background audio goroutine: record/playback/echo-test sessions over the `AudioCmd`/`AudioEvt` mailbox protocol, layered close-and-rethrow resource tiers around the cgo capture/encoder/decoder handles. |
+| `fbtest.scala` | 102 | `fbdump` (host PNG golden) and `fbsmoke` (on-device fb/LED/evdev smoke test) drivers; also `FbTest.present`, the byte-copy blit used by the real UI loop too. |
+| `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
+| `shell.scala` | 157 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, everything else goes to the active applet). |
+| `applets.scala` | 769 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
+| `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
+| `ui.scala` | 226 | The real product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs the ~30fps main loop. |
+
+## Known gaps / debt observed while reading
+
+Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
+for the body. Beyond what `WATA-TODO.md` already tracks (the dot2/event-bus
+gap, the `/dev/shm`-only deploy), a few things stood out during this read:
+
+- `[FB-M8-LITERALS]` **Three string literals still carry a milestone tag
+  from the port**: `"WATA-FB M8"` (`fbtest.scala:26`), `"wata-fb skeleton
+  (M8 chunk 2)"` (`main.scala:78`), and `"v0.1 M8 sgola"`
+  (`applets.scala:732`). They are the only such references left in the
+  source. Each is drawn or printed, so changing them is a baseline bump,
+  not a comment edit: the first is rendered into `tools/fb-golden.png` and
+  needs that PNG regenerated, and the others feed `*.expected.txt`
+  oracles. Replace them with text that describes the build, and refresh
+  every oracle in the same commit.
+- `[FB-SYSCALL-SILENT]` **`led.scala:26-31` (`writeSysfs`) swallows every syscall error
+  silently**, including `Close`/`Write` inside `syscall.scala:34-40`,
+  which themselves already drop their Go error return. There is no
+  way, from application code, to distinguish "LED hardware not
+  present" (expected on host) from "LED hardware present but the
+  write actually failed" (a real device bug) — both look identical
+  (silent no-op). This is consistent with the ported design intent
+  but means an LED regression on real hardware would be silent.
+- **`Draw.newBuffer()` allocates a new 40960-byte buffer, but the UI
+  loop only allocates it once** (`ui.scala:70`, passed into
+  `frameLoop`) and clears+redraws it in place every frame
+  (`ui.scala:130`); this is fine, just worth noting there's no
+  double-buffering — `present()` (`fbtest.scala:60`) blits the same
+  buffer that's actively being redrawn next frame, i.e. there is a
+  window where the fb briefly shows a partially-drawn frame if the
+  loop were ever interrupted mid-`render`. In a single-goroutine loop
+  with no signal handling this is presently harmless, but it would
+  matter if a signal handler or a second writer to `mem`/`px` were
+  ever added.
+- **`Font.drawText` breaks out of the whole string, not just the
+  current character, once a character would overflow the display
+  width** (`display.scala:396`, `going = false`) — this is correct
+  today because all call sites pass fixed short strings, but nothing
+  enforces that invariant; a longer string is silently truncated with
+  no ellipsis or wrapping.
+- **`Ui.wake()` restores brightness from the *current* settings state
+  every time** (`ui.scala:172-177`) but there is no explicit
+  "screen just turned back on" event separate from the general input
+  event — the first keypress after wake is swallowed
+  (`Ui.handleFrameInput`, `ui.scala:148`) specifically to prevent that
+  keypress from also being routed to the active applet, which is a
+  reasonable UX choice but is easy to miss reading `applyOne` in
+  isolation.
+- **`DevCli.audiosoak`'s peer-record/send/download/play loop has no
+  backoff or jitter** (`devcli.scala:107-157`) between cycles; a
+  failed cycle (`recFail`/`sendFail`/`playFail`) simply continues
+  immediately into the next one until the wall-clock deadline, which
+  is fine for a bounded soak test but would hot-loop indefinitely if
+  ever reused as a long-running daemon.
+- `[FB-PNG-BLOCK]` **`Png.zlib`'s single-stored-block encoding assumes the raw image
+  never exceeds 65535 bytes** (`png.scala:9-10`, `png.scala:104-117`)
+  — true today only because the display is fixed at 160x128
+  (61568-byte raw stream); this silently breaks (via unsigned
+  underflow: `nlen = 0xffff ^ rlen` becoming wrong, and DEFLATE
+  stored-block headers being invalid for any block over 65535 bytes)
+  if `Display.W`/`Display.H` are ever changed for a different panel,
+  since there is no chunking of the DEFLATE stream into multiple
+  stored blocks.
+- `[FB-UI-UNTESTED]` It's worth flagging explicitly for a new engineer: **there is no
+  automated test that exercises `Ui.run` end to end** — the closest
+  things are `fbsmoke` (manual, on-device) and `integ` (automated but
+  bypasses the UI/applet/input layer entirely, talking to
+  `wataclient`'s `Runtime` directly). A bug purely in `shell.scala` or
+  `applets.scala` input routing would not be caught by any existing
+  automation; it would need `[HUMAN-VERIFY]`-style manual device
+  testing.
+
+The untagged items are recorded as things worth knowing before touching
+the surrounding code, not as work owed.

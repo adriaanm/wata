@@ -1,0 +1,9 @@
+# sgo.build (schema: see core/sgo.build). wata-fb is an APP over core + json +
+# wataclient (the portable client core) that rides a cgo Go dep (go-pkgs/audio,
+# static opus/tinyalsa libs on a cgo cross-build).
+mode app
+emitname wata-fb
+binname wata-fb
+gomod watafb
+optreport
+godep github.com/adriaanm/wata/go-pkgs/audio go-pkgs/audio cgo

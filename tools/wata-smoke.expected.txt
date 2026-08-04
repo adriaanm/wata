@@ -1,0 +1,21 @@
+login user_id=@alice:localhost
+whoami user_id=@alice:localhost
+set-displayname {}
+get-profile {"displayname":"Alice W"}
+set-acct {}
+get-acct {"@bob:localhost":["!r"]}
+acct-405 code=405 body={"errcode":"M_BAD_JSON","error":"Cannot set m.fully_read through this API"}
+unknown-token code=401 body={"errcode":"M_UNKNOWN_TOKEN","error":"Unknown access token"}
+missing-token code=401 body={"errcode":"M_MISSING_TOKEN","error":"Missing access token"}
+bob-login user_id=@bob:localhost
+create-dm room_id_ok=true
+bob-join {"room_id":"ROOM"}
+send1 event_id_ok=true
+send2-replay-matches true
+receipt {}
+redact event_id_ok=true differs=true
+upload content_uri=mxc://localhost/MEDIA
+download-ctype audio/ogg
+download-bytes-match true
+resolve {"room_id":"ROOM","servers":["localhost"]}
+illegal-join code=403 body={"errcode":"M_FORBIDDEN","error":"You are not invited to this room"}

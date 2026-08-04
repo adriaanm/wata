@@ -81,3 +81,23 @@ dist/
 
 .pnpm-store/ 
 .vibe/
+# --- sgola port ---
+# frontend early-jar / pipelining staging (build product; the committed payload
+# under <module>/sgola/ is the artifact — decision 12)
+target/
+# app-mode generated Go tree (pure build product; BUILD E3 (b): a moved-out app
+# emits under its OWN <module>/.sgo/<emitname>, the fresh-module rule)
+.sgo/
+# built test/run leftovers
+*.test
+# cgo static-lib build products (mklibs.sh) + host check binary
+go-pkgs/audio/clib/
+go-pkgs/audio/audiocheck
+# pinned sgola toolchain clone (tools/toolchain.py sync)
+.toolchain/
+# python bytecode from tools/
+__pycache__/
+# IDE state: .bsp/sgo.json names an absolute path to the pinned sgo binary
+# (regenerate with `just ide`); .metals/ is the Metals cache
+.bsp/
+.metals/

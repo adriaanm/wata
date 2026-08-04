@@ -1,0 +1,9 @@
+# sgo.build (schema: see the sgola tree's core/sgo.build). wataclient is the
+# PORTABLE client core: a liblink library over core + json, with a default
+# package and no @goexport — its whole surface is consumed only from Sgola
+# (wata-fb links it whole-program, resolving it as a source sibling in this
+# repo). Add `publish` back if it ever gains a fetchable remote; `sgo emit`
+# then produces the payload-only module tree consumers take from pkg/mod.
+mode liblink
+emitname wataclient
+optreport

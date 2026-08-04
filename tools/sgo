@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Run the pinned sgola driver with wata's build environment.
+
+    tools/sgo build      # from any module dir (wata-server/, wata-fb/, ...)
+    tools/sgo run
+    tools/sgo emit <path>
+
+Uses the pinned toolchain, or a preset $SGOLA_HOME if there is one. See
+tools/toolchain.py for what the environment is and why.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from toolchain import build_env, prepare, sgo_bin  # noqa: E402
+
+home = prepare()
+driver = str(sgo_bin(home))
+os.execve(driver, [driver] + sys.argv[1:], build_env(home))

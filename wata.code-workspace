@@ -1,0 +1,36 @@
+// VS Code multi-root workspace: the repo root for docs/tools/justfile, plus
+// one folder per Sgola module (Metals runs one `sgo bsp` session per folder —
+// the shim serves a single module per session) and the plain-Go audio module
+// (its own go.mod, so gopls gets a proper root).
+//
+// Run `just ide` first: it writes the per-module .bsp/sgo.json launch files
+// Metals discovers, and the dep TASTy symlinks. Rerun after `just sync`.
+{
+  "folders": [
+    { "name": "wata (root)", "path": "." },
+    { "path": "wataclient" },
+    { "path": "wata-server" },
+    { "path": "wata-fb" },
+    { "path": "go-pkgs/audio" }
+  ],
+  "settings": {
+    // These globs are matched relative to EACH workspace folder, so they hide
+    // the module dirs only inside the root folder (where they'd otherwise show
+    // up twice — once nested, once as their own root).
+    "files.exclude": {
+      "wataclient/**": true,
+      "wata-server/**": true,
+      "wata-fb/**": true,
+      "go-pkgs/audio/**": true
+    },
+    "files.watcherExclude": {
+      "**/.toolchain/**": true,
+      "**/.sgo/**": true,
+      "**/.metals/**": true,
+      "**/target/**": true
+    }
+  },
+  "extensions": {
+    "recommendations": ["scalameta.metals", "golang.go"]
+  }
+}

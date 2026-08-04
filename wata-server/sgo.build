@@ -1,0 +1,6 @@
+# sgo.build (schema: see core/sgo.build). wata-server is an APP over core + json.
+mode app
+emitname wata-server
+binname wata-server
+gomod wataserver
+optreport

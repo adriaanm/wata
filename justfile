@@ -1,71 +1,111 @@
-zig := env("ZIG", home_dir() / ".local/zig/zig")
-device := "bq268"
-device_dir := "/opt/wata"
+# wata recipes — run `just` to list, `just <recipe>` to run one.
+#
+# Every recipe resolves the sgola toolchain the same way the scripts do: the
+# pinned clone under .toolchain/sgola, unless SGOLA_HOME is set. So sgola can
+# drive any of these against an in-development compiler:
+#
+#     SGOLA_HOME=/path/to/sgola just smoke
 
-# Start the wata-server systemd user service.
-wata-up:
-    systemctl --user start wata-server.service
+# list recipes
+default:
+    @just --list
 
-# Stop the wata-server systemd user service.
-wata-down:
-    systemctl --user stop wata-server.service
+# ── Toolchain ─────────────────────────────────────────────────────────────────
 
-# Restart the wata-server systemd user service.
-wata-restart:
-    systemctl --user restart wata-server.service
+# clone/checkout the pinned sgola commit and build the toolchain
+sync:
+    tools/toolchain.py sync
 
-# Show wata-server status.
-wata-status:
-    systemctl --user status wata-server.service --no-pager
+# what's present, and does it match the pin
+status:
+    tools/toolchain.py status
 
-# Tail wata-server logs from journald.
-wata-logs:
-    journalctl --user -u wata-server.service -f --no-pager
+# bump the pin to a new sgola commit (then run `just sync`)
+pin COMMIT:
+    tools/toolchain.py pin {{COMMIT}}
 
-# Cross-compile fbclient for ARM device
-fb-build *FLAGS:
-    cd src/fbclient && {{zig}} build -Dtarget=arm-linux-musleabihf -Doptimize=ReleaseSafe {{FLAGS}}
+# ── IDE ───────────────────────────────────────────────────────────────────────
 
-# Build and deploy to device. Does NOT launch — the system-menu owns the
-# framebuffer VT and must be the one to spawn wata (it unbinds fbcon
-# before launch and rebinds on exit). Kill any running wata so the user
-# can re-launch from the menu to pick up the new binary.
-fb-deploy *FLAGS: (fb-build FLAGS)
-    ssh {{device}} 'killall wata-fb 2>/dev/null; sleep 0.3'
-    scp src/fbclient/zig-out/bin/wata-fb {{device}}:{{device_dir}}/wata-fb
-    @echo "Deployed. Launch from the system menu on the device."
+# Metals speaks BSP to `sgo bsp` — one build target per Sgola module. In VS
+# Code, open wata.code-workspace (multi-root: one folder per module, one BSP
+# session each). In a single-root editor, open a MODULE dir (wataclient/,
+# wata-server/, wata-fb/), not the repo root.
+#
+# write the .bsp/sgo.json launch files Metals discovers, and bridge the dep
+# TASTy paths the BSP shim expects (rerun after `just sync`)
+ide:
+    tools/ide-setup.py
 
-# Cross-compile, deploy, and run the on-device audio self-test. Drives
-# the real production audio thread via its command mailbox. Pass STAGE
-# to run a subset: "echo" (echo_test only), "play" (ogg/opus play only),
-# or "all" (default). User confirms tones are audible.
-fb-audio-test STAGE="all" *FLAGS: (fb-build FLAGS)
-    ssh {{device}} 'killall wata-fb 2>/dev/null; sleep 0.3'
-    scp src/fbclient/zig-out/bin/wata-fb {{device}}:{{device_dir}}/wata-fb
-    ssh {{device}} '{{device_dir}}/wata-fb --selftest {{STAGE}}'
+# ── Build ─────────────────────────────────────────────────────────────────────
 
-# Run fbclient unit tests (no network).
-fb-test:
-    cd src/fbclient && {{zig}} build test --summary all
+# build both apps
+build: build-server build-fb
 
-# Bring up the Conduit Matrix server (Docker) and register alice/bob.
-# Idempotent — reuses test/docker/setup.sh which is the same harness used by
-# `pnpm dev:server` and the TypeScript integration suite.
-conduit-up:
-    cd test/docker && ./setup.sh
+# build the homeserver
+build-server:
+    cd wata-server && ../tools/sgo build
 
-# Tear down the Conduit Matrix server and its volumes.
-conduit-down:
-    cd test/docker && docker-compose down -v
+# build the device client (native; audio is stubbed off-device)
+build-fb:
+    cd wata-fb && ../tools/sgo build
 
-# Run fbclient integration tests against a live Matrix homeserver.
-# Wipes Conduit volumes first so every run starts from a deterministic
-# state (no accumulated DM rooms / m.direct entries from prior runs).
-# Override target with WATA_TEST_HOMESERVER / WATA_TEST_USER1 / WATA_TEST_PASS1 / WATA_TEST_USER2 / WATA_TEST_PASS2.
-fb-test-integration: conduit-down conduit-up
-    cd src/fbclient && {{zig}} build test-integration --summary all
+# run the homeserver, default port 8008
+server PORT="8008":
+    cd wata-server && ../tools/sgo run :{{PORT}}
 
-# Fast iterative variant — reuses existing Conduit state (may carry over
-# DM rooms from prior runs; tolerant tests only).
-fb-test-integration-fast: conduit-up
-    cd src/fbclient && {{zig}} build test-integration --summary all
+# ── Test ──────────────────────────────────────────────────────────────────────
+
+# Each script prints its own PASS; just stops at the first failure.
+#
+# the whole gate
+ci: smoke persist fb-smoke client-tests integ golden amd64-smoke
+
+# homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
+smoke:
+    bash tools/wata-smoke.sh
+
+# homeserver: kill -9 and replay the JSONL journal
+persist:
+    bash tools/wata-persist-smoke.sh
+
+# device client: native build+run, armv7 cross-cgo build
+fb-smoke:
+    bash tools/wata-fb-smoke.sh
+
+# device client: byte-exact golden frame against tools/fb-golden.png
+golden:
+    bash tools/fb-golden.sh
+
+# client core: portability tripwire, sync/fixture/ogg byte oracles
+client-tests:
+    bash tools/wataclient-tests.sh
+
+# client core: 10 live client-server scenarios, fresh server each
+integ:
+    bash tools/wataclient-integ.sh
+
+# Needs $WATA_TS_REPO (default ~/g/bq268/wata) with node_modules installed.
+#
+# conformance oracle: the original TypeScript wata's jest suite, this server
+conformance:
+    bash tools/wata-tests.sh
+
+# throughput and concurrency benchmarks
+bench:
+    bash tools/wata-bench.sh
+
+# These are committed baselines. Review the diff; don't rubber-stamp it.
+#
+# regenerate the wataclient fixture oracles
+fixtures:
+    bash tools/wataclient-fixtures.sh
+
+# ── Deploy ────────────────────────────────────────────────────────────────────
+
+# cross-build armv7 and deploy the device client
+fb-deploy *FLAGS:
+    bash tools/fb-deploy.sh {{FLAGS}}
+
+# linux/amd64 server smoke — the always-on box is a real target
+amd64-smoke:
+    bash tools/linux-amd64-smoke.sh
