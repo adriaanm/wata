@@ -385,9 +385,18 @@ carries no server-specific compensation.
   when set, calls `backfillRoom`.
 - `Runtime.backfillRoom` reads the room's stored `prevBatch`
   (`SyncEngine.prevBatchOf`, "" when the room is unknown or no token was
-  stored) and issues `MatrixHttp.getMessages(from = prevBatch, dir = b,
-  limit = 50)`. The chunk arrives newest-first and is ingested in that
-  order.
+  stored) and pages `MatrixHttp.getMessages(dir = b, limit = 50)` from it,
+  chaining each response's `end` token as the next `from`
+  (`Runtime.backfillPage`). Each chunk arrives newest-first and is
+  ingested in that order. The walk stops when the gap is closed — an empty
+  chunk, a missing `end`, an `end` equal to the `from` just used (the
+  server's no-progress signal), or an HTTP failure — or at
+  `Runtime.maxBackfillPages` (10 pages, i.e. 500 events per `limited`
+  trigger). A gap deeper than the cap stays unrecovered, deliberately:
+  the oldest history of a very long absence is not worth unbounded serial
+  paging, and no later trigger reopens it — a later `limited` sync starts
+  from a *newer* `prev_batch`, so it re-covers the recent side of history,
+  not the abandoned deep end.
 - Ingestion goes through `SyncEngine.ingestBackfill`, which is deliberately
   narrower than `process()`: it only dedups against `timelineEventIds` and
   extracts voice messages from `m.room.message` events — it does not
@@ -406,11 +415,6 @@ Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. The untagged ones are recorded as things to know before
 touching the surrounding code, not as work owed.
 
-- `[CLI-BACKFILL-BOUND]` **`backfillRoom` fetches one 50-event page and never
-  chains.** The server's `end` token is a real continuation position, but
-  `backfillRoom` discards it, so a gap larger than 50 events (rejoining
-  after a long absence) leaves the oldest part of the history unrecovered
-  until some later sync marks the room `limited` again.
 - `[CLI-BACKFILL-BLOCKING]` **Backfill runs synchronously inside the sync loop
   (`processRound`).** `backfillRooms` issues a blocking `/messages` call per
   limited room before `publishSnapshot` is reached; a sync round with

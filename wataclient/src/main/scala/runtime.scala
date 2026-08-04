@@ -238,15 +238,39 @@ object Runtime:
     if WJson.boolField(WJson.objField(p._2, "timeline"), "limited") then
       backfillRoom(hs, roomId)
 
-  /** GET /messages(prev_batch, dir=b, 50) and feed the chunk through the
-   *  engine's dedup + voice extraction. */
+  /** cap on chained GET /messages pages per backfill trigger: 10 pages of 50
+   *  = 500 events per `limited` room per sync round. A gap deeper than that
+   *  stays unrecovered — deliberately: the oldest history of a very long
+   *  absence is not worth unbounded serial paging, and no later trigger
+   *  reopens it (a later `limited` sync starts from a NEWER `prev_batch`). */
+  val maxBackfillPages: Int = 10
+
+  /** page GET /messages(dir=b, 50) from the room's stored `prev_batch`,
+   *  chaining the server's `end` token until the gap closes (empty chunk / no
+   *  token progress / HTTP failure) or `maxBackfillPages` is hit. Every chunk
+   *  feeds the engine's dedup + voice extraction. */
   def backfillRoom(hs: Hs, roomId: String): Unit =
-    val pb = SyncEngine.prevBatchOf(roomId)
-    if pb != "" then
-      val resp = MatrixHttp.getMessages(hs, roomId, pb, 50)
-      if resp.status == 200 then
-        ingestChunk(roomId, SyncEngine.arrItems(
-          WJson.objField(MatrixHttp.parseOrNull(resp.body), "chunk")))
+    var from = SyncEngine.prevBatchOf(roomId)
+    var pages = 0
+    while from != "" && pages < maxBackfillPages do
+      from = backfillPage(hs, roomId, from)
+      pages = pages + 1
+
+  /** ONE /messages page: ingest the chunk, return the token to continue from
+   *  ("" = done — the server's `end` is a real continuation position, and a
+   *  missing/unmoved one or an empty chunk means the walk is over). */
+  def backfillPage(hs: Hs, roomId: String, from: String): String =
+    val resp = MatrixHttp.getMessages(hs, roomId, from, 50)
+    if resp.status != 200 then ""
+    else
+      val j = MatrixHttp.parseOrNull(resp.body)
+      val chunk = SyncEngine.arrItems(WJson.objField(j, "chunk"))
+      ingestChunk(roomId, chunk)
+      continueToken(chunk, from, WJson.strField(j, "end", ""))
+
+  def continueToken(chunk: List[Json], from: String, end: String): String = chunk match
+    case Nil => ""
+    case _   => if end == "" || end == from then "" else end
 
   def ingestChunk(roomId: String, evs: List[Json]): Unit =
     var cur = evs
