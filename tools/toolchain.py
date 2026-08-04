@@ -177,7 +177,7 @@ def cmd_sync(_args):
         print(f"toolchain: cloning {repo} -> {PINNED_HOME}")
         run(["git", "clone", "--no-checkout", repo, str(PINNED_HOME)])
     have = run(["git", "rev-parse", "HEAD"], cwd=PINNED_HOME, check=False, quiet=True).stdout.strip()
-    if have != commit:
+    if not have.startswith(commit):
         print(f"toolchain: checking out pinned commit {commit[:12]}")
         if run(["git", "cat-file", "-e", commit + "^{commit}"], cwd=PINNED_HOME,
                check=False, quiet=True).returncode != 0:
@@ -250,7 +250,7 @@ def cmd_status(_args):
     ):
         print(f"{label} {'present' if Path(path).exists() else 'ABSENT'}")
     print(f"go pin     {go_pin(home) or 'unknown'}")
-    return 0 if (home != PINNED_HOME or have == commit) else 1
+    return 0 if (home != PINNED_HOME or have.startswith(commit)) else 1
 
 
 def cmd_env(_args):
