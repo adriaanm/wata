@@ -113,6 +113,13 @@ than a bare `sgo`. Prerequisites: `go`, JDK, `sbt`, `git`. The pinned Go
 version is read out of the toolchain — emitted Go is a pinned-toolchain
 product, so a different `go` reformats it and byte-comparisons drift.
 
+**Run gates in the foreground.** A verification run (`just ci`, a suite
+rerun) is the thing a session exists to wait for — run it blocking, not
+backgrounded, and never end a session while its gate is still running. A
+session that stops before its gate reports has not finished its task.
+Also: piping a gate through `tail` eats its exit code — check the status,
+not the last lines of output.
+
 ### Building against a different sgola
 
 A preset `$SGOLA_HOME` overrides the pin, so sgola can drive wata as a
