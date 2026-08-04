@@ -127,16 +127,8 @@ object WataLogic:
    *  eventual release then does nothing. */
   def backInput(s: WataState, ks: KeyState): WataState = ks match
     case Pressed()  => withBack(s, true, 0.0)
-    case Released() => backRelease(s)
+    case Released() => if s.backHeld then withBack(withView(s, VContacts()), false, 0.0) else s
     case _          => s
-
-  /** NB a plain body, not an if-expression inside the match case above: the
-   *  emitter mis-types an if-else case body against the nested constructor
-   *  (WataView vs WataState) — see MATCH-CASE-IF-EXPR-LUB. */
-  def backRelease(s: WataState): WataState =
-    var out = s
-    if s.backHeld then out = withBack(withView(s, VContacts()), false, 0.0)
-    out
 
   /** PTT: press starts recording, release stops + (via the audio thread) sends.
    *  The effect (trySend) runs in statement position; the result rides a
