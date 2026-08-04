@@ -53,18 +53,9 @@ blocks + git log; each entry cites where it was recorded.*
   a generic result type (`def pollInput(): List[KeyEvent]`) emits a bare,
   undefined `List` in the Go interface declaration — fails only at
   `go build`, violating the loud-wall doctrine. Workaround in-tree: box
-  in a non-generic record (`KeyBatch`).
+  in a non-generic record (`KeyBatch`). Triaged upstream behind the
+  TEMPLATE-TYPE-VOCAB session.
 - Emitter trap (same build): the emitted `catch` arm names its Go error
   variable `err`, so a user `var err` in the enclosing scope collides
   (`cannot use … as error value`). Workaround: don't name things `err`
   near a `try`.
-- `[PIN-BUMP-BLOCKED]` pin bump to sgola `b0d02aef7b19` is parked on
-  branch `pin-bump-b0d02aef`: the new compiler inserts an unsound
-  narrowing cast building the `(String, Json)` tuple in
-  `MatrixHttp.upsertRoomList` — emitted `wataclient_mhttp.go` wraps
-  `oneRoomArr`/`appendRoomArr` (a `JArr`) in `sgolaAsInstanceOf[*JStr]`,
-  so every `m.direct` update panics `class JArr cannot be cast to class
-  JStr` (6/10 integ scenarios red; server gates green; the caps.scala
-  non-nullable `newRequest` adaptation on that branch is correct and
-  ready). Needs a sgola-side fix to the tuple-instantiation cast;
-  then repin to the fixed commit and merge the branch.
