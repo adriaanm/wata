@@ -38,6 +38,16 @@ in the sibling's `docs/planning/<feature>.md` plus a one-line task in its
 tracker, and track our side here. Device work follows commit-before-flash:
 commit, flash/deploy, then record the outcome.
 
+**Compiler bugs: work around AND file, never just work around.** When a
+sgola defect or gap forces a workaround here, the workaround keeps us
+moving but the signal must reach the fix: drop a ticket file in the sgola
+tree's `inbox/` (one JSON file per ticket, created `O_EXCL` — atomic, no
+shared queue file to race on; fields `key`/`title`/`from:"wata"`/`date`/
+`body`, body states repro surface + the workaround). The sgola session
+drains its inbox into its own `TODO.jsonl`; queue order stays its
+designer's act. Mirror the item in `WATA-TODO.md`'s waiting-on-sgola list,
+and when the fix lands upstream, remove the workaround.
+
 **The two repos share exactly one interface:**
 
 ```
