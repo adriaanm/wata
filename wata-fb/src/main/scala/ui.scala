@@ -73,7 +73,7 @@ object Ui:
   // snapshots swap through the cells (ShellState / ConnectionState box;
   // Double boxes since Go has no atomic float word; Boolean rides
   // atomic.Bool). Reads keep their old names via private accessor defs.
-  private val stateC: sgo.Atomic[ShellState] = sgo.atomic(Shell.initial())
+  private val stateC: sgo.Atomic[ShellState] = sgo.atomic(Shell.initial(FbConfig.loadPrefs()))
   private val connC: sgo.Atomic[ConnectionState] = sgo.atomic(Disconnected())
   private val idleC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
   private val offC: sgo.Atomic[Boolean] = sgo.atomic(false)
@@ -122,8 +122,9 @@ object Ui:
     val fds = Evdev.open()
     println("ui: input devices open: " + Evdev.count(fds))
     val dev = FbUiDevice(fds, mem)
-    // device init: backlight + button LEDs on
-    dev.backlight(40)
+    // device init: the STORED backlight level (resetCells has just restored
+    // the settings applet from the config store) + button LEDs on.
+    dev.backlight(SettingsLogic.getBrightness(Shell.settingsState(stateV)))
     dev.buttonBacklight(true)
     val px = Draw.newBuffer()
     sgo.supervised {
@@ -151,7 +152,7 @@ object Ui:
   /** reset the UI cells — a fresh session per run (the host drivers reuse the
    *  process across sequential sessions, so this is not merely cosmetic). */
   def resetCells(): Unit =
-    stateC.set(Shell.initial())
+    stateC.set(Shell.initial(FbConfig.loadPrefs()))
     connC.set(Disconnected())
     idleC.set(0.0)
     offC.set(false)

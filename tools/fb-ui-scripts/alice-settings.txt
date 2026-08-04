@@ -1,0 +1,47 @@
+# settings-walk, phase 1: every settings item in turn, and the two that change
+# stored preferences actually changed. The detail block under the menu is what
+# these frames are really pinning — it renders on the last two grid rows, and
+# every item has its own.
+
+# The self display name is resolved from ROOM MEMBERSHIP, not from the profile
+# endpoint, so the name round trip below needs alice to be in a room at all.
+family @bob:localhost
+
+wait syncing 1 900
+wait convs 1 900
+
+# dot2 switches to the settings applet; item 0 (the echo test) is selected.
+tap dot2
+advance 5
+checkpoint settings-echo
+
+# brightness: starts at the maximum, so `<` is the direction that moves.
+tap down
+tap left
+tap left
+advance 5
+checkpoint settings-brightness
+
+# screen-off timeout: 30s / 1m / 2m / 5m / Never, wrapping.
+tap down
+tap right
+advance 5
+checkpoint settings-timeout
+
+# display name: `<`/`>` pick a preset, OK pushes it to the homeserver. The
+# `nameset` probe is 1 once the name comes back around through /sync.
+tap down
+tap right
+tap enter
+wait nameset 1 2000
+advance 5
+checkpoint settings-name
+
+# network and device info: the last two items, both detail-only.
+tap down
+advance 5
+checkpoint settings-network
+
+tap down
+advance 5
+checkpoint settings-info

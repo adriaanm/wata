@@ -23,7 +23,7 @@ object FbTest:
     Draw.strokeRect(px, 0, 0, Display.W, Display.H, Color.white)
     // a dark panel for the text block
     Draw.fillRect(px, 6, 36, 148, 56, Color.darkGray)
-    Font.drawText(px, "WATA-FB M8", 2, 5, Color.white, true, Color.darkGray)
+    Font.drawText(px, "WATA-FB", 2, 5, Color.white, true, Color.darkGray)
     Font.drawText(px, "0123456789", 2, 6, Color.cyan, true, Color.darkGray)
     Font.drawText(px, "abcXYZ !?+-", 2, 7, Color.orange, true, Color.darkGray)
     Font.drawTextCentered(px, "rgb565 ok", 9, Color.white, true, Color.darkGray)

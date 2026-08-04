@@ -59,9 +59,12 @@ object Shell:
   val WATA = 0
   val SETTINGS = 1
 
-  def initial(): ShellState =
+  /** the boot state. The settings applet starts from the STORED preferences,
+   *  so brightness and screen timeout survive a restart; everything else
+   *  starts from its own defaults. */
+  def initial(prefs: FbPrefs): ShellState =
     ShellState(WATA, StIdle(),
-      IArray[Applet](WataApplet(WataLogic.initial()), SettingsApplet(SettingsLogic.initial())))
+      IArray[Applet](WataApplet(WataLogic.initial()), SettingsApplet(SettingsLogic.restored(prefs))))
 
   // ---- record withers (no `.copy` on sgola — see WataLogic) -------------------
   def withActive(s: ShellState, a: scala.Int): ShellState =

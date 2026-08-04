@@ -599,7 +599,17 @@ object SettingsLogic:
     if i == 0 then "Alice" else if i == 1 then "Bob" else if i == 2 then "Charlie" else "Device"
   val N_NAMES = 4
 
+  /** the menu occupies grid rows 2..12 (six items at two-row spacing), which
+   *  leaves rows 13 and 14 — the last two of the 15-row landscape grid — for
+   *  the selected item's detail text. Two lines is what there is room for. */
+  val DETAIL_ROW = 13
+
   def initial(): SettingsState = SettingsState(0, 40, EchoIdle(), 0, 1, true)
+
+  /** the boot state: preferences come back from the config store, so a device
+   *  keeps the backlight and timeout its owner set. */
+  def restored(p: FbPrefs): SettingsState =
+    SettingsState(0, p.brightness, EchoIdle(), p.nameIdx, p.timeoutIdx, true)
 
   def getScreenTimeout(s: SettingsState): scala.Int = timeoutSecs(s.screenTimeoutIdx)
   def getBrightness(s: SettingsState): scala.Int = s.brightness
@@ -619,7 +629,13 @@ object SettingsLogic:
     SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, c)
 
   // ---- input (press-only) ------------------------------------------------------
+  /** every key goes through `persisted`, so the three stored preferences are
+   *  written back the moment one of them changes and there is exactly one
+   *  place that decides when to write. */
   def handleInput(s: SettingsState, k: Key, ks: KeyState, ctx: FrameCtx): SettingsState =
+    persisted(s, handleKey(s, k, ks, ctx))
+
+  def handleKey(s: SettingsState, k: Key, ks: KeyState, ctx: FrameCtx): SettingsState =
     if !Shell.isPressed(ks) then s
     else k match
       case _: KUp    => moveUp(s)
@@ -628,6 +644,15 @@ object SettingsLogic:
       case _: KLeft  => onLeft(s)
       case _: KRight => onRight(s)
       case _           => s
+
+  def persisted(before: SettingsState, after: SettingsState): SettingsState =
+    if prefsChanged(before, after) then
+      FbConfig.savePrefs(FbPrefs(after.brightness, after.screenTimeoutIdx, after.nameIdx))
+    after
+
+  def prefsChanged(a: SettingsState, b: SettingsState): Boolean =
+    a.brightness != b.brightness || a.screenTimeoutIdx != b.screenTimeoutIdx ||
+      a.nameIdx != b.nameIdx
 
   def moveUp(s: SettingsState): SettingsState =
     var out = s
@@ -762,10 +787,12 @@ object SettingsLogic:
     else
       Font.drawText(px, "Device Info", 0, row, fg, false, 0)
 
+  /** the selected item's detail, on the two grid rows left below the menu. */
   def renderDetail(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
-    val row = 2 + N_ITEMS * 2 + 1
+    val row = DETAIL_ROW
     if s.selected == INFO then
-      Font.drawText(px, "v0.1 M8 sgola", 0, row, Color.midGray, false, 0)
+      renderBattery(px, row)
+      Font.drawText(px, "wata-fb sgola", 0, row + 1, Color.midGray, false, 0)
     else if s.selected == ECHO then
       Font.drawText(px, "Records 2s, plays", 0, row, Color.midGray, false, 0)
       Font.drawText(px, "back thru speaker", 0, row + 1, Color.midGray, false, 0)
@@ -779,6 +806,14 @@ object SettingsLogic:
       Font.drawText(px, "</> adjust", 0, row, Color.midGray, false, 0)
     else
       Font.drawText(px, "</> timeout", 0, row, Color.midGray, false, 0)
+      Font.drawText(px, "Any key wakes", 0, row + 1, Color.midGray, false, 0)
+
+  /** sysfs has no battery node off-device, and `readBatteryPercent` says so
+   *  with -1 rather than by failing — the line is simply left out then. */
+  def renderBattery(px: go.Bytes, row: scala.Int): Unit =
+    val pct = Led.readBatteryPercent()
+    if pct >= 0 then
+      Font.drawText(px, "Battery: " + pct + "%", 0, row, Color.midGray, false, 0)
 
   def renderCurrentName(px: go.Bytes, ctx: FrameCtx, row: scala.Int): Unit =
     if ctx.snap.hasSelfUser then

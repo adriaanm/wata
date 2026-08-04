@@ -87,7 +87,7 @@ object Main:
     if s.length > 0 then println(s.substring(0, s.length - 1))
 
   def skeleton(): Unit =
-    println("wata-fb skeleton (M8 chunk 2)")
+    println("wata-fb skeleton: audio constants + one encoded frame")
     println("audio: " + go.audio.SampleRate + "Hz " + go.audio.Channels + "ch S16_LE")
     println("frame: " + go.audio.FrameSamples + " samples, maxEncoded " + go.audio.MaxFrameByte + " bytes")
     println("ring: " + go.audio.PlaybackPeriods + " periods x " + go.audio.FramesPerPeriod + " frames")

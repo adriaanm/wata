@@ -355,7 +355,13 @@ app layer's decision. `config.scala` is that decision:
   a dev host, and every test run points the env var at its own file
   rather than sharing the operator's.
 - **Contents**: `{homeserver, username, access_token, user_id,
-  device_id}` — the Zig client's file shape.
+  device_id}` — the Zig client's file shape — plus three fields the
+  settings applet owns: `brightness`, `screen_timeout_idx`,
+  `name_idx`. Those are the device's preferences, not the account's:
+  someone who set the backlight low and the timeout long should not
+  have to set them again after a reboot. Session and preferences are
+  written together, and each writer reads the other half back first,
+  so neither clobbers the other.
 - **Read** is best-effort in every direction: absent file, unreadable
   file and malformed JSON all resolve to the empty session, which
   `Sessions.isValid` rejects, which sends the sync loop down the
@@ -363,9 +369,16 @@ app layer's decision. `config.scala` is that decision:
 - **Write** is best-effort too: the parent directory is created if it
   can be, the file is opened 0600, and any failure is a silent no-op.
   A device that cannot persist still runs; it logs in again next boot.
-- **When**: `Ui.persistSession`, on the first `Connected` event of a
-  session and only when `Runtime.lastAuth` carries a non-empty token.
-  Once per session — a stale store is never overwritten with nothing.
+- **When**: the session at `Ui.persistSession`, on the first
+  `Connected` event of a session and only when `Runtime.lastAuth`
+  carries a non-empty token — once per session, so a stale store is
+  never overwritten with nothing. The preferences at
+  `SettingsLogic.persisted`, which every settings keypress goes
+  through, so a changed preference is on disk immediately and there is
+  one place that decides when to write.
+- **Back**: `Shell.initial` takes the stored preferences and builds the
+  settings applet from them, and the device applies the restored
+  brightness at startup instead of a hardcoded maximum.
 
 `FbConfig.resolve` is what every UI entry point builds its
 `ClientConfig` from. Explicitly given arguments win; a slot that is
@@ -508,6 +521,7 @@ one-user phases:
 |---|---|
 | `voice-alice-to-bob` | the send path end to end: alice bootstraps the family room, holds PTT and sends; bob runs, auto-joins, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
 | `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, and redacts one with F2; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, and the played marks. |
+| `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, and device info. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
 
 Two things the scripts need that are worth knowing. `waitmax` is the
@@ -560,10 +574,10 @@ rewrites its row here.
 | screen-timeout picker 30s/1m/2m/5m/Never | yes | yes | same |
 | display-name preset picker, OK sets it over Matrix | yes | yes | same |
 | network disconnect (stop sync + actions, restart to reconnect) | yes | yes | same |
-| brightness / screen-timeout / name survive a restart | no | no | **GAP** — neither client persists them; the store this needs is the session store |
-| battery percent in the Info detail | yes | no | **GAP** — no `readBatteryPercent` in `led.scala` |
-| detail area under the menu | rows 16..19 of 19 | row 15 of 15 | **GAP** — off the bottom of the panel, see below |
-| any settings item under test | n/a | no | **GAP** — the settings golden is the menu at rest |
+| brightness / screen-timeout / name survive a restart | no | yes | wata-fb only — the same config store the session lives in |
+| battery percent in the Info detail | yes | yes | same, `Led.readBatteryPercent`; absent hardware reads -1 and the line is left out |
+| detail area under the menu | rows 16..19 of 19 | rows 13..14 of 15 | same idea, sized to the landscape grid |
+| every settings item under test | n/a | yes | the `settings-walk` scenario |
 | **Chrome / feedback** ||||
 | 1px status line colored by connection | yes | yes | same |
 | header + connection indicator (`ok`/`..`/`ERR`/`off`) | yes | yes | same |
@@ -584,14 +598,15 @@ Three things worth stating outright:
   token — and the field is kept only because the Zig client's
   `config.json` has it.
 
-- **The settings detail area renders off the bottom of the panel.** The
-  menu is six items at two-row spacing (grid rows 2..12); the detail
-  block sits at `2 + N_ITEMS * 2 + 1` = row 15, one past the last row
-  of the 15-row landscape grid, so its first line is clipped to seven
-  of eight pixel rows and its second line never appears at all. The
-  number is inherited from the portrait grid, where 16 is a real row.
-  (The Zig client has the same arithmetic and loses its own fourth
-  echo-test line to it.)
+- **The settings detail area is sized to the grid it draws on.** The
+  menu is six items at two-row spacing (grid rows 2..12), which leaves
+  rows 13 and 14 — the last two of the 15-row landscape grid — for the
+  selected item's detail text, so two lines is what every item gets.
+  The layout number this replaced, `2 + N_ITEMS * 2 + 1` = 15, was
+  inherited from the portrait grid where 16 is a real row: it put the
+  first detail line one row past the bottom and the second one off the
+  panel entirely. (The Zig client has the same arithmetic and loses
+  its own fourth echo-test line to it.)
 - **The cursors are reconciled with the snapshot every frame.** Both
   lists can shrink under the selection with no input at all — a
   redaction drops a message row, a peer leaving drops a conversation —
@@ -635,25 +650,25 @@ is enough.
 |---|---|---|
 | `main.scala` | 93 | Top-level subcommand dispatcher; also has the pre-device "skeleton" smoke check that exercises the cgo path with a synthesized tone. |
 | `syscall.scala` | 52 | `go.syscall` facade: thin binds for `Open/Close/Read/Write/Mmap/Munmap/Mkdir` plus the flag/prot/map constants, used by every device-layer file that touches `/dev/fb0`, `/dev/input/*`, or sysfs. |
-| `config.scala` | 130 | The session store: `$WATA_FB_CONFIG` / `/etc/wata/config.json` read and write over `go.sys`/`go.syscall`, and `FbConfig.resolve`, the arguments-override-the-store rule every UI entry point builds its `ClientConfig` with. |
+| `config.scala` | 190 | The session and preferences store: `$WATA_FB_CONFIG` / `/etc/wata/config.json` read and write over `go.sys`/`go.syscall`, and `FbConfig.resolve`, the arguments-override-the-store rule every UI entry point builds its `ClientConfig` with. |
 | `caps.scala` | 83 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`. |
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 404 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |
 | `png.scala` | 127 | Minimal deterministic PNG encoder (CRC-32, Adler-32, one stored DEFLATE block) used only for the host-side golden-frame dump. |
 | `input.scala` | 159 | `/dev/input/event{0,1,2}` reader: raw `input_event` decoding, kernel-keycode → `Key`/`KeyState` mapping, and `KeyBatch` (the non-generic box the `UiDevice` input edge needs). |
-| `led.scala` | 31 | Backlight/LED control via sysfs writes; best-effort, errors swallowed. |
+| `led.scala` | 63 | Backlight/LED control and the battery-capacity read, via sysfs; best-effort, errors swallowed, and a missing battery node reads -1 rather than failing. |
 | `oggforeign.scala` | 22 | `wata-fb oggforeign` driver: reads a fixture file and prints `wataclient`'s foreign-Ogg oracle report. |
 | `syncfixdriver.scala` | 28 | `wata-fb syncfix` driver: reads captured `/sync` fixture files and feeds them to `wataclient`'s sync-fixture oracle. |
 | `audiothread.scala` | 342 | The background audio goroutine: record/playback/echo-test sessions over the `AudioCmd`/`AudioEvt` mailbox protocol, layered close-and-rethrow resource tiers around the cgo capture/encoder/decoder handles. |
 | `fbtest.scala` | 102 | `fbdump` (host PNG golden) and `fbsmoke` (on-device fb/LED/evdev smoke test) drivers; also `FbTest.present`, the byte-copy blit used by the real UI loop too. |
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
 | `shell.scala` | 157 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, everything else goes to the active applet). |
-| `applets.scala` | 800 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `applets.scala` | 840 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
 | `ui.scala` | 291 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
 | `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
-| `uiscript.scala` | 420 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
+| `uiscript.scala` | 450 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
 
 ## Known gaps / debt observed while reading
 
@@ -661,15 +676,6 @@ Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. Beyond what `WATA-TODO.md` already tracks (the dot2/event-bus
 gap, the `/dev/shm`-only deploy), a few things stood out during this read:
 
-- `[FB-M8-LITERALS]` **Three string literals still carry a milestone tag
-  from the port**: `"WATA-FB M8"` (`fbtest.scala:26`), `"wata-fb skeleton
-  (M8 chunk 2)"` (`main.scala:78`), and `"v0.1 M8 sgola"`
-  (`applets.scala:732`). They are the only such references left in the
-  source. Each is drawn or printed, so changing them is a baseline bump,
-  not a comment edit: the first is rendered into `tools/fb-golden.png` and
-  needs that PNG regenerated, and the others feed `*.expected.txt`
-  oracles. Replace them with text that describes the build, and refresh
-  every oracle in the same commit.
 - `[FB-SYSCALL-SILENT]` **`led.scala:26-31` (`writeSysfs`) swallows every syscall error
   silently**, including `Close`/`Write` inside `syscall.scala:34-40`,
   which themselves already drop their Go error return. There is no

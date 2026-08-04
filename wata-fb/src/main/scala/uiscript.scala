@@ -48,7 +48,8 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
  *  msgs (messages in the conversation the wata applet is pointing at), played
- *  (of those, how many are marked played). */
+ *  (of those, how many are marked played), nameset (1 once the self user's
+ *  display name equals the settings applet's currently picked preset). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -309,7 +310,18 @@ object UiScript:
     else if name == "convs" then WataLogic.convCount(Ui.frameSnap)
     else if name == "msgs" then WataLogic.msgCount(Ui.frameSnap, curConvIdx())
     else if name == "played" then playedCount(Ui.frameSnap, curConvIdx())
+    else if name == "nameset" then nameSetProbe()
     else -1
+
+  /** 1 once the self user's display name in the snapshot equals the preset the
+   *  settings applet is currently pointing at — the round trip of `OK` on the
+   *  name item, which has no count to wait on. */
+  def nameSetProbe(): scala.Int =
+    val snap = Ui.frameSnap
+    val want = SettingsLogic.displayName(Shell.settingsState(Ui.shellState).nameIdx)
+    var out = 0
+    if snap.hasSelfUser && snap.selfUser.displayName == want then out = 1
+    out
 
   def syncingProbe(): scala.Int =
     var out = 0

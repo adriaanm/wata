@@ -23,7 +23,20 @@ import language.experimental.saferExceptions
  *  `AuthCreds(accessToken, userId)` and drops the login response's device id,
  *  and nothing reads the field back (`Sessions.isValid` wants a homeserver and
  *  a token). It is kept in the file because the Zig client's `config.json`
- *  has it. */
+ *  has it.
+ *
+ *  The same file also carries the settings applet's own preferences, in three
+ *  fields alongside the session. They are the device's, not the account's:
+ *  someone who has set the backlight low and the screen timeout long should
+ *  not have to set them again after a reboot. Session and preferences are
+ *  written together — every write reads the whole store back first, so the
+ *  half that did not change is preserved. */
+
+/** the settings the settings applet owns and this store persists: panel
+ *  brightness 0..40, an index into the screen-timeout choices, and an index
+ *  into the display-name presets. */
+case class FbPrefs(brightness: scala.Int, timeoutIdx: scala.Int, nameIdx: scala.Int)
+
 object FbConfig:
 
   /** the env var that overrides the config path. */
@@ -48,6 +61,15 @@ object FbConfig:
   /** the stored session, or the empty one when there is nothing readable. */
   def load(): Session = Sessions.fromJson(readJson())
 
+  /** the stored preferences, or the defaults (full brightness, 1m screen
+   *  timeout, the first name preset) for anything absent. */
+  def loadPrefs(): FbPrefs = prefsFrom(readJson())
+
+  def prefsFrom(j: Json): FbPrefs =
+    FbPrefs(WJson.longField(j, "brightness", 40L).toInt,
+      WJson.longField(j, "screen_timeout_idx", 1L).toInt,
+      WJson.longField(j, "name_idx", 0L).toInt)
+
   /** the parsed config object; `JNull` for absent/unreadable/malformed. */
   def readJson(): Json =
     var out: Json = JNull()
@@ -59,13 +81,35 @@ object FbConfig:
 
   // ---- write -----------------------------------------------------------------
 
-  /** persist the credentials a live session logged in with. */
-  def saveSession(s: Session): Unit = writeText(Sessions.write(s))
+  /** persist the credentials a live session logged in with, keeping whatever
+   *  preferences are already stored. */
+  def saveSession(s: Session): Unit = writeStore(s, loadPrefs())
 
   /** the post-login write: the homeserver and username this run was configured
    *  with, plus the token and user id the sync loop actually got back. */
   def saveLogin(homeserver: String, username: String, creds: AuthCreds): Unit =
     saveSession(Session(homeserver, username, creds.accessToken, creds.userId, ""))
+
+  /** persist the settings applet's preferences, keeping the stored session. */
+  def savePrefs(p: FbPrefs): Unit = writeStore(load(), p)
+
+  /** the one writer: session fields first (the Zig client's file order), then
+   *  the preference fields. Both halves are always written, so a caller that
+   *  changed one of them has to have read the other back — which `saveSession`
+   *  and `savePrefs` each do. */
+  def writeStore(s: Session, p: FbPrefs): Unit = writeText(Json.write(toJson(s, p)))
+
+  def toJson(s: Session, p: FbPrefs): Json =
+    var fs: List[(String, Json)] = Nil
+    fs = ("name_idx", JInt(p.nameIdx.toLong)) :: fs
+    fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
+    fs = ("brightness", JInt(p.brightness.toLong)) :: fs
+    fs = ("device_id", JStr(s.deviceId)) :: fs
+    fs = ("user_id", JStr(s.userId)) :: fs
+    fs = ("access_token", JStr(s.accessToken)) :: fs
+    fs = ("username", JStr(s.username)) :: fs
+    fs = ("homeserver", JStr(s.homeserver)) :: fs
+    JObj(fs)
 
   /** open 0600 (creating the parent dir if it is missing), truncate, write. */
   def writeText(text: String): Unit =

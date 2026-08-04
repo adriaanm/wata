@@ -57,6 +57,13 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "settings-walk",
+        "phases": [
+            ("alice", "alice-settings.txt"),
+            ("-", "alice-settings-restored.txt"),
+        ],
+    },
+    {
         "name": "session-resume",
         "phases": [
             ("alice", "alice-login.txt"),

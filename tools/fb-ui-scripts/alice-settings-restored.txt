@@ -1,0 +1,18 @@
+# settings-walk, phase 2: a second run of the same user, started with no
+# credentials, showing that the preferences phase 1 changed came back from the
+# config store — brightness 30 rather than the default 40, and a 2m screen
+# timeout rather than the default 1m.
+#
+# The name preset comes back too, which is why the frame shows the name item
+# already pointing at what phase 1 set.
+
+wait syncing 1 900
+
+tap dot2
+tap down
+advance 5
+checkpoint settings-restored-brightness
+
+tap down
+advance 5
+checkpoint settings-restored-timeout
