@@ -24,6 +24,7 @@ lines:
 | `dm.scala` | 274 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
 | `rooms.scala` | 700 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
 | `sync.scala` | 506 | `/sync` (initial + incremental + leave) and the long-poll wait |
+| `testhooks.scala` | 68 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
 | `server.scala` | 314 | HTTP boot, mux registration, request edge, `SelfCheck` |
 
 ## Scope
@@ -475,6 +476,31 @@ before the kill and asserts afterwards that re-resolving the pair — from
 either side, and through a DM-shaped `createRoom` — returns the *same* room
 rather than minting a second one, and that its alias still resolves.
 
+## Test hooks
+
+`WATA_TEST_HOOKS=1` (env, checked both at route registration and at dispatch)
+adds ONE route the production server does not have:
+
+```
+POST /_wata/v1/test/fail   {"count": N}   -> {}
+```
+
+It arms a shared counter (`TestHooks`, testhooks.scala): the next `N` media
+operations — upload (`Rooms.upload1`) or download (`MediaEdge.download2`),
+whichever arrive first — answer `500 M_UNKNOWN` instead of running. The
+counter disarms itself as it is consumed; re-arming replaces the count, and
+`{"count": 0}` disarms explicitly. This exists for the UI golden suite's
+`send-play-failed` scenario (the `SEND FAILED`/`PLAY FAILED` flashes need a
+server that fails on demand); the endpoint is unauthenticated because it only
+ever lives inside a harness's private, per-scenario server.
+
+Without the env var the route is not registered and its dispatch predicate is
+off, so the path falls through to the Matrix 404 catch-all like any unknown
+path — the production surface is unchanged. `tools/fb-ui-tests.py` asserts
+that gate on every run: each scenario's server is probed with a
+`POST /_wata/v1/test/fail` right after readiness and must answer 404 (200
+for the one scenario that opts into hooks).
+
 ## File-by-file map
 
 - **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and the canonical-DM values (`DmPair`, `DmPeer`, `DmRoom`, `StateSeed`).
@@ -489,6 +515,7 @@ rather than minting a second one, and that its alias still resolves.
 - **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
 - **`dm.scala`** — `Dm`: canonical DMs. The `POST /_wata/v1/dm/{userId}` endpoint, the `net.wata.dm`/alias identity, the boot migration, and the one-way `m.direct` compat projection.
 - **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental, account data through `Dm.project`) and the long-poll orchestration.
+- **`testhooks.scala`** — `TestHooks`: the `WATA_TEST_HOOKS=1`-only fail-on-demand counter and its `POST /_wata/v1/test/fail` route (see "Test hooks").
 - **`server.scala`** — `WataHandler`/`MediaEdge`/`NotFound`/`Respond` (the HTTP edge), `Server` (boot + route table), `Main`, and `SelfCheck` (a deterministic smoke test of the store/handler logic, diffed against a golden file by the build's smoke script).
 
 ## Known gaps / debt

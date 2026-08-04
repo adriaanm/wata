@@ -546,6 +546,10 @@ object Rooms:
     case rr: Right[MErr, Auth] => upload1(r, rawBody)
 
   def upload1(r: go.net.http.Request, rawBody: String): Either[MErr, Json] =
+    if TestHooks.failMedia() then Left(TestHooks.mediaErr)
+    else upload2(r, rawBody)
+
+  def upload2(r: go.net.http.Request, rawBody: String): Either[MErr, Json] =
     val id = Store.storeMedia(rawBody, ctOr(r.header.get("Content-Type")))
     Right(obj1("content_uri", JStr("mxc://" + Config.serverName + "/" + id)))
 

@@ -46,6 +46,12 @@ PASSWORD = "testpass123"
 # `-` in every credential slot and has to resume the session the config store
 # holds. Each scenario gets its own config store (see run_scenario), so a
 # resume phase can only see what an earlier phase of the same scenario wrote.
+# Optional keys:
+#   "hooks": True — start the scenario's server with WATA_TEST_HOOKS=1 (the
+#       fail-on-demand media hook; scripts arm it with the `failnext`
+#       directive). Every scenario's server is probed for the hook route
+#       right after readiness, so each run asserts the route EXISTS exactly
+#       when the env var says so (404 otherwise — the production surface).
 SCENARIOS = [
     {
         "name": "voice-alice-to-bob",
@@ -134,6 +140,20 @@ def start_server(binary, log_path, env):
     return None, log
 
 
+def hook_gate_status():
+    """POST the test-hook route; returns the HTTP status (the route answers
+    200 when registered, and falls through to the Matrix 404 catch-all when
+    the server was started without WATA_TEST_HOOKS=1)."""
+    req = urllib.request.Request(
+        f"{BASE}/_wata/v1/test/fail", data=b'{"count": 0}',
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
 def stop_server(proc, log):
     if proc is not None:
         proc.terminate()
@@ -148,10 +168,21 @@ def stop_server(proc, log):
 def run_scenario(scenario, fb, server_bin, env, outdir, update):
     """Returns (ok, message). Frames land in outdir; goldens are compared here."""
     logs = os.path.join(outdir, f"server-{scenario['name']}.log")
-    proc, log = start_server(server_bin, logs, env)
+    hooks = bool(scenario.get("hooks"))
+    server_env = dict(env)
+    if hooks:
+        server_env["WATA_TEST_HOOKS"] = "1"
+    proc, log = start_server(server_bin, logs, server_env)
     if proc is None:
         stop_server(proc, log)
         return False, "server never became ready"
+    # the test-hook gate, asserted on EVERY server this harness boots: the
+    # route exists exactly when this scenario opted into WATA_TEST_HOOKS=1.
+    want = 200 if hooks else 404
+    got = hook_gate_status()
+    if got != want:
+        stop_server(proc, log)
+        return False, f"test-hook gate: POST /_wata/v1/test/fail = {got}, want {want}"
     # Every scenario gets its own session store, so a run never reads or writes
     # the operator's real /etc/wata/config.json and phases only see each other.
     env = dict(env, WATA_FB_CONFIG=os.path.join(outdir, "config.json"))

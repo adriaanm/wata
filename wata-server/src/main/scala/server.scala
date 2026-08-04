@@ -69,7 +69,12 @@ object MediaEdge:
     case l: Left[MErr, Auth]  => Respond.finish(w, l.left.status, Json.write(errEnvelope(l.left)))
     case _: Right[MErr, Auth] => download2(w, r)
 
-  def download2(w: go.net.http.ResponseWriter, r: go.net.http.Request): Unit = Store.getMedia(r.pathValue("mediaId")) match
+  def download2(w: go.net.http.ResponseWriter, r: go.net.http.Request): Unit =
+    if TestHooks.failMedia() then
+      Respond.finish(w, 500, Json.write(errEnvelope(TestHooks.mediaErr)))
+    else download3(w, r)
+
+  def download3(w: go.net.http.ResponseWriter, r: go.net.http.Request): Unit = Store.getMedia(r.pathValue("mediaId")) match
     case s: Some[MediaItem] => Respond.raw(w, s.value.contentType, s.value.data)
     case None => Respond.finish(w, 404, Json.write(errEnvelope(MErr(404, M_NOT_FOUND(), "Media not found"))))
 
@@ -143,6 +148,10 @@ object Server:
     mux.handle("PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}", h)
     // the wata dialect: canonical DMs (dm.scala).
     mux.handle("POST /_wata/v1/dm/{userId}", h)
+    // the fail-on-demand test hook (testhooks.scala): REGISTERED only under
+    // WATA_TEST_HOOKS=1 — without the env var the path 404s like any other
+    // unknown path, so the production surface is unchanged.
+    if TestHooks.enabled then mux.handle("POST /_wata/v1/test/fail", h)
     // rooms / messaging / receipts / media.
     mux.handle("POST /_matrix/client/v3/createRoom", h)
     mux.handle("POST /_matrix/client/v3/rooms/{roomIdOrAlias}/join", h)
