@@ -129,8 +129,11 @@ fbcon and respawns wata-fb; keep a debug VT; metrics heartbeat to
 handled in `audiothread.scala`; dedicated `wata` user per the alpine
 privilege audit; the sidecar ships in the image (dormant until
 configured). Cross-repo spec handed to `bq268-alpine`. The
-`FB-SIM-DEVICE-VERIFY` human pass folds into this phase's first
-on-device checkpoint. Runs in parallel with the Mac server deployment
+`FB-SIM-DEVICE-VERIFY` human pass is done (2026-08-04): the full
+loop ran on hardware against a live server — system-menu launch into
+the UI, sync-populated contact list, PTT record/upload, and
+receive/decode/speaker playback, confirming the UiDevice refactor
+left the real fbdev/evdev/audio path intact. Runs in parallel with the Mac server deployment
 hardening from phase 4's sweep.
 
 System-menu retires outright (ruling 2026-08-04): wata is then the

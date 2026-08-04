@@ -720,6 +720,15 @@ need to be copied somewhere durable manually. `BQ268_HOST` and
 `FB_CC` are overridable via environment variables; the device's SSH
 host alias is expected to be `bq268` in the operator's `~/.ssh/config`.
 
+The durable install on the device is `/opt/wata/wata-fb` plus
+`/opt/wata/start.sh` (`exec /opt/wata/wata-fb ui` — the `ui`
+subcommand is required; a bare invocation runs the skeleton
+diagnostic and exits). The system menu launches wata by unbinding
+the framebuffer console, running `start.sh`, and rebinding when it
+exits; `ui` with no further arguments resolves the session from the
+config store (`WATA_FB_CONFIG` or `/etc/wata/config.json`). Both
+files are sourced from the `bq268-alpine` repo's rootfs overlay.
+
 The static opus/tinyalsa libraries for the ARM target are prebuilt
 and checked in under `go-pkgs/audio/clib/arm/` (built by
 `go-pkgs/audio/mklibs.sh`), so a normal cross-build does not need to
