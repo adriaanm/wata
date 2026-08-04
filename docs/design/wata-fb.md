@@ -734,7 +734,8 @@ is enough.
 | `main.scala` | 93 | Top-level subcommand dispatcher; also has the pre-device "skeleton" smoke check that exercises the cgo path with a synthesized tone. |
 | `syscall.scala` | 52 | `go.syscall` facade: thin binds for `Open/Close/Read/Write/Mmap/Munmap/Mkdir` plus the flag/prot/map constants, used by every device-layer file that touches `/dev/fb0`, `/dev/input/*`, or sysfs. |
 | `config.scala` | 190 | The session and preferences store: `$WATA_FB_CONFIG` / `/etc/wata/config.json` read and write over `go.sys`/`go.syscall`, and `FbConfig.resolve`, the arguments-override-the-store rule every UI entry point builds its `ClientConfig` with. |
-| `caps.scala` | 83 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`. |
+| `caps.scala` | 83 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`; `WATA_IROH_CONFIG=<json>` swaps the underlying client for the embedded iroh transport (plan 0013), nothing above the capability line changing. |
+| `irohnet.scala` | 20 | Sgola-side `@go.bind` facade over `go-pkgs/irohnet`: `newHTTPClient(config)`, an `*http.Client` whose connections are iroh streams (real only on darwin + `-tags iroh`; loud-error stub elsewhere). |
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 404 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |
 | `png.scala` | 127 | Minimal deterministic PNG encoder (CRC-32, Adler-32, one stored DEFLATE block) used only for the host-side golden-frame dump. |
