@@ -1,6 +1,6 @@
 # 0007 — canonical DM rooms: the pair is the key
 
-Status: proposed
+Status: accepted
 
 `[CANONICAL-DM]`
 
@@ -93,9 +93,12 @@ so uniqueness is a map lookup, not a distributed protocol.
   room; endpoint idempotency across restart (`just persist`);
   DM-shaped `createRoom` from a stock-client shape returns the existing
   room.
-- `just ci` green; `just conformance` (84/84) green — the jest suite's
-  own `m.direct` reads/writes must keep working through the merge-based
-  projection, which is the compat gate.
+- `just ci` green. `just conformance` runs, but per the product ruling
+  (2026-08-04) **the clean design overrides Matrix compat**: a jest
+  suite that fails only because it encodes the retired client-authored
+  `m.direct` mechanism is recorded as exercising-the-retired-mechanism
+  (named, with the reason, in the design doc) rather than blocking the
+  design. Suites failing for any other reason still block.
 - Sync oracle fixtures re-recorded (`just fixtures`, reviewed diff).
 
 ## Out of scope
