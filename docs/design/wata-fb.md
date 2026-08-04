@@ -118,8 +118,17 @@ collection result needs the same boxing.
 
 Two device edges are NOT behind the seam and stay best-effort no-ops
 off-device: `SettingsLogic.setBl` writes the backlight sysfs node
-directly from the settings applet, and `Led.writeSysfs` swallows every
-error (see `[FB-SYSCALL-SILENT]`).
+directly from the settings applet, and the `Led.*` sysfs writes never
+throw. They are not blindly silent though: `Led.writeSysfs` keeps a
+per-node status cell (a `val`-held `Atomic[Int]`), and the FIRST write
+to a node is the hardware probe — a first-write failure marks the node
+absent (every dev host; silent no-op forever), while a failure on a
+node that previously wrote successfully is a real device fault, logged
+once per node and then suppressed so the ~30fps frame loop cannot spam.
+The write error itself is visible because `go.syscall.writeChecked`
+binds `syscall.Write` a second time WITH the `(n, error)` throws
+lowering (the plain `write` binding stays error-dropping for the
+stdout/PNG dump sinks).
 
 ## The display stack
 
@@ -710,14 +719,6 @@ Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. Beyond what `WATA-TODO.md` already tracks (the dot2/event-bus
 gap, the `/dev/shm`-only deploy), a few things stood out during this read:
 
-- `[FB-SYSCALL-SILENT]` **`led.scala:26-31` (`writeSysfs`) swallows every syscall error
-  silently**, including `Close`/`Write` inside `syscall.scala:34-40`,
-  which themselves already drop their Go error return. There is no
-  way, from application code, to distinguish "LED hardware not
-  present" (expected on host) from "LED hardware present but the
-  write actually failed" (a real device bug) — both look identical
-  (silent no-op). This is consistent with the ported design intent
-  but means an LED regression on real hardware would be silent.
 - **`Draw.newBuffer()` allocates a new 40960-byte buffer, but the UI
   loop only allocates it once** (`ui.scala:70`, passed into
   `frameLoop`) and clears+redraws it in place every frame

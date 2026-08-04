@@ -1,17 +1,32 @@
 import language.experimental.saferExceptions
 
-/** LED + backlight control via sysfs. Best-effort: silently no-ops on failure
- *  (the dev host has no leds sysfs tree). Device-layer app code over the
+/** LED + backlight control via sysfs. Never throws, but not blindly silent:
+ *  the FIRST write to a node probes for the hardware — if it fails, the node
+ *  is absent (every dev host) and stays a silent no-op; if it succeeded and a
+ *  LATER write fails, that is a real device fault and is logged ONCE per node
+ *  (never spamming the ~30fps frame loop). Device-layer app code over the
  *  `go.syscall` facade. */
 object Led:
+  /** per-node write status, threaded through `writeSysfs`; the cells are
+   *  `val`-held Atomics (module-level mutable state must be a synchronizer). */
+  val UNTRIED = 0
+  val PRESENT = 1
+  val ABSENT  = 2
+  val FAULTED = 3   // was PRESENT, then a write failed — already logged
+
+  val blStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
+  val redStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
+  val greenStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
+  val buttonStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
+
   def setBacklight(brightness: scala.Int): Unit =
-    writeSysfs("/sys/class/leds/lcd-bl/brightness", brightness)
+    blStatusC.set(writeSysfs("/sys/class/leds/lcd-bl/brightness", brightness, blStatusC.get()))
   def setRedLed(on: Boolean): Unit =
-    writeSysfs("/sys/class/leds/red/brightness", onValue(on))
+    redStatusC.set(writeSysfs("/sys/class/leds/red/brightness", onValue(on), redStatusC.get()))
   def setGreenLed(on: Boolean): Unit =
-    writeSysfs("/sys/class/leds/green/brightness", onValue(on))
+    greenStatusC.set(writeSysfs("/sys/class/leds/green/brightness", onValue(on), greenStatusC.get()))
   def setButtonBacklight(on: Boolean): Unit =
-    writeSysfs("/sys/class/leds/button-backlight/brightness", onValue(on))
+    buttonStatusC.set(writeSysfs("/sys/class/leds/button-backlight/brightness", onValue(on), buttonStatusC.get()))
 
   /** 255 when on, else 0. */
   def onValue(on: Boolean): scala.Int =
@@ -53,10 +68,23 @@ object Led:
     if seen then out = acc
     out
 
-  /** open WRONLY, write the decimal value, close — errors ignored. */
-  def writeSysfs(path: String, value: scala.Int): Unit =
+  /** open WRONLY, write the decimal value, close; returns the node's new
+   *  status. Failure on an UNTRIED node marks it ABSENT (expected off-device,
+   *  silent); failure on a PRESENT node logs once and marks it FAULTED. */
+  def writeSysfs(path: String, value: scala.Int, status: scala.Int): scala.Int =
+    var failMsg = ""
     try
       val fd = go.syscall.open(path, go.syscall.O_WRONLY, 0)
-      go.syscall.write(fd, go.bytes("" + value))
+      val n = go.syscall.writeChecked(fd, go.bytes("" + value))
       go.syscall.close(fd)
-    catch case e: sgo.GoError => ()
+      if n <= 0 then failMsg = "wrote " + n + " bytes"
+    catch case e: sgo.GoError => failMsg = e.message
+    var out = status
+    if failMsg == "" then
+      if out == UNTRIED then out = PRESENT
+    else if out == UNTRIED then out = ABSENT
+    else if out == PRESENT then
+      println("led: " + path + ": write failed on previously working hardware: "
+        + failMsg + " (further failures on this node not reported)")
+      out = FAULTED
+    out

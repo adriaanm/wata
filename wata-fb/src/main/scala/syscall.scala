@@ -12,8 +12,9 @@ import language.experimental.saferExceptions
  *  (the host uses the PNG backend instead of a real framebuffer).
  *
  *  Bound surface: syscall.{Open,Close,Read,Write,Mmap,Munmap} + the O_* /
- *  PROT_* / MAP_* constants. `Close`/`Write`/`Munmap` declare `Unit` and drop
- *  their `error`/`n` returns (best-effort); `Read`/`Mmap`/`Open` ride the
+ *  PROT_* / MAP_* constants. `Close`/`write`/`Munmap` declare `Unit` and drop
+ *  their `error`/`n` returns (best-effort); `Read`/`Mmap`/`Open` — and
+ *  `writeChecked`, a second binding of the same `syscall.Write` — ride the
  *  `(T, error)` throws val-bind lowering. `perm` is always passed as a LITERAL
  *  at call sites (`0` for the read/write-existing paths, `420` = 0644 for the
  *  one create path, the uitest PNG checkpoint dump) so it lands as an untyped
@@ -39,8 +40,12 @@ object syscall:
   /** `syscall.Read(fd, p)` — `(n int, err error)`; EAGAIN on a NONBLOCK fd
    *  surfaces as a `GoError` (the caller's `catch` = Zig's `catch break`). */
   @go.name("Read") def read(fd: scala.Int, p: go.Bytes): scala.Int throws sgo.GoError = ???
-  /** `syscall.Write(fd, p)` — `n`/`error` dropped (best-effort). */
+  /** `syscall.Write(fd, p)` — `n`/`error` dropped (best-effort; the
+   *  stdout/PNG dump sinks). */
   @go.name("Write") def write(fd: scala.Int, p: go.Bytes): Unit = ???
+  /** `syscall.Write(fd, p)` — `(n int, err error)` surfaced, for callers that
+   *  need to distinguish a real write failure (the LED sysfs nodes). */
+  @go.name("Write") def writeChecked(fd: scala.Int, p: go.Bytes): scala.Int throws sgo.GoError = ???
   /** `syscall.Mmap(fd, offset, length, prot, flags)` — `([]byte, error)`. */
   @go.name("Mmap") def mmap(fd: scala.Int, offset: scala.Long, length: scala.Int, prot: scala.Int, flags: scala.Int): go.Bytes throws sgo.GoError = ???
   /** `syscall.Munmap(b)` — error dropped. */
