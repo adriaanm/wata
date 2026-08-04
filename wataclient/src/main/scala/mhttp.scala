@@ -18,8 +18,8 @@ object MatrixHttp:
   def withToken(hs: Hs, token: String): Hs = Hs(hs.http, hs.clock, hs.base, token)
 
   /** one request through the capability, with a 429 retry loop (<= 3 retries,
-   *  `retry_after_ms` else 1000ms). Any other status returns as-is — the
-   *  CALLER decides what non-200 means. */
+   *  `retry_after_ms` clamped to [1s, 60s], else 1000ms). Any other status
+   *  returns as-is — the CALLER decides what non-200 means. */
   def request(hs: Hs, method: String, path: String, contentType: String, body: String): HttpResponse =
     var resp = send1(hs, method, path, contentType, body)
     var attempt = 0
@@ -37,10 +37,15 @@ object MatrixHttp:
     hs.http.send(HttpRequest(method, hs.base + path, headers, body))
 
   /** the 429 body's `retry_after_ms`, default 1000ms (also on unparseable
-   *  JSON, or a non-positive value). */
+   *  JSON, or a non-positive value), clamped to 60000ms — the sync loop's own
+   *  backoff ceiling (`runtime.scala`). The value is server-supplied; without
+   *  the clamp a malicious or buggy homeserver could stall the caller's
+   *  supervised scope for an arbitrary time per retry. */
   def retryAfterMs(body: String): Long =
-    val v = WJson.longField(parseOrNull(body), "retry_after_ms", 1000L)
-    if v > 0L then v else 1000L
+    var v = WJson.longField(parseOrNull(body), "retry_after_ms", 1000L)
+    if v <= 0L then v = 1000L
+    if v > 60000L then v = 60000L
+    v
 
   /** parse a response body, `JNull` when malformed (callers read fields with
    *  defaults). try-as-STATEMENT: a value-yielding try is outside the

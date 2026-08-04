@@ -241,7 +241,10 @@ bytes over a socket":
   `sendVoiceMessage`), all going through
   a single `request`/`send1` chokepoint that adds the bearer token and
   content-type header and retries on HTTP 429 (up to 3 times, honoring
-  `retry_after_ms` from the response body, defaulting to 1000ms). `Hs`
+  `retry_after_ms` from the response body, defaulting to 1000ms and
+  clamped to 60000ms — the sync loop's own backoff ceiling — so a
+  server-supplied value can never stall the caller longer than an
+  ordinary error backoff round). `Hs`
   bundles the two capabilities (`HttpDo`, `Clock`) with the base URL and
   current access token; it is immutable, so re-authenticating means
   building a new `Hs` (`withToken`). Media upload/download bodies cross
@@ -420,14 +423,6 @@ touching the surrounding code, not as work owed.
   `txnCounterC.add(1)`) rather than randomness. Not necessarily a bug,
   just dead surface worth knowing about if the capability contract is
   ever trimmed.
-- `[CLI-RETRY-CLAMP]` **`retryAfterMs` (`mhttp.scala:43-45`) treats a non-positive
-  `retry_after_ms` as the 1000ms default**, but does not cap an
-  attacker/bug-supplied *huge* value — a malicious or buggy homeserver
-  returning e.g. `retry_after_ms: 999999999` would make the client sleep
-  that long inside a supervised scope, blocking the sync loop for the
-  duration (up to 3 times before giving up on the retry loop). Low risk
-  given the server is operator-controlled in this deployment, but there's
-  no defensive upper clamp.
 - **`applyRedaction` reads `redacts` as a plain string field on the event
   and falls back to `content.redacts`** (`syncengine.scala:521-524`) —
   this matches Matrix spec versions before and after the v1.10 move of
