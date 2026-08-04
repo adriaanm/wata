@@ -52,7 +52,10 @@ The channel is symmetric: this repo has an `inbox/` too (gitignored).
 The sgola agent drops completion notices and heads-ups there — "fix
 landed at `<sha>`, repin", a facade change that will hit our code, a
 restriction ruling that affects us. Drain it at session start: act on or
-queue each ticket in `TODO.jsonl`, then delete the file.
+queue each ticket in `TODO.jsonl`, then delete the file. Then keep it
+live: arm a persistent Monitor on `inbox/` (a 5s poll emitting one event
+per new file is enough) so tickets are acted on when they arrive, not at
+the next session boundary.
 
 **The two repos share exactly one interface:**
 
