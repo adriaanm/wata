@@ -132,6 +132,7 @@ object Server:
     MediaFiles.boot()                   // before Journal.boot: replay migrates blobs out
     Journal.boot()
     Dm.migrate()                        // derive the pair map from replayed rooms
+    Retain.boot()                       // media retention: sweep now, then daily
     val mux = go.net.http.newServeMux()
     val h = new WataHandler()
     registerRoutes(mux, h)

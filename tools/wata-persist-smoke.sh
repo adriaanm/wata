@@ -16,6 +16,13 @@
 #     MIGRATED on boot: the blob is written out to the media dir and serves
 #   - a media op whose blob file is MISSING replays as log-and-skip (404 on
 #     fetch, boot not aborted)
+#   - the RETENTION SWEEP (WATA_MEDIA_RETAIN_DAYS) reclaims an aged voice
+#     message at boot: blob file deleted, the event server-side-redacted, and
+#     the sweep's redaction journaled like any other, so a further reboot
+#     (default retention) converges on the same state. Age is FAKED by
+#     rewriting the message's origin_server_ts in the journal — event ts is
+#     the sweep's age basis (a blob file's mtime would reset on migration),
+#     so aging the journaled ts is the honest lever.
 #   - /sync serves the joined room (derived from replayed state)
 #   - the redaction survives (target content emptied)
 #   - a state event set through PUT /state/... survives
@@ -171,6 +178,53 @@ check "dm-pair-symmetric"       "$(curl -s -X POST "${B[@]}" "$BASE/_wata/v1/dm/
 check "dm-stock-create-survives" "$(curl -s -X POST "${A[@]}" -d '{"is_direct":true,"invite":["@bob:localhost"]}' \
                                     "$BASE/_matrix/client/v3/createRoom" | jget room_id)"                                "$DM"
 check "dm-alias-survives"       "$(curl -s "${A[@]}" "$BASE/_matrix/client/v1/directory/room/%23dm.alice.bob:localhost" | jget room_id)" "$DM"
+
+# ---- retention sweep: an aged voice message is reclaimed at boot -------------
+kill_server
+# fake age: rewrite the voice message's origin_server_ts to 2 days ago.
+python3 - "$LOG" "$AEV" <<'EOF'
+import json, sys, time
+path, aev = sys.argv[1], sys.argv[2]
+aged = int(time.time() * 1000) - 2 * 86400000
+out = []
+for line in open(path):
+    line = line.rstrip("\n")
+    if not line:
+        continue
+    o = json.loads(line)
+    if o.get("op") == "event" and o.get("event_id") == aev:
+        o["ts"] = aged
+        line = json.dumps(o, separators=(",", ":"))
+    out.append(line)
+open(path, "w").write("\n".join(out) + "\n")
+EOF
+echo "persist-smoke: aged the voice message 2 days; rebooting with WATA_MEDIA_RETAIN_DAYS=1…"
+WATA_MEDIA_RETAIN_DAYS=1 boot || exit 1
+
+echo "--- retention sweep assertions ---"
+check "sweep-file-deleted"      "$([ ! -e "$TMP/media/$MID" ] && echo true)"                                              "true"
+check "sweep-download-404"      "$(curl -s -o /dev/null -w '%{http_code}' "${A[@]}" "$BASE/_matrix/media/v3/download/localhost/$MID")" "404"
+check "sweep-event-redacted"    "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/messages?dir=b&limit=30" \
+                                    | python3 -c 'import json,sys
+c=json.load(sys.stdin)["chunk"]
+sw=[e for e in c if e.get("event_id")=="'"$AEV"'"]
+print(bool(sw) and sw[0].get("content")=={})')" "True"
+check "sweep-logged"            "$(grep -c "retention swept $AEV" "$TMP/server.log" | tr -d ' ')"                          "1"
+# the unreferenced (migrated) blob is NOT swept — only event-referenced media is
+check "sweep-spares-unreferenced" "$([ -e "$TMP/media/legacymid1" ] && echo true)"                                        "true"
+
+# the sweep journaled an ordinary redaction: a reboot WITHOUT the aggressive
+# retention setting replays to the same state.
+kill_server
+echo "persist-smoke: rebooting with default retention; the swept state must replay…"
+boot || exit 1
+echo "--- sweep-replay convergence ---"
+check "sweep-survives-replay"   "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/messages?dir=b&limit=30" \
+                                    | python3 -c 'import json,sys
+c=json.load(sys.stdin)["chunk"]
+sw=[e for e in c if e.get("event_id")=="'"$AEV"'"]
+print(bool(sw) and sw[0].get("content")=={})')" "True"
+check "sweep-file-stays-gone"   "$([ ! -e "$TMP/media/$MID" ] && echo true)"                                              "true"
 
 [ "$fail" -eq 0 ] || { echo "persist-smoke: FAILED"; exit 1; }
 echo "persist-smoke: state survived kill+reboot from the JSONL log — PASS"

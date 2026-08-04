@@ -7,25 +7,30 @@ compiles to Go source — see the repo root for the toolchain) and built as an
 `wata-server/go.mod`). There is no JVM at runtime: `sgo build` emits Go, which
 is compiled and run like any other Go program.
 
-The source lives entirely in `wata-server/src/main/scala/` — 13 files, ~3900
+The source lives entirely in `wata-server/src/main/scala/` — 19 files, ~4700
 lines:
 
 | file | lines | role |
 |---|---|---|
-| `model.scala` | 121 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts, DM pairs |
+| `model.scala` | 126 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts, DM pairs |
 | `config.scala` | 112 | the accounts, loaded once at boot from `$WATA_USERS`; `serverName` |
 | `membership.scala` | 86 | the room-membership state machine (join/invite/leave/ban transitions) |
 | `power.scala` | 80 | the `m.room.power_levels` authorization table |
-| `jsonnav.scala` | 202 | JSON object/field helpers over the `json` module's `Json` type |
-| `store.scala` | 963 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping |
-| `persist.scala` | 278 | append-only JSONL journal + boot-time replay |
-| `handlers.scala` | 253 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
+| `jsonnav.scala` | 203 | JSON object/field helpers over the `json` module's `Json` type |
+| `store.scala` | 1061 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping, media reclaim |
+| `persist.scala` | 315 | append-only JSONL journal + boot-time replay + old-journal media migration |
+| `mediafiles.scala` | 89 | the file-backed media blob store under `<dataDir>/media/` |
+| `retain.scala` | 120 | the media retention sweep (boot + daily) |
+| `handlers.scala` | 344 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
 | `keys.scala` | 83 | the E2EE device-key routes, as no-op stubs |
-| `dm.scala` | 274 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
-| `rooms.scala` | 700 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
-| `sync.scala` | 506 | `/sync` (initial + incremental + leave) and the long-poll wait |
+| `dm.scala` | 308 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
+| `rooms.scala` | 721 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
+| `sync.scala` | 509 | `/sync` (initial + incremental + leave) and the long-poll wait |
 | `testhooks.scala` | 65 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
-| `server.scala` | 314 | HTTP boot, mux registration, request edge, `SelfCheck` |
+| `server.scala` | 425 | HTTP boot, mux registration, request edge, `SelfCheck` |
+| `iolimit.scala` | 11 | app-owned facade: `io.LimitReader` (the request-body cap) |
+| `subtle.scala` | 12 | app-owned facade: `crypto/subtle` constant-time compare |
+| `osfile.scala` | 24 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove` for the blob store |
 
 ## Scope
 
@@ -355,6 +360,22 @@ metadata entry and deletes the file (`reclaimMedia` — the event is the only
 referrer; media ids are not shared). The reclaim runs on live redactions and
 on replayed ones alike, so a reboot converges.
 
+**Media retention** (`Retain`, retain.scala): wata is ephemeral by design — a
+walkie-talkie, not an archive (plan 0012's product ruling). Voice media older
+than `WATA_MEDIA_RETAIN_DAYS` (default 7; `0` or negative disables) is swept:
+the referring message is redacted *server-side* through the same store
+sequence a manual redaction takes (an `m.room.redaction` event + the target
+redact, both journaled — so a replay converges and clients render the
+ordinary message-removed row), and the redact reclaims the blob as above.
+Candidates are `m.room.message` events whose `url` names a *stored* media id:
+text messages are untouched, already-redacted events have empty content and
+fall through, and unreferenced blobs (e.g. a migrated orphan) are never
+swept. Age is judged by the event's `origin_server_ts`, which survives replay
+verbatim (a blob file's mtime would reset on migration). The sweep runs once
+at boot, before listening, and then daily on a spawned goroutine. The
+exempt-set seam (`Retain.exemptEventIds`, empty today) is where a future
+"favorite a message" marker slots in to keep a message.
+
 **Long-poll waiters.** `Waiter` (`model.scala:109`) pairs a monotonic `id`
 with an *unbuffered* `Chan[Boolean]` that is used purely as a
 close-signalled wake — nothing is ever sent on it, only closed. `notifyUser`
@@ -516,7 +537,11 @@ back byte-identical from its blob file after the reboot while the journal's
 `media` ops stay payload-free; a live redaction of a media message deletes
 the blob (and stays deleted across the replay); a crafted old-style base64
 `media` op is migrated out to the media dir on boot and serves; and a crafted
-slim op with no blob file replays as a logged skip whose id then 404s.
+slim op with no blob file replays as a logged skip whose id then 404s. For
+the retention sweep it ages a journaled voice message's `origin_server_ts` by
+two days, reboots with `WATA_MEDIA_RETAIN_DAYS=1`, and asserts the blob is
+gone, the event reads as redacted, an unreferenced blob was spared — and that
+one more reboot at default retention replays to the same state.
 
 ## Test hooks
 
@@ -554,6 +579,7 @@ for the one scenario that opts into hooks).
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
 - **`osfile.scala`** — `go.osfile`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove`) the blob store needs; perms passed as literals, errors dropped (best-effort).
+- **`retain.scala`** — `Retain`: the media retention sweep — `WATA_MEDIA_RETAIN_DAYS`, the boot + daily passes, the server-side redaction of expired voice messages, and the favorites exempt-set seam.
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
 - **`keys.scala`** — `Keys`: the three E2EE device-key routes as authenticated no-op stubs; `/keys/upload` tallies the one-time-key counts back per algorithm, which matrix-dart-sdk requires, and discards the keys.
 - **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
