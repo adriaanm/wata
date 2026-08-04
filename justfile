@@ -38,8 +38,8 @@ ide:
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-# build both apps
-build: build-server build-fb
+# build every app
+build: build-server build-fb build-tui
 
 # build the homeserver
 build-server:
@@ -48,6 +48,10 @@ build-server:
 # build the device client (native; audio is stubbed off-device)
 build-fb:
     cd wata-fb && ../tools/sgo build
+
+# build the terminal client / admin REPL
+build-tui:
+    cd wata-tui && ../tools/sgo build
 
 # run the homeserver, default port 8008
 server PORT="8008":
@@ -91,6 +95,15 @@ client-tests:
 # client core: 14 live client-server scenarios, fresh server each
 integ:
     bash tools/wataclient-integ.sh
+
+# terminal client: two scripted REPL sessions against a fresh server (bob
+# sends a canned Ogg, alice snaps/plays/pokes). ~10s, so standalone, not in ci.
+tui-smoke:
+    tools/tui-smoke.py
+
+# terminal client: a REPL against a live server (WATA_TUI_USER/PASS/HS or args)
+tui *ARGS:
+    cd wata-tui && ../tools/sgo run {{ARGS}}
 
 # Needs node_modules installed at $WATA_TS_REPO (default: this repo — the TS
 # reference tree is in-tree since the graft).

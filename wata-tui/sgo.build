@@ -1,0 +1,12 @@
+# sgo.build (schema: see core/sgo.build). wata-tui is an APP over core + json +
+# wataclient (the portable client core) with no device layer: a line-oriented
+# command REPL on the host, the second client and the admin surface.
+mode app
+emitname wata-tui
+binname wata-tui
+gomod watatui
+optreport
+# The embedded iroh transport (plan 0013): the same plain Go dep wata-fb rides,
+# so WATA_IROH_CONFIG makes the tui an iroh client too. Its REAL cgo build is
+# opt-in (darwin + `-tags iroh`); ordinary builds ride the pure-Go stub.
+godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet

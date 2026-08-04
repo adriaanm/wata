@@ -1,6 +1,6 @@
 # 0016 — wata-tui: the terminal client and admin interface
 
-Status: accepted
+Status: done
 
 ## Problem
 
@@ -79,14 +79,27 @@ shell out to ffmpeg the same way `play` shells out, if wanted.
 
 ## Verification
 
-`tools/tui-smoke.py`: boot a fresh server (test users), run one tui as
+Done: `tools/tui-smoke.py` (`just tui-smoke`) boots a fresh server, runs one tui as
 bob sending a fixture Ogg to alice, then one as alice scripted over stdin:
 `snap` shows the DM with 1 unplayed, `msgs` lists it, `play` (with
 `WATA_TUI_PLAYER` pointed at a stub that records its argv) fetches
 byte-identical Ogg and marks it played, `raw GET /_matrix/client/v3/...`
-answers 200, and a re-run of `snap` shows 0 unplayed. Assert on printed
-lines. Added to `just ci` only if it stays under a few seconds; otherwise
-standalone like the iroh smokes.
+answers 200, and a re-run of `snap` shows 0 unplayed. Every assertion is on printed
+lines. It runs in ~10s (the two `wait`s dominate), so it stayed standalone
+like the iroh smokes rather than joining `just ci`.
+
+Two things the implementation learned, both recorded in
+[../design/wata-tui.md](../design/wata-tui.md):
+
+- `exec.Command` is variadic and the dialect has no slice-spread lowering,
+  so the args facade is five explicit arities of the same `@go.name`.
+- A `Unit`-returning self-recursive list walk
+  (`case h :: t => println(…); walk(t, i + 1)` / `case Nil => ()`) crashes
+  `sgolaBackend` with "unsupported expression (Thicket)" over an
+  `EmptyTree`. It does not reproduce from that def in isolation — the
+  surrounding file is part of the trigger. Every walk in `wata-tui` is a
+  `while` loop over a `var cur` instead, which is what the rest of the repo
+  already does.
 
 ## Out of scope
 

@@ -1,0 +1,4 @@
+# In-link libraries above the implicit prelude (core). wata-tui links json +
+# wataclient (order: json then wataclient, matching wata-fb's chain).
+json
+wataclient

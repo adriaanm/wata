@@ -81,6 +81,7 @@ serve the compiler's own gate does not belong here.
 |--------------------|-------------------------------------------------------------------------|
 | `wata-server/`     | app — the Matrix client-server homeserver                                |
 | `wata-fb/`         | app — the device client (framebuffer display, input, audio, LEDs)        |
+| `wata-tui/`        | app — the terminal client and admin REPL (host-side, no device layer)    |
 | `wataclient/`      | library — the portable Matrix client core, linked by `wata-fb`            |
 | `go-pkgs/audio/`   | plain Go cgo module — opus + tinyalsa, `wata-fb`'s device audio           |
 | `tools/`           | build, test, and deploy scripts                                          |
@@ -227,6 +228,7 @@ justfile just gives it a name.
 | [docs/design/wata-server.md](docs/design/wata-server.md) | homeserver: routing, store, sync, persistence |
 | [docs/design/wataclient.md](docs/design/wataclient.md) | client core: sync engine, domain model, transport, audio |
 | [docs/design/wata-fb.md](docs/design/wata-fb.md) | device client: display, input, audio, cross-build, deploy |
+| [docs/design/wata-tui.md](docs/design/wata-tui.md) | terminal client: the command REPL, the admin surface, its smoke |
 | [justfile](justfile) | every repeatable operation, one recipe each (`just` to list) |
 | [TODO.jsonl](TODO.jsonl) | the open-work queue (protocol above) |
 | [WATA-TODO.md](WATA-TODO.md) | known debt |

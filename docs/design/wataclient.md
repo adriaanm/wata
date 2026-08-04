@@ -1,25 +1,26 @@
 # wataclient — design and architecture
 
-`wataclient` is the portable core of the Matrix client used by the wata
-framebuffer device (`wata-fb`). It contains no device-specific or
-platform-specific code: no HTTP sockets, no file I/O, no audio hardware
-access. It is a pure state machine (the sync engine) plus a thin runtime
-that drives that state machine through injected capabilities. `wata-fb`
-links `wataclient` whole-program and supplies the capability
-implementations (real HTTP client, real clock, ALSA/opus audio thread).
+`wataclient` is the portable core of the Matrix client shared by the wata
+framebuffer device (`wata-fb`) and the terminal client (`wata-tui`). It
+contains no device-specific or platform-specific code: no HTTP sockets, no
+file I/O, no audio hardware access. It is a pure state machine (the sync
+engine) plus a thin runtime that drives that state machine through
+injected capabilities. An app links `wataclient` whole-program and
+supplies the capability implementations (real HTTP client, real clock,
+and — where there is hardware to drive — an audio thread).
 
 `wataclient` is written in Sgola (a restricted Scala 3 dialect compiled to
 Go source by the `sgo` compiler). It is a **Sgola-only library**: it has
 no `@goexport` surface and exports nothing directly callable from plain
-Go. Its only consumer today is `wata-fb`, which links it whole-program at
-the Sgola level, resolving it as a source sibling in this repo — `sgo`
-searches the declaring module's parent dir for an in-link library before
-it looks at the toolchain home.
+Go. Its consumers are `wata-fb` and `wata-tui`, each of which links it
+whole-program at the Sgola level, resolving it as a source sibling in this
+repo — `sgo` searches the declaring module's parent dir for an in-link
+library before it looks at the toolchain home.
 
 There is no published payload. `sgo emit` can generate one (a
 `wataclient/sgola/{meta,tasty,src}` tree of embedded source and TASTy, for
 consumers that resolve the module from `pkg/mod` instead), but nothing
-consumes it: `wata-fb`'s emitted `go.mod` never references it, and the
+consumes it: no consumer's emitted `go.mod` references it, and the
 tree goes stale silently on any edit under `wataclient/src/`. Re-enabling
 it means putting `publish` back in `wataclient/sgo.build`, running `sgo
 emit`, and committing the result — plus a check that keeps it honest.
@@ -38,8 +39,8 @@ compiles and runs correctly wherever an app supplies those two traits.
 
 ## The public surface
 
-A consumer (`wata-fb`) interacts with `wataclient` mainly through
-`runtime.scala`'s `Runtime` object and the `MatrixClient` handle:
+A consumer interacts with `wataclient` mainly through `runtime.scala`'s
+`Runtime` object and the `MatrixClient` handle:
 
 | Type | File | Role |
 |---|---|---|
@@ -57,6 +58,23 @@ with `Runtime.sendAction`, and poll `UiEvent`s / `StateSnapshot`s with
 `Runtime.pollEvent`/`Runtime.pollSnap`. `Runtime.stopClient` closes the
 `stop` channel and sends the `ActQuit` poison pill to wind both loops
 down; the enclosing `supervised` scope is the join point.
+
+### The two consumers
+
+- **`wata-fb`** ([wata-fb.md](wata-fb.md)) is the device client: it builds
+  with `makeWithAudio` and runs an ALSA/opus audio thread on the other end
+  of `audioCmds`, so `ActPlay` reaches a speaker.
+- **`wata-tui`** ([wata-tui.md](wata-tui.md)) is the host-side terminal
+  client and admin REPL. It is **headless** — `Runtime.make`, no audio
+  thread — so it never sends `ActPlay`; playback calls
+  `MatrixHttp.downloadMedia` through an `Hs` built on `Runtime.lastAuth`,
+  writes the bytes to a file, and hands that to an external player
+  process. That same `Hs` is what its `raw`
+  command rides, which is the only place a consumer builds an `Hs` of its
+  own rather than letting the runtime own it. It is the second exercise of
+  the capability seam and of `WATA_IROH_CONFIG`, and it proves the module
+  really is device-independent: nothing under `wataclient/` changed to
+  gain it.
 
 ## The sync engine — the heart of the module
 
