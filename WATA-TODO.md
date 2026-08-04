@@ -49,13 +49,13 @@ blocks + git log; each entry cites where it was recorded.*
   GRADUATION-BRIEF consumer-driven ledger.
 - ADT-valued `Atomic` cells / RWMutex reader-parallel cell — same
   ledger, first-consumer-triggered (Wata is the likely consumer).
-- Facade-subclass restriction (from the `[SRV-BODY-LIMIT]` build): a
-  self-call of a nullary instance `def` on a class extending a `go.*`
-  facade trait crashes the plugin (`unsupported expression (Apply)`, as
-  an unhandled exception) — the identical shape on a plain class
-  compiles clean, so it is the facade-callback lowering path, not
-  anything inherent. Workaround: keep such members on an object.
-  Filed: `WATA-FACADE-SUBCLASS-SELF-CALL`.
+- Facade-subclass trap (upstream-known, audited clean here): BODY
+  val/var fields of a class extending a `go.*` facade trait are silently
+  Go-zeroed at construction (only ctor params are seated) — keep Handler
+  state in ctor params or on an object until
+  FACADE-SUBCLASS-BODY-FIELD-SILENT-ZERO lands. (The self-call
+  restriction from the `[SRV-BODY-LIMIT]` build is fixed at `ae2e63f`;
+  `[TOOLCHAIN-REPIN-BATCH]` covers picking it up.)
 - Emitter trap (residual of the fixed CATCH-ERR-SHADOW): a *parameter*
   literally named `err` still bypasses the emitter's rename machinery —
   avoid that spelling for params until PARAM-ERR-COLLISION lands. Local

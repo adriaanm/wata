@@ -1,4 +1,5 @@
 {"key": "FB-SIM-DEVICE-VERIFY", "title": "human pass: just fb-deploy + on-device check that the UiDevice refactor left the real fbdev/evdev path intact", "doc": "docs/design/wata-fb.md", "inProgress": false}
+{"key": "TOOLCHAIN-REPIN-BATCH", "title": "repin to sgola ae2e63f+ (facade self-call fixed; batch with INT-LED-STRING-CONCAT when its notice lands); body-val trap audited clean, object shapes stay", "doc": "WATA-TODO.md", "inProgress": false}
 {"key": "SRV-MEDIA-UNBOUNDED", "title": "media blobs never evicted or capped, and are base64'd into the journal — unbounded memory and boot-replay time", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "CLI-BACKFILL-BOUND", "title": "backfillRoom fetches one 50-event page and discards the server's end token — gaps larger than that stay unrecovered", "doc": "docs/design/wataclient.md", "inProgress": false}
 {"key": "CLI-BACKFILL-BLOCKING", "title": "backfill issues blocking /messages calls serially inside processRound, delaying the snapshot publish and the next long-poll", "doc": "docs/design/wataclient.md", "inProgress": false}
