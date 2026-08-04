@@ -1,6 +1,10 @@
 # 0014 — enrolling a device onto the family's iroh network
 
-Status: **accepted**
+Status: **accepted, on hold**
+
+Held 2026-08-05: the approach depends on a phone
+scanning the device's screen, and there is no phone client yet. The design stands;
+it waits on that. Plan 0008 (Apple clients) is where the scanner would come from.
 
 ## The problem
 
@@ -75,9 +79,14 @@ not built.
 
 ## Milestones
 
+Nothing here is started; the hold above is why.
+
 1. **Device-minted identity**: the device generates its keypair on
    first boot and persists it with the rest of its config; nothing
-   mints keys by hand any more.
+   mints keys by hand any more. This one is independently useful — it
+   removes hand-minted keys whatever the enrolment channel turns out
+   to be — so it is the natural first thing to pick up when the hold
+   lifts, or sooner if key handling starts to itch.
 2. **Pending enrolment**: the server takes an announced id + nonce,
    holds it with an expiry, and grows the allowlist on approval.
 3. **The QR**: rendered on the device's own framebuffer, goldened like
