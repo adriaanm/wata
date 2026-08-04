@@ -30,8 +30,11 @@ sessions, profile (displayname/avatar_url), global and per-room account data,
 room creation with the common presets, join (by id or alias), invite, leave,
 kick, ban, setting arbitrary state events, sending and redacting `m.room.*`
 events, read receipts, media upload/download, and `/sync` including
-long-polling. Deliberately absent: any encryption (no
-`m.room.encrypted` handling, no device-key endpoints), federation, user
+long-polling, plus no-op E2EE key stubs. Deliberately absent: any
+encryption (no `m.room.encrypted` handling; the `/keys/*` routes store
+nothing and hand no key to anyone — they exist only so a stock client
+completes its post-login device-key handshake and reaches `/sync`),
+federation, user
 registration (users are a fixed, hardcoded pair — `wata-server/src/main/scala/model.scala:120-131`),
 `/publicRooms`, and `createRoom`'s
 `initial_state`/`creation_content`/`power_level_content_override` fields
@@ -336,6 +339,7 @@ silently skipped (best-effort, not validated).
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, and per-op-kind (de)serialization.
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
+- **`keys.scala`** — `Keys`: the three E2EE device-key routes as authenticated no-op stubs; `/keys/upload` tallies the one-time-key counts back per algorithm, which matrix-dart-sdk requires, and discards the keys.
 - **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
 - **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental) and the long-poll orchestration.
 - **`server.scala`** — `WataHandler`/`MediaEdge`/`NotFound`/`Respond` (the HTTP edge), `Server` (boot + route table), `Main`, and `SelfCheck` (a deterministic smoke test of the store/handler logic, diffed against a golden file by the build's smoke script).

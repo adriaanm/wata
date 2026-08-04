@@ -28,6 +28,7 @@ object Router:
     else if path.endsWith("/messages") then Rooms.messages(r)
     else if isAcctPath(path) then acctRoute(m, path, r, body)
     else if isProfilePath(path) then profileRoute(path, r, body)
+    else if path.contains("/keys/") then Keys.route(path, r, body)
     else if path.contains("/directory/room/") then Rooms.resolveAlias(r)
     else if path.endsWith("/upload") then Rooms.upload(r, body)
     else if path.contains("/send/") then Rooms.sendEvent(r, body)

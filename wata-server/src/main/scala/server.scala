@@ -123,6 +123,10 @@ object Server:
     mux.handle("PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}", h)
     mux.handle("PUT /_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}", h)
     mux.handle("POST /_matrix/client/v3/rooms/{roomId}/receipt/{receiptType}/{eventId}", h)
+    // E2EE device-key handshake — no-op stubs (keys.scala).
+    mux.handle("POST /_matrix/client/v3/keys/query", h)
+    mux.handle("POST /_matrix/client/v3/keys/upload", h)
+    mux.handle("POST /_matrix/client/v3/keys/device_signing/upload", h)
     mux.handle("POST /_matrix/media/v3/upload", h)
     mux.handle("GET /_matrix/media/v3/download/{serverName}/{mediaId}", h)
     mux.handle("GET /_matrix/media/v1/download/{serverName}/{mediaId}", h)
