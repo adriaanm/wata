@@ -45,3 +45,41 @@ checkpoint settings-network
 tap down
 advance 5
 checkpoint settings-info
+
+# The diagnostics rows absorbed from system-menu (plan 0003, phase 5). The
+# menu is a scrolling window of six from here on — walking past Device Info
+# scrolls, and the `v`/`^` cues mark the hidden rows. On the host the IP and
+# cellular values are an honest "n/a" (no wlan0, no modem); on the device
+# they read `ip -4 addr show` and the ppp0 node, which no golden can pin.
+tap down
+advance 5
+checkpoint settings-ip
+
+tap down
+advance 5
+checkpoint settings-cell
+
+# The power actions render everywhere but only act on the hardware: OK arms
+# (the detail rows become the red confirm prompt), a second OK runs the
+# action — here a logged no-op, the device guard.
+tap down
+advance 5
+checkpoint settings-poweroff
+
+tap enter
+advance 5
+checkpoint settings-poweroff-armed
+
+# OK again on the armed row: off-device this is the guarded no-op — the frame
+# after it must show the row back in its unarmed state.
+tap enter
+advance 5
+checkpoint settings-poweroff-run
+
+# arm reboot-to-BL, then move away: any key but OK cancels the confirm.
+tap down
+tap enter
+advance 2
+tap down
+advance 5
+checkpoint settings-reboot-edl

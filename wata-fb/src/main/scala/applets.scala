@@ -587,13 +587,21 @@ case class EchoPlaying() extends EchoState
 case class EchoDone() extends EchoState
 case class EchoErr() extends EchoState
 
+/** `armed` is the power-action confirmation latch: OK on a power row arms it,
+ *  a second OK runs the action, any other key drops it. `ipText`/`cellText`
+ *  are the diagnostics info rows' cached values, re-read by `refreshDiag`
+ *  every `DIAG_REFRESH` frames (`diagLeft` counts down to the next read). */
 case class SettingsState(
   selected: scala.Int,
   brightness: scala.Int,
   echo: EchoState,
   nameIdx: scala.Int,
   screenTimeoutIdx: scala.Int,
-  connected: Boolean
+  connected: Boolean,
+  armed: Boolean,
+  ipText: String,
+  cellText: String,
+  diagLeft: scala.Int
 )
 
 /** the settings applet: a thin dynamic-dispatch shell over `SettingsLogic`
@@ -609,14 +617,31 @@ final class SettingsApplet(val state: SettingsState) extends Applet:
 
 object SettingsLogic:
   // menu items: 0 echo, 1 brightness, 2 screen_off, 3 display_name,
-  // 4 disconnect, 5 info.
-  val N_ITEMS = 6
+  // 4 disconnect, 5 info, then the diagnostics absorbed from system-menu
+  // (plan 0003, phase 5): 6 ip, 7 cell data, 8-10 the power actions.
+  val N_ITEMS = 11
   val ECHO = 0
   val BRIGHTNESS = 1
   val SCREEN_OFF = 2
   val DISPLAY_NAME = 3
   val DISCONNECT = 4
   val INFO = 5
+  val IP_ADDR = 6
+  val CELL_DATA = 7
+  val POWER_OFF = 8
+  val REBOOT_BL = 9
+  val REBOOT_EDL = 10
+
+  /** menu rows visible at once — the menu is a scrolling window now that the
+   *  item count outgrew the grid (six two-row items + the two detail rows).
+   *  The window start is DERIVED from `selected` (no scroll state): 0 until
+   *  the selection passes the last visible row, then just enough to keep it
+   *  on-screen — deterministic, which is what the goldens pin. */
+  val VISIBLE = 6
+
+  /** frames between diagnostics re-reads (~5s at 30fps — system-menu's own
+   *  refresh cadence; an interface lookup per frame would be needless). */
+  val DIAG_REFRESH = 150
 
   // screen timeouts (seconds; 0 = never) + labels
   def timeoutSecs(i: scala.Int): scala.Int =
@@ -634,29 +659,42 @@ object SettingsLogic:
    *  the selected item's detail text. Two lines is what there is room for. */
   val DETAIL_ROW = 13
 
-  def initial(): SettingsState = SettingsState(0, 40, EchoIdle(), 0, 1, true)
+  def initial(): SettingsState =
+    SettingsState(0, 40, EchoIdle(), 0, 1, true, false, "", "", 0)
 
   /** the boot state: preferences come back from the config store, so a device
    *  keeps the backlight and timeout its owner set. */
   def restored(p: FbPrefs): SettingsState =
-    SettingsState(0, p.brightness, EchoIdle(), p.nameIdx, p.timeoutIdx, true)
+    SettingsState(0, p.brightness, EchoIdle(), p.nameIdx, p.timeoutIdx, true, false, "", "", 0)
 
   def getScreenTimeout(s: SettingsState): scala.Int = timeoutSecs(s.screenTimeoutIdx)
   def getBrightness(s: SettingsState): scala.Int = s.brightness
 
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
-    SettingsState(sel, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected)
+    SettingsState(sel, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+      s.armed, s.ipText, s.cellText, s.diagLeft)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
-    SettingsState(s.selected, b, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected)
+    SettingsState(s.selected, b, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+      s.armed, s.ipText, s.cellText, s.diagLeft)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
-    SettingsState(s.selected, s.brightness, e, s.nameIdx, s.screenTimeoutIdx, s.connected)
+    SettingsState(s.selected, s.brightness, e, s.nameIdx, s.screenTimeoutIdx, s.connected,
+      s.armed, s.ipText, s.cellText, s.diagLeft)
   def withNameIdx(s: SettingsState, i: scala.Int): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, i, s.screenTimeoutIdx, s.connected)
+    SettingsState(s.selected, s.brightness, s.echo, i, s.screenTimeoutIdx, s.connected,
+      s.armed, s.ipText, s.cellText, s.diagLeft)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, i, s.connected)
+    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, i, s.connected,
+      s.armed, s.ipText, s.cellText, s.diagLeft)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, c)
+    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, c,
+      s.armed, s.ipText, s.cellText, s.diagLeft)
+  def withArmed(s: SettingsState, a: Boolean): SettingsState =
+    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+      a, s.ipText, s.cellText, s.diagLeft)
+  def withDiag(s: SettingsState, ip: String, cell: String, left: scala.Int): SettingsState =
+    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+      s.armed, ip, cell, left)
 
   // ---- input (press-only) ------------------------------------------------------
   /** every key goes through `persisted`, so the three stored preferences are
@@ -665,15 +703,22 @@ object SettingsLogic:
   def handleInput(s: SettingsState, k: Key, ks: KeyState, ctx: FrameCtx): SettingsState =
     persisted(s, handleKey(s, k, ks, ctx))
 
+  /** every key except OK drops an armed power action first — arming is a
+   *  two-OK-in-a-row gesture, nothing else keeps it alive. */
   def handleKey(s: SettingsState, k: Key, ks: KeyState, ctx: FrameCtx): SettingsState =
     if !Shell.isPressed(ks) then s
     else k match
-      case _: KUp    => moveUp(s)
-      case _: KDown  => moveDown(s)
+      case _: KUp    => moveUp(disarmed(s))
+      case _: KDown  => moveDown(disarmed(s))
       case _: KEnter => onEnter(s, ctx)
-      case _: KLeft  => onLeft(s)
-      case _: KRight => onRight(s)
-      case _           => s
+      case _: KLeft  => onLeft(disarmed(s))
+      case _: KRight => onRight(disarmed(s))
+      case _           => disarmed(s)
+
+  def disarmed(s: SettingsState): SettingsState =
+    var out = s
+    if s.armed then out = withArmed(s, false)
+    out
 
   def persisted(before: SettingsState, after: SettingsState): SettingsState =
     if prefsChanged(before, after) then
@@ -698,7 +743,27 @@ object SettingsLogic:
     if s.selected == ECHO then startEcho(s, ctx)
     else if s.selected == DISPLAY_NAME then pushName(s, ctx)
     else if s.selected == DISCONNECT then doDisconnect(s, ctx)
+    else if isPowerRow(s.selected) then armOrRun(s)
     else s
+
+  def isPowerRow(i: scala.Int): Boolean =
+    i == POWER_OFF || i == REBOOT_BL || i == REBOOT_EDL
+
+  /** first OK arms (the detail rows turn into the confirm hint); the second
+   *  runs the action. `Diag.runOnDevice` is the device guard: off the
+   *  hardware the run is a logged no-op, so the sim can walk the whole
+   *  gesture. */
+  def armOrRun(s: SettingsState): SettingsState =
+    var out = withArmed(s, true)
+    if s.armed then
+      runPower(s.selected)
+      out = withArmed(s, false)
+    out
+
+  def runPower(i: scala.Int): Unit =
+    if i == POWER_OFF then Diag.powerOff()
+    else if i == REBOOT_BL then Diag.rebootBootloader()
+    else Diag.rebootEdl()
 
   def startEcho(s: SettingsState, ctx: FrameCtx): SettingsState =
     var out = s
@@ -759,10 +824,19 @@ object SettingsLogic:
     withBrightness(s, b)
 
   // ---- update ---------------------------------------------------------------------
-  /** nothing per-frame here: echo events arrive via `Shell.routeAudio` ->
-   *  `onEcho`, NOT a drain — the shell owns the mailbox's single drain
-   *  (plan 0009). */
-  def update(s: SettingsState, dt: scala.Double, ctx: FrameCtx): SettingsState = s
+  /** the diagnostics refresh is the only per-frame work; echo events arrive
+   *  via `Shell.routeAudio` -> `onEcho`, NOT a drain — the shell owns the
+   *  mailbox's single drain (plan 0009). */
+  def update(s: SettingsState, dt: scala.Double, ctx: FrameCtx): SettingsState =
+    refreshDiag(s)
+
+  /** re-read the IP / cellular info rows every `DIAG_REFRESH` frames (the
+   *  first frame reads immediately — `diagLeft` starts at 0). Off-device
+   *  both reads answer a constant "n/a", which keeps the frames the goldens
+   *  pin independent of when a refresh lands. */
+  def refreshDiag(s: SettingsState): SettingsState =
+    if s.diagLeft > 0 then withDiag(s, s.ipText, s.cellText, s.diagLeft - 1)
+    else withDiag(s, Diag.wlanIp(), Diag.cellData(), DIAG_REFRESH)
 
   /** one echo event, routed here by `Shell.routeAudio`; the catch-all is
    *  unreachable (wata events route to the wata applet). */
@@ -780,14 +854,31 @@ object SettingsLogic:
 
   def renderMenu(s: SettingsState, px: go.Bytes): Unit =
     Font.drawText(px, "SETTINGS", 0, 0, Color.cyan, false, 0)
-    var i = 0
-    while i < N_ITEMS do
-      val row = 2 + i * 2
+    val start = windowStart(s)
+    var i = start
+    while i < start + VISIBLE do
+      val row = 2 + (i - start) * 2
       val sel = i == s.selected
       if sel then Draw.fillRect(px, 0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)
       val fg = if sel then Color.black else Color.green
       renderItem(s, px, i, row, fg)
       i += 1
+    renderScrollCues(px, start)
+
+  /** first visible item: 0 until the selection passes the window's last row,
+   *  then whatever keeps it on the last row (derived, not stored — see
+   *  `VISIBLE`). */
+  def windowStart(s: SettingsState): scala.Int =
+    var w = s.selected - (VISIBLE - 1)
+    if w < 0 then w = 0
+    w
+
+  /** "^"/"v" in the last column of the first/last menu rows when the window
+   *  has items above/below it. */
+  def renderScrollCues(px: go.Bytes, start: scala.Int): Unit =
+    if start > 0 then Font.drawText(px, "^", 25, 2, Color.midGray, false, 0)
+    if start + VISIBLE < N_ITEMS then
+      Font.drawText(px, "v", 25, 2 + (VISIBLE - 1) * 2, Color.midGray, false, 0)
 
   def renderItem(s: SettingsState, px: go.Bytes, i: scala.Int, row: scala.Int, fg: scala.Int): Unit =
     if i == ECHO then
@@ -812,8 +903,20 @@ object SettingsLogic:
         netTxt = "ON"
         netFg = Color.green
       Font.drawText(px, netTxt, 11, row, netFg, false, 0)
-    else
+    else if i == INFO then
       Font.drawText(px, "Device Info", 0, row, fg, false, 0)
+    else if i == IP_ADDR then
+      Font.drawText(px, "IP", 0, row, fg, false, 0)
+      Font.drawText(px, WataLogic.clip(s.ipText, 21), 4, row, fg, false, 0)
+    else if i == CELL_DATA then
+      Font.drawText(px, "Cell data", 0, row, fg, false, 0)
+      Font.drawText(px, WataLogic.clip(s.cellText, 14), 11, row, fg, false, 0)
+    else if i == POWER_OFF then
+      Font.drawText(px, "Power off", 0, row, fg, false, 0)
+    else if i == REBOOT_BL then
+      Font.drawText(px, "Reboot to BL", 0, row, fg, false, 0)
+    else
+      Font.drawText(px, "Reboot to EDL", 0, row, fg, false, 0)
 
   /** the selected item's detail, on the two grid rows left below the menu. */
   def renderDetail(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
@@ -832,9 +935,31 @@ object SettingsLogic:
       else Font.drawText(px, "Restart to reconn", 0, row, Color.midGray, false, 0)
     else if s.selected == BRIGHTNESS then
       Font.drawText(px, "</> adjust", 0, row, Color.midGray, false, 0)
-    else
+    else if s.selected == SCREEN_OFF then
       Font.drawText(px, "</> timeout", 0, row, Color.midGray, false, 0)
       Font.drawText(px, "Any key wakes", 0, row + 1, Color.midGray, false, 0)
+    else if s.selected == IP_ADDR then
+      Font.drawText(px, "wlan0 IPv4 address", 0, row, Color.midGray, false, 0)
+    else if s.selected == CELL_DATA then
+      Font.drawText(px, "ppp0 data link", 0, row, Color.midGray, false, 0)
+    else
+      renderPowerDetail(s, px, row)
+
+  /** the power rows' detail doubles as the confirmation prompt: unarmed it
+   *  says what OK starts, armed it says what the NEXT OK does — in red, with
+   *  the escape route on the second line. */
+  def renderPowerDetail(s: SettingsState, px: go.Bytes, row: scala.Int): Unit =
+    if s.armed then
+      Font.drawText(px, "OK again: " + powerVerb(s.selected), 0, row, Color.red, false, 0)
+      Font.drawText(px, "other keys cancel", 0, row + 1, Color.midGray, false, 0)
+    else
+      Font.drawText(px, "OK arms " + powerVerb(s.selected), 0, row, Color.midGray, false, 0)
+      Font.drawText(px, "then OK again runs", 0, row + 1, Color.midGray, false, 0)
+
+  def powerVerb(i: scala.Int): String =
+    if i == POWER_OFF then "power off"
+    else if i == REBOOT_BL then "reboot to BL"
+    else "reboot to EDL"
 
   /** sysfs has no battery node off-device, and `readBatteryPercent` says so
    *  with -1 rather than by failing — the line is simply left out then. */

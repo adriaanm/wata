@@ -192,8 +192,14 @@ explicit state machine, not a generic widget framework:
   two applets today: `WataApplet`/`WataLogic` (contacts + conversation
   view, PTT recording, playback — `applets.scala:38-479`) and
   `SettingsApplet`/`SettingsLogic` (menu: audio echo test,
-  brightness, screen timeout, display name, disconnect, info —
-  `applets.scala:532-769`).
+  brightness, screen timeout, display name, disconnect, info, plus
+  the diagnostics absorbed from system-menu — the wlan0-IP and
+  cellular-data info rows and the power off / reboot-to-BL /
+  reboot-to-EDL actions). The menu outgrew the grid at eleven items,
+  so it renders as a scrolling window of six with `^`/`v` cues in the
+  last column; the window start is derived from the selection (no
+  scroll state), which keeps the frames the goldens pin
+  deterministic.
 - Input routing has two special cases outside the generic per-applet
   dispatch: the PTT button always targets the wata applet regardless
   of which applet is active, and the two "dot" buttons cycle the
@@ -577,7 +583,7 @@ one-user phases:
 | `family-three` | a third account (per-scenario `$WATA_USERS`): all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
 | `badges-across-restart` | unplayed counts across a restart: bob sees family=1 / DM=2, resumes with no credentials, and the badge frame is byte-identical; playing out the DM clears only its own badge. |
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED`, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm. |
-| `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, and device info. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
+| `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, device info, and the diagnostics rows — the IP and cellular info rows (an honest `n/a` on the host), the power-action confirm arming, the guarded no-op on the second OK, and a move-away cancelling an armed action. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
 
 A few things the scripts need that are worth knowing. `waitmax` is the
@@ -662,6 +668,8 @@ information in the equivalent place, not the same number.
 | network disconnect (stop sync + actions, restart to reconnect) | yes | yes | same |
 | brightness / screen-timeout / name survive a restart | no | yes | wata-fb only — the same config store the session lives in |
 | battery percent in the Info detail | yes | yes | same, `Led.readBatteryPercent`; absent hardware reads -1 and the line is left out |
+| wlan0 IP + cellular-data info rows | no (system-menu) | yes | absorbed from system-menu (plan 0003 phase 5): `Diag.wlanIp`/`cellData` mirror its sources — `ip -4 addr show <iface>` and the ppp0 sysfs node — re-read every ~5s; off-device both rows answer `n/a` |
+| power off / reboot to BL / reboot to EDL | no (system-menu) | yes | same commands system-menu runs (`poweroff`, `/usr/local/bin/reboot-bootloader`, `/usr/local/bin/reboot-edl`) via `go.exec`; OK arms (the detail rows become a red confirm prompt), a second OK runs, any other key cancels. `Diag.runOnDevice` gates on the lcd-bl sysfs node so off the hardware the run is a logged no-op; on-device verification is the boot-into-wata phase's checkpoint |
 | detail area under the menu | rows 16..19 of 19 | rows 13..14 of 15 | same idea, sized to the landscape grid |
 | every settings item under test | n/a | yes | the `settings-walk` scenario |
 | **Chrome / feedback** ||||
@@ -685,7 +693,8 @@ Three things worth stating outright:
   `config.json` has it.
 
 - **The settings detail area is sized to the grid it draws on.** The
-  menu is six items at two-row spacing (grid rows 2..12), which leaves
+  menu shows six items at two-row spacing (grid rows 2..12; a scrolling
+  window over the eleven), which leaves
   rows 13 and 14 — the last two of the 15-row landscape grid — for the
   selected item's detail text, so two lines is what every item gets.
   The layout number this replaced, `2 + N_ITEMS * 2 + 1` = 15, was
@@ -780,7 +789,9 @@ it is not part of `just ci`.
 | `fbtest.scala` | 102 | `fbdump` (host PNG golden) and `fbsmoke` (on-device fb/LED/evdev smoke test) drivers; also `FbTest.present`, the byte-copy blit used by the real UI loop too. |
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
 | `shell.scala` | 157 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, everything else goes to the active applet). |
-| `applets.scala` | 840 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `applets.scala` | 985 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `diag.scala` | 107 | The settings applet's diagnostics + power actions (`Diag`): the wlan0/ppp0 reads and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources; `onDevice()` (the lcd-bl sysfs probe) gates the reads and the destructive paths. |
+| `netexec.scala` | 24 | The `go.exec` facade over `os/exec`, curated to `Command`/`Output` — what `Diag` runs `ip` and the power commands through. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
 | `ui.scala` | 310 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |

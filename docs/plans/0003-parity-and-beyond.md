@@ -138,13 +138,18 @@ hardening from phase 4's sweep.
 
 System-menu retires outright (ruling 2026-08-04): wata is then the
 only framebuffer occupant, which is what makes the tty1 swap clean.
-The bare minimum of its diagnostics moves into wata's settings applet
-first — current IP, cellular data status, battery percent (already in
-Device Info), and power actions (power off / reboot to bootloader /
-reboot to EDL) — mirroring system-menu's own sources for each. The
-info rows are host-simulable and land with sim coverage ahead of the
-rootfs work; the power actions are device-only and verify in this
-phase's on-device checkpoint. `[FB-SETTINGS-DIAG]` in the queue.
+The bare minimum of its diagnostics is absorbed into wata's settings
+applet (done 2026-08-04): the wlan0-IP and cellular-data info rows and
+the power off / reboot-to-bootloader / reboot-to-EDL actions, each
+mirroring system-menu's own source (`ip -4 addr show`, the ppp0 sysfs
+node, and the same three commands — see `Diag` in wata-fb and the
+settings section of docs/design/wata-fb.md; battery percent was
+already in Device Info). The info rows carry sim coverage in the
+`settings-walk` goldens, honest `n/a` off-device; the power actions
+render and arm everywhere but run only behind the on-device guard,
+and their **on-device verification remains part of this phase's
+boot-into-wata checkpoint** — nothing has exercised them on hardware
+yet.
 
 Later polish, same phase family (queued, not blocking the first boot):
 a boot logo instead of the kernel bootlog — the device has a splash
