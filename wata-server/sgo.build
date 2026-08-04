@@ -4,3 +4,6 @@ emitname wata-server
 binname wata-server
 gomod wataserver
 optreport
+# The embedded iroh transport (plan 0013): a plain Go dep; its REAL cgo build
+# is opt-in (darwin + `-tags iroh`), so ordinary builds ride its pure-Go stub.
+godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet
