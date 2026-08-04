@@ -1,6 +1,6 @@
 # 0012 — media out of the journal, and a retention decision
 
-Status: accepted
+Status: done
 
 `[MEDIA-BOUNDS]`
 
@@ -75,3 +75,33 @@ needs to leave a seam for an exempt-set so favorites can slot in.
 reclaimed and its event reads as redacted after replay); `just ci`
 green; `just conformance`
 84/84 (media upload/download suites exercise the new path end to end).
+
+## Outcome
+
+Landed as planned, with these deviations from the text above:
+
+- **`$WATA_DATA` resolution did not already exist** (the journal path is
+  the `WATA_LOG` env var directly, not derived from a data dir). It does
+  now: the media dir is `$WATA_DATA/media` when `WATA_DATA` is set,
+  defaulting to the `WATA_LOG` journal file's directory. With neither
+  env var (the stateless test runs) the file store is off and blobs stay
+  in memory exactly as before.
+- **Journal compaction indeed does not exist**, so old base64 `media`
+  ops stay in the log and the boot migration re-runs every boot; the
+  blob write truncates, so re-running converges. The write-out alone
+  stops the memory cost, as anticipated.
+- **Sweep age basis is the event's `origin_server_ts`**, not file mtime
+  and not a test-hooks override: the event ts survives replay verbatim,
+  where a blob file's mtime would reset on every migration. The persist
+  smoke fakes age by rewriting the journaled ts — a third lever the plan
+  didn't name, documented in the script.
+- **The sweep's redaction sender is the swept message's own sender** (a
+  self-redaction, which any power table permits), so no server user
+  needed inventing.
+- One file-level addition the plan didn't list: `osfile.scala`, an
+  app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove`) — the core
+  facade only covers open/read/append.
+
+Verified: `just ci` exit 0 (persist runs 29 assertions incl. the four
+new groups), `just conformance` 84/84. No compiler defects surfaced; no
+workarounds were needed.
