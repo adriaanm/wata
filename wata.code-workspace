@@ -27,7 +27,8 @@
       "**/.toolchain/**": true,
       "**/.sgo/**": true,
       "**/.metals/**": true,
-      "**/target/**": true
+      "**/target/**": true,
+      "**/target": true
     }
   },
   "extensions": {
