@@ -740,5 +740,16 @@ gap, the `/dev/shm`-only deploy), a few things stood out during this read:
   would need the client's clock virtualized too — which the sync
   loop's backoff cannot tolerate as things stand.
 
+- `[FB-INTEG-FLAKY]` **`just integ` fails intermittently under machine
+  load.** Roughly one run in three on a busy box fails, and a DIFFERENT
+  scenario each time (`multiturn-order`, `redaction`, `both-sync`,
+  `voice-to-bob` all observed); the same tree then passes several runs
+  in a row once the machine is quiet. The scenarios drive a real
+  long-poll against a real server with fixed frame and wait budgets, so
+  the suspicion is those budgets rather than any ordering bug — but it
+  is a suspicion, not a diagnosis. A gate that fails at random is a
+  gate people learn to re-run instead of read, so this is worth
+  bottoming out. `fb-ui-tests` shows none of it.
+
 The untagged items are recorded as things worth knowing before touching
 the surrounding code, not as work owed.
