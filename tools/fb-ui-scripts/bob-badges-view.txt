@@ -1,0 +1,14 @@
+# badges-across-restart, phase 3: bob's first session pins both badges —
+# family 1, DM 2 — and leaves its session in $WATA_FB_CONFIG for phase 4 to
+# resume. The waits walk the selection down to the DM and back so the probe
+# (which reads the SELECTED conversation) sees both counts before the dump.
+
+wait syncing 1 900
+# [Family, Alice-DM]
+wait convs 2 900
+wait msgs 1 2000
+tap down
+wait msgs 2 2000
+tap up
+advance 30
+checkpoint badges-before

@@ -92,6 +92,15 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "badges-across-restart",
+        "phases": [
+            ("bob", "bob-family-bootstrap.txt"),
+            ("alice", "alice-badges-send.txt"),
+            ("bob", "bob-badges-view.txt"),
+            ("-", "bob-badges-resume.txt"),
+        ],
+    },
+    {
         "name": "settings-walk",
         "phases": [
             ("alice", "alice-settings.txt"),

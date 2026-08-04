@@ -1,0 +1,24 @@
+# badges-across-restart, phase 4: bob restarts with NO credentials (`-` in
+# every slot), resumes on the stored token, and the same two badges come
+# back — unplayed state is server-side receipt state, so a restart cannot
+# lose it. Then one conversation is played out, and only ITS badge clears.
+
+wait syncing 1 900
+wait convs 2 900
+wait msgs 1 2000
+tap down
+wait msgs 2 2000
+tap up
+advance 30
+checkpoint badges-restored
+
+# play out the DM only: opening receipts its latest message, OK on the
+# remaining unplayed row receipts + plays it
+tap down
+tap enter
+wait played 1 2000
+tap enter
+wait played 2 2000
+tap back
+advance 10
+checkpoint badges-cleared-one

@@ -1,0 +1,25 @@
+# badges-across-restart, phase 2: alice loads bob up — one clip into the
+# family room, two into bob's DM — so bob's phases arrive with two badged
+# conversations whose counts differ.
+
+wait syncing 1 900
+# the family invite auto-joins; the roster is [Family, Bob(roomless)]
+wait convs 2 900
+
+# one clip into the family room (the selected row)
+key ptt press
+advance 4
+key ptt release
+wait msgs 1 1500
+
+# two clips into bob's DM (the first send resolves the canonical room)
+tap down
+key ptt press
+advance 4
+key ptt release
+wait msgs 1 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 2 1500
