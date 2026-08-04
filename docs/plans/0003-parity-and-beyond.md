@@ -107,26 +107,59 @@ persistence, screensaver, connection-status LEDs. Verified in the
 simulator; `just fb-deploy` for on-device checks. The Zig source is the
 spec — port behavior, not code.
 
-**Phase 4 — Boot into wata.** Durable install (`/opt/wata`, rootfs build
+*Reordered (2026-08-04, product ruling): iroh moves ahead of
+boot-into-wata — it is the biggest unknown, and the first sweep is a
+personal end-to-end setup (server on the dev Mac) whose security is
+iroh's node-id allowlist; refinement passes follow once the family
+actually uses it. Getting there fast is the point.*
+
+**Phase 4 — Iroh connectivity** (plan 0013). Adopt the Rust sidecar into
+this repo (`iroh-tunnel/`, pinned iroh 1.x), `just` recipes for
+listen/connect; server side on the dev Mac first (a Pi is phase 6),
+client side on the device (ARMv7 cross-build of the sidecar); NodeID
+provisioning (config file first, QR later); node-id allowlist as the
+whole access story for the personal sweep; E2E test across two real
+networks. Later: evaluate self-hosted relay to drop the n0 dependency.
+
+**Phase 5 — Boot into wata.** Durable install (`/opt/wata`, rootfs build
 step that fails loudly if the binary is missing, like the metricsd one);
 tty1 inittab slot swapped from `system-menu` to a launcher that unbinds
 fbcon and respawns wata-fb; keep a debug VT; metrics heartbeat to
 `/run/wata.tick`; the `Playback 0 Volume`-after-first-write audio quirk
 handled in `audiothread.scala`; dedicated `wata` user per the alpine
-privilege audit. Cross-repo spec handed to `bq268-alpine`.
+privilege audit; the sidecar ships in the image (dormant until
+configured). Cross-repo spec handed to `bq268-alpine`. The
+`FB-SIM-DEVICE-VERIFY` human pass folds into this phase's first
+on-device checkpoint. Runs in parallel with the Mac server deployment
+hardening from phase 4's sweep.
 
-**Phase 5 — Iroh connectivity.** Adopt the Rust sidecar into this repo
-(`iroh-tunnel/`, pinned iroh 1.x), `just` recipes for listen/connect;
-server side on the Pi, client side on the device (ARMv7 cross-build of the
-sidecar); NodeID provisioning (config file first, QR later); E2E test
-across two real networks. Later: evaluate self-hosted relay to drop the
-n0 dependency.
+System-menu retires outright (ruling 2026-08-04): wata is then the
+only framebuffer occupant, which is what makes the tty1 swap clean.
+The bare minimum of its diagnostics moves into wata's settings applet
+first — current IP, cellular data status, battery percent (already in
+Device Info), and power actions (power off / reboot to bootloader /
+reboot to EDL) — mirroring system-menu's own sources for each. The
+info rows are host-simulable and land with sim coverage ahead of the
+rootfs work; the power actions are device-only and verify in this
+phase's on-device checkpoint. `[FB-SETTINGS-DIAG]` in the queue.
+
+Later polish, same phase family (queued, not blocking the first boot):
+a boot logo instead of the kernel bootlog — the device has a splash
+path in aboot (sibling `bq268-aboot`) for the earliest frame, plus
+`quiet` and fbcon logo suppression for the rest, ending in wata-fb's
+first frame; and **boot into wata as early as init allows**, before
+the network/modem are up — the client already survives a dead server
+(sync backoff), so the UI change is a calm "starting up / waiting for
+network" presentation of the existing connection state rather than an
+error surface. `[FB-BOOT-LOGO]`, `[FB-EARLY-BOOT]`.
 
 **Phase 6 — Family deployment.** Raspberry Pi target (arm64 build +
 service unit, extending `amd64-smoke`), journal-on by default with
-compaction + media caps, provisioning the actual family accounts, invite
-security (validate inviter is a family member). Then usage-driven:
-disappearing messages, offline outgoing queue.
+compaction, provisioning the actual family accounts, invite security
+(validate inviter is a family member) and the other refinement passes
+deferred from the personal sweep. Then usage-driven: offline outgoing
+queue. (Disappearing messages landed early as plan 0012's retention
+sweep; media caps likewise.)
 
 ## Also in scope (phase 0, mechanical)
 
