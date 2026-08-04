@@ -81,3 +81,10 @@ blocks + git log; each entry cites where it was recorded.*
   once something constructs the type, but stays permanently reachable for
   a library that leaves construction to its consumers. Filed:
   `WATA-SIGNATURE-ONLY-GENERIC-NOT-INSTANTIATED`.
+- Emitter trap (from the `[FB-PNG-BLOCK]` build): an Int-LED string
+  concatenation (`blocks + " blocks"`, i.e. `any2stringadd` with the Int
+  on the left) compiles and links clean but emits `int + string` Go —
+  `invalid operation: mismatched types int and untyped string` at
+  `go build`. A String-led concat (`"" + blocks + " blocks"`) is fine,
+  which is the tree's universal style anyway. Workaround: lead every
+  mixed concat with a String. Filed: `WATA-INT-LED-STRING-CONCAT`.

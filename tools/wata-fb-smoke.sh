@@ -26,6 +26,14 @@ done
 printf '%s\n' "$OUT" | grep -qF "audio unavailable" || { echo "wata-fb: host stub did not report unavailable audio"; exit 1; }
 echo "   native OK (stub path reported cleanly)"
 
+# PNG stored-block selfcheck: Png.zlib chunks the DEFLATE stream at the
+# 65535-byte stored-block cap; the golden only ever exercises the single-block
+# size, so this holds the multi-block path green (png.scala PngCheck header).
+echo "-- wata-fb (1b): PNG stored-block selfcheck (pngtest) --"
+PNGOUT="$("$FB_EMIT/$FB_BIN" pngtest)" || { echo "wata-fb pngtest run failed"; exit 1; }
+printf '%s\n' "$PNGOUT" | sed 's/^/   /'
+printf '%s\n' "$PNGOUT" | grep -qF "pngtest: PASS" || { echo "wata-fb: pngtest did not PASS"; exit 1; }
+
 echo "-- wata-fb (2/2): cross build armv7-musl (cgo opus + tinyalsa) --"
 if ! command -v zig >/dev/null 2>&1; then
   echo "   SKIP: zig not installed (cross-cgo needs the C cross-toolchain; no test needs the device)"

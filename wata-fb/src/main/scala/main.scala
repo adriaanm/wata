@@ -44,6 +44,9 @@ object Main:
     //                       blink the LEDs, poll evdev echoing keys ~20s, clear.
     else if args.length > 0 && args(0) == "fbdump" then FbTest.dump()
     else if args.length > 0 && args(0) == "fbsmoke" then FbTest.smoke()
+    // the PNG stored-block selfcheck (png.scala PngCheck header): exercises
+    // Png.zlib past the 65535-byte stored-block cap; run by fb-smoke.
+    else if args.length > 0 && args(0) == "pngtest" then PngCheck.run()
     else if args.length > 1 && args(0) == "syncfix" then
       SyncFixDriver.run(args)
     else if args.length > 2 && args(0) == "integ" then

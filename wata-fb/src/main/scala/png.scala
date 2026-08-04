@@ -1,14 +1,17 @@
 /** A minimal DETERMINISTIC PNG encoder for the headless-host golden-frame
  *  oracle. RGB565 pixel buffer -> a 24-bit truecolor PNG. Pure byte work over
- *  the portable `BytesBuilder` prelude; the image data rides a SINGLE stored
- *  (uncompressed) DEFLATE block, so the output is Go-version-independent and
+ *  the portable `BytesBuilder` prelude; the image data rides stored
+ *  (uncompressed) DEFLATE blocks, so the output is Go-version-independent and
  *  byte-stable — a golden compared in ci, regenerated and reviewed like a
  *  baseline. CRC-32 here is the zlib/PNG variant (the REFLECTED poly
  *  0xEDB88320 — DISTINCT from the Ogg writer's non-reflected 0x04C11DB7);
  *  Adler-32 covers the raw stream. Both carry a `Long` masked to 32 bits (Go
  *  has no unsigned `int32`, so 32-bit arithmetic that can carry into bit 31
- *  needs an explicit mask to avoid sign-extension bugs). One stored block
- *  suffices: the raw stream is H*(1+W*3) = 128*481 = 61568 bytes < 65535.
+ *  needs an explicit mask to avoid sign-extension bugs). A stored block caps
+ *  at 65535 bytes, so `zlib` chunks the raw stream; at the current geometry
+ *  the raw stream is H*(1+W*3) = 128*481 = 61568 bytes, i.e. ONE block, and
+ *  the golden bytes are what a single-block encoder produces. The multi-block
+ *  path is held green by `PngCheck` (`wata-fb pngtest`, run by fb-smoke).
  *
  *  NB every helper builds a LOCAL `BytesBuilder` and RETURNS a `Bytes`; NONE
  *  mutates a passed-in builder. A `BytesBuilder` (like a `[]byte`) passed as a
@@ -100,19 +103,30 @@ object Png:
       y = y + 1
     d.result()
 
-  /** zlib wrapper: header + one final stored block + Adler-32(raw). */
+  /** zlib wrapper: header + stored block(s) + Adler-32(raw). A stored block
+   *  carries at most 65535 bytes, so the raw stream is chunked; only the last
+   *  block sets BFINAL. Empty input still emits one (empty) final block. */
   def zlib(raw: Bytes): Bytes =
     val z = new BytesBuilder
     z.addByte(0x78)   // CMF (deflate, 32K window)
     z.addByte(0x01)   // FLG (no dict, fastest) — (0x78*256+0x01) % 31 == 0
-    z.addByte(0x01)   // block header: BFINAL=1, BTYPE=00 (stored)
-    val rlen = raw.size
-    val nlen = 0xffff ^ rlen
-    z.addByte(rlen & 0xff)
-    z.addByte((rlen >> 8) & 0xff)
-    z.addByte(nlen & 0xff)
-    z.addByte((nlen >> 8) & 0xff)
-    z.addBytes(raw)
+    val n = raw.size
+    var off = 0
+    var going = true
+    while going do
+      var blen = n - off
+      if blen > 65535 then blen = 65535
+      var bfinal = 0
+      if off + blen == n then bfinal = 1
+      z.addByte(bfinal)  // block header: BFINAL + BTYPE=00 (stored)
+      val nlen = 0xffff ^ blen
+      z.addByte(blen & 0xff)
+      z.addByte((blen >> 8) & 0xff)
+      z.addByte(nlen & 0xff)
+      z.addByte((nlen >> 8) & 0xff)
+      z.addBytes(raw.slice(off, off + blen))
+      off = off + blen
+      if bfinal == 1 then going = false
     z.addBytes(be32(adler32(raw)))
     z.result()
 
@@ -125,3 +139,75 @@ object Png:
     out.addBytes(chunk("IDAT", zlib(rawImage(px))))
     out.addBytes(chunk("IEND", Bytes.empty))
     out.result()
+
+/** `wata-fb pngtest` (run by fb-smoke): the stored-DEFLATE selfcheck for
+ *  `Png.zlib`. Encodes deterministic raw streams around and past the 65535-byte
+ *  stored-block cap, then DECODES the stream with an independent stored-block
+ *  walker: header bytes, per-block BTYPE/BFINAL/len/nlen consistency, payload
+ *  equality with the input, the trailing Adler-32, exact stream length, and
+ *  the expected block count. Greppable output: one `pngtest ... ok` line per
+ *  size and a final `pngtest: PASS`; any failure prints `pngtest ... FAIL`. */
+object PngCheck:
+  def run(): Unit =
+    var ok = true
+    if !one(0, 1) then ok = false          // empty input still carries one final block
+    if !one(100, 1) then ok = false
+    if !one(65535, 1) then ok = false      // exactly the cap: still a single block
+    if !one(65536, 2) then ok = false      // one byte over: the second block
+    if !one(150000, 3) then ok = false     // 65535 + 65535 + 18930
+    if ok then println("pngtest: PASS")
+    else println("pngtest: FAIL")
+
+  /** deterministic pseudo-random raw stream of `n` bytes. */
+  def pattern(n: scala.Int): Bytes =
+    val b = new BytesBuilder
+    var i = 0
+    while i < n do
+      b.addByte((i * 31 + 7) & 0xff)
+      i += 1
+    b.result()
+
+  def one(rawSize: scala.Int, wantBlocks: scala.Int): Boolean =
+    val msg = checkZlib(pattern(rawSize), wantBlocks)
+    if msg == "" then println("pngtest " + rawSize + " bytes -> " + wantBlocks + " block(s) ok")
+    else println("pngtest " + rawSize + " bytes FAIL: " + msg)
+    msg == ""
+
+  /** decode `Png.zlib(raw)` as a stored-block DEFLATE stream; "" when it
+   *  round-trips exactly, else what went wrong. */
+  def checkZlib(raw: Bytes, wantBlocks: scala.Int): String =
+    val z = Png.zlib(raw)
+    var bad = ""
+    if z(0) != 0x78 || z(1) != 0x01 then bad = "zlib header " + z(0) + "," + z(1)
+    var pos = 2
+    var rawPos = 0
+    var blocks = 0
+    var sawFinal = false
+    while bad == "" && !sawFinal do
+      val hdr = z(pos)
+      if (hdr >> 1) != 0 then bad = "block " + blocks + ": header byte " + hdr + " (BTYPE != stored)"
+      else
+        val blen = z(pos + 1) | (z(pos + 2) << 8)
+        val nlen = z(pos + 3) | (z(pos + 4) << 8)
+        if (0xffff ^ blen) != nlen then bad = "block " + blocks + ": nlen " + nlen + " vs len " + blen
+        else if rawPos + blen > raw.size then bad = "block " + blocks + ": overruns raw"
+        else
+          pos = pos + 5
+          var i = 0
+          while bad == "" && i < blen do
+            if z(pos + i) != raw(rawPos + i) then bad = "block " + blocks + ": payload byte " + i
+            i += 1
+          pos = pos + blen
+          rawPos = rawPos + blen
+          blocks += 1
+          if (hdr & 1) == 1 then sawFinal = true
+          else if blen != 65535 then bad = "block " + (blocks - 1) + ": non-final block of " + blen
+    if bad == "" && rawPos != raw.size then bad = "decoded " + rawPos + " of " + raw.size + " raw bytes"
+    // NB the concat is ""-led: an Int-led `blocks + "..."` compiles clean but
+    // emits `int + string` Go (WATA-TODO.md waiting-on-sgola).
+    if bad == "" && blocks != wantBlocks then bad = "" + blocks + " blocks, want " + wantBlocks
+    if bad == "" then
+      val adler = (z(pos).toLong << 24) | (z(pos + 1).toLong << 16) | (z(pos + 2).toLong << 8) | z(pos + 3).toLong
+      if adler != Png.adler32(raw) then bad = "adler mismatch"
+      else if pos + 4 != z.size then bad = "trailing bytes: stream " + z.size + ", consumed " + (pos + 4)
+    bad

@@ -2,6 +2,5 @@
 {"key": "SRV-MEDIA-UNBOUNDED", "title": "media blobs never evicted or capped, and are base64'd into the journal — unbounded memory and boot-replay time", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "CLI-BACKFILL-BOUND", "title": "backfillRoom fetches one 50-event page and discards the server's end token — gaps larger than that stay unrecovered", "doc": "docs/design/wataclient.md", "inProgress": false}
 {"key": "CLI-BACKFILL-BLOCKING", "title": "backfill issues blocking /messages calls serially inside processRound, delaying the snapshot publish and the next long-poll", "doc": "docs/design/wataclient.md", "inProgress": false}
-{"key": "FB-PNG-BLOCK", "title": "Png.zlib emits one DEFLATE stored block and underflows nlen above 65535 raw bytes — breaks silently if the panel size ever changes", "doc": "docs/design/wata-fb.md", "inProgress": false}
 {"key": "SRV-HARDENING", "title": "password/token compares are plain string equality (not constant-time) and CORS is unconditionally wide open with no knob", "doc": "docs/design/wata-server.md", "inProgress": false}
 {"key": "CLI-RAND-DEAD", "title": "the Rand capability has no consumer (txn ids come from an Atomic counter) — wire it or trim the contract", "doc": "docs/design/wataclient.md", "inProgress": false}

@@ -2,8 +2,8 @@
 # The headless-host golden-frame oracle.
 # Builds wata-fb NATIVE, runs the deterministic draw script
 # (`wata-fb fbdump`) which encodes the RGB565 test pattern to a byte-stable PNG
-# (a single stored-DEFLATE block — Go-version-independent) and writes the raw
-# PNG bytes to stdout, then byte-compares against the checked-in golden
+# (stored-DEFLATE blocks, a single one at this geometry — Go-version-independent)
+# and writes the raw PNG bytes to stdout, then byte-compares against the golden
 # `tools/fb-golden.png`. The golden is regenerated designer-reviewed like a
 # baseline: `wata-fb/.sgo/wata-fb/wata-fb fbdump > tools/fb-golden.png`, then
 # eyeball it.

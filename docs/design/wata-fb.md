@@ -160,10 +160,16 @@ this module. `Font.drawText`/`drawTextCentered` lay text out on a
 1-pixel status line.
 
 `Png.scala` is a minimal, deliberately simple PNG encoder: single
-IDAT chunk, one stored (uncompressed) DEFLATE block, standard
+IDAT chunk, stored (uncompressed) DEFLATE blocks chunked at the
+format's 65535-byte-per-block cap (one block at the current 160x128
+geometry, so the golden bytes match a single-block encoder), standard
 zlib/PNG CRC-32 and Adler-32 checksums. It exists purely so the host
 build can produce a byte-stable "golden frame" without needing a real
-display or a general-purpose compression library.
+display or a general-purpose compression library. The multi-block
+path — which the goldens never reach — is held green by `PngCheck`
+(`wata-fb pngtest`, run by fb-smoke): encodes past the cap, then an
+independent walker re-parses block headers/payloads, the Adler-32,
+and the block count.
 
 A frame gets composed like this each UI tick (`Ui.frameLoop`,
 `ui.scala:96`): pick up the latest `StateSnapshot` from
@@ -750,15 +756,6 @@ gap, the `/dev/shm`-only deploy), a few things stood out during this read:
   immediately into the next one until the wall-clock deadline, which
   is fine for a bounded soak test but would hot-loop indefinitely if
   ever reused as a long-running daemon.
-- `[FB-PNG-BLOCK]` **`Png.zlib`'s single-stored-block encoding assumes the raw image
-  never exceeds 65535 bytes** (`png.scala:9-10`, `png.scala:104-117`)
-  — true today only because the display is fixed at 160x128
-  (61568-byte raw stream); this silently breaks (via unsigned
-  underflow: `nlen = 0xffff ^ rlen` becoming wrong, and DEFLATE
-  stored-block headers being invalid for any block over 65535 bytes)
-  if `Display.W`/`Display.H` are ever changed for a different panel,
-  since there is no chunking of the DEFLATE stream into multiple
-  stored blocks.
 - **`just fb-ui-tests` covers the frame loop, not every applet path.**
   The scenarios walk the contact list, PTT send, applet switching, the
   conversation view's selection/scroll/play/delete inputs, the
