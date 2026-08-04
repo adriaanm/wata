@@ -1,6 +1,6 @@
 # 0011 — UI flow coverage: the main use cases, pixel-pinned
 
-Status: accepted
+Status: done
 
 `[UI-FLOWS]`
 
@@ -57,3 +57,34 @@ rediscovered; `wata-server.md` documents the test hook.
 by eye at creation (`--update` + inspect); `just conformance` unaffected
 (hook route absent without the env var), verified by grepping the
 route table in both modes.
+
+## Outcome
+
+Landed as planned — four scenarios (20 new goldens, all inspected at
+creation), the `WATA_TEST_HOOKS=1` fail hook, and the coverage table in
+wata-fb.md. Deviations and findings:
+
+- **The hook gate is asserted behaviorally, not by grepping.** The
+  route table lives in code, so "grep it in both modes" became
+  something stronger: `fb-ui-tests.py` POSTs the hook route on every
+  server it boots and requires 404 (200 only for the scenario that
+  opts in) — the production surface is re-proven on every run of the
+  suite, not once at review.
+- **Harness/driver surface grew slightly beyond "scripts + goldens":**
+  a per-scenario `users` key (writes `$WATA_USERS`; family-three needs
+  a third account), a `hooks` key, a multi-peer `family` directive, a
+  `failnext` directive, and `sendfail`/`playfail` probes over the
+  session tallies (Ui gained the playfail tally; the timeout diag line
+  reports it).
+- **dm-roundtrip exposed a real server defect, fixed with it:** invite
+  membership content carried no displayname (join content does), so an
+  invited-but-unjoined DM peer rendered as a raw MXID in the
+  conversation header. `memberInviteContent` now stamps the invitee's
+  profile displayname, as real homeservers do.
+- **badges-across-restart got its assertion for free:** the pre- and
+  post-restart badge goldens are byte-identical files, which is the
+  survival claim in its strongest form.
+- Bob (not alice) bootstraps the family in dm-roundtrip and
+  badges-across-restart: the roster's roomless DM rows derive from
+  JOINED family membership, so the DM peer must be in the room before
+  the sending phase runs.

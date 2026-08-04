@@ -24,7 +24,7 @@ lines:
 | `dm.scala` | 274 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
 | `rooms.scala` | 700 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
 | `sync.scala` | 506 | `/sync` (initial + incremental + leave) and the long-poll wait |
-| `testhooks.scala` | 68 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
+| `testhooks.scala` | 65 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
 | `server.scala` | 314 | HTTP boot, mux registration, request edge, `SelfCheck` |
 
 ## Scope

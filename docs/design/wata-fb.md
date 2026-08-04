@@ -562,26 +562,60 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Three scripted scenarios, each a fresh server and a sequence of
+Eight scripted scenarios, each a fresh server and a sequence of
 one-user phases:
 
 | scenario | what it pins |
 |---|---|
 | `voice-alice-to-bob` | the send path end to end: alice bootstraps the family room, holds PTT and sends; bob runs, auto-joins, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
 | `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, and redacts one with F2; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, and the played marks. |
+| `dm-roundtrip` | the canonical-DM flow (plan 0007) rendered: alice selects bob's ROOMLESS roster row, the first PTT send resolves the room through `POST /_wata/v1/dm`, bob receives with an unplayed badge, receipts, plays, replies, and alice's second session pins the reply and the badge clearing. Goldens the roster before/after, both conversation views, and the badge lifecycle. |
+| `family-three` | a third account (per-scenario `$WATA_USERS`): all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
+| `badges-across-restart` | unplayed counts across a restart: bob sees family=1 / DM=2, resumes with no credentials, and the badge frame is byte-identical; playing out the DM clears only its own badge. |
+| `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED`, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm. |
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, and device info. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
 
-Three things the scripts need that are worth knowing. `waitmax` is the
+A few things the scripts need that are worth knowing. `waitmax` is the
 mirror of `wait` — advance until a probe drops to a bound — because a
 redaction shrinks a count, which an ordinary `wait` (a `>=` test)
 already satisfies. `idle` runs frames with the real per-frame pause
 switched off: a timer expiring needs simulated time, not network
 progress, which is what makes the screensaver's half-minute of blanking
-cost the suite nothing. And a phase whose credentials are `-` cannot
+cost the suite nothing. A phase whose credentials are `-` cannot
 also run the out-of-band `family` bootstrap, since that logs in
 directly and a resumed run has no password: bootstrap in one phase,
-resume in a later one.
+resume in a later one. `failnext <n>` arms the server's
+`WATA_TEST_HOOKS=1` fail-on-demand counter (wata-server's testhooks.scala;
+the harness starts a scenario's server with the env var only when the
+scenario opts in, and probes the hook route on EVERY server so the
+production 404 is asserted each run), and the `sendfail`/`playfail`
+probes over the session tallies are what a script waits on after
+provoking a failure. And a scenario's `users` key writes a
+`$WATA_USERS` accounts file, which is how a phase gets a third login.
+
+### Use-case coverage
+
+The product's use cases against the scenarios that pin them — the table
+this suite is grown by (a missing row's flow is a missing scenario, not
+a rediscovery):
+
+| use case | covered by |
+|---|---|
+| boot with no credentials, resume the stored session | `session-resume`, `badges-across-restart` |
+| first login writes the session store | `session-resume` |
+| family room: auto-join, roster, send, receive | `voice-alice-to-bob`, `family-three` |
+| DM: select a contact, first-send room resolution, receive, reply | `dm-roundtrip` |
+| unplayed badges: accumulate, survive restart, clear per-conversation | `dm-roundtrip`, `badges-across-restart` |
+| play a message: receipt + played mark round trip | `conversation-actions`, `dm-roundtrip` |
+| delete a message (F2 redact) | `conversation-actions` |
+| long conversation: scroll window, selection clamp | `conversation-actions` |
+| sender attribution, >2 participants, interleaved ordering | `family-three` |
+| send failure feedback (`SEND FAILED`) and recovery | `send-play-failed` |
+| play failure feedback (`PLAY FAILED`) and recovery | `send-play-failed` |
+| every settings item, preference persistence | `settings-walk` |
+| screensaver blank + wake swallow | `settings-walk` |
+| mid-phase network drop / degraded boot | NOT COVERED — needs a proxy or server pause; deferred to the connection-status UX work (plan 0011, out of scope) |
 
 ## Parity with the Zig fbclient
 
@@ -756,14 +790,13 @@ gap, the `/dev/shm`-only deploy), a few things stood out during this read:
   immediately into the next one until the wall-clock deadline, which
   is fine for a bounded soak test but would hot-loop indefinitely if
   ever reused as a long-running daemon.
-- **`just fb-ui-tests` covers the frame loop, not every applet path.**
-  The scenarios walk the contact list, PTT send, applet switching, the
-  conversation view's selection/scroll/play/delete inputs, the
-  read-receipt round-trip, every settings item and its detail block,
-  preference and session restore, and the screensaver blank/wake. Still
-  untouched: the `SEND FAILED` and `PLAY FAILED` flashes, which need a
-  server that fails on demand rather than another script. Adding
-  coverage is otherwise a script file plus a golden, not code.
+- **`just fb-ui-tests` covers the frame loop and the product's use
+  cases** (see the coverage table above), including the `SEND FAILED` /
+  `PLAY FAILED` flashes via the server's `WATA_TEST_HOOKS=1`
+  fail-on-demand hook. Adding coverage is a script file plus a golden,
+  not code; the one flow still uncovered — a mid-phase network drop —
+  is called out in the table and deferred to the connection-status UX
+  work.
 - **`Ui.frameStep`'s `dt` is the only thing the scripted clock
   virtualizes.** Anything a frame renders that depends on WALL-clock
   time or on network arrival order would still be non-deterministic;
