@@ -77,6 +77,7 @@ object Server:
   def serve(addr: String): Unit =
     Store.init()
     Journal.boot()
+    Dm.migrate()                        // derive the pair map from replayed rooms
     val mux = go.net.http.newServeMux()
     val h = new WataHandler()
     registerRoutes(mux, h)
@@ -104,6 +105,8 @@ object Server:
     mux.handle("PUT /_matrix/client/v3/user/{userId}/account_data/{type}", h)
     mux.handle("GET /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}", h)
     mux.handle("PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}", h)
+    // the wata dialect: canonical DMs (dm.scala).
+    mux.handle("POST /_wata/v1/dm/{userId}", h)
     // rooms / messaging / receipts / media.
     mux.handle("POST /_matrix/client/v3/createRoom", h)
     mux.handle("POST /_matrix/client/v3/rooms/{roomIdOrAlias}/join", h)
@@ -157,6 +160,7 @@ object SelfCheck:
     memTable()
     idFormats()
     roomsDemo()
+    dmDemo()
     syncDemo()
 
   def printProfile(userId: String): Unit = Store.getProfile(userId) match
@@ -257,6 +261,54 @@ object SelfCheck:
   def memberDisplayName2(room: Room, userId: String): String = Store.stateContent(room, "m.room.member", userId) match
     case s: Some[Json] => JsonNav.strField(s.value, "displayname", "")
     case None => "none"
+
+  // ---- canonical DMs (pair ordering, boot migration, compat projection) -------
+
+  /** the pair key's ordering, the boot migration over the legacy DM room
+   *  `roomsDemo` left behind, and the `m.direct` projection derived from it.
+   *  Booleans and ids only — never the volatile room id. */
+  def dmDemo(): Unit =
+    val alice = "@alice:localhost"
+    val bob = "@bob:localhost"
+    println("dm-order " + boolStr(Store.strLess(alice, bob) && !Store.strLess(bob, alice)))
+    println("dm-pair-symmetric " + boolStr(Store.pairLo(bob, alice) == alice && Store.pairHi(alice, bob) == bob))
+    println("dm-alias " + Dm.aliasOf(bob, alice))
+    Dm.migrate()
+    println("dm-peers " + JsonNav.longStr(peerCount(Store.dmPeersOf(alice))))
+    println("dm-peer " + firstPeer(Store.dmPeersOf(alice)))
+    println("dm-mapped " + boolStr(dmRoomMatches(alice, bob)))
+    println("dm-direct-projected " + boolStr(directHasPeer(alice, bob)))
+    Dm.migrate()
+    println("dm-migrate-idempotent " + JsonNav.longStr(peerCount(Store.dmPeersOf(alice))))
+
+  def peerCount(ps: List[DmPeer]): scala.Long = ps match
+    case _ :: t => 1L + peerCount(t)
+    case Nil  => 0L
+
+  def firstPeer(ps: List[DmPeer]): String = ps match
+    case h :: _ => h.peer
+    case Nil  => "none"
+
+  /** the pair map and the room's own membership agree. */
+  def dmRoomMatches(a: String, b: String): Boolean = Store.dmRoomFor(a, b) match
+    case s: Some[String] => Mem.str(Store.getMembership(s.value, b)) == "join"
+    case None => false
+
+  /** the projected `m.direct` names the peer (the stored content is whatever
+   *  `acctDemo` left, so this proves re-assertion, not a fresh write). */
+  def directHasPeer(user: String, peer: String): Boolean =
+    hasPeerKey(Dm.project(user, Store.allAccountData(user, false, "")), peer)
+
+  def hasPeerKey(items: List[AcctData], peer: String): Boolean = items match
+    case h :: t => hasPeerKeyStep(h, t, peer)
+    case Nil  => false
+
+  def hasPeerKeyStep(h: AcctData, t: List[AcctData], peer: String): Boolean =
+    if h.dtype == "m.direct" && fieldPresent(h.content, peer) then true else hasPeerKey(t, peer)
+
+  def fieldPresent(c: Json, key: String): Boolean = JsonNav.getField(c, key) match
+    case _: Some[Json] => true
+    case None => false
 
   // ---- /sync building (deterministic — no age/IDs printed) --------------------
 

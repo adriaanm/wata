@@ -78,7 +78,6 @@ object SyncDescribe:
     case te: TimelineEventE     => "ev timeline_event " + te.roomId + " " + te.eventId + "\n"
     case mc: MembershipChanged  => "ev membership_changed " + mc.roomId + " " + mc.userId + " " + mc.membership + "\n"
     case ru: ReceiptUpdated     => "ev receipt_updated " + ru.roomId + " " + ru.eventId + "\n"
-    case ad: AccountDataUpdated => "ev account_data_updated " + ad.dataType + "\n"
 
   // ---- accumulated state --------------------------------------------------------
 
@@ -92,7 +91,6 @@ object SyncDescribe:
           b.append(describeRoom(c.head))
           cur = c.tail
         case Nil => going = false
-    b.append(describeDirect())
     b.toString
 
   def describeRoom(r: RoomState): String =
@@ -106,13 +104,33 @@ object SyncDescribe:
     if r.hasAlias then b.append(r.alias)
     b.append('"')
     b.append(" dm=")
-    b.append(boolStr(r.isDm))
+    b.append(dmStr(r.dmMembers))
     b.append(" joined=")
     b.append(SyncEngine.joinedMemberCount(r))
     b.append('\n')
     b.append(describeMembers(r.members))
     b.append(describeVoices(r.voiceMessages))
     b.append(describeReceipts(r.receipts))
+    b.toString
+
+  /** the `net.wata.dm` pair, or "no" — the room's classification, verbatim. */
+  def dmStr(members: List[String]): String = members match
+    case _ :: _ => joinStr(members)
+    case Nil  => "no"
+
+  def joinStr(xs: List[String]): String =
+    val b = new StringBuilder
+    var first = true
+    var cur = xs
+    var going = true
+    while going do
+      cur match
+        case c: ::[String] =>
+          if !first then b.append(',')
+          b.append(c.head)
+          first = false
+          cur = c.tail
+        case Nil => going = false
     b.toString
 
   def describeMembers(ms: List[MemberInfo]): String =
@@ -128,8 +146,6 @@ object SyncDescribe:
           b.append(c.head.displayName)
           b.append("\" ")
           b.append(c.head.membership)
-          b.append(" direct=")
-          b.append(boolStr(c.head.isDirect))
           b.append('\n')
           cur = c.tail
         case Nil => going = false
@@ -166,22 +182,6 @@ object SyncDescribe:
           b.append(c.head.eventId)
           b.append(" by")
           b.append(strListStr(c.head.userIds))
-          b.append('\n')
-          cur = c.tail
-        case Nil => going = false
-    b.toString
-
-  def describeDirect(): String =
-    val b = new StringBuilder
-    var cur = SyncEngine.allDirect
-    var going = true
-    while going do
-      cur match
-        case c: ::[DirectEntry] =>
-          b.append("mdirect ")
-          b.append(c.head.userId)
-          b.append(" ->")
-          b.append(strListStr(c.head.roomIds))
           b.append('\n')
           cur = c.tail
         case Nil => going = false

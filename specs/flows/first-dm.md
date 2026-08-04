@@ -1,5 +1,11 @@
 # First DM Flow - Creating First DM with a Contact
 
+> **Retired mechanism.** This describes the client-authored `m.direct` DM
+> mechanism, which wata no longer uses: the server owns DM identity, keyed
+> by the user pair (`docs/plans/0007-canonical-dms.md`,
+> `docs/design/wata-server.md` § Canonical DMs). Kept as the record of what
+> the rules used to be and why they were needed.
+
 ## Overview
 
 This flow covers creating the first DM room with a contact. DMRoomService detects no existing DM room and creates a new one, then updates m.direct account data.

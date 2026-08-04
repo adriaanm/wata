@@ -4,16 +4,15 @@ t02 room: name Test Room joined 1
 t02 bob: display Bob membership join
 t03 voice: order timeline_event.room_updated
 t03 vm: id $msg1 sender @bob:test url mxc://test/audio1 durMs 3500 tsOk true
-t04 mdirect: ad-event true entries 2
-t04 bob: first !dm1:test
+t04 classify: dm @alice:test,@bob:test is_direct-only no peer @bob:test
 t05 snapshot: contacts 1 first Bob convs 1 room !dm1:test
 t06 dedup: voice 1
-t07 stale-skip: convs 1 room !active:test
-t08 stale-only: convs 0
+t07 first-wins: convs 1 room !first:test
+t08 not-ours: convs 0 contacts 0
 t09 family: has true name Family members 1 first Bob
 t09 convs: n 2 c0 family c1 dm c1room ""
 t10 roomless: convs 3 c0 family charlie room "" type dm msgs 0
-t11 self-skip: contacts 0 convs 0
+t11 self-skip: contacts 0 family-members 0 convs 1
 t12 played: convs 1 msgs 1 is_played true unplayed 0
 t13 unplayed: n 2 m0 false
 t14 redact: msgs 1 first $msg2

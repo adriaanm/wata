@@ -1,83 +1,83 @@
 ==== user @alice:localhost
 == fixture wataclient/test-fixtures/alice__01-initial.json
-ev account_data_updated m.direct
-ev membership_changed !I1gYQl1HXTCj:localhost @alice:localhost join
-ev membership_changed !I1gYQl1HXTCj:localhost @bob:localhost invite
-ev timeline_event !I1gYQl1HXTCj:localhost $UyXimCJRx3ZP:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $sC_05MPAmLQw:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $IARSJMVLW8cw:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $Sm2l5uVhCugu:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $Dt7jA3tFcGLI:localhost
-ev membership_changed !I1gYQl1HXTCj:localhost @alice:localhost join
-ev timeline_event !I1gYQl1HXTCj:localhost $MQWaUFNBgbGd:localhost
-ev membership_changed !I1gYQl1HXTCj:localhost @bob:localhost invite
-ev timeline_event !I1gYQl1HXTCj:localhost $4z2lj_MDlHPx:localhost
-ev room_updated !I1gYQl1HXTCj:localhost
-next_batch s8
-room !I1gYQl1HXTCj:localhost name="" alias="" dm=true joined=1
-  member @alice:localhost "Alice" join direct=true
-  member @bob:localhost "@bob:localhost" invite direct=true
-mdirect @bob:localhost -> !I1gYQl1HXTCj:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @alice:localhost join
+ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost invite
+ev timeline_event !q_xb3ZSFxlVB:localhost $ufBqYlueELPn:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $dKITjxbhPLBJ:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $pqrGvxR8d7xm:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $CYvAgpLNtsCL:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $krCcsH9cqLlx:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @alice:localhost join
+ev timeline_event !q_xb3ZSFxlVB:localhost $aAv0ToJIptvf:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost invite
+ev timeline_event !q_xb3ZSFxlVB:localhost $U67SlAux04lL:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $fpPh9lopmFYm:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $pwKzU_8Npcb_:localhost
+ev room_updated !q_xb3ZSFxlVB:localhost
+next_batch s11
+room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:localhost,@bob:localhost joined=1
+  member @alice:localhost "Alice" join
+  member @bob:localhost "@bob:localhost" invite
 snapshot self="Alice"
 contact @bob:localhost "@bob:localhost"
-conv "!I1gYQl1HXTCj:localhost" dm contact="@bob:localhost" unplayed=0
+conv "!q_xb3ZSFxlVB:localhost" dm contact="@bob:localhost" unplayed=0
 == fixture wataclient/test-fixtures/alice__02-incr.json
-ev membership_changed !I1gYQl1HXTCj:localhost @bob:localhost join
-ev membership_changed !I1gYQl1HXTCj:localhost @bob:localhost join
-ev timeline_event !I1gYQl1HXTCj:localhost $d2VF9_HKUA2G:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $MXszOrRJsu4f:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $0IR_8NE6wXAU:localhost
-ev room_updated !I1gYQl1HXTCj:localhost
-next_batch s11
-room !I1gYQl1HXTCj:localhost name="" alias="" dm=true joined=2
-  member @alice:localhost "Alice" join direct=true
-  member @bob:localhost "Bob" join direct=false
-  voice $MXszOrRJsu4f:localhost from @alice:localhost url mxc://localhost/jCy4dyrGt11vZ0PdUnUHNjaB durMs 2640
-mdirect @bob:localhost -> !I1gYQl1HXTCj:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost join
+ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost join
+ev timeline_event !q_xb3ZSFxlVB:localhost $Yo6J8Z-Vah5z:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $wXltfU6A_Bbb:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $iyM0XSs5frDX:localhost
+ev room_updated !q_xb3ZSFxlVB:localhost
+next_batch s14
+room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:localhost,@bob:localhost joined=2
+  member @alice:localhost "Alice" join
+  member @bob:localhost "Bob" join
+  voice $wXltfU6A_Bbb:localhost from @alice:localhost url mxc://localhost/5PUKUWJFFP9bHyKm90wxbFbi durMs 2640
 snapshot self="Alice"
 contact @bob:localhost "Bob"
-conv "!I1gYQl1HXTCj:localhost" dm contact="@bob:localhost" unplayed=1
-  msg $MXszOrRJsu4f:localhost from "Alice" durMs 2640 played=false
+conv "!q_xb3ZSFxlVB:localhost" dm contact="@bob:localhost" unplayed=1
+  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=false
 == fixture wataclient/test-fixtures/alice__03-incr.json
-ev receipt_updated !I1gYQl1HXTCj:localhost $MXszOrRJsu4f:localhost
-ev room_updated !I1gYQl1HXTCj:localhost
-next_batch s12
-room !I1gYQl1HXTCj:localhost name="" alias="" dm=true joined=2
-  member @alice:localhost "Alice" join direct=true
-  member @bob:localhost "Bob" join direct=false
-  voice $MXszOrRJsu4f:localhost from @alice:localhost url mxc://localhost/jCy4dyrGt11vZ0PdUnUHNjaB durMs 2640
-  receipt $MXszOrRJsu4f:localhost by @bob:localhost
-mdirect @bob:localhost -> !I1gYQl1HXTCj:localhost
+ev receipt_updated !q_xb3ZSFxlVB:localhost $wXltfU6A_Bbb:localhost
+ev room_updated !q_xb3ZSFxlVB:localhost
+next_batch s15
+room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:localhost,@bob:localhost joined=2
+  member @alice:localhost "Alice" join
+  member @bob:localhost "Bob" join
+  voice $wXltfU6A_Bbb:localhost from @alice:localhost url mxc://localhost/5PUKUWJFFP9bHyKm90wxbFbi durMs 2640
+  receipt $wXltfU6A_Bbb:localhost by @bob:localhost
 snapshot self="Alice"
 contact @bob:localhost "Bob"
-conv "!I1gYQl1HXTCj:localhost" dm contact="@bob:localhost" unplayed=1
-  msg $MXszOrRJsu4f:localhost from "Alice" durMs 2640 played=false
+conv "!q_xb3ZSFxlVB:localhost" dm contact="@bob:localhost" unplayed=1
+  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=false
 ==== user @bob:localhost
 == fixture wataclient/test-fixtures/bob__01-initial.json
-ev membership_changed !I1gYQl1HXTCj:localhost @alice:localhost join
-ev membership_changed !I1gYQl1HXTCj:localhost @bob:localhost join
-ev timeline_event !I1gYQl1HXTCj:localhost $UyXimCJRx3ZP:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $sC_05MPAmLQw:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $IARSJMVLW8cw:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $Sm2l5uVhCugu:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $Dt7jA3tFcGLI:localhost
-ev membership_changed !I1gYQl1HXTCj:localhost @alice:localhost join
-ev timeline_event !I1gYQl1HXTCj:localhost $MQWaUFNBgbGd:localhost
-ev membership_changed !I1gYQl1HXTCj:localhost @bob:localhost invite
-ev timeline_event !I1gYQl1HXTCj:localhost $4z2lj_MDlHPx:localhost
-ev membership_changed !I1gYQl1HXTCj:localhost @bob:localhost join
-ev timeline_event !I1gYQl1HXTCj:localhost $d2VF9_HKUA2G:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $MXszOrRJsu4f:localhost
-ev timeline_event !I1gYQl1HXTCj:localhost $0IR_8NE6wXAU:localhost
-ev receipt_updated !I1gYQl1HXTCj:localhost $MXszOrRJsu4f:localhost
-ev room_updated !I1gYQl1HXTCj:localhost
-next_batch s12
-room !I1gYQl1HXTCj:localhost name="" alias="" dm=true joined=2
-  member @alice:localhost "Alice" join direct=true
-  member @bob:localhost "Bob" join direct=false
-  voice $MXszOrRJsu4f:localhost from @alice:localhost url mxc://localhost/jCy4dyrGt11vZ0PdUnUHNjaB durMs 2640
-  receipt $MXszOrRJsu4f:localhost by @bob:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @alice:localhost join
+ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost join
+ev timeline_event !q_xb3ZSFxlVB:localhost $ufBqYlueELPn:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $dKITjxbhPLBJ:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $pqrGvxR8d7xm:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $CYvAgpLNtsCL:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $krCcsH9cqLlx:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @alice:localhost join
+ev timeline_event !q_xb3ZSFxlVB:localhost $aAv0ToJIptvf:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost invite
+ev timeline_event !q_xb3ZSFxlVB:localhost $U67SlAux04lL:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $fpPh9lopmFYm:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $pwKzU_8Npcb_:localhost
+ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost join
+ev timeline_event !q_xb3ZSFxlVB:localhost $Yo6J8Z-Vah5z:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $wXltfU6A_Bbb:localhost
+ev timeline_event !q_xb3ZSFxlVB:localhost $iyM0XSs5frDX:localhost
+ev receipt_updated !q_xb3ZSFxlVB:localhost $wXltfU6A_Bbb:localhost
+ev room_updated !q_xb3ZSFxlVB:localhost
+next_batch s15
+room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:localhost,@bob:localhost joined=2
+  member @alice:localhost "Alice" join
+  member @bob:localhost "Bob" join
+  voice $wXltfU6A_Bbb:localhost from @alice:localhost url mxc://localhost/5PUKUWJFFP9bHyKm90wxbFbi durMs 2640
+  receipt $wXltfU6A_Bbb:localhost by @bob:localhost
 snapshot self="Bob"
 contact @alice:localhost "Alice"
-conv "!I1gYQl1HXTCj:localhost" dm contact="@alice:localhost" unplayed=0
-  msg $MXszOrRJsu4f:localhost from "Alice" durMs 2640 played=true
+conv "!q_xb3ZSFxlVB:localhost" dm contact="@alice:localhost" unplayed=0
+  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=true

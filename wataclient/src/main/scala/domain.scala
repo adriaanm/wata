@@ -42,7 +42,9 @@ case class VoiceMessage(
 )
 
 /** a DM or family conversation. `hasContact == false` for the family thread;
- *  `roomId == ""` means "no DM room yet" (created on first send). */
+ *  `roomId == ""` means "no DM room yet" — a family member nobody has messaged.
+ *  The first send resolves the pair through the server's DM endpoint, which is
+ *  what fills the room in. */
 case class Conversation(
   roomId: String,
   convType: ConversationType,
@@ -55,7 +57,7 @@ case class Conversation(
 case class Family(id: String, name: String, members: List[Contact])
 
 // ---- sync-engine working state --------------------------------------------------
-case class MemberInfo(userId: String, displayName: String, membership: String, isDirect: Boolean)
+case class MemberInfo(userId: String, displayName: String, membership: String)
 
 /** raw voice message extracted from a timeline `m.room.message`/`m.audio`. */
 case class VoiceMessageRaw(eventId: String, sender: String, mxcUrl: String, durationMs: Long, timestamp: Long)
@@ -63,9 +65,6 @@ case class VoiceMessageRaw(eventId: String, sender: String, mxcUrl: String, dura
 /** read receipts for one event: eventId -> the user ids that read it
  *  (insertion-ordered; duplicates are kept, not deduplicated). */
 case class ReceiptEntry(eventId: String, userIds: List[String])
-
-/** one `m.direct` account-data entry: userId -> DM room ids (insertion-ordered). */
-case class DirectEntry(userId: String, roomIds: List[String])
 
 /** per-room accumulated sync state. Immutable — the engine swaps whole
  *  records in its insertion-ordered room list. `canonical_alias` (optional on
@@ -81,7 +80,7 @@ case class RoomState(
   voiceMessages: List[VoiceMessageRaw], // timeline order
   receipts: List[ReceiptEntry],
   prevBatch: String,
-  isDm: Boolean                         // sticky is_direct flag
+  dmMembers: List[String]               // the `net.wata.dm` pair; empty = not a DM
 )
 
 /** the immutable UI view, built by the engine. Optional `User`/`Family`
@@ -99,11 +98,10 @@ case class StateSnapshot(
 // ---- emitted sync events ---------------------------------------------------------
 // Pointer-shaped by design: the value-shape rule lays every case's payload
 // slots side by side in one flat struct (distinct names and a <= 4-word total
-// across all cases); SyncEvent's cases carry 9 string slots between them, so
+// across all cases); SyncEvent's cases carry 8 string slots between them, so
 // no accessor rename brings it under that budget.
 sealed trait SyncEvent
 case class RoomUpdated(roomId: String) extends SyncEvent
 case class TimelineEventE(roomId: String, eventId: String) extends SyncEvent
 case class MembershipChanged(roomId: String, userId: String, membership: String) extends SyncEvent
 case class ReceiptUpdated(roomId: String, eventId: String) extends SyncEvent
-case class AccountDataUpdated(dataType: String) extends SyncEvent

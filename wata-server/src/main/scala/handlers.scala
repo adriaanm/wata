@@ -24,6 +24,7 @@ object Router:
     else if path == "/_matrix/client/v3/logout" then logoutRoute(r)
     else if path == "/_matrix/client/v3/account/whoami" then whoami(r)
     else if path.endsWith("/sync") then Sync.handle(r)
+    else if path.startsWith("/_wata/v1/dm/") then Dm.route(r)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if path.endsWith("/messages") then Rooms.messages(r)
     else if isAcctPath(path) then acctRoute(m, path, r, body)

@@ -1,5 +1,11 @@
 # DMRoomService - DM Room Management and Deduplication
 
+> **Retired mechanism.** This describes the client-authored `m.direct` DM
+> mechanism, which wata no longer uses: the server owns DM identity, keyed
+> by the user pair (`docs/plans/0007-canonical-dms.md`,
+> `docs/design/wata-server.md` § Canonical DMs). Kept as the record of what
+> the rules used to be and why they were needed.
+
 ## Overview
 
 DMRoomService encapsulates all DM room management logic: lookup, creation, and deterministic deduplication when multiple DM rooms exist with the same contact. It maintains internal caches for fast lookups and delegates to MatrixApi for room creation. This is part of Layer 2 (State Management).

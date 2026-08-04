@@ -1,5 +1,11 @@
 # DM Deduplication Flow - Handling Multiple DM Rooms
 
+> **Retired mechanism.** This describes the client-authored `m.direct` DM
+> mechanism, which wata no longer uses: the server owns DM identity, keyed
+> by the user pair (`docs/plans/0007-canonical-dms.md`,
+> `docs/design/wata-server.md` § Canonical DMs). Kept as the record of what
+> the rules used to be and why they were needed.
+
 ## Overview
 
 This flow covers the scenario where multiple DM rooms exist with the same contact (due to race conditions or bugs) and how DMRoomService deterministically selects one as the primary room.

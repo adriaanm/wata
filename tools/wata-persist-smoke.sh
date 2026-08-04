@@ -12,6 +12,9 @@
 #   - the redaction survives (target content emptied)
 #   - a state event set through PUT /state/... survives
 #   - a ban survives (the banned user still cannot join after the reboot)
+#   - a canonical DM's pair -> room claim survives, so re-resolving the pair
+#     (from either side, or via a DM-shaped createRoom) returns the SAME room
+#     rather than minting a second one, and its alias still resolves
 # Deterministic: asserts on stable facts (booleans / known bodies), never a
 # volatile id. Exit non-zero on any failure.
 #
@@ -63,7 +66,10 @@ BOB=$(curl -s -X POST "$BASE/_matrix/client/v3/login" \
   -d '{"identifier":{"type":"m.id.user","user":"bob"},"password":"testpass123"}' | jget access_token)
 B=(-H "Authorization: Bearer $BOB")
 
-ROOM=$(curl -s -X POST "${A[@]}" -d '{"is_direct":true,"invite":["@bob:localhost"]}' "$BASE/_matrix/client/v3/createRoom" | jget room_id)
+# An ORDINARY private room (creator 100, invitee 0) — the ban assertion needs an
+# asymmetric room. A canonical DM is co-owned by its pair (both 100), so neither
+# side can ban the other out of their own DM; DM identity gets its own section.
+ROOM=$(curl -s -X POST "${A[@]}" -d '{"invite":["@bob:localhost"]}' "$BASE/_matrix/client/v3/createRoom" | jget room_id)
 curl -s -X POST "${B[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/join" >/dev/null
 EVID=$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.text","body":"persist-me"}' "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx1" | jget event_id)
 DOOMED=$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.text","body":"redact-me"}' "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx2" | jget event_id)
@@ -77,6 +83,9 @@ MID="${CU##*/}"
 # m.room.member / state events in the journal, so this is what proves it.
 curl -s -X PUT "${A[@]}" -d '{"topic":"family channel"}' "$BASE/_matrix/client/v3/rooms/$ROOM/state/m.room.topic/" >/dev/null
 curl -s -X POST "${A[@]}" -d '{"user_id":"@bob:localhost","reason":"persist-test"}' "$BASE/_matrix/client/v3/rooms/$ROOM/ban" >/dev/null
+# canonical DM identity: the pair -> room claim is journalled post-generation, so
+# the SAME room must come back after the reboot.
+DM=$(curl -s -X POST "${A[@]}" "$BASE/_wata/v1/dm/bob" | jget room_id)
 LINES=$(wc -l < "$LOG" | tr -d ' ')
 
 # ---- crash + reboot from the log -------------------------------------------
@@ -108,6 +117,15 @@ check "ban-survives"            "$(curl -s -o /dev/null -w '%{http_code}' -X POS
 # idempotency replayed: re-sending tx1 returns the SAME event id
 check "txn-idempotency-survives" "$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.text","body":"persist-me"}' \
                                     "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx1" | jget event_id)"       "$EVID"
+
+# ---- canonical DM identity across the reboot ---------------------------------
+# The pair map is journalled, so no room is minted a second time — asked from
+# either side, or through the DM-shaped createRoom a stock client would send.
+check "dm-pair-survives"        "$(curl -s -X POST "${A[@]}" "$BASE/_wata/v1/dm/bob" | jget room_id)"                     "$DM"
+check "dm-pair-symmetric"       "$(curl -s -X POST "${B[@]}" "$BASE/_wata/v1/dm/alice" | jget room_id)"                   "$DM"
+check "dm-stock-create-survives" "$(curl -s -X POST "${A[@]}" -d '{"is_direct":true,"invite":["@bob:localhost"]}' \
+                                    "$BASE/_matrix/client/v3/createRoom" | jget room_id)"                                "$DM"
+check "dm-alias-survives"       "$(curl -s "${A[@]}" "$BASE/_matrix/client/v1/directory/room/%23dm.alice.bob:localhost" | jget room_id)" "$DM"
 
 [ "$fail" -eq 0 ] || { echo "persist-smoke: FAILED"; exit 1; }
 echo "persist-smoke: state survived kill+reboot from the JSONL log — PASS"

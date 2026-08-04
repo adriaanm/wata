@@ -1,5 +1,11 @@
 # Repeat DM Flow - Sending to Existing DM Room
 
+> **Retired mechanism.** This describes the client-authored `m.direct` DM
+> mechanism, which wata no longer uses: the server owns DM identity, keyed
+> by the user pair (`docs/plans/0007-canonical-dms.md`,
+> `docs/design/wata-server.md` § Canonical DMs). Kept as the record of what
+> the rules used to be and why they were needed.
+
 ## Overview
 
 This flow covers sending a second (and subsequent) messages to an existing DM room. DMRoomService uses its cache for fast lookup, avoiding room creation.

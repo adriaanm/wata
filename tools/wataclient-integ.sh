@@ -20,7 +20,8 @@ BASE="http://127.0.0.1:$PORT"
 ONLY="${1:-}"
 
 SCENARIOS=(login-syncing both-sync voice-to-bob receipt-accepted receipt-roundtrip
-           multiturn-order redaction download-bytes family-room session-resume)
+           multiturn-order redaction download-bytes family-room session-resume
+           dm-idempotent dm-stock-create)
 
 # ---- build -------------------------------------------------------------------
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "integ: wata-server build failed"; exit 1; }

@@ -30,11 +30,37 @@ object Rooms:
     case Right(j) => createRoomDo(userId, j)
     case Left(_)  => createRoomDo(userId, emptyObj)
 
+  /** A DM-SHAPED createRoom — `is_direct` with exactly ONE invitee who has an
+   *  account here — is answered idempotently with the canonical room for that
+   *  pair (minting and claiming it on first ask), so even a stock client that
+   *  knows nothing of the dialect endpoint cannot produce a duplicate DM. Any
+   *  other shape takes the ordinary path. */
   def createRoomDo(userId: String, j: Json): Either[MErr, Json] =
+    val invites = invitesOf(j)
+    if boolField(j, "is_direct") then createMaybeDm(userId, j, invites)
+    else createPlain(userId, j, invites)
+
+  def createMaybeDm(userId: String, j: Json, invites: List[String]): Either[MErr, Json] = soleInvite(invites) match
+    case s: Some[String] => createDm(userId, j, invites, Dm.canonicalRoom(userId, s.value))
+    case None => createPlain(userId, j, invites)
+
+  def createDm(userId: String, j: Json, invites: List[String], roomId: String): Either[MErr, Json] =
+    if roomId == "" then createPlain(userId, j, invites)
+    else Right(obj1("room_id", JStr(roomId)))
+
+  /** the one invitee, or `None` for none / more than one. */
+  def soleInvite(invites: List[String]): Option[String] = invites match
+    case h :: t => soleInviteStep(h, t)
+    case Nil  => None
+
+  def soleInviteStep(h: String, t: List[String]): Option[String] = t match
+    case _ :: _ => None
+    case Nil  => Some(h)
+
+  def createPlain(userId: String, j: Json, invites: List[String]): Either[MErr, Json] =
     val roomId = Store.createRoom()
     val preset = presetOf(j)
     val direct = boolField(j, "is_direct")
-    val invites = invitesOf(j)
     addStateEvent(roomId, userId, "m.room.create", "", createContent(userId))
     applyPreset(roomId, userId, preset)
     addStateEvent(roomId, userId, "m.room.power_levels", "", powerLevels(userId, preset, invites))
@@ -195,8 +221,12 @@ object Rooms:
     case s: Some[Json] => strField(s.value, "join_rule", "")
     case None => ""
 
+  /** `is_direct` rides the JOIN too, not just the invite: a stock client reads
+   *  the flag off the member event it is looking at, and dropping it here left
+   *  the two sides of a DM asymmetric. It is derived, not echoed from the
+   *  request — the room's `net.wata.dm` stamp is the truth. */
   def joinPerform(userId: String, roomId: String): Either[MErr, Json] =
-    addStateEvent(roomId, userId, "m.room.member", userId, memberJoinContent(userId, false))
+    addStateEvent(roomId, userId, "m.room.member", userId, memberJoinContent(userId, Dm.isDmRoom(roomId)))
     Store.notifyRoomMembers(roomId)
     Right(obj1("room_id", JStr(roomId)))
 
@@ -240,9 +270,14 @@ object Rooms:
       case _         => invite6(roomId, target)
 
   def invite6(roomId: String, target: String): Either[MErr, Json] =
-    Store.addEvent(roomId, "m.room.member", target, obj1("membership", JStr("invite")), true, target, false, "", JNull())
+    Store.addEvent(roomId, "m.room.member", target, inviteContentFor(roomId), true, target, false, "", JNull())
     Store.notifyUser(target)
     Right(emptyObj)
+
+  /** an invite into a canonical DM carries `is_direct`; an ordinary room's does
+   *  not carry the field at all (rather than carrying it as false). */
+  def inviteContentFor(roomId: String): Json =
+    if Dm.isDmRoom(roomId) then memberInviteContent(true) else obj1("membership", JStr("invite"))
 
   // ---- leave / kick / ban ---------------------------------------------------
   //
