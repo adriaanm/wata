@@ -151,6 +151,25 @@ and their **on-device verification remains part of this phase's
 boot-into-wata checkpoint** — nothing has exercised them on hardware
 yet.
 
+`[FB-SETTINGS-FULL]` audit ruled 2026-08-05 — the full system-menu
+feature delta (source: `bq268-alpine/tools/system-menu.py`, 816 lines)
+and each item's fate, which is the retirement checklist:
+
+| system-menu offers | settings has | fate |
+|---|---|---|
+| launch wata | n/a — wata becomes the tty1 program | retire with the flip |
+| sysinfo: battery, wifi SSID/IP, uptime, free mem, signal dBm, live refresh | battery, IP row, cellular info row | fold: uptime+mem into Device Info, signal dBm into the cellular row |
+| net test: ping gateway/1.1.1.1/8.8.8.8 + DNS probe | absent | fold: one "Net test" diagnostics action row running the same probes via the exec facade |
+| cellular start/stop data (`pppd call cellular` / stop) | info only | fold: a data on/off toggle row, same commands (mind the one-data-call-per-boot kernel constraint — the row surfaces failure honestly rather than retrying) |
+| wifi ON/OFF (`rc-service wifi start/stop`) | absent | fold: a wifi toggle row (provisioning a *new* network stays TUI-WIFI-PANEL's job) |
+| brightness, screen timeout | present | done |
+| reboot / power off / reboot-to-BL (+EDL in wata) | present, on-device-unverified | done pending the hardware pass above |
+| dmesg-VT chord toggle (F3+F4) | absent | retire — kernel-log debugging lives on the serial console/ssh, not on a kid's screen |
+
+The toggles and the net test are the only new code; all reuse the
+`Diag`/exec patterns the absorbed rows established, and each lands
+with `settings-walk` golden coverage (honest `n/a`/no-op off-device).
+
 Later polish, same phase family (queued, not blocking the first boot):
 a boot logo instead of the kernel bootlog — the device has a splash
 path in aboot (sibling `bq268-aboot`) for the earliest frame, plus
