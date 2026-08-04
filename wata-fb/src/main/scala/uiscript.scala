@@ -254,7 +254,7 @@ object UiScript:
     var err = ""
     if !ok then
       err = "wait " + name + " >= " + want + " timed out after " + maxFrames +
-        " frames (saw " + probe(name) + ")"
+        " frames (saw " + probe(name) + diag() + ")"
     err
 
   /** the mirror of `wait`: advance until a probe DROPS to `want` or below.
@@ -271,8 +271,15 @@ object UiScript:
     var err = ""
     if !ok then
       err = "waitmax " + name + " <= " + want + " timed out after " + maxFrames +
-        " frames (saw " + probe(name) + ")"
+        " frames (saw " + probe(name) + diag() + ")"
     err
+
+  /** the wait-timeout postmortem: connection tag + the session's send/conn
+   *  tallies, so a timeout log already says whether the send failed, sync hit
+   *  error backoff, or the echo simply never arrived. */
+  def diag(): String =
+    "; conn=" + Runtime.connTag(Ui.connection) + " sendok=" + Ui.sendOks +
+      " sendfail=" + Ui.sendFails + " connerr=" + Ui.connErrs
 
   def expect(name: String, want: scala.Int): String =
     val got = probe(name)

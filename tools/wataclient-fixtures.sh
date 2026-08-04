@@ -25,7 +25,9 @@ cd "$(dirname "$0")/.."
 WATA="$(pwd)"
 . "$WATA/tools/sgo-env.sh"                        # SGOLA_HOME, GOTOOLCHAIN, SGO
 FIXDIR="$WATA/wataclient/test-fixtures"
-PORT="${FIXTURES_PORT:-18119}"
+# A RANDOM port per run (FIXTURES_PORT overrides) — a fixed port collides with
+# a sibling checkout's harnesses (see tools/wataclient-integ.sh).
+PORT="${FIXTURES_PORT:-$(( 20000 + (RANDOM % 20000) ))}"
 BASE="http://127.0.0.1:$PORT"
 
 mkdir -p "$FIXDIR"
@@ -39,7 +41,12 @@ trap 'kill $PID 2>/dev/null || true' EXIT
 
 ready=0
 for _ in $(seq 1 100); do
-  if curl -s -o /dev/null "$BASE/_matrix/client/versions" 2>/dev/null; then ready=1; break; fi
+  # OUR process must be THE LISTENER (a bind loser exits zero, and a foreign
+  # squatter would answer a bare curl probe; see tools/wataclient-integ.sh)
+  kill -0 "$PID" 2>/dev/null || { echo "fixtures: server exited (port :$PORT taken?)"; cat "$LOG"; exit 1; }
+  if lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | grep -qx "$PID"; then
+    if curl -s -o /dev/null "$BASE/_matrix/client/versions" 2>/dev/null; then ready=1; break; fi
+  fi
   sleep 0.1
 done
 [ "$ready" -eq 1 ] || { echo "fixtures: server never became ready"; cat "$LOG"; exit 1; }

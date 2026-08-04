@@ -15,7 +15,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 WATA="$(pwd)"
 . "$WATA/tools/sgo-env.sh"                          # SGOLA_HOME (pinned clone by default), GOTOOLCHAIN, SGO
-PORT="${INTEG_PORT:-18121}"
+# A RANDOM port per run (INTEG_PORT overrides): a fixed port collides with a
+# sibling checkout running this same harness — its per-scenario server bounces
+# turn into mid-scenario connection errors here (sync backoff, wait expiry),
+# failing a different scenario each time.
+PORT="${INTEG_PORT:-$(( 20000 + (RANDOM % 20000) ))}"
 BASE="http://127.0.0.1:$PORT"
 ONLY="${1:-}"
 
@@ -42,7 +46,17 @@ start_server() { # $1 = scenario (log name)
   "$SERVER" ":$PORT" >"$TMP/server-$1.log" 2>&1 &
   SRV_PID=$!
   for _ in $(seq 1 100); do
-    curl -s -o /dev/null "$BASE/_matrix/client/versions" 2>/dev/null && return 0
+    # OUR process must be THE LISTENER: a server that lost the bind race exits
+    # zero (the subset has no os.Exit facade), and a bare curl probe would
+    # happily accept a FOREIGN process squatting on the port — including one
+    # that answers before our server has even attempted its bind.
+    if ! kill -0 "$SRV_PID" 2>/dev/null; then
+      echo "integ: server exited before becoming ready for $1 (port :$PORT taken?)"
+      cat "$TMP/server-$1.log"; SRV_PID=""; return 1
+    fi
+    if lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | grep -qx "$SRV_PID"; then
+      curl -s -o /dev/null "$BASE/_matrix/client/versions" 2>/dev/null && return 0
+    fi
     sleep 0.1
   done
   echo "integ: server never became ready for $1"; cat "$TMP/server-$1.log"; return 1

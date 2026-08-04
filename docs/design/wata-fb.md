@@ -183,11 +183,17 @@ explicit state machine, not a generic widget framework:
   dispatch: the PTT button always targets the wata applet regardless
   of which applet is active, and the two "dot" buttons cycle the
   active applet (`Shell.handleInput`, `shell.scala:109`).
-- Every applet's `update` is called every frame even when inactive
-  (`Shell.update`, `shell.scala:149`) — this matters because the wata
-  applet must keep draining recording-done audio events (to trigger
-  the actual upload+send) even while the user is sitting in the
-  settings menu.
+- The shell owns the `AudioEvt` mailbox's SINGLE per-frame drain
+  (`Shell.drainAudio` -> `routeAudio`): echo events go to the settings
+  applet, recording/playback events to the wata applet, whichever
+  applet is active. This is load-bearing, not tidiness — when each
+  applet ran its own drain on the shared channel, each discarded the
+  other's events, and an `AeRecordingDone` landing between the two
+  drains inside one `Shell.update` was silently eaten: a recording
+  dropped on the floor, at a scheduler-dependent ~1% per send that
+  grew under machine load (docs/plans/0009-audio-event-routing.md).
+  Every applet's `update` is still called every frame even when
+  inactive, for its timers and cursor clamping.
 
 ## Input
 
@@ -455,6 +461,33 @@ All of these are subcommands dispatched from `main.scala`:
 two end-to-end suites; both require a running `wata-server` and are
 invoked by scripts in `tools/`, not from this module directly.
 
+**Harness isolation.** Every live-server harness (`wataclient-integ.sh`,
+`fb-ui-tests.py`, `wataclient-fixtures.sh`) picks a RANDOM port per run
+(env overrides: `INTEG_PORT`, `FB_UI_PORT`, `FIXTURES_PORT`), and its
+readiness probe requires the spawned process to BE the listener (`lsof`
+pid match) before trusting an HTTP 200. Both halves matter: a
+`wata-server` that loses a bind race prints the listen error but exits
+ZERO (the subset has no `os.Exit` facade), and a foreign server
+squatting on the port answers `/versions` indistinguishably — so a bare
+curl probe silently runs the whole suite against another checkout's
+server, whose own per-scenario restarts then appear here as mid-scenario
+connection errors (sync-loop backoff, 1s..60s) that expire whichever
+wait they happen to land in. That was the historical `integ` "fails
+under load, a different scenario each time": the load (sgola's sbt gate)
+correlated with a sibling checkout running these same harnesses on the
+then-fixed ports. The matching `fb-ui-tests` flake (`wait msgs >= N`
+expiring with `sendok = N-1`, connection healthy) was a real client bug
+the same load widened — the audio-event drain race of plan 0009. The
+wait budgets themselves — wall-clock 15–30s per wait in `integ`,
+900–2000 frames at a real 10ms floor per frame in the ui scripts — hold
+with ~50x headroom even at load average ~60, and a genuinely hung
+client still fails within one budget; on a `wait`/`waitmax` timeout the
+scripted driver appends the connection tag and the session's
+send-ok/send-fail/conn-error tallies (`Ui.sendOks` etc.), so a timeout
+log already classifies its cause. `wata-tests.sh` stays pinned to :8008
+because the read-only TS suites hardcode that URL per file; it cannot
+run concurrently across checkouts, and says so.
+
 ## The host simulator
 
 `wata-fb ui` needs a real `/dev/fb0`, so for a long time the
@@ -616,9 +649,10 @@ Three things worth stating outright:
   scroll window after them. The Zig client does not do this and has the
   same dead cursor after its own `F2`.
 - **Every applet ticks every frame here; the Zig shell ticks only the
-  active one.** That is a fix, not a divergence to undo: the wata
-  applet must keep draining recording-done audio events (which is what
-  triggers the upload) while the user is sitting in the settings menu.
+  active one.** That is a fix, not a divergence to undo: recording-done
+  audio events must trigger the upload while the user is sitting in the
+  settings menu — the shell's single audio drain (`Shell.drainAudio`)
+  routes them to the wata applet regardless of which one is active.
 
 ## Cross-compilation and deployment
 
@@ -739,17 +773,6 @@ gap, the `/dev/shm`-only deploy), a few things stood out during this read:
   timestamp in the message rows, say, would break every golden and
   would need the client's clock virtualized too — which the sync
   loop's backoff cannot tolerate as things stand.
-
-- `[FB-INTEG-FLAKY]` **`just integ` fails intermittently under machine
-  load.** Roughly one run in three on a busy box fails, and a DIFFERENT
-  scenario each time (`multiturn-order`, `redaction`, `both-sync`,
-  `voice-to-bob` all observed); the same tree then passes several runs
-  in a row once the machine is quiet. The scenarios drive a real
-  long-poll against a real server with fixed frame and wait budgets, so
-  the suspicion is those budgets rather than any ordering bug — but it
-  is a suspicion, not a diagnosis. A gate that fails at random is a
-  gate people learn to re-run instead of read, so this is worth
-  bottoming out. `fb-ui-tests` shows none of it.
 
 The untagged items are recorded as things worth knowing before touching
 the surrounding code, not as work owed.

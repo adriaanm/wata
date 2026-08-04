@@ -1,4 +1,5 @@
 import language.experimental.saferExceptions
+import sgo.add  // the Atomic[Int] add extension (the session tally cells)
 
 /** The UI runtime: the frame loop that ties the sync runtime, the audio thread,
  *  a `UiDevice` backend, and the shell/applets together.
@@ -95,6 +96,19 @@ object Ui:
   /** the connection the status line and the LEDs are mirroring. */
   def connection: ConnectionState = connC.get()
 
+  // Session tallies of the terminal UI events — what a wait-timeout in the
+  // scripted driver reports, so "the echo never came" is distinguishable
+  // from "the send failed" and "sync fell into error backoff" after the fact.
+  private val sendOkC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  private val sendFailC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  private val connErrC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  /** sends completed this session (`EvSendComplete` count). */
+  def sendOks: scala.Int = sendOkC.get()
+  /** sends failed this session (`EvSendFailed` count). */
+  def sendFails: scala.Int = sendFailC.get()
+  /** `ConnError` transitions this session (each one = sync-loop backoff). */
+  def connErrs: scala.Int = connErrC.get()
+
   /** every credential is optional: what the arguments do not give,
    *  `FbConfig.resolve` takes from the stored session, which is what lets the
    *  device boot straight into the client. */
@@ -159,6 +173,9 @@ object Ui:
     snapC.set(Runtime.emptySnapshot())
     lastMsC.set(0L)
     savedC.set(false)
+    sendOkC.set(0)
+    sendFailC.set(0)
+    connErrC.set(0)
 
   /** seed the frame clock — every driver calls this once before its first
    *  `frameStep`, so the first frame's dt is a frame and not the epoch. */
@@ -281,16 +298,27 @@ object Ui:
 
   def onUiEvent(c: MatrixClient, e: UiEvent, dev: UiDevice): Unit = e match
     case cs: EvConn        => onConn(c, cs.state, dev)
-    case _: EvSendComplete => stateC.set(Shell.notifyWataSend(stateV, false))
-    case _: EvSendFailed   => stateC.set(Shell.notifyWataSend(stateV, true))
+    case _: EvSendComplete =>
+      tally(sendOkC)
+      stateC.set(Shell.notifyWataSend(stateV, false))
+    case _: EvSendFailed   =>
+      tally(sendFailC)
+      stateC.set(Shell.notifyWataSend(stateV, true))
     case _: EvPlaybackError => stateC.set(Shell.notifyWataPlayError(stateV))
     case _: EvSnapshot     => () // snapshot is picked up via pollSnap
+
+  /** bump a tally cell, discarding `add`'s returned new value (a bare value
+   *  statement is not legal Go; a call is, so the discard rides a def). */
+  def tally(cell: sgo.Atomic[scala.Int]): Unit =
+    val n = cell.add(1)
+    ()
 
   /** connection change -> mirror on the red/green LEDs, and — the first time a
    *  session actually comes up — write the credentials to the config store so
    *  the next boot resumes without arguments. */
   def onConn(c: MatrixClient, cs: ConnectionState, dev: UiDevice): Unit =
     connC.set(cs)
+    if Runtime.connTag(cs) == 4 then tally(connErrC)
     dev.leds(isLive(cs), isBad(cs))
     if isLive(cs) then persistSession(c)
 

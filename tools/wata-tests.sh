@@ -26,7 +26,11 @@ WATA="$(pwd)"
 # A dev tool, not part of `just ci` — it needs $WATA_TS_REPO checked out.
 
 WATA_TS="${WATA_TS_REPO:-$WATA}"  # the TS wata tree (jest oracle source); in-tree since the graft
-PORT="${WATA_PORT:-8008}"
+# FIXED at 8008 deliberately, no override: every TS suite hardcodes
+# `http://localhost:8008` in its own file and the TS tree is read-only from
+# this branch, so a knob here would move the server away from where the
+# suites look. Two checkouts therefore cannot run this oracle concurrently.
+PORT=8008
 BASE="http://127.0.0.1:$PORT"
 ONLY="${1:-}"
 

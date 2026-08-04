@@ -138,13 +138,44 @@ object Shell:
     withApplet(s, s.active, s.applets(s.active).handleInput(k, ks, ctx))
 
   // ---- per-frame update --------------------------------------------------------
-  /** EVERY applet ticks every frame (the wata applet must drain audio events —
-   *  recording-done -> send — even when settings is active, so both applets
-   *  are updated on every frame regardless of which one is displayed). */
+  /** Drain the audio-event mailbox ONCE, here, routing each event to its
+   *  owning applet by type — then tick every applet (both applets are updated
+   *  on every frame regardless of which one is displayed). The single drain is
+   *  load-bearing: two per-applet drains on the one channel would each eat the
+   *  other's events, and which drain won depended on when the audio goroutine's
+   *  send landed inside the frame — an `AeRecordingDone` falling between them
+   *  was silently discarded, i.e. a recording dropped on the floor
+   *  (docs/plans/0009-audio-event-routing.md). */
   def update(s: ShellState, dt: scala.Double, ctx: FrameCtx): ShellState =
-    ShellState(s.active, s.status, IArray.tabulate(s.applets.length)(i => tickOne(s, i, dt, ctx)))
+    val d = drainAudio(s, ctx)
+    ShellState(d.active, d.status, IArray.tabulate(d.applets.length)(i => tickOne(d, i, dt, ctx)))
   def tickOne(s: ShellState, i: scala.Int, dt: scala.Double, ctx: FrameCtx): Applet =
     s.applets(i).update(dt, ctx)
+
+  /** the ONE consumer of `ctx.audioEvts`: every pending event, routed. */
+  def drainAudio(s0: ShellState, ctx: FrameCtx): ShellState =
+    var s = s0
+    var run = true
+    while run do
+      ctx.audioEvts.tryReceive() match
+        case e: Some[AudioEvt] => s = routeAudio(s, e.value, ctx)
+        case None => run = false
+    s
+
+  /** echo events belong to the settings applet's test widget; recording and
+   *  playback events to the wata applet's send/play paths. */
+  def routeAudio(s: ShellState, e: AudioEvt, ctx: FrameCtx): ShellState =
+    if isEchoEvt(e) then
+      withApplet(s, SETTINGS, SettingsApplet(SettingsLogic.onEcho(settingsState(s), e)))
+    else
+      withApplet(s, WATA, WataApplet(WataLogic.onAudioEvent(wataState(s), e, ctx)))
+
+  def isEchoEvt(e: AudioEvt): Boolean = e match
+    case _: AeEchoRecording => true
+    case _: AeEchoPlaying   => true
+    case _: AeEchoDone      => true
+    case _: AeEchoError     => true
+    case _                  => false
 
   // ---- render (1px status line + active applet) --------------------------------
   def render(s: ShellState, px: go.Bytes, ctx: FrameCtx): Unit =

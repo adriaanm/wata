@@ -21,6 +21,7 @@ Hermetic — no device, no network beyond localhost.
 """
 
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,11 @@ import urllib.request
 WATA = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(WATA, "tools", "fb-ui-scripts")
 GOLDEN = os.path.join(WATA, "tools", "fb-ui-golden")
-PORT = int(os.environ.get("FB_UI_PORT", "18131"))
+# A RANDOM port per run (FB_UI_PORT overrides): a fixed port collides with a
+# sibling checkout running this same harness — whichever server binds second
+# dies, and the survivor serves BOTH harnesses' phases, so redactions/sends
+# from the foreign run corrupt this run's message counts mid-scenario.
+PORT = int(os.environ.get("FB_UI_PORT") or random.randint(20000, 39999))
 BASE = f"http://127.0.0.1:{PORT}"
 PASSWORD = "testpass123"
 
@@ -102,17 +107,29 @@ def build(sgo, env):
 
 
 # ---- the hermetic server -----------------------------------------------------
+def our_listener(pid):
+    """True when `pid` is the process listening on PORT. A wata-server that
+    lost a bind race exits ZERO (the subset has no os.Exit facade), and a
+    foreign squatter on the port would answer a bare readiness probe — the
+    listener's identity is the only trustworthy readiness signal."""
+    r = subprocess.run(["lsof", "-ti", f"tcp:{PORT}", "-sTCP:LISTEN"],
+                       capture_output=True, text=True)
+    return str(pid) in r.stdout.split()
+
+
 def start_server(binary, log_path, env):
     log = open(log_path, "wb")
     proc = subprocess.Popen([binary, f":{PORT}"], stdout=log, stderr=log, env=env)
     for _ in range(200):
         if proc.poll() is not None:
             return None, log
-        try:
-            urllib.request.urlopen(f"{BASE}/_matrix/client/versions", timeout=0.5).read()
-            return proc, log
-        except (urllib.error.URLError, OSError):
-            time.sleep(0.1)
+        if our_listener(proc.pid):
+            try:
+                urllib.request.urlopen(f"{BASE}/_matrix/client/versions", timeout=0.5).read()
+                return proc, log
+            except (urllib.error.URLError, OSError):
+                pass
+        time.sleep(0.1)
     proc.kill()
     return None, log
 

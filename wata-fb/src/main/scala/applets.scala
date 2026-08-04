@@ -206,13 +206,11 @@ object WataLogic:
     if roomId != "" && eventId != "" then Runtime.sendAction(ctx.client, ActReceipt(roomId, eventId))
 
   // ---- per-frame update --------------------------------------------------------
-  /** tick hold-time + status flash; drain audio events (recording-done -> send;
-   *  playback done/error; the settings echo events belong to the other applet). */
+  /** tick hold-time + status flash, then reconcile the cursors. Audio events
+   *  arrive via `Shell.routeAudio` -> `onAudioEvent`, NOT a drain here — the
+   *  shell owns the mailbox's single drain (plan 0009). */
   def update(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
-    var st = tickTimers(s, dt)
-    st = drainAudioEvents(st, ctx)
-    st = clampSelection(st, ctx)
-    st
+    clampSelection(tickTimers(s, dt), ctx)
 
   /** Reconcile the cursors with the live snapshot. The lists shrink under the
    *  cursor without any input — a redaction drops a message row, a peer
@@ -258,16 +256,9 @@ object WataLogic:
       else out = withFlash(s, hold, t, s.sendError, s.sendOk, s.playError)
     out
 
-  /** drain the audio event mailbox: a finished recording is uploaded+sent. */
-  def drainAudioEvents(s0: WataState, ctx: FrameCtx): WataState =
-    var s = s0
-    var run = true
-    while run do
-      ctx.audioEvts.tryReceive() match
-        case e: Some[AudioEvt] => s = onAudioEvent(s, e.value, ctx)
-        case None => run = false
-    s
-
+  /** one audio event, routed here by `Shell.routeAudio`: a finished recording
+   *  is uploaded+sent; the catch-all is unreachable (echo events route to the
+   *  settings applet). */
   def onAudioEvent(s: WataState, e: AudioEvt, ctx: FrameCtx): WataState = e match
     case d: AeRecordingDone =>
       uploadRecording(ctx, s, d.ogg, d.durationMs)
@@ -275,7 +266,7 @@ object WataLogic:
     case _: AeRecordingError => withFlash(s, s.pttHoldTime, 2.0, true, s.sendOk, s.playError)
     case _: AePlaybackDone   => withPlaying(s, false)
     case _: AePlaybackError  => withPlayErr(s, false, true, 2.0)
-    case _                   => s // echo events -> settings applet
+    case _                   => s // echo events -> settings applet (unreachable)
 
   /** upload+send the recorded voice message to the current/selected
    *  conversation. roomId "" -> the runtime resolves/creates the DM for the
@@ -728,22 +719,20 @@ object SettingsLogic:
     Led.setBacklight(b)
     withBrightness(s, b)
 
-  // ---- update (drain echo events) -----------------------------------------------
-  def update(s: SettingsState, dt: scala.Double, ctx: FrameCtx): SettingsState =
-    var st = s
-    var run = true
-    while run do
-      ctx.audioEvts.tryReceive() match
-        case e: Some[AudioEvt] => st = onEcho(st, e.value)
-        case None => run = false
-    st
+  // ---- update ---------------------------------------------------------------------
+  /** nothing per-frame here: echo events arrive via `Shell.routeAudio` ->
+   *  `onEcho`, NOT a drain — the shell owns the mailbox's single drain
+   *  (plan 0009). */
+  def update(s: SettingsState, dt: scala.Double, ctx: FrameCtx): SettingsState = s
 
+  /** one echo event, routed here by `Shell.routeAudio`; the catch-all is
+   *  unreachable (wata events route to the wata applet). */
   def onEcho(s: SettingsState, e: AudioEvt): SettingsState = e match
     case _: AeEchoRecording => withEcho(s, EchoRecording())
     case _: AeEchoPlaying   => withEcho(s, EchoPlaying())
     case _: AeEchoDone      => withEcho(s, EchoDone())
     case _: AeEchoError     => withEcho(s, EchoErr())
-    case _                  => s // wata events
+    case _                  => s // wata events (unreachable)
 
   // ---- render --------------------------------------------------------------------
   def render(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
