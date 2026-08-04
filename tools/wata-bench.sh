@@ -14,7 +14,7 @@ WATA="$(pwd)"
 # A dev tool, not part of `just ci`.
 . "$WATA/tools/sgo-env.sh"                        # SGOLA_HOME, GOTOOLCHAIN, SGO
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
-WATA_TS="${WATA_TS_REPO:-$HOME/g/bq268/wata}"     # the TS reference server, for (2)
+WATA_TS="${WATA_TS_REPO:-$WATA}"                  # the TS reference server (in-tree), for (2)
 
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "bench: build failed"; exit 1; }
 WATA_EMIT="$(emitdir wata-server)"

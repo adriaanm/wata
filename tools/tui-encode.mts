@@ -3,8 +3,8 @@
 // TUI's OWN encoder (@evan/wasm opus, 16kHz/60ms) + Ogg muxer (one packet/page,
 // EOS-carries-audio, random serial) via shared/audio-codec.encodeOggOpus — the
 // exact bytes the TUI uploads. Writes a 1.5s 440Hz tone to argv[2].
-import { Encoder } from '/Users/adriaan/g/bq268/wata/node_modules/.pnpm/@evan+wasm@0.0.95/node_modules/@evan/wasm/target/opus/node.mjs';
-import { encodeOggOpus } from '/Users/adriaan/g/bq268/wata/src/shared/lib/audio-codec.ts';
+import { Encoder } from '../node_modules/.pnpm/@evan+wasm@0.0.95/node_modules/@evan/wasm/target/opus/node.mjs';
+import { encodeOggOpus } from '../src/shared/lib/audio-codec.ts';
 import { writeFileSync } from 'node:fs';
 
 const mkEncoder = (sampleRate: number, channels: number, application: string) =>

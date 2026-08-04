@@ -1,10 +1,42 @@
 # Wata
 
-A Matrix homeserver and a framebuffer device client, written in **Sgola**
-(restricted Scala 3 compiled to readable Go source; no JVM at runtime).
-Wata is a plain downstream consumer of the sgola compiler — nothing in
-this repo is about the compiler's own development, and nothing here
-asserts anything about the compiler.
+**A secure walkie-talkie for a family**: push-to-talk voice messages over
+Matrix, self-hostable by anyone who can set up a Raspberry Pi — no cloud
+account, no subscription, no port forwarding. The clients are BQ268
+handhelds (repurposed ~$20 4G Android walkie-talkies) that boot straight
+into the app. Users see contacts and one family channel; they never see
+Matrix concepts. The network is the trust boundary.
+
+This branch (`sgola`) is the **Sgola port**: a Matrix homeserver and a
+framebuffer device client written in restricted Scala 3 compiled to
+readable Go source; no JVM at runtime. Wata is a plain downstream consumer
+of the sgola compiler — nothing in this repo is about the compiler's own
+development, and nothing here asserts anything about the compiler.
+
+The original TypeScript/Zig implementations live **in-tree** (`src/`,
+`test/`, `specs/`, `spec/`, `docs/planning/`, `scripts/`) as the reference
+and conformance oracle until the Sgola apps replace them; treat that tree
+as read-only from this branch except when a plan says otherwise. Roadmap:
+[docs/plans/0003-parity-and-beyond.md](docs/plans/0003-parity-and-beyond.md).
+
+## Siblings, device, and what may be committed
+
+Sibling repos are assumed checked out under `~/g/bq268` — most relevantly
+`bq268-alpine` (the device's Alpine rootfs; wata-fb is its single app) —
+and the device is ssh host `bq268` (BQ268: MSM8909, 32-bit ARMv7, 160×128
+ST7735S SPI LCD, GPIO keypad with PTT=F1, tinyalsa audio through the Q6
+ADSP, red/green LEDs).
+
+Those two facts — the `~/g/bq268` layout and the host alias `bq268` — are
+the **only** local-environment specifics allowed in committed files.
+No other absolute paths, machine names, IPs, or usernames; parameterize
+via env vars (`BQ268_HOST`, `SGOLA_HOME`, `WATA_TS_REPO`) with defaults
+derived from those two facts. Public repos cross-reference by URL.
+
+Work that belongs in a sibling repo is not done from here: hand off a spec
+in the sibling's `docs/planning/<feature>.md` plus a one-line task in its
+tracker, and track our side here. Device work follows commit-before-flash:
+commit, flash/deploy, then record the outcome.
 
 **The two repos share exactly one interface:**
 
@@ -34,9 +66,9 @@ fetchable remote yet, so `sgo` compiles it from the toolchain tree.
 ## Toolchain
 
 Building needs the sgola compiler, pinned by `tools/toolchain-pin.txt` and
-cloned to `.toolchain/sgola` (gitignored). `~/g/sgola`, if present, is an
-active development tree — never build against it; a toolchain change must
-be a commit here.
+cloned to `.toolchain/sgola` (gitignored). A local sgola checkout is an
+active development tree — never build against it by default; a toolchain
+change must be a pin commit here.
 
 ```
 just            # every recipe this repo has
@@ -148,3 +180,13 @@ justfile just gives it a name.
 | [TODO.jsonl](TODO.jsonl) | the open-work queue (protocol above) |
 | [WATA-TODO.md](WATA-TODO.md) | known debt |
 | [docs/plans/](docs/plans/) | plan docs, newest last |
+
+Reference material from the original implementation (in-tree, read-only):
+
+| doc | what it covers |
+|-----|----------------|
+| [docs/wata-matrix-spec.md](docs/wata-matrix-spec.md) | the Matrix C-S subset wata needs — the server requirements doc |
+| [docs/family-model.md](docs/family-model.md) | the product model: contacts, family channel, trust boundary |
+| [docs/planning/connectivity-iroh.md](docs/planning/connectivity-iroh.md) | the iroh transport decision + sidecar spike (`src/iroh-tunnel/`) |
+| [test/integration/](test/integration/) | the 83-test jest conformance oracle (`just conformance`) |
+| [src/fbclient/](src/fbclient/) | the Zig device client — the behavioral spec for `wata-fb` |

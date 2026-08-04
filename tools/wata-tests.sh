@@ -13,7 +13,7 @@
 # execute its jest suites (pnpm's node_modules must already be installed; we
 # never write to it).
 #
-# Node note (this machine): homebrew node 25.x is linked against a llhttp dylib
+# Node note: some homebrew node 25.x installs are linked against a llhttp dylib
 # version that is no longer installed, so `node` fails to launch. Rather than
 # mutate the user's homebrew, we detect that and build a leaf-name symlink shim in
 # a temp dir + DYLD_FALLBACK_LIBRARY_PATH (llhttp 9.x is ABI-stable). We also
@@ -25,7 +25,7 @@ cd "$(dirname "$0")/.."
 WATA="$(pwd)"
 # A dev tool, not part of `just ci` — it needs $WATA_TS_REPO checked out.
 
-WATA_TS="${WATA_TS_REPO:-$HOME/g/bq268/wata}"  # the ORIGINAL TS wata repo (jest oracle source)
+WATA_TS="${WATA_TS_REPO:-$WATA}"  # the TS wata tree (jest oracle source); in-tree since the graft
 PORT="${WATA_PORT:-8008}"
 BASE="http://127.0.0.1:$PORT"
 ONLY="${1:-}"

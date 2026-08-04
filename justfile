@@ -84,7 +84,8 @@ client-tests:
 integ:
     bash tools/wataclient-integ.sh
 
-# Needs $WATA_TS_REPO (default ~/g/bq268/wata) with node_modules installed.
+# Needs node_modules installed at $WATA_TS_REPO (default: this repo — the TS
+# reference tree is in-tree since the graft).
 #
 # conformance oracle: the original TypeScript wata's jest suite, this server
 conformance:

@@ -1,13 +1,15 @@
 # 0003 — Parity with the original wata, and beyond it to daily use
 
-Status: proposed
+Status: accepted
 
 `[PARITY]`
 
 ## Problem
 
-This repo is a Sgola port of `~/g/bq268/wata` (TypeScript server + client,
-Zig framebuffer client). The port has a working server, client core, and
+This branch is the Sgola port of wata; the original implementation
+(TypeScript server + client, Zig framebuffer client) lives in-tree on
+`main` and under `src/`, `test/`, `specs/`, `docs/planning/` here, as
+reference and oracle. The port has a working server, client core, and
 device client skeleton, but it is not yet something a family can use:
 
 - There is **no way to iterate on the device UI locally**. The Zig client
