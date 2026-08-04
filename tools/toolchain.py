@@ -238,7 +238,8 @@ def cmd_status(_args):
         return 1
     have = run(["git", "rev-parse", "HEAD"], cwd=home, check=False, quiet=True).stdout.strip()
     if home == PINNED_HOME:
-        print(f"clone      {have[:12]}  {'MATCHES pin' if have == commit else 'DRIFTED from pin'}")
+        # the pin may be an abbreviated sha; HEAD is always full
+        print(f"clone      {have[:12]}  {'MATCHES pin' if have.startswith(commit) else 'DRIFTED from pin'}")
     else:
         print(f"checkout   {have[:12]}")
     plugin = sorted((home / 'plugin' / 'target').glob('scala-*/sgola-plugin_*.jar'))
