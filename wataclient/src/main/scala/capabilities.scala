@@ -1,5 +1,5 @@
 /** the platform capability SEAM. The portable core touches the outside world
- *  only through these three capabilities, injected at the app edge.
+ *  only through these two capabilities, injected at the app edge.
  *
  *  Capabilities are proper TRAITS (open, non-generic, abstract methods only).
  *  Each becomes a Go interface carrying its real method set; the app supplies
@@ -9,9 +9,13 @@
  *  which would otherwise be unjudgeable by the concurrency-safety checker
  *  used here.
  *
- *  Transport/time/rand are UNUSED by the pure sync engine (sync-response Json
+ *  Transport/time are UNUSED by the pure sync engine (sync-response Json
  *  in -> events out) — they are DEFINED here (the seam) and CONSUMED in the
- *  runtime layer.
+ *  runtime layer. There is deliberately NO randomness capability: the one
+ *  candidate consumer, transaction ids, rides an `Atomic[Int]` counter
+ *  (`Runtime.txnCounterC`) — deterministic and sufficient for a
+ *  single-client process — and nothing else in the core consumes
+ *  randomness.
  */
 
 // ---- HTTP transport (request record => response record) ----------------------
@@ -31,13 +35,6 @@ trait HttpDo extends Shareable:
 trait Clock extends Shareable:
   def nowUnixMillis(): Long
   def sleepMs(ms: Long): Unit
-
-/** randomness for transaction ids / device ids. No consumer today —
- *  transaction ids ride the `Atomic[Int]` counter instead; kept for
- *  uniformity with the other capabilities. An impl would live at the app edge
- *  over the platform's rand facade, like the `Clock` impl. */
-trait Rand extends Shareable:
-  def nextU32(): Int
 
 /** header-list builders (the request-shaping surface; also the construction
  *  sites that record the `List[(String, String)]` instantiation — a bare

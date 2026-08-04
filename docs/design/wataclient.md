@@ -31,10 +31,10 @@ Total size: 13 files, ~3400 lines, under `wataclient/src/main/scala/`.
 `wataclient` is the code that would be identical on any device running a
 wata Matrix client — desktop, phone, or the framebuffer device this repo
 currently targets. Nothing here touches `go` facades (the network, the
-clock, audio hardware); those cross into the module only through three
-capability traits (`HttpDo`, `Clock`, `Rand`) that the app layer
+clock, audio hardware); those cross into the module only through two
+capability traits (`HttpDo`, `Clock`) that the app layer
 implements. This is what makes the module "portable": the same source
-compiles and runs correctly wherever an app supplies those three traits.
+compiles and runs correctly wherever an app supplies those two traits.
 
 ## The public surface
 
@@ -303,11 +303,14 @@ bytes over a socket":
 
 ## `oracle.scala` and `capabilities.scala`
 
-- **`capabilities.scala`** (55 lines) is the capability seam: `HttpDo`
-  (`send(req) -> resp`), `Clock` (`nowUnixMillis`, `sleepMs`), and `Rand`
-  (`nextU32`, currently unused — transaction ids are generated from an
-  `Atomic[Int]` counter, not randomness) are Go-interface-shaped traits
-  the app supplies implementations of. `HttpRequest`/`HttpResponse` are
+- **`capabilities.scala`** is the capability seam: `HttpDo`
+  (`send(req) -> resp`) and `Clock` (`nowUnixMillis`, `sleepMs`) are
+  Go-interface-shaped traits the app supplies implementations of. There
+  is deliberately no randomness capability: transaction ids are generated
+  from an `Atomic[Int]` counter (`Runtime.txnCounterC`) — deterministic
+  and sufficient for a single-client process — and nothing else in the
+  core consumes randomness, so a `Rand` trait would be dead contract
+  surface every consumer had to implement. `HttpRequest`/`HttpResponse` are
   the plain records that cross the boundary; network failure is
   represented as a non-2xx (or, per `mhttp.scala:97`, status `0` for a
   malformed mxc URL) status rather than a Go error — the portable core
@@ -354,7 +357,7 @@ checked against a separately pinned expected-output file in CI.
 | File | Lines | Contents |
 |---|---|---|
 | `audiocmd.scala` | 44 | Audio-thread command/event protocol types (`AudioCmd`, `AudioEvt`). |
-| `capabilities.scala` | 55 | The three injected capability traits: `HttpDo`, `Clock`, `Rand`, plus header-list helpers. |
+| `capabilities.scala` | 45 | The two injected capability traits: `HttpDo`, `Clock`, plus header-list helpers. |
 | `domain.scala` | 115 | Core domain types: connection state, conversation type, users/contacts/messages, room/engine working state, sync events. |
 | `matrix.scala` | 105 | Matrix C-S API request-body shaping and response parsing (pure, no transport). |
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
@@ -427,12 +430,6 @@ Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. The untagged ones are recorded as things to know before
 touching the surrounding code, not as work owed.
 
-- `[CLI-RAND-DEAD]` **`Rand` (`capabilities.scala:45`) has no consumer today** — it's
-  defined for symmetry with `HttpDo`/`Clock` but transaction ids are
-  produced from an `Atomic[Int]` counter (`runtime.scala:402`,
-  `txnCounterC.add(1)`) rather than randomness. Not necessarily a bug,
-  just dead surface worth knowing about if the capability contract is
-  ever trimmed.
 - **`applyRedaction` reads `redacts` as a plain string field on the event
   and falls back to `content.redacts`** (`syncengine.scala:521-524`) —
   this matches Matrix spec versions before and after the v1.10 move of

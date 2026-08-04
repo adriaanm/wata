@@ -3,7 +3,7 @@
 #
 #   1. PORTABILITY TRIPWIRE: wataclient sources must have ZERO `go.*`
 #      references. The core is portable by construction: it reaches hardware,
-#      the network, and the clock only through the HttpDo/Clock/Rand
+#      the network, and the clock only through the HttpDo/Clock
 #      capability traits its consumer implements.
 #   2. SYNC-ENGINE UNIT ORACLE: `wata-fb synctest` runs the 15 sync-engine
 #      scenarios; byte-diffed against tools/wataclient-sync.expected.txt.
