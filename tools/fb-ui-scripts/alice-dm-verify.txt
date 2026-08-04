@@ -1,0 +1,22 @@
+# dm-roundtrip, phase 4: alice's second session pins bob's reply and the
+# badge lifecycle — the roster shows one unplayed for the reply, opening the
+# conversation receipts it, and the roster afterwards shows no badge.
+
+wait syncing 1 900
+wait convs 2 900
+tap down
+wait msgs 2 2000
+advance 30
+checkpoint dm-alice-badge
+
+# open: receipts bob's reply (the latest). Alice's own first message was
+# receipted back in phase 2, so `played` reaches 2 and both rows render
+# played (gray + check mark).
+tap enter
+wait played 2 2000
+advance 30
+checkpoint dm-alice-reply
+
+tap back
+advance 10
+checkpoint dm-alice-cleared

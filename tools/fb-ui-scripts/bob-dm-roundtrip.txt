@@ -1,0 +1,30 @@
+# dm-roundtrip, phase 3: bob sees the DM arrive with an unplayed badge,
+# opens it (read receipt -> played mark), plays it, and replies into the
+# same canonical room.
+
+wait syncing 1 900
+# [Family, Alice-DM]: the canonical room synced in with its net.wata.dm stamp
+wait convs 2 900
+tap down
+wait msgs 1 2000
+advance 30
+checkpoint dm-bob-roster
+
+# open the DM — which receipts its latest (alice's) message: the played mark
+# turns on and the badge basis clears
+tap enter
+wait played 1 2000
+advance 30
+checkpoint dm-bob-played
+
+# OK plays the selected, already-receipted message through the sim audio actor
+tap enter
+advance 30
+
+# reply: PTT inside the conversation view sends into this DM room
+key ptt press
+advance 20
+key ptt release
+wait msgs 2 1500
+advance 120
+checkpoint dm-bob-reply

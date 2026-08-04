@@ -145,7 +145,7 @@ object Dm:
     var xs: List[StateSeed] = Nil
     xs = StateSeed("m.room.canonical_alias", "", obj1("alias", JStr(aliasOf(caller, peer)))) :: xs
     xs = StateSeed("net.wata.dm", "", dmContent(caller, peer)) :: xs
-    xs = StateSeed("m.room.member", peer, Rooms.memberInviteContent(true)) :: xs
+    xs = StateSeed("m.room.member", peer, Rooms.memberInviteContent(peer, true)) :: xs
     xs = StateSeed("m.room.member", caller, Rooms.memberJoinContent(caller, true)) :: xs
     xs = StateSeed("m.room.power_levels", "", Rooms.powerLevels(caller, "trusted_private_chat", oneInvite(peer))) :: xs
     xs = StateSeed("m.room.guest_access", "", obj1("guest_access", JStr("can_join"))) :: xs

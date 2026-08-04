@@ -130,8 +130,18 @@ object Rooms:
     if direct then fs = ("is_direct", JBool(true)) :: fs else ()
     endObj(fs)
 
-  def memberInviteContent(direct: Boolean): Json =
-    obj2("membership", JStr("invite"), "is_direct", JBool(direct))
+  /** Invite membership content carries the INVITEE's profile displayname,
+   *  like the join content does (and like real homeservers stamp profile
+   *  info into invite events) — without it, a client rendering an
+   *  invited-but-not-yet-joined member has nothing but the raw MXID, which
+   *  is exactly what the DM conversation header showed for a freshly
+   *  resolved DM whose peer hadn't synced yet. */
+  def memberInviteContent(target: String, direct: Boolean): Json =
+    var fs: List[(String, Json)] = Nil
+    fs = ("membership", JStr("invite")) :: fs
+    fs = ("displayname", JStr(displayNameOf(target))) :: fs
+    if direct then fs = ("is_direct", JBool(true)) :: fs else ()
+    endObj(fs)
 
   def displayNameOf(userId: String): String = Config.userByLocalpart(Store.localpartOf(userId)) match
     case s: Some[UserCfg] => s.value.displayName
@@ -160,7 +170,7 @@ object Rooms:
     case Nil  => ()
 
   def addInvitesStep(roomId: String, userId: String, target: String, t: List[String], direct: Boolean): Unit =
-    addStateEvent(roomId, userId, "m.room.member", target, memberInviteContent(direct))
+    addStateEvent(roomId, userId, "m.room.member", target, memberInviteContent(target, direct))
     Store.notifyUser(target)
     addInvites(roomId, userId, t, direct)
 
@@ -270,14 +280,14 @@ object Rooms:
       case _         => invite6(roomId, target)
 
   def invite6(roomId: String, target: String): Either[MErr, Json] =
-    Store.addEvent(roomId, "m.room.member", target, inviteContentFor(roomId), true, target, false, "", JNull())
+    Store.addEvent(roomId, "m.room.member", target, inviteContentFor(roomId, target), true, target, false, "", JNull())
     Store.notifyUser(target)
     Right(emptyObj)
 
   /** an invite into a canonical DM carries `is_direct`; an ordinary room's does
    *  not carry the field at all (rather than carrying it as false). */
-  def inviteContentFor(roomId: String): Json =
-    if Dm.isDmRoom(roomId) then memberInviteContent(true) else obj1("membership", JStr("invite"))
+  def inviteContentFor(roomId: String, target: String): Json =
+    memberInviteContent(target, Dm.isDmRoom(roomId))
 
   // ---- leave / kick / ban ---------------------------------------------------
   //

@@ -68,6 +68,15 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "dm-roundtrip",
+        "phases": [
+            ("bob", "bob-family-bootstrap.txt"),
+            ("alice", "alice-dm-send.txt"),
+            ("bob", "bob-dm-roundtrip.txt"),
+            ("alice", "alice-dm-verify.txt"),
+        ],
+    },
+    {
         "name": "settings-walk",
         "phases": [
             ("alice", "alice-settings.txt"),

@@ -264,7 +264,7 @@ object SelfCheck:
     Rooms.addStateEvent(roomId, alice, "m.room.create", "", Rooms.createContent(alice))
     Rooms.applyPreset(roomId, alice, "private_chat")
     Rooms.addStateEvent(roomId, alice, "m.room.member", alice, Rooms.memberJoinContent(alice, true))
-    Rooms.addStateEvent(roomId, alice, "m.room.member", bob, Rooms.memberInviteContent(true))
+    Rooms.addStateEvent(roomId, alice, "m.room.member", bob, Rooms.memberInviteContent(bob, true))
     println("mem-creator " + Mem.str(Store.getMembership(roomId, alice)))
     println("mem-invitee " + Mem.str(Store.getMembership(roomId, bob)))
     println("join-legal " + Mem.transStr(Mem.transition(Store.getMembership(roomId, bob), AJoin())))
