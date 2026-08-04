@@ -53,9 +53,7 @@ blocks + git log; each entry cites where it was recorded.*
   val/var fields of a class extending a `go.*` facade trait are silently
   Go-zeroed at construction (only ctor params are seated) — keep Handler
   state in ctor params or on an object until
-  FACADE-SUBCLASS-BODY-FIELD-SILENT-ZERO lands. (The self-call
-  restriction from the `[SRV-BODY-LIMIT]` build is fixed at `ae2e63f`;
-  `[TOOLCHAIN-REPIN-BATCH]` covers picking it up.)
+  FACADE-SUBCLASS-BODY-FIELD-SILENT-ZERO lands.
 - Emitter trap (residual of the fixed CATCH-ERR-SHADOW): a *parameter*
   literally named `err` still bypasses the emitter's rename machinery —
   avoid that spelling for params until PARAM-ERR-COLLISION lands. Local
@@ -74,10 +72,3 @@ blocks + git log; each entry cites where it was recorded.*
   `var ok` wherever a match case assigns it (any other name is safe)
   until MATCH-CASE-OK-VAR-SHADOW lands. Filed:
   `MATCH-CASE-OK-VAR-SHADOW`.
-- Emitter trap (from the `[FB-PNG-BLOCK]` build): an Int-LED string
-  concatenation (`blocks + " blocks"`, i.e. `any2stringadd` with the Int
-  on the left) compiles and links clean but emits `int + string` Go —
-  `invalid operation: mismatched types int and untyped string` at
-  `go build`. A String-led concat (`"" + blocks + " blocks"`) is fine,
-  which is the tree's universal style anyway. Workaround: lead every
-  mixed concat with a String. Filed: `WATA-INT-LED-STRING-CONCAT`.
