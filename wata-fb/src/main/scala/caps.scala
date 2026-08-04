@@ -57,10 +57,11 @@ object FbCaps:
     catch case e: sgo.GoError => out = HttpResponse(0, "")
     out
 
-  /** "" body -> nil reader (a GET; the httpscenario `newRequest(_, _, null)`
-   *  shape), else a strings.Reader over the (binary-safe) body String. */
+  /** "" body -> nil reader (a GET; the httpscenario
+   *  `newRequest(_, _, null.asInstanceOf[go.io.Reader])` shape), else a
+   *  strings.Reader over the (binary-safe) body String. */
   def bodyReader(req: HttpRequest): go.io.Reader =
-    if req.body == "" then null
+    if req.body == "" then null.asInstanceOf[go.io.Reader]
     else go.strings.newReader(req.body)
 
   def setHeaders(r: go.net.http.Request, hs: List[(String, String)]): Unit =

@@ -1,11 +1,11 @@
 # The sgola toolchain commit this repo builds against.
 #
 # Wata is a downstream consumer of sgola (the restricted-Scala-3-to-Go
-# compiler). ~/g/sgola may be an active development tree; wata builds against
+# compiler). A local sgola checkout may be an active development tree; wata builds against
 # a *pinned clone* instead, so a toolchain change is a deliberate, reviewable
 # commit here rather than an invisible drift.
 #
 # Bump with:  tools/toolchain.py pin <sha>   (then re-run tools/toolchain.py sync)
 #
 repo   https://github.com/adriaanm/sgola.git
-commit c2d89b0c14d57e1c46e890010e27d3d0afb6e819
+commit b0d02aef7b19e9eda1b381c037621c18bfa41c20
