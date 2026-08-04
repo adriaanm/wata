@@ -41,8 +41,25 @@ object MediaEdge:
     else dispatch(w, r, go.string(raw))
 
   def dispatch(w: go.net.http.ResponseWriter, r: go.net.http.Request, reqBody: String): Unit =
-    if r.uRL.path.contains("/download/") then download(w, r)
+    if isDownload(r.uRL.path) then download(w, r)
     else jsonReply(w, r, reqBody)
+
+  /** exact match on the three registered download patterns —
+   *  `/_matrix/media/{v3,v1}/download/{serverName}/{mediaId}` and
+   *  `/_matrix/client/v1/media/download/{serverName}/{mediaId}` — segment
+   *  count + literal segments, like `Router.routeSeg`. */
+  def isDownload(path: String): Boolean =
+    isMediaDl(path, Router.segCount(path)) || isClientDl(path, Router.segCount(path))
+
+  def isMediaDl(path: String, n: scala.Int): Boolean =
+    n == 6 && Router.seg(path, 0) == "_matrix" && Router.seg(path, 1) == "media"
+      && isDlVersion(Router.seg(path, 2)) && Router.seg(path, 3) == "download"
+
+  def isDlVersion(v: String): Boolean = v == "v3" || v == "v1"
+
+  def isClientDl(path: String, n: scala.Int): Boolean =
+    n == 7 && Router.isClientV(path, "v1") && Router.seg(path, 3) == "media"
+      && Router.seg(path, 4) == "download"
 
   def jsonReply(w: go.net.http.ResponseWriter, r: go.net.http.Request, reqBody: String): Unit = Router.route(r, reqBody) match
     case rr: Right[MErr, Json] => Respond.finish(w, 200, Json.write(rr.right))

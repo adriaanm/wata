@@ -99,10 +99,15 @@ to `MediaEdge.dispatch` (`server.scala:27`), which special-cases media
 everything else, including media *upload*, through the JSON pipeline
 (`MediaEdge.jsonReply`, `server.scala:32`).
 
-The JSON pipeline calls `Router.route` (`handlers.scala:20`), which is a flat
-if/else chain matching on HTTP method and `r.URL.Path` (substring/suffix
-tests, not the mux's own pattern variables beyond `PathValue`). `route`
-dispatches to per-area objects: `Router` itself for auth/profile/account-data,
+The JSON pipeline calls `Router.route` (`handlers.scala`), which re-derives
+the handler from `r.URL.Path` — the facade's `Request` does not expose the
+mux's matched pattern, so the path is re-parsed. The dispatch is a flat
+if/else chain and EXACT: literal paths compare whole, and each parameterized
+pattern has a predicate matching on segment count plus its literal segments
+(`Router.seg`/`segCount`), mirroring `registerRoutes` one for one — never a
+raw substring, which a parameter value could collide with. The download edge
+(`MediaEdge.isDownload`, server.scala) matches its three registered patterns
+the same way. `route` dispatches to per-area objects: `Router` itself for auth/profile/account-data,
 `Rooms` for room/messaging/media/receipt endpoints, `Sync` for `/sync`. Each
 handler function threads down to a leaf that returns `Either[MErr, Json]` —
 `Left` for a Matrix-style error, `Right` for the 200 body. There is no
@@ -507,21 +512,6 @@ line in `TODO.jsonl`; grep the key here for the body.
   `server.scala:56-59`: `Access-Control-Allow-Origin: *` on every response)
   with no configuration knob; fine for the current trusted-network / dev
   posture but worth flagging if this is ever exposed more broadly.
-- `[SRV-ROUTE-SUBSTRING]` **`Router.route`'s dispatch is substring/suffix matching on the raw path**
-  (`handlers.scala:20-40`, e.g. `path.contains("/send/")`,
-  `path.endsWith("/join")`) layered on top of the mux's own exact
-  method+pattern registration — the mux already disambiguates the concrete
-  routes, so this second, looser dispatch inside `route` is redundant with,
-  and looser than, what got the request there in the first place. It works
-  today because the registered pattern set doesn't create an ambiguous
-  substring collision, but it's a latent trap for the next added route
-  (e.g. any future path containing `/join/` as a substring of something
-  unrelated would misroute).
-- **`GET /_matrix/client/v1/directory/room/{roomAlias}` vs.
-  `Router.route`'s `path.contains("/directory/room/")` test**
-  (`handlers.scala:32`) — this would also match an alias that itself
-  contained the literal substring `/directory/room/`, though Matrix room
-  aliases realistically won't.
 - **Every list-shaped store slice (`acct`, `receiptList`, `roomIds`,
   `waiters`, room `state`/`timeline`) is scanned linearly on every read and
   write** (`store.scala`, throughout — e.g. `findAcct`, `filterReceipts`,

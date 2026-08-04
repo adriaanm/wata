@@ -11,43 +11,128 @@ import JsonNav.*
  *
  *  A single `WataHandler` is registered on the ServeMux for every route; the mux
  *  does the path + method match (Go 1.22 patterns) and param capture, and
- *  `route` re-derives which handler from method + path, reading params back with
- *  `Request.PathValue`.
+ *  `route` re-derives which handler — the facade's `Request` does not expose
+ *  the matched pattern, so the path is re-parsed here. The dispatch is EXACT: a
+ *  literal path compares whole, and a parameterized pattern matches on segment
+ *  count plus its literal segments (`seg`/`segCount`), mirroring the mux
+ *  registration (server.scala `registerRoutes`) one for one — never a raw
+ *  substring, which a parameter value could collide with. Params are read back
+ *  with `Request.PathValue`. The method is not re-checked (the mux 405s a
+ *  method mismatch before we run), except where one pattern serves two methods
+ *  (login, account data).
  */
 object Router:
 
   def route(r: go.net.http.Request, body: String): Either[MErr, Json] =
-    val m = r.method
-    val path = r.uRL.path
+    routeSeg(r, r.method, body, r.uRL.path, segCount(r.uRL.path))
+
+  def routeSeg(r: go.net.http.Request, m: String, body: String, path: String, n: scala.Int): Either[MErr, Json] =
     if path == "/_matrix/client/versions" then Right(versions())
     else if isLoginPath(path) then loginRoute(m, body)
     else if path == "/_matrix/client/v3/logout" then logoutRoute(r)
     else if path == "/_matrix/client/v3/account/whoami" then whoami(r)
-    else if path.endsWith("/sync") then Sync.handle(r)
-    else if path.startsWith("/_wata/v1/dm/") then Dm.route(r)
+    else if path == "/_matrix/client/v3/sync" then Sync.handle(r)
+    else if isDmPath(path, n) then Dm.route(r)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
-    else if path.endsWith("/messages") then Rooms.messages(r)
-    else if isAcctPath(path) then acctRoute(m, path, r, body)
-    else if isProfilePath(path) then profileRoute(path, r, body)
-    else if path.contains("/keys/") then Keys.route(path, r, body)
-    else if path.contains("/directory/room/") then Rooms.resolveAlias(r)
-    else if path.endsWith("/upload") then Rooms.upload(r, body)
-    else if path.contains("/send/") then Rooms.sendEvent(r, body)
-    else if path.contains("/redact/") then Rooms.redact(r, body)
-    else if path.contains("/receipt/") then Rooms.receipt(r)
-    else if path.contains("/state/") then Rooms.setState(r, body)
-    else if path.endsWith("/invite") then Rooms.inviteRoute(r, body)
-    else if path.endsWith("/leave") then Rooms.leaveRoute(r, body)
-    else if path.endsWith("/kick") then Rooms.kickRoute(r, body)
-    else if path.endsWith("/ban") then Rooms.banRoute(r, body)
-    else if path.endsWith("/join") then Rooms.joinRoute(r)
-    else if path.contains("/join/") then Rooms.joinRoute(r)
+    else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)
+    else if isAcctPath(path, n) then acctRoute(m, path, r, body)
+    else if isProfilePath(path, n) then profileRoute(path, r, body)
+    else if isKeysPath(path, n) then Keys.route(path, r, body)
+    else if isAliasPath(path, n) then Rooms.resolveAlias(r)
+    else if path == "/_matrix/media/v3/upload" then Rooms.upload(r, body)
+    else if isRoomVerb(path, n, 8, "send") then Rooms.sendEvent(r, body)
+    else if isRoomVerb(path, n, 8, "redact") then Rooms.redact(r, body)
+    else if isRoomVerb(path, n, 8, "receipt") then Rooms.receipt(r)
+    else if isStatePath(path, n) then Rooms.setState(r, body)
+    else if isRoomVerb(path, n, 6, "invite") then Rooms.inviteRoute(r, body)
+    else if isRoomVerb(path, n, 6, "leave") then Rooms.leaveRoute(r, body)
+    else if isRoomVerb(path, n, 6, "kick") then Rooms.kickRoute(r, body)
+    else if isRoomVerb(path, n, 6, "ban") then Rooms.banRoute(r, body)
+    else if isRoomVerb(path, n, 6, "join") then Rooms.joinRoute(r)
+    else if isJoinById(path, n) then Rooms.joinRoute(r)
     else Left(MErr(404, M_UNRECOGNIZED(), "Unrecognized request"))
 
+  // ---- path segments ----------------------------------------------------------
+
+  /** segments of a leading-'/' path, Go `strings.Split(path[1:], "/")` style: a
+   *  trailing slash yields a final empty segment (which is how the mux's
+   *  `{stateKey...}` wildcard matches an empty remainder). */
+  def segCount(path: String): scala.Int =
+    var n = 1
+    var i = 1
+    while i < path.length do
+      if path.charAt(i) == '/' then n = n + 1
+      i = i + 1
+    n
+
+  /** the `want`-th segment; "" when out of range (callers gate on `segCount`). */
+  def seg(path: String, want: scala.Int): String =
+    var start = 1
+    var k = 0
+    while k < want && start < path.length do
+      if path.charAt(start) == '/' then k = k + 1
+      start = start + 1
+    if k < want then "" else segFrom(path, start)
+
+  def segFrom(path: String, start: scala.Int): String =
+    var e = start
+    while e < path.length && path.charAt(e) != '/' do e = e + 1
+    path.substring(start, e)
+
+  // ---- one predicate per registered pattern shape -----------------------------
+
+  def isClientV(path: String, v: String): Boolean =
+    seg(path, 0) == "_matrix" && seg(path, 1) == "client" && seg(path, 2) == v
+
   def isLoginPath(path: String): Boolean = path == "/_matrix/client/v3/login"
-  def isProfilePath(path: String): Boolean = path.contains("/profile/")
-  def isAcctPath(path: String): Boolean = path.contains("/account_data/")
-  def isRoomAcct(path: String): Boolean = path.contains("/rooms/")
+
+  /** `/_wata/v1/dm/{userId}` */
+  def isDmPath(path: String, n: scala.Int): Boolean =
+    n == 4 && seg(path, 0) == "_wata" && seg(path, 1) == "v1" && seg(path, 2) == "dm"
+
+  /** `/_matrix/client/{v3,v2}/profile/{userId}` (GET) and
+   *  `/_matrix/client/v3/profile/{userId}/{displayname,avatar_url}` (PUT). */
+  def isProfilePath(path: String, n: scala.Int): Boolean =
+    if n == 5 then (isClientV(path, "v3") || isClientV(path, "v2")) && seg(path, 3) == "profile"
+    else n == 6 && isClientV(path, "v3") && seg(path, 3) == "profile" && isProfileField(seg(path, 5))
+
+  def isProfileField(s: String): Boolean = s == "displayname" || s == "avatar_url"
+
+  /** `/_matrix/client/v3/user/{userId}/account_data/{type}` and
+   *  `/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}`. */
+  def isAcctPath(path: String, n: scala.Int): Boolean =
+    if !(isClientV(path, "v3") && seg(path, 3) == "user") then false
+    else if n == 7 then seg(path, 5) == "account_data"
+    else n == 9 && seg(path, 5) == "rooms" && seg(path, 7) == "account_data"
+
+  def isRoomAcct(path: String): Boolean = seg(path, 5) == "rooms"
+
+  /** `/_matrix/client/v3/keys/{query,upload}` and
+   *  `/_matrix/client/v3/keys/device_signing/upload`. */
+  def isKeysPath(path: String, n: scala.Int): Boolean =
+    if !(isClientV(path, "v3") && seg(path, 3) == "keys") then false
+    else if n == 5 then seg(path, 4) == "query" || seg(path, 4) == "upload"
+    else n == 6 && seg(path, 4) == "device_signing" && seg(path, 5) == "upload"
+
+  /** `/_matrix/client/v1/directory/room/{roomAlias}` */
+  def isAliasPath(path: String, n: scala.Int): Boolean =
+    n == 6 && isClientV(path, "v1") && seg(path, 3) == "directory" && seg(path, 4) == "room"
+
+  /** `/_matrix/client/v3/join/{roomIdOrAlias}` */
+  def isJoinById(path: String, n: scala.Int): Boolean =
+    n == 5 && isClientV(path, "v3") && seg(path, 3) == "join"
+
+  /** `/_matrix/client/v3/rooms/{roomId}/<verb>/...` at exactly `want` segments:
+   *  6 for the bare verbs (join/invite/leave/kick/ban/messages), 8 for the
+   *  two-param ones (send/redact/receipt). */
+  def isRoomVerb(path: String, n: scala.Int, want: scala.Int, verb: String): Boolean =
+    n == want && isClientV(path, "v3") && seg(path, 3) == "rooms" && seg(path, 5) == verb
+
+  /** `/_matrix/client/v3/rooms/{roomId}/state/{eventType}` plus the
+   *  `{stateKey...}` wildcard form — 7 segments or more (the wildcard may be
+   *  empty, one segment, or, per the mux, several). */
+  def isStatePath(path: String, n: scala.Int): Boolean =
+    n >= 7 && isClientV(path, "v3") && seg(path, 3) == "rooms" && seg(path, 5) == "state"
 
   // ---- access-token middleware -----------------------------------------------
 
@@ -149,9 +234,9 @@ object Router:
   // ---- profile ------------------------------------------------------------
 
   def profileRoute(path: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
-    if path.endsWith("/displayname") then setDisplayName(r, body)
-    else if path.endsWith("/avatar_url") then setAvatarUrl(r, body)
-    else getProfile(r)
+    if segCount(path) == 5 then getProfile(r)
+    else if seg(path, 5) == "displayname" then setDisplayName(r, body)
+    else setAvatarUrl(r, body)
 
   def getProfile(r: go.net.http.Request): Either[MErr, Json] =
     Store.getProfile(r.pathValue("userId")) match
