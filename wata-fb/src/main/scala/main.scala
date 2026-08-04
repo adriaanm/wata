@@ -70,8 +70,14 @@ object Main:
     // no audio hardware — only a live wata-server):
     //   wata-fb sim <base> <user> <pass> [--once]  interactive ANSI half-block
     //                                              terminal client (sim.scala)
+    //   wata-fb uitest <script> <base> <user> <pass> <outdir>
+    //                                              the deterministic scripted
+    //                                              driver + PNG checkpoints
+    //                                              (uiscript.scala)
     else if args.length > 0 && args(0) == "sim" then
       Sim.run(args)
+    else if args.length > 0 && args(0) == "uitest" then
+      UiScript.run(args)
     else
       skeleton()
 

@@ -1,6 +1,6 @@
 # 0004 — wata-fb host simulator
 
-Status: accepted
+Status: done
 
 `[FB-SIM]`
 

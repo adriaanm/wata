@@ -58,7 +58,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist fb-smoke client-tests integ golden amd64-smoke
+ci: smoke persist fb-smoke client-tests integ golden fb-ui-tests amd64-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -75,6 +75,10 @@ fb-smoke:
 # device client: byte-exact golden frame against tools/fb-golden.png
 golden:
     bash tools/fb-golden.sh
+
+# device UI: scripted runs of the real frame loop, golden frames per checkpoint
+fb-ui-tests *ARGS:
+    tools/fb-ui-tests.py {{ARGS}}
 
 # device UI: the real frame loop in this terminal, against a live server
 fb-sim *ARGS:

@@ -1,0 +1,19 @@
+# bob: sync in, see alice's voice message arrive, open the conversation, and
+# let the read receipt round-trip before the frame is dumped.
+#
+# This is plan 0004's exit criterion: the RECEIVING client's conversation view
+# renders the message row, checked as a golden frame.
+
+wait syncing 1 900
+# the family invite auto-joins, so bob ends up with the same two conversations
+wait convs 2 900
+wait msgs 1 2000
+advance 30
+checkpoint bob-contacts
+
+# open the family conversation — which also sends the read receipt for its
+# latest message
+tap enter
+wait played 1 2000
+advance 60
+checkpoint bob-conversation
