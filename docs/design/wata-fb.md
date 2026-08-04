@@ -189,8 +189,10 @@ explicit state machine, not a generic widget framework:
   index; `Applet` (`applets.scala:506`) is a three-method interface
   (`handleInput`, `update`, `render`) implemented by immutable,
   wither-style state records rather than mutation. There are exactly
-  two applets today: `WataApplet`/`WataLogic` (contacts + conversation
-  view, PTT recording, playback — `applets.scala:38-479`) and
+  three applets today: `WataApplet`/`WataLogic` (contacts + conversation
+  view, PTT recording, playback — `applets.scala:38-479`),
+  `SnakeApplet`/`SnakeLogic` (the snake game, `snake.scala` — ported
+  from the Zig client's `applets/snake.zig`; see the parity table) and
   `SettingsApplet`/`SettingsLogic` (menu: audio echo test,
   brightness, screen timeout, display name, disconnect, info, plus
   the diagnostics absorbed from system-menu — the wlan0-IP and
@@ -200,10 +202,12 @@ explicit state machine, not a generic widget framework:
   last column; the window start is derived from the selection (no
   scroll state), which keeps the frames the goldens pin
   deterministic.
-- Input routing has two special cases outside the generic per-applet
+- Input routing has three special cases outside the generic per-applet
   dispatch: the PTT button always targets the wata applet regardless
-  of which applet is active, and the two "dot" buttons cycle the
-  active applet (`Shell.handleInput`, `shell.scala:109`).
+  of which applet is active, the two "dot" buttons cycle the
+  active applet, and red pressed in the snake applet returns to the
+  wata applet — the red-goes-back convention; the game itself never
+  sees the key (`Shell.handleInput`).
 - The shell owns the `AudioEvt` mailbox's SINGLE per-frame drain
   (`Shell.drainAudio` -> `routeAudio`): echo events go to the settings
   applet, recording/playback events to the wata applet, whichever
@@ -214,7 +218,12 @@ explicit state machine, not a generic widget framework:
   dropped on the floor, at a scheduler-dependent ~1% per send that
   grew under machine load (docs/plans/0009-audio-event-routing.md).
   Every applet's `update` is still called every frame even when
-  inactive, for its timers and cursor clamping.
+  inactive, for its timers and cursor clamping — except the snake,
+  which `Shell.tickOne` ticks only while active: the Zig shell ticks
+  the active applet alone, so switching away from its snake implicitly
+  pauses the game, and an always-ticking port would run it into a wall
+  unwatched. The snake takes no part in the audio routing the
+  always-tick rule exists for.
 
 ## Input
 
@@ -572,7 +581,7 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Eight scripted scenarios, each a fresh server and a sequence of
+Nine scripted scenarios, each a fresh server and a sequence of
 one-user phases:
 
 | scenario | what it pins |
@@ -585,6 +594,7 @@ one-user phases:
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED`, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm. |
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, device info, and the diagnostics rows — the IP and cellular info rows (an honest `n/a` on the host), the power-action confirm arming, the guarded no-op on the second OK, and a move-away cancelling an armed action. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
+| `snake` | the snake applet end to end, on exact frame counts (the game is pure virtual-clock work once open, and the food PRNG is fixed-seed, so `idle N` lands on exact game states — `tools/snake-frames.py` is the mirror that designs the counts): the fresh board, the first eat (score, growth, the next food), the turn-and-wall game over with its overlay, the OK restart continuing the PRNG sequence, and red leaving back to the wata applet. |
 
 A few things the scripts need that are worth knowing. `waitmax` is the
 mirror of `wait` — advance until a probe drops to a bound — because a
@@ -625,6 +635,7 @@ a rediscovery):
 | play failure feedback (`PLAY FAILED`) and recovery | `send-play-failed` |
 | every settings item, preference persistence | `settings-walk` |
 | screensaver blank + wake swallow | `settings-walk` |
+| snake: open, steer, eat, game over, restart, leave | `snake` |
 | mid-phase network drop / degraded boot | NOT COVERED — needs a proxy or server pause; deferred to the connection-status UX work (plan 0011, out of scope) |
 
 ## Parity with the Zig fbclient
@@ -679,8 +690,21 @@ information in the equivalent place, not the same number.
 | PTT overlay: red bar + hold timer | yes | yes | same, with a `REC` prefix |
 | `SENT` / `SEND FAILED` / `PLAY FAILED` flash | yes | yes | same |
 | screensaver blank + wake-swallows-the-keypress | yes | yes | same, and covered by `settings-walk` |
+| **Snake applet** ||||
+| board: full-width grid of 6x8 cells, bottom row = score | 21x18 | 26x14 | same cells, sized to the landscape grid |
+| 3-cell snake at board center heading right | yes | yes | same |
+| arrows steer, buffered one tick, reversal ignored | yes | yes | same guard (against the applied direction) |
+| tick 150ms/step, -5ms per food, 60ms floor | yes | yes | same |
+| food +10, grow by one, red cell; green head, dark-green body, 1px cell gap | yes | yes | same |
+| wall + self collision end the game | yes | yes | same |
+| zero-padded score, bottom row | `SCORE:%04d` | same | same |
+| GAME OVER overlay, OK restarts | yes | yes | same, hint says `OK` (the green key's label), not `ENTER` |
+| food PRNG | wall-clock-seeded | fixed-seed minstd LCG threaded through the state | deliberate: deterministic under the uitest virtual clock; a restart continues the sequence rather than reseeding |
+| implicit pause when switched away | shell ticks active applet only | `Shell.tickOne` skips the inactive snake | same behavior by special case (this shell otherwise ticks every applet) |
+| leave the game with red | no key (dots only) | red returns to the wata applet | wata-fb adds the shell's red-goes-back convention |
+| the rows above under test | n/a | yes | the `snake` scenario |
 | **Not ported** ||||
-| snake / clock / charmap applets | yes | no | toys, out of scope |
+| clock / charmap applets | yes | no | toys, out of scope |
 | FreeType text rendering | optional | no | bitmap font only |
 
 Three things worth stating outright:
@@ -788,7 +812,8 @@ it is not part of `just ci`.
 | `audiothread.scala` | 342 | The background audio goroutine: record/playback/echo-test sessions over the `AudioCmd`/`AudioEvt` mailbox protocol, layered close-and-rethrow resource tiers around the cgo capture/encoder/decoder handles. |
 | `fbtest.scala` | 102 | `fbdump` (host PNG golden) and `fbsmoke` (on-device fb/LED/evdev smoke test) drivers; also `FbTest.present`, the byte-copy blit used by the real UI loop too. |
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
-| `shell.scala` | 157 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, everything else goes to the active applet). |
+| `shell.scala` | 204 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, red-in-snake goes back to wata, everything else goes to the active applet; the snake is also the one applet ticked only while active). |
+| `snake.scala` | 275 | The snake applet, ported from the Zig client's `applets/snake.zig`: packed-cell body, deterministic minstd food PRNG, tick/step game logic, and rendering; frame counts for its uitest scenario are designed with `tools/snake-frames.py`, an exact Python mirror. |
 | `applets.scala` | 985 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `diag.scala` | 107 | The settings applet's diagnostics + power actions (`Diag`): the wlan0/ppp0 reads and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources; `onDevice()` (the lcd-bl sysfs probe) gates the reads and the destructive paths. |
 | `netexec.scala` | 24 | The `go.exec` facade over `os/exec`, curated to `Command`/`Output` — what `Diag` runs `ip` and the power commands through. |
