@@ -101,3 +101,6 @@ __pycache__/
 # (regenerate with `just ide`); .metals/ is the Metals cache
 .bsp/
 .metals/
+
+# cross-repo ticket drop (drained into TODO.jsonl, never committed)
+inbox/

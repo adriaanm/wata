@@ -48,6 +48,12 @@ drains its inbox into its own `TODO.jsonl`; queue order stays its
 designer's act. Mirror the item in `WATA-TODO.md`'s waiting-on-sgola list,
 and when the fix lands upstream, remove the workaround.
 
+The channel is symmetric: this repo has an `inbox/` too (gitignored).
+The sgola agent drops completion notices and heads-ups there — "fix
+landed at `<sha>`, repin", a facade change that will hit our code, a
+restriction ruling that affects us. Drain it at session start: act on or
+queue each ticket in `TODO.jsonl`, then delete the file.
+
 **The two repos share exactly one interface:**
 
 ```
