@@ -1,0 +1,111 @@
+# conversation-actions, phase 1: alice fills a conversation past the visible
+# window, scrolls to the bottom of it, and redacts a message with F2.
+#
+# Thirteen clips is deliberate: twelve message rows fit between the header and
+# the footer, so the thirteenth can only be reached by scrolling, and the
+# scrolled window is what the second checkpoint pins.
+
+family @bob:localhost
+
+wait syncing 1 900
+wait convs 1 900
+
+# Each clip is one PTT press/release into the selected (family) conversation.
+# `wait msgs` after each one keeps the timeline order deterministic — without
+# it the sends would race and the rows could arrive interleaved.
+key ptt press
+advance 4
+key ptt release
+wait msgs 1 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 2 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 3 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 4 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 5 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 6 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 7 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 8 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 9 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 10 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 11 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 12 1500
+
+key ptt press
+advance 4
+key ptt release
+wait msgs 13 1500
+
+# outrun the SENT flash before opening the conversation
+advance 120
+tap enter
+advance 5
+checkpoint conv-top
+
+# twelve downs walk the selection from the oldest message to the newest, which
+# sits one row past the window — the list scrolls by one.
+tap down
+tap down
+tap down
+tap down
+tap down
+tap down
+tap down
+tap down
+tap down
+tap down
+tap down
+tap down
+advance 5
+checkpoint conv-scrolled
+
+# back up two rows, then F2 redacts the selected message. The row count drops,
+# which `wait` cannot see (it tests >=), so `waitmax` is what asserts it.
+tap up
+tap up
+tap f2
+waitmax msgs 12 1500
+advance 5
+checkpoint conv-deleted

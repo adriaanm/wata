@@ -211,7 +211,43 @@ object WataLogic:
   def update(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
     var st = tickTimers(s, dt)
     st = drainAudioEvents(st, ctx)
+    st = clampSelection(st, ctx)
     st
+
+  /** Reconcile the cursors with the live snapshot. The lists shrink under the
+   *  cursor without any input — a redaction drops a message row, a peer
+   *  leaving drops a conversation — and a selection left past the end
+   *  highlights nothing and plays nothing. So each frame pulls both cursors
+   *  back onto the last row and drags the scroll window after them. */
+  def clampSelection(s: WataState, ctx: FrameCtx): WataState =
+    var out = clampContacts(s, convCount(ctx.snap))
+    out = clampMessages(out, msgCount(ctx.snap, out.convContactIdx))
+    out
+
+  def clampContacts(s: WataState, count: scala.Int): WataState =
+    val sel = clampIdx(s.selected, count)
+    withSel(s, sel, clampScroll(s.scrollOffset, sel))
+
+  def clampMessages(s: WataState, count: scala.Int): WataState =
+    val sel = clampIdx(s.msgSelected, count)
+    withMsgSel(s, sel, clampScroll(s.msgScroll, sel))
+
+  /** the last index, or 0 for an empty list (which renders no rows anyway). */
+  def clampIdx(i: scala.Int, count: scala.Int): scala.Int =
+    var out = i
+    if count <= 0 then out = 0
+    else if i > count - 1 then out = count - 1
+    if out < 0 then out = 0
+    out
+
+  /** the scroll offset that keeps `sel` inside the visible window. */
+  def clampScroll(off: scala.Int, sel: scala.Int): scala.Int =
+    val vis = visibleRows()
+    var out = off
+    if sel < out then out = sel
+    if sel >= out + vis then out = sel - vis + 1
+    if out < 0 then out = 0
+    out
 
   def tickTimers(s: WataState, dt: scala.Double): WataState =
     val hold = if s.pttHeld then s.pttHoldTime + dt else s.pttHoldTime

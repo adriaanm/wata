@@ -501,11 +501,22 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-The scripted scenario `voice-alice-to-bob` is the coverage that
-matters: alice bootstraps the family room, holds PTT, and sends; bob
-then runs, auto-joins, opens the conversation, and his conversation
-view renders the message row — golden-framed, along with both contact
-lists and the settings applet.
+Three scripted scenarios, each a fresh server and a sequence of
+one-user phases:
+
+| scenario | what it pins |
+|---|---|
+| `voice-alice-to-bob` | the send path end to end: alice bootstraps the family room, holds PTT and sends; bob runs, auto-joins, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
+| `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, and redacts one with F2; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, and the played marks. |
+| `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
+
+Two things the scripts need that are worth knowing. `waitmax` is the
+mirror of `wait` — advance until a probe drops to a bound — because a
+redaction shrinks a count, which an ordinary `wait` (a `>=` test)
+already satisfies. And a phase whose credentials are `-` cannot also
+run the out-of-band `family` bootstrap, since that logs in directly and
+a resumed run has no password: bootstrap in one phase, resume in a
+later one.
 
 ## Parity with the Zig fbclient
 
@@ -541,7 +552,8 @@ rewrites its row here.
 | OK = receipt (if unplayed) + download-and-play | yes | yes | same |
 | F2 = redact the selected message | yes | yes | same |
 | message scrolling past the visible window | yes | yes | same |
-| any of the six rows above under test | n/a | no | **GAP** — `fb-ui-tests` walks the list and opens a conversation, nothing more |
+| a selection left past the end of a shrunk list | not reconciled | reconciled every frame | wata-fb only, see below |
+| the rows above under test | n/a | yes | the `conversation-actions` scenario |
 | **Settings** ||||
 | echo test driven over the audio command mailbox | yes | yes | same |
 | brightness ±5, clamped 0..40, sysfs write-through | yes | yes | same |
@@ -580,6 +592,14 @@ Three things worth stating outright:
   number is inherited from the portrait grid, where 16 is a real row.
   (The Zig client has the same arithmetic and loses its own fourth
   echo-test line to it.)
+- **The cursors are reconciled with the snapshot every frame.** Both
+  lists can shrink under the selection with no input at all — a
+  redaction drops a message row, a peer leaving drops a conversation —
+  and a selection left past the end highlights nothing and plays
+  nothing. `WataLogic.clampSelection`, called from `update`, pulls the
+  contact and message cursors back onto the last row and drags the
+  scroll window after them. The Zig client does not do this and has the
+  same dead cursor after its own `F2`.
 - **Every applet ticks every frame here; the Zig shell ticks only the
   active one.** That is a fix, not a divergence to undo: the wata
   applet must keep draining recording-done audio events (which is what
@@ -628,12 +648,12 @@ is enough.
 | `fbtest.scala` | 102 | `fbdump` (host PNG golden) and `fbsmoke` (on-device fb/LED/evdev smoke test) drivers; also `FbTest.present`, the byte-copy blit used by the real UI loop too. |
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
 | `shell.scala` | 157 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, everything else goes to the active applet). |
-| `applets.scala` | 769 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `applets.scala` | 800 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
 | `ui.scala` | 291 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
 | `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
-| `uiscript.scala` | 399 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
+| `uiscript.scala` | 420 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
 
 ## Known gaps / debt observed while reading
 
@@ -699,12 +719,12 @@ gap, the `/dev/shm`-only deploy), a few things stood out during this read:
   since there is no chunking of the DEFLATE stream into multiple
   stored blocks.
 - **`just fb-ui-tests` covers the frame loop, not every applet path.**
-  The scripted scenario walks the contact list, PTT send, applet
-  switching, opening a conversation and the read-receipt round-trip;
-  it does not touch playback selection, delete (`F2`), scrolling past
-  the visible rows, the screensaver timeout, or any settings item
-  beyond the menu render. Those remain manual. Adding coverage is a
-  script file plus a golden, not code.
+  The scenarios walk the contact list, PTT send, applet switching, the
+  conversation view's selection/scroll/play/delete inputs, the
+  read-receipt round-trip and session resume. Still untouched: the
+  screensaver timeout, and every settings item's effect (the settings
+  goldens are menu renders). Adding coverage is a script file plus a
+  golden, not code.
 - **`Ui.frameStep`'s `dt` is the only thing the scripted clock
   virtualizes.** Anything a frame renders that depends on WALL-clock
   time or on network arrival order would still be non-deterministic;

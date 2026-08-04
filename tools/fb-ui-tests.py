@@ -50,6 +50,13 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "conversation-actions",
+        "phases": [
+            ("alice", "alice-convo.txt"),
+            ("bob", "bob-play.txt"),
+        ],
+    },
+    {
         "name": "session-resume",
         "phases": [
             ("alice", "alice-login.txt"),

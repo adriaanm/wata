@@ -39,6 +39,9 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              its press and release separated)
  *    wait <probe> <n> <frames> advance until probe >= n, or fail after
  *                              <frames> frames
+ *    waitmax <probe> <n> <frames>  the mirror — advance until probe <= n
+ *                              (what a redaction needs: a shrinking count
+ *                              already satisfies `wait`)
  *    expect <probe> <n>        fail unless probe >= n right now
  *    checkpoint <name>         write <outdir>/<name>.png from the live frame
  *
@@ -170,6 +173,9 @@ object UiScript:
     else if cmd == "wait" then
       err = waitFor(nth(ts, 1), num(nth(ts, 2), 1), num(nth(ts, 3), 600),
         c, clock, evts, dev, px)
+    else if cmd == "waitmax" then
+      err = waitMax(nth(ts, 1), num(nth(ts, 2), 0), num(nth(ts, 3), 600),
+        c, clock, evts, dev, px)
     else if cmd == "expect" then
       err = expect(nth(ts, 1), num(nth(ts, 2), 1))
     else if cmd == "checkpoint" then
@@ -224,6 +230,23 @@ object UiScript:
     var err = ""
     if !ok then
       err = "wait " + name + " >= " + want + " timed out after " + maxFrames +
+        " frames (saw " + probe(name) + ")"
+    err
+
+  /** the mirror of `wait`: advance until a probe DROPS to `want` or below.
+   *  A redaction is only observable this way — the count shrinking already
+   *  satisfies a `wait`, which tests for `>=`. */
+  def waitMax(name: String, want: scala.Int, maxFrames: scala.Int, c: MatrixClient,
+              clock: Clock, evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
+    var i = 0
+    var ok = probe(name) <= want
+    while !ok && i < maxFrames do
+      step(c, clock, evts, dev, px)
+      ok = probe(name) <= want
+      i = i + 1
+    var err = ""
+    if !ok then
+      err = "waitmax " + name + " <= " + want + " timed out after " + maxFrames +
         " frames (saw " + probe(name) + ")"
     err
 
