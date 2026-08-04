@@ -3,9 +3,9 @@ import language.experimental.saferExceptions
 /** Device diagnostics + power actions for the settings applet — the minimum
  *  absorbed from system-menu (plan 0003, phase 5): the wlan0 address for the
  *  IP row, the ppp0 link for the cellular-data row, and poweroff /
- *  reboot-bootloader / reboot-edl for the power rows, each mirroring
- *  system-menu's own source (`ip -4 addr show <iface>`, the ppp0 sysfs node,
- *  and the same three commands). Device-layer app code over the `go.exec` /
+ *  reboot-bootloader / reboot-edl for the power rows (stdlib `net` for the
+ *  addresses, the ppp0 sysfs node, and system-menu's own three power
+ *  commands). Device-layer app code over the `go.netif` / `go.exec` /
  *  `go.sys` facades.
  *
  *  Everything compiles and renders on the host; `onDevice()` gates both the
@@ -29,32 +29,30 @@ object Diag:
 
   // ---- info rows ---------------------------------------------------------------
 
-  /** the IP row: wlan0's IPv4 address (system-menu's wifi_info source),
+  /** the IP row: wlan0's IPv4 address (what system-menu's wifi_info shows),
    *  "no addr" when the interface is down, "n/a" off-device. */
   def wlanIp(): String =
     var out = UNAVAILABLE
     if onDevice() then out = ifaceIp("wlan0")
     out
 
-  /** `ip -4 addr show <iface>` — the exact read system-menu does — parsed for
-   *  the first `inet a.b.c.d/nn`. */
+  /** the interface's first IPv4 address, via `net.InterfaceByName(name)` +
+   *  `Interface.Addrs()`; "no addr" when the interface has none, UNAVAILABLE
+   *  when it does not exist. `Addr.String()` is CIDR text, so the dotted
+   *  quad is the leading digits-and-dots run — an IPv6 address never yields
+   *  one (its text has no dot before the mask). */
   def ifaceIp(name: String): String =
     var out = "no addr"
     try
-      val cmd = go.exec.command4("ip", "-4", "addr", "show", name)
-      val raw = cmd.output()
-      val found = parseInet(go.string(raw))
-      if found != "" then out = found
+      val iface = go.netif.interfaceByName(name)
+      val addrs = iface.addrs()
+      var i = 0
+      while i < addrs.length do
+        if out == "no addr" then
+          val quad = addrPrefix(addrs(i).show())
+          if quad.indexOf(".") >= 0 then out = quad
+        i = i + 1
     catch case e: sgo.GoError => out = UNAVAILABLE
-    out
-
-  /** the address after the first "inet ", up to its "/nn" mask; "" if none. */
-  def parseInet(s: String): String =
-    var out = ""
-    val at = s.indexOf("inet ")
-    if at >= 0 then
-      val rest = s.substring(at + 5)
-      out = addrPrefix(rest)
     out
 
   /** the leading run of digits and dots — the dotted quad before the mask. */
