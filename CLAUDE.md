@@ -135,11 +135,23 @@ doc updates, and queue edits together — once its verification is green.
 Don't leave finished work sitting in the working tree waiting to be asked
 about; an uncommitted tree is work nobody else can see or bisect.
 
+### Working with subagents
+
+The main session is the **designer/reviewer**; implementation chunks go
+to subagents. A brief points at the governing plan/design doc and the
+oracle that judges the work (a conformance suite, an integ scenario, a
+golden), states the acceptance checks, and demands a gotcha report back —
+durable gotchas get folded into the design docs at review. **At most one
+subagent works in this tree at a time**: agents share `.toolchain`, the
+emitted Go, and the ci gate, so two in-tree agents poison each other's
+runs; further work queues or runs out-of-tree.
+
 ### Open work — `TODO.jsonl`
 
 `TODO.jsonl` is an **ephemeral work queue**, one JSON object per line,
-roughly priority-ordered. It holds only open items; it is not a record of
-anything. The durable content lives in the docs.
+**top line = work next** — to pick the next task, read the top of the
+queue. It holds only open items; it is not a record of anything. The
+durable content lives in the docs.
 
 ```json
 {"key":"FB-PNG-BLOCK","title":"one-line description","doc":"docs/design/wata-fb.md","inProgress":false}
