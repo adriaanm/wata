@@ -203,8 +203,6 @@ object PngCheck:
           if (hdr & 1) == 1 then sawFinal = true
           else if blen != 65535 then bad = "block " + (blocks - 1) + ": non-final block of " + blen
     if bad == "" && rawPos != raw.size then bad = "decoded " + rawPos + " of " + raw.size + " raw bytes"
-    // NB the concat is ""-led: an Int-led `blocks + "..."` compiles clean but
-    // emits `int + string` Go (WATA-TODO.md waiting-on-sgola).
     if bad == "" && blocks != wantBlocks then bad = "" + blocks + " blocks, want " + wantBlocks
     if bad == "" then
       val adler = (z(pos).toLong << 24) | (z(pos + 1).toLong << 16) | (z(pos + 2).toLong << 8) | z(pos + 3).toLong
