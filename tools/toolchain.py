@@ -183,6 +183,17 @@ def cmd_sync(_args):
                check=False, quiet=True).returncode != 0:
             run(["git", "fetch", "origin"], cwd=PINNED_HOME)
         run(["git", "checkout", "-q", "--detach", commit], cwd=PINNED_HOME)
+        # The clone's build products (plugin jar, frontend jar, minlib early
+        # jars) are untracked, so they survive the checkout and would be
+        # silently served for the WRONG commit — cmd_build's exists-checks
+        # can't tell. Drop them so the build below is from the pinned sources.
+        for jar in (PINNED_HOME / "plugin" / "target").glob("scala-*/sgola-plugin_*.jar"):
+            jar.unlink()
+        fe = PINNED_HOME / "tools" / "frontend" / "frontend.jar"
+        if fe.exists():
+            fe.unlink()
+        for d in (PINNED_HOME / "minlib" / "target").glob("scala-*/early"):
+            shutil.rmtree(d, ignore_errors=True)
     cmd_build(_args)
 
 
@@ -202,6 +213,11 @@ def cmd_build(_args):
     if not (home / "tools" / "frontend" / "frontend.jar").exists():
         print("toolchain: building the frontend daemon jar")
         run(["bash", "tools/frontend/build.sh"], cwd=home, env=env)
+
+    # A resident frontend daemon from an earlier build keeps serving its old
+    # classes (empty minlib early jars, phantom diagnostics from the wrong
+    # commit's checks). Restart it so the daemon always matches the jars.
+    run([str(home / "sgo" / "sgo"), "frontend", "restart"], cwd=home, env=env, check=False)
 
     print(f"toolchain: ready ({home})")
 
