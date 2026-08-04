@@ -161,6 +161,19 @@ the network/modem are up — the client already survives a dead server
 network" presentation of the existing connection state rather than an
 error surface. `[FB-BOOT-LOGO]`, `[FB-EARLY-BOOT]`.
 
+`[FB-EARLY-BOOT]` split ruled 2026-08-05: the init half is handed off to
+`bq268-alpine` (`docs/planning/wata-fb-early-boot.md` there — the tty1
+respawn flips from system-menu to wata-fb, respawn doubling as crash
+supervision, escape hatches kept). The flip is **gated on wata verifying
+the settings power actions on-device** (this phase's open boot-into-wata
+checkpoint) — until then a parent's only power-off path is system-menu.
+Wata's half is the calm waiting-state UI: until the first successful
+sync of a session, the wata applet presents "starting up" /
+"waiting for network" derived from the same pipe-and-health state the
+FB-CONN-STATUS element computes (plan 0013 M4's design), instead of the
+error surface; after first connect, ordinary reconnect presentation
+takes over.
+
 **Phase 6 — Family deployment.** Raspberry Pi target (arm64 build +
 service unit, extending `amd64-smoke`), journal-on by default with
 compaction, provisioning the actual family accounts, invite security
