@@ -1,10 +1,11 @@
-//go:build !(darwin && iroh)
+//go:build !(iroh && (darwin || (linux && arm)))
 
-// Pure-Go no-op stub for every build except darwin with the `iroh` tag
-// (milestone 1 is Mac-only; milestone 2 adds the device cross-build). It lets
-// every ordinary build — native sgo builds, the CGO_ENABLED=0 linux/amd64
-// cross-build — compile this package with no cargo, no staticlib. Every entry
-// point errors loudly rather than silently serving over the wrong transport.
+// Pure-Go no-op stub for every build without the `iroh` tag (and for tagged
+// builds on targets with no staged staticlib: darwin and linux/arm — the
+// BQ268 device — are the wired targets). It lets every ordinary build —
+// native sgo builds, the CGO_ENABLED=0 linux/amd64 cross-build — compile
+// this package with no cargo, no staticlib. Every entry point errors loudly
+// rather than silently serving over the wrong transport.
 
 package irohnet
 
@@ -13,7 +14,7 @@ import (
 	"net/http"
 )
 
-var errIrohStub = errors.New("irohnet: stub build (the real transport is darwin + `-tags iroh` — run mklib.py, then build with the tag)")
+var errIrohStub = errors.New("irohnet: stub build (the real transport needs `-tags iroh` on darwin or linux/arm — run mklib.py [arm], then build with the tag)")
 
 // GenKey — stub; see the darwin+iroh build.
 func GenKey() (string, string, error) { return "", "", errIrohStub }

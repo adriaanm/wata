@@ -11,9 +11,10 @@
 //     configured peer over iroh (one bidi stream per pooled connection).
 //   - Serve(path, handler) — config-driven http.Server.Serve over Listen.
 //
-// The REAL implementation builds only on darwin with the `iroh` build tag
-// (milestone 1 — build the staticlib first with ./mklib.py); everywhere else
-// a pure-Go stub errors loudly, so ordinary builds (including the linux/amd64
+// The REAL implementation builds with the `iroh` build tag on the wired
+// targets — darwin (staticlib: ./mklib.py) and linux/arm, the BQ268 device
+// cross-build (staticlib: ./mklib.py arm); everywhere else a pure-Go stub
+// errors loudly, so ordinary builds (including the linux/amd64
 // CGO_ENABLED=0 cross-build) never need cargo or the lib.
 //
 // net.Conn semantics, precisely (the honest-gaps ledger):
@@ -90,10 +91,12 @@ func (a Addr) Network() string { return "iroh" }
 func (a Addr) String() string  { return a.ID }
 
 // announce writes the listener's identity for a harness to pick up:
-// {"id": "<hex>", "addrs": ["127.0.0.1:52011", ...]} — unspecified hosts
-// rewritten to loopback (the addrs are the endpoint's LOCAL sockets; for the
-// same-machine smoke that is the dialable form). Written via rename so a
-// polling reader never sees a partial file.
+// {"id": "<hex>", "addrs": ["127.0.0.1:52011", "192.168.1.4:52011", ...]}.
+// The endpoint's LOCAL sockets usually bind an unspecified host; that is
+// expanded to every dialable form — loopback first (the same-machine tunnel
+// smoke) and then each non-loopback unicast interface address (a LAN peer's
+// dialable form; the on-device smoke filters for these). Written via rename
+// so a polling reader never sees a partial file.
 func announce(path, id string, addrs []string) error {
 	dialable := make([]string, 0, len(addrs))
 	for _, a := range addrs {
@@ -102,14 +105,19 @@ func announce(path, id string, addrs []string) error {
 			continue
 		}
 		ip := net.ParseIP(host)
-		if ip != nil && ip.IsUnspecified() {
-			if strings.Contains(host, ":") {
-				host = "::1"
-			} else {
-				host = "127.0.0.1"
-			}
+		if ip == nil || !ip.IsUnspecified() {
+			dialable = append(dialable, a)
+			continue
 		}
-		dialable = append(dialable, net.JoinHostPort(host, port))
+		v6 := strings.Contains(host, ":")
+		if v6 {
+			dialable = append(dialable, net.JoinHostPort("::1", port))
+		} else {
+			dialable = append(dialable, net.JoinHostPort("127.0.0.1", port))
+		}
+		for _, ifip := range interfaceIPs(v6) {
+			dialable = append(dialable, net.JoinHostPort(ifip, port))
+		}
 	}
 	blob, e := json.Marshal(map[string]any{"id": id, "addrs": dialable})
 	if e != nil {
@@ -120,4 +128,29 @@ func announce(path, id string, addrs []string) error {
 		return e
 	}
 	return os.Rename(tmp, path)
+}
+
+// interfaceIPs lists the host's non-loopback unicast addresses of one family
+// (v6 selects IPv6, else IPv4), link-local excluded — the addresses a LAN
+// peer can dial. Best-effort: enumeration failure is an empty list.
+func interfaceIPs(v6 bool) []string {
+	var out []string
+	ifaddrs, e := net.InterfaceAddrs()
+	if e != nil {
+		return out
+	}
+	for _, ia := range ifaddrs {
+		ipn, ok := ia.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipn.IP
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || !ip.IsGlobalUnicast() {
+			continue
+		}
+		if (ip.To4() == nil) == v6 {
+			out = append(out, ip.String())
+		}
+	}
+	return out
 }

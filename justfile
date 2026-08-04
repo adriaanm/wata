@@ -123,6 +123,12 @@ amd64-smoke:
 # processes, one machine, no real network and no TCP port. Needs cargo.
 tunnel-smoke:
     tools/tunnel-smoke.py
+
+# on-device iroh LAN smoke (plan 0013): armv7-musl cross-build, then the BQ268
+# dials this machine's wata-server over embedded iroh (direct LAN addrs, no
+# relay). Needs cargo + rustup + zig + the device (ssh host bq268); not in ci.
+iroh-lan-smoke:
+    tools/iroh-lan-smoke.py
 # --- iroh-tunnel (connectivity spike; see docs/planning/connectivity-iroh.md) ---
 
 # Server side: run next to the homeserver. Prints a stable NodeID to provision

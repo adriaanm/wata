@@ -59,6 +59,30 @@ sound). It rides this config format but must not gate the tunnel.
 5. **Allowlist enforcement**: an unenrolled node id is refused at
    accept (E2E negative test).
 
+**Milestone 1 outcome**: done (merged) — `go-pkgs/irohnet` proves out on
+darwin; `just tunnel-smoke` joins `just ci`.
+
+**Milestone 2 outcome**: done. The Rust staticlib cross-builds for
+`armv7-unknown-linux-musleabihf` (`go-pkgs/irohnet/mklib.py arm` — rustup
+target std + `zig cc` for ring's C sources), the same cgo glue compiles for
+linux/arm (`-lunwind` added there: Rust std wants `_Unwind_*`, satisfied
+statically by zig's bundled LLVM libunwind), and the on-device smoke passed:
+`just iroh-lan-smoke` cross-builds an iroh-tagged wata-fb (static musl ELF,
+~29 MB), boots wata-server over an embedded iroh listener on the host,
+deploys to the BQ268's `/dev/shm`, and the device completes the
+`login-syncing` integ scenario over iroh — relay "none", direct LAN
+addresses, no TCP port on the server. Announce now expands an unspecified
+bind host to the host's interface addresses so a LAN peer gets dialable
+addrs. The smoke needs hardware, so it stays out of `just ci`; it is the
+on-device gate for this plan. Toolchain specifics milestone 3 inherits: the
+`iroh` tag never rides `sgo build` (no tag passthrough) — iroh-tagged
+binaries are a manual `go build -tags iroh` in the emit dir, cross ones
+under `GOOS=linux GOARCH=arm GOARM=7 CC="zig cc -target arm-linux-musleabihf"`
+with `-ldflags "-linkmode=external -extldflags=-static"`; cargo/rustc must
+resolve via `rustup which` (a distro rustc earlier on PATH has no cross
+std); milestone 3 swaps relay "none" for "n0" in the two configs and needs
+no new build machinery.
+
 **Fallback, explicit**: if milestone 1 shows iroh-ffi cannot honestly
 back `net.Conn` (stream semantics, callback model, or an unshippable
 lib size), the spike's sidecar returns as a bounded plan revision —

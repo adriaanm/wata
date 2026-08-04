@@ -727,6 +727,26 @@ recompile C/C++ vendor sources — a plain `linux/arm` cgo build against
 the checked-in `.a` files and `zig cc` as the linker/compiler driver
 is enough.
 
+The embedded iroh transport cross-builds for the device too
+(`go-pkgs/irohnet`): `go-pkgs/irohnet/mklib.py arm` stages the Rust
+staticlib for `armv7-unknown-linux-musleabihf` (rustup supplies the
+target std; `zig cc` is the cross C compiler for ring's C sources,
+behind a generated wrapper that strips cc-rs's clang-style `--target=`
+flags), and the iroh-enabled device binary is a manual
+`go build -tags iroh` in the sgo emit dir under the same
+`GOOS=linux GOARCH=arm GOARM=7 CC="zig cc -target arm-linux-musleabihf"`
+environment, with `-ldflags "-linkmode=external -extldflags=-static"`
+(the `iroh` tag never rides `sgo build` itself — the driver has no tag
+passthrough). The cgo directive adds `-lunwind` on linux/arm: Rust
+std's panic machinery references `_Unwind_*`, which zig satisfies with
+its bundled LLVM libunwind, statically. `just iroh-lan-smoke`
+(`tools/iroh-lan-smoke.py`) is the repeatable proof: it cross-builds
+that binary, boots wata-server over iroh on the host, deploys to
+`/dev/shm` under fb-deploy's conventions (nothing installed, artifacts
+removed), and runs the `login-syncing` integ scenario from the device
+over the LAN — direct addresses, no relay. It needs the hardware, so
+it is not part of `just ci`.
+
 ## File-by-file map
 
 | file | lines | what it does |
@@ -735,7 +755,7 @@ is enough.
 | `syscall.scala` | 52 | `go.syscall` facade: thin binds for `Open/Close/Read/Write/Mmap/Munmap/Mkdir` plus the flag/prot/map constants, used by every device-layer file that touches `/dev/fb0`, `/dev/input/*`, or sysfs. |
 | `config.scala` | 190 | The session and preferences store: `$WATA_FB_CONFIG` / `/etc/wata/config.json` read and write over `go.sys`/`go.syscall`, and `FbConfig.resolve`, the arguments-override-the-store rule every UI entry point builds its `ClientConfig` with. |
 | `caps.scala` | 83 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`; `WATA_IROH_CONFIG=<json>` swaps the underlying client for the embedded iroh transport (plan 0013), nothing above the capability line changing. |
-| `irohnet.scala` | 20 | Sgola-side `@go.bind` facade over `go-pkgs/irohnet`: `newHTTPClient(config)`, an `*http.Client` whose connections are iroh streams (real only on darwin + `-tags iroh`; loud-error stub elsewhere). |
+| `irohnet.scala` | 20 | Sgola-side `@go.bind` facade over `go-pkgs/irohnet`: `newHTTPClient(config)`, an `*http.Client` whose connections are iroh streams (real with `-tags iroh` on darwin and linux/arm; loud-error stub elsewhere). |
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 404 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |
 | `png.scala` | 127 | Minimal deterministic PNG encoder (CRC-32, Adler-32, one stored DEFLATE block) used only for the host-side golden-frame dump. |
