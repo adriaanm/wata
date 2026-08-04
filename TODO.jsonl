@@ -1,4 +1,3 @@
 {"key": "FB-SIM-DEVICE-VERIFY", "title": "human pass: just fb-deploy + on-device check that the UiDevice refactor left the real fbdev/evdev path intact", "doc": "docs/design/wata-fb.md", "inProgress": false}
 {"key": "TOOLCHAIN-REPIN-BATCH", "title": "repin blocked: 8129338 has both wanted fixes (facade self-call, int-led concat) but a plain-class method-casing regression breaks wata-fb \u2014 filed WATA-PLAINCLASS-METHOD-CASE-REGRESSION; repin when fixed, then drop png.scala concat NB", "doc": "WATA-TODO.md", "inProgress": false}
 {"key": "SRV-MEDIA-UNBOUNDED", "title": "media blobs never evicted or capped, and are base64'd into the journal \u2014 unbounded memory and boot-replay time", "doc": "docs/design/wata-server.md", "inProgress": false}
-{"key": "SRV-HARDENING", "title": "password/token compares are plain string equality (not constant-time) and CORS is unconditionally wide open with no knob", "doc": "docs/design/wata-server.md", "inProgress": true}

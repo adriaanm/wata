@@ -209,7 +209,7 @@ object Router:
     case s: Some[UserCfg] => loginCheck(s.value, lp, j)
 
   def loginCheck(u: UserCfg, lp: String, j: Json): Either[MErr, Json] =
-    if u.password == strField(j, "password", "") then loginOk(lp)
+    if Store.ctEq(u.password, strField(j, "password", "")) then loginOk(lp)
     else Left(MErr(403, M_FORBIDDEN(), "Invalid username or password"))
 
   def loginOk(lp: String): Either[MErr, Json] =

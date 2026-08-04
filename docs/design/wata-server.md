@@ -126,10 +126,25 @@ only set your own displayname") are then done by comparing the resolved
 `Auth.userId` against the path's `{userId}` (`handlers.scala:166` and
 elsewhere) — there is no admin/impersonation concept.
 
+Secret comparisons are constant-time: `Store.ctEq` wraps
+`crypto/subtle.ConstantTimeCompare` through the app-owned `go.subtle`
+facade (`subtle.scala`, same mechanism as `go.iolimit`), and both the login
+password check (`Router.loginCheck`) and the token resolution go through
+it. `Store.deviceByToken` deliberately does NOT `HashMap.get` the guess —
+a hash lookup's early exit is its own timing channel — but folds over
+every stored token comparing each in constant time, then resolves the
+matched stored key; work per request is constant in the guess and linear
+in the (family-sized) device count.
+
 Response envelope: every JSON response goes through `Respond.finish`
-(`server.scala:54`), which sets `Content-Type: application/json` and
-wide-open CORS headers (`Access-Control-Allow-Origin: *`, plus explicit
-methods/headers) unconditionally, then writes the status and body. A body
+(`server.scala:54`), which sets `Content-Type: application/json` and CORS
+headers, then writes the status and body. The advertised origin is
+`Respond.corsOrigin()`: `*` by default — deliberately wide open, because
+the trust boundary is the family network and the devices plus local dev
+tooling call from arbitrary origins — or, when `WATA_CORS_ORIGIN` is set,
+that exact origin echoed instead, so browsers on any other origin fail
+their CORS check; the env var is read per response (one getenv, like
+`TestHooks.enabled`), so there is no boot-order dependency. A body
 write that fails (`Respond.writeBody` — usually the client hanging up
 mid-response) is logged as one `wata: response write failed: …` line and
 dropped; the connection is already gone, but the line keeps partial-response
@@ -530,15 +545,6 @@ line in `TODO.jsonl`; grep the key here for the body.
   on, every upload is also base64-encoded into the JSONL log
   (`Journal.mediaOp`, `persist.scala:153`) with no size check, so a handful of
   large uploads could make the journal (and boot-replay time) balloon.
-- `[SRV-HARDENING]` **Password and token comparisons are plain string equality**
-  (`Router.loginCheck`, `handlers.scala:116-118`; `Store.deviceByToken`,
-  `store.scala:114`), not constant-time — a timing side channel in principle,
-  though the fixed two-user, no-registration setup makes this low-stakes
-  today.
-- `[SRV-HARDENING]` **CORS is wide open unconditionally** (`Respond.finish`,
-  `server.scala:56-59`: `Access-Control-Allow-Origin: *` on every response)
-  with no configuration knob; fine for the current trusted-network / dev
-  posture but worth flagging if this is ever exposed more broadly.
 - **Every list-shaped store slice (`acct`, `receiptList`, `roomIds`,
   `waiters`, room `state`/`timeline`) is scanned linearly on every read and
   write** (`store.scala`, throughout — e.g. `findAcct`, `filterReceipts`,

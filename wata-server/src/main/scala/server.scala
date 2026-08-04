@@ -89,9 +89,21 @@ class NotFound() extends go.net.http.Handler:
     Respond.finish(w, status, body)
 
 object Respond:
+  /** the CORS origin every response advertises: `*` unless `WATA_CORS_ORIGIN`
+   *  is set, in which case that exact origin is echoed instead and browsers
+   *  on any other origin fail their CORS check. Wide open is the deliberate
+   *  DEFAULT — the trust boundary is the family network, and both the
+   *  devices and local dev tooling talk to the server from whatever origin
+   *  they happen to run on; the knob exists for a deployment that fronts the
+   *  server to a known web origin. Read per response (one getenv, like
+   *  `TestHooks.enabled`), so no boot-order dependency. */
+  def corsOrigin(): String =
+    val v = go.sys.getenv("WATA_CORS_ORIGIN")
+    if v == "" then "*" else v
+
   def finish(w: go.net.http.ResponseWriter, status: scala.Int, body: String): Unit =
     w.header().set("Content-Type", "application/json")
-    w.header().set("Access-Control-Allow-Origin", "*")
+    w.header().set("Access-Control-Allow-Origin", corsOrigin())
     w.header().set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     w.header().set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
     w.writeHeader(go.Int.of(status))
@@ -101,7 +113,7 @@ object Respond:
    *  Content-Type + the bytes (a byte-preserving String -> `[]byte`). */
   def raw(w: go.net.http.ResponseWriter, contentType: String, data: String): Unit =
     w.header().set("Content-Type", contentType)
-    w.header().set("Access-Control-Allow-Origin", "*")
+    w.header().set("Access-Control-Allow-Origin", corsOrigin())
     w.writeHeader(go.Int.of(200))
     writeBody(w, data)
 

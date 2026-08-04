@@ -116,8 +116,33 @@ object Store:
     }
     d
 
+  /** constant-time string equality (crypto/subtle via the app-owned
+   *  `go.subtle` facade): every secret comparison — the login password check
+   *  and the access-token lookup — goes through this, so timing cannot leak
+   *  how much of a guess matched. */
+  def ctEq(a: String, b: String): Boolean =
+    go.subtle.constantTimeCompare(go.bytes(a), go.bytes(b)) == 1
+
+  /** the token lookup is NOT a straight HashMap.get on the guess: a hash
+   *  lookup's early exit is itself a timing channel, so this folds over EVERY
+   *  stored token comparing each in constant time, keeping the matched KEY,
+   *  and only then resolves it — the final get runs on the already-matched
+   *  stored key, never on the guess. Work is constant per request in the
+   *  guess and linear in the device count — family-sized here, so a handful
+   *  of compares. */
   def deviceByToken(token: String): Option[Device] =
-    cell.withLock(st => HashMap.get(st.tokens, token))
+    cell.withLock(st => resolveToken(st.tokens, foldTokens(st.tokens, token)))
+
+  /** "" when no stored token constant-time-matches the guess. */
+  def foldTokens(tokens: HashMap[String, Device], token: String): String =
+    HashMap.foldLeft[String, Device, String](tokens, "",
+      (acc: String, k: String, d: Device) => tokenFold(acc, k, token))
+
+  def tokenFold(acc: String, k: String, token: String): String =
+    if ctEq(k, token) then k else acc
+
+  def resolveToken(tokens: HashMap[String, Device], matched: String): Option[Device] =
+    if matched == "" then None else HashMap.get(tokens, matched)
 
   def removeDevice(deviceId: String): Unit =
     cell.withLock(st => dropDevice(st, HashMap.get(st.devices, deviceId), deviceId))
