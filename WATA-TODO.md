@@ -66,21 +66,6 @@ blocks + git log; each entry cites where it was recorded.*
   (`List(KeyDown(...), KeyUp(...))`) fails at `go build` (concrete slice
   vs collapsed `[]any` template param) — build such lists via cons until
   LIST-VARARGS-FAMILY-ELEM-COLLAPSE lands.
-- Instantiation swap (from the `[CANONICAL-DM]` build): a `Mutex.withLock`
-  lambda whose result is a DIFFERENT instantiation of a generic than the
-  one it reads (`Option[DmPair]` in, `Option[String]` out) emits the two
-  `Option` interfaces bound to each other's symbols — two opposite
-  "does not implement" errors on one emitted line, at `go build`, not as a
-  sgola diagnostic. Workaround in-tree: the block returns the Option it
-  looked up and the mapping happens outside it. Filed:
-  `WATA-WITHLOCK-OPTION-INSTANTIATION`.
-- Instantiation gap (same build): a generic that appears ONLY in
-  signatures and is never constructed (`List[StateSeed]`) is referenced by
-  the emitted Go but never defined — `undefined: List__StateSeed` at
-  `go build`, again with compile and link reporting success. Self-resolves
-  once something constructs the type, but stays permanently reachable for
-  a library that leaves construction to its consumers. Filed:
-  `WATA-SIGNATURE-ONLY-GENERIC-NOT-INSTANTIATED`.
 - Emitter trap (from the `[FB-PNG-BLOCK]` build): an Int-LED string
   concatenation (`blocks + " blocks"`, i.e. `any2stringadd` with the Int
   on the left) compiles and links clean but emits `int + string` Go —
