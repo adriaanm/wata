@@ -83,6 +83,23 @@ resolve via `rustup which` (a distro rustc earlier on PATH has no cross
 std); milestone 3 swaps relay "none" for "n0" in the two configs and needs
 no new build machinery.
 
+Milestone 3 status: cellular replaces the phone hotspot as the foreign
+network — the BQ268 has live LTE data (PPP over the modem's SMD tty), a
+strictly stronger test (CGNAT, no shared LAN). `just iroh-roam-smoke`
+is the gate: it stages over ssh, then drives wifi-down → cellular-only
+dial (relay "n0", id-only, no peerAddrs) → wifi-restore over the USB
+serial console, since ssh dies with wifi. Not yet green: runs so far
+died before the dial on device-side cellular bring-up — most recently a
+kernel oops in the vendor 4.4 kernel's `smd_tty_tiocmset` when pppd
+opens the modem port after a fresh boot (cellular worked earlier the
+same day pre-reboot, so it is a bring-up race, not a hard block; it
+lives in the bq268 kernel/alpine layer, outside this repo). Also found
+and worked around there: the PPP ip-up hook installs no peer DNS, so
+the smoke sets public DNS for the wifi-down window. The wifi restore
+path deliberately leaves the whole bring-up to the wifi service — a
+bare `ifconfig up` first can wedge the CAF driver's connect state
+machine, which only a reboot clears.
+
 **Fallback, explicit**: if milestone 1 shows iroh-ffi cannot honestly
 back `net.Conn` (stream semantics, callback model, or an unshippable
 lib size), the spike's sidecar returns as a bounded plan revision —

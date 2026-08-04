@@ -104,7 +104,7 @@ def main():
     if sha(arm_lib) != arm_lib_before:
         # Go's build cache is blind to .a content changes (the audio-module
         # trap): a freshly-built staticlib needs -a or it links the stale one.
-        cmd.insert(1, "-a")
+        cmd.insert(2, "-a")
     r = run(cmd, cross_env, cwd=fb_emit, capture_output=True, text=True)
     if r.returncode != 0:
         print(r.stdout + r.stderr)

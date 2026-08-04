@@ -1,2 +1,3 @@
 {"key": "FB-BOOT-LOGO", "title": "boot logo end to end: aboot splash partition frame, kernel quiet/fbcon-logo suppression, hand-off to wata-fb's first frame", "doc": "docs/plans/0003-parity-and-beyond.md", "inProgress": false}
+{"key": "IROH-M3-ROAM-SMOKE", "title": "first green just iroh-roam-smoke: needs a boot where cell-data up survives (vendor-kernel smd_tty oops race); then record latencies in plan 0013 and mark M3 done", "doc": "docs/plans/0013-iroh-e2e.md", "inProgress": false}
 {"key": "FB-EARLY-BOOT", "title": "start wata-fb as early as init allows; UI presents a calm starting-up/waiting-for-network state over the existing backoff instead of an error surface", "doc": "docs/plans/0003-parity-and-beyond.md", "inProgress": false}

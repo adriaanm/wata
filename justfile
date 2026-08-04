@@ -129,6 +129,13 @@ tunnel-smoke:
 # relay). Needs cargo + rustup + zig + the device (ssh host bq268); not in ci.
 iroh-lan-smoke:
     tools/iroh-lan-smoke.py
+
+# on-device iroh ROAM smoke (plan 0013 milestone 3): wifi down over the USB
+# serial console, the BQ268 dials this machine via the n0 relay over CELLULAR
+# by node id alone, then wifi is restored. Needs the serial console
+# (BQ268_SERIAL) besides everything iroh-lan-smoke needs; not in ci.
+iroh-roam-smoke:
+    tools/iroh-roam-smoke.py
 # --- iroh-tunnel (connectivity spike; see docs/planning/connectivity-iroh.md) ---
 
 # Server side: run next to the homeserver. Prints a stable NodeID to provision
