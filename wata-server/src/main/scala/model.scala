@@ -92,6 +92,26 @@ case class MediaItem(mediaId: String, data: String, contentType: String)
  *  (like the acct slice) rather than a per-room map. */
 case class Receipt(roomId: String, userId: String, eventId: String, ts: scala.Long, receiptType: String, seq: scala.Long)
 
+/** One canonical DM: the unordered user pair `{a, b}` (stored SORTED, so the
+ *  pair is a key rather than two orderings) and the room that IS that DM. The
+ *  whole set is ONE flat `List[DmPair]` in the store, like the acct and receipt
+ *  slices — family-sized, so a linear scan is the right shape and the list can
+ *  also be walked per user (`Store.dmPeersOf`). */
+case class DmPair(a: String, b: String, roomId: String)
+
+/** one of a user's canonical DMs, from their side: who it is with, and where. */
+case class DmPeer(peer: String, roomId: String)
+
+/** the result of `Store.dmGetOrCreate`: the canonical room, and whether THIS
+ *  call is the one that created it (only the creator does the after-effects —
+ *  the compat `m.direct` write and the two wakes). */
+case class DmRoom(roomId: String, created: Boolean)
+
+/** one state event to stamp into a freshly created room, inside the SAME store
+ *  transaction that mints it (dm.scala builds the list; store.scala applies
+ *  it). Sender is the room's creator for all of them. */
+case class StateSeed(etype: String, sk: String, content: Json)
+
 /** A registered long-poll waiter. ONE flat `List[Waiter]` in the store.
  *  `id` is a monotonic tag so removal never needs channel equality; `ch` is
  *  an UNBUFFERED `Chan[Boolean]` used purely as a close-signalled wake

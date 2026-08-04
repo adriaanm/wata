@@ -31,6 +31,8 @@ import sgo.{Mutex, mutex}
  *                              replay)
  *   - `receipt`              — read receipts (carries its seq)
  *   - `txn`                  — per-device send idempotency
+ *   - `dmpair`               — a canonical DM's pair -> room claim, so DM
+ *                              identity survives a restart with no re-derivation
  *
  *  NOT logged (transient by nature): long-poll waiters (in-flight goroutines).
  */
@@ -168,6 +170,15 @@ object Journal:
     fs = ("seq", JInt(rc.seq)) :: fs
     endObj(fs)
 
+  /** a canonical DM pair claim: the SORTED pair and the room it claimed. */
+  def dmPairOp(p: DmPair): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("dmpair")) :: fs
+    fs = ("a", JStr(p.a)) :: fs
+    fs = ("b", JStr(p.b)) :: fs
+    fs = ("room_id", JStr(p.roomId)) :: fs
+    endObj(fs)
+
   def txnOp(key: String, eventId: String): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("op", JStr("txn")) :: fs
@@ -234,6 +245,7 @@ object Journal:
     else if op == "media" then applyMedia(j)
     else if op == "receipt" then Store.replayReceipt(receiptOf(j))
     else if op == "txn" then Store.replayTxn(strField(j, "key", ""), strField(j, "event_id", ""))
+    else if op == "dmpair" then Store.replayDmPair(DmPair(strField(j, "a", ""), strField(j, "b", ""), strField(j, "room_id", "")))
     else ()
 
   def acctOf(j: Json): AcctData =

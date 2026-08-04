@@ -27,7 +27,7 @@ import sgo.{Mutex, mutex}
  *  receipts/txns + long-poll waiters), see `StoreState` below.
  */
 
-/** The guarded store state: 13 `var` fields of a plain class held behind ONE
+/** The guarded store state: 14 `var` fields of a plain class held behind ONE
  *  `Mutex`. Reseats are in-place under the lock (same HashMap/cons ops); no
  *  facade types, no separate write-back API. */
 class StoreState:
@@ -48,6 +48,7 @@ class StoreState:
   var txns: HashMap[String, String] =
     HashMap.empty[String, String](k => sgo.hash(k), (a, b) => a == b)
   var roomIds: List[String] = Nil
+  var dmPairs: List[DmPair] = Nil
   var seq: scala.Long = 0L
   var waiters: List[Waiter] = Nil
   var waiterSeq: scala.Long = 0L
@@ -359,6 +360,146 @@ object Store:
 
   def getRoom(roomId: String): Option[Room] =
     cell.withLock(st => HashMap.get(st.rooms, roomId))
+
+  /** every room, OLDEST FIRST (`roomIds` is newest-first). The boot migration
+   *  (dm.scala) scans in this order, which is what makes "oldest wins" fall
+   *  out of a never-overwrite register. */
+  def allRooms(): List[Room] =
+    cell.withLock(st => collectAll(st, ListOps.reverse(st.roomIds), Nil))
+
+  def collectAll(st: StoreState, ids: List[String], acc: List[Room]): List[Room] = ids match
+    case h :: t => collectAllStep(st, h, t, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def collectAllStep(st: StoreState, h: String, t: List[String], acc: List[Room]): List[Room] =
+    var acc2: List[Room] = acc
+    acc2 = consRoom(HashMap.get(st.rooms, h), acc2)
+    collectAll(st, t, acc2)
+
+  def consRoom(ro: Option[Room], acc: List[Room]): List[Room] = ro match
+    case s: Some[Room] => s.value :: acc
+    case None => acc
+
+  // ---- canonical DM pairs -----------------------------------------------------
+  //
+  // A DM is identified by its unordered user pair, so the pair is the KEY and
+  // uniqueness is a lookup rather than a distributed protocol: the whole
+  // get-or-create — lookup, room mint, alias, every seed state event, and the
+  // pair registration — happens in ONE `withLock` transaction, so two
+  // concurrent first-sends from the two sides cannot mint two rooms. Pairs are
+  // stored SORTED (`a < b`), so the two orderings are one entry.
+
+  /** lexicographic `<` over the byte-wise chars. The subset has no string
+   *  ordering operator, and only the ORDER matters here (it decides which of
+   *  the two spellings of a pair is canonical), not the collation. */
+  def strLess(a: String, b: String): Boolean = strLessAt(a, b, 0)
+
+  def strLessAt(a: String, b: String, i: scala.Int): Boolean =
+    if i >= a.length then i < b.length
+    else if i >= b.length then false
+    else strLessChar(a, b, i)
+
+  def strLessChar(a: String, b: String, i: scala.Int): Boolean =
+    val ca = a.charAt(i)
+    val cb = b.charAt(i)
+    if ca < cb then true
+    else if ca > cb then false
+    else strLessAt(a, b, i + 1)
+
+  def pairLo(a: String, b: String): String = if strLess(a, b) then a else b
+  def pairHi(a: String, b: String): String = if strLess(a, b) then b else a
+
+  /** the canonical room for this pair, if one has been claimed. */
+  // The `Option[String]` is derived OUTSIDE the block: a `withLock` lambda whose
+  // result is a DIFFERENT Option instantiation than the one it reads gets the
+  // two mixed up at link time (`Option__R does not implement Option__S`), so the
+  // block returns the Option it looked up and the mapping happens here.
+  def dmRoomFor(a: String, b: String): Option[String] =
+    roomOfPair(cell.withLock(st => findPair(st.dmPairs, pairLo(a, b), pairHi(a, b))))
+
+  def roomOfPair(p: Option[DmPair]): Option[String] = p match
+    case s: Some[DmPair] => Some(s.value.roomId)
+    case None => None
+
+  def findPair(xs: List[DmPair], lo: String, hi: String): Option[DmPair] = xs match
+    case h :: t => findPairStep(h, t, lo, hi)
+    case Nil  => None
+
+  def findPairStep(h: DmPair, t: List[DmPair], lo: String, hi: String): Option[DmPair] =
+    if h.a == lo && h.b == hi then Some(h) else findPair(t, lo, hi)
+
+  /** every canonical DM this user is in, from their side. The compat
+   *  projection (dm.scala) re-asserts these over the stored `m.direct`. */
+  def dmPeersOf(userId: String): List[DmPeer] =
+    cell.withLock(st => peersOf(st.dmPairs, userId, Nil))
+
+  def peersOf(xs: List[DmPair], userId: String, acc: List[DmPeer]): List[DmPeer] = xs match
+    case h :: t => peersOfStep(h, t, userId, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def peersOfStep(h: DmPair, t: List[DmPair], userId: String, acc: List[DmPeer]): List[DmPeer] =
+    var acc2: List[DmPeer] = acc
+    if h.a == userId then acc2 = DmPeer(h.b, h.roomId) :: acc2
+    else if h.b == userId then acc2 = DmPeer(h.a, h.roomId) :: acc2
+    else ()
+    peersOf(t, userId, acc2)
+
+  /** THE get-or-create: one transaction over the pair map. When the pair is
+   *  already claimed the existing room comes straight back; otherwise the room
+   *  is minted, its alias registered, every seed state event written, and the
+   *  pair recorded — all before the lock is released, so nothing observes a
+   *  half-built DM and no second room can appear for the same pair. */
+  def dmGetOrCreate(a: String, b: String, sender: String, alias: String, seeds: List[StateSeed]): DmRoom =
+    cell.withLock(st => dmGetOrCreateLocked(st, pairLo(a, b), pairHi(a, b), sender, alias, seeds))
+
+  def dmGetOrCreateLocked(st: StoreState, lo: String, hi: String, sender: String,
+                          alias: String, seeds: List[StateSeed]): DmRoom =
+    findPair(st.dmPairs, lo, hi) match
+      case s: Some[DmPair] => DmRoom(s.value.roomId, false)
+      case None => dmCreateLocked(st, lo, hi, sender, alias, seeds)
+
+  def dmCreateLocked(st: StoreState, lo: String, hi: String, sender: String,
+                     alias: String, seeds: List[StateSeed]): DmRoom =
+    val id = genRoomId()
+    st.rooms = HashMap.put(st.rooms, id, Room(id, "10", Nil, Nil))
+    st.roomIds = id :: st.roomIds
+    if Journal.enabled then Journal.rec(Journal.roomOp(id)) else ()
+    st.aliases = HashMap.put(st.aliases, alias, id)
+    if Journal.enabled then Journal.rec(Journal.aliasOp(alias, id)) else ()
+    seedEvents(st, id, sender, seeds)
+    putPairLocked(st, DmPair(lo, hi, id))
+    DmRoom(id, true)
+
+  def seedEvents(st: StoreState, roomId: String, sender: String, seeds: List[StateSeed]): Unit = seeds match
+    case h :: t => seedStep(st, roomId, sender, h, t)
+    case Nil  => ()
+
+  def seedStep(st: StoreState, roomId: String, sender: String, h: StateSeed, t: List[StateSeed]): Unit =
+    addEventLocked(st, roomId, h.etype, sender, h.content, true, h.sk, false, "", JNull())
+    seedEvents(st, roomId, sender, t)
+
+  def putPairLocked(st: StoreState, p: DmPair): Unit =
+    st.dmPairs = appendPair(st.dmPairs, p)
+    if Journal.enabled then Journal.rec(Journal.dmPairOp(p)) else ()
+
+  def appendPair(xs: List[DmPair], p: DmPair): List[DmPair] =
+    ListOps.reverse(p :: ListOps.reverse(xs))
+
+  /** claim a pair for a room minted elsewhere (the boot migration). Never
+   *  overwrites: the FIRST room to claim a pair is the canonical one, and the
+   *  migration scans oldest-first, so the oldest room wins and the losers stay
+   *  joined but unmapped. Returns whether this call did the claiming. */
+  def registerDmPair(a: String, b: String, roomId: String): Boolean =
+    cell.withLock(st => registerLocked(st, pairLo(a, b), pairHi(a, b), roomId))
+
+  def registerLocked(st: StoreState, lo: String, hi: String, roomId: String): Boolean =
+    findPair(st.dmPairs, lo, hi) match
+      case _: Some[DmPair] => false
+      case None => claimPair(st, lo, hi, roomId)
+
+  def claimPair(st: StoreState, lo: String, hi: String, roomId: String): Boolean =
+    putPairLocked(st, DmPair(lo, hi, roomId))
+    true
 
   def stateContent(room: Room, etype: String, sk: String): Option[Json] =
     lookupState(room.state, stateKeyOf(etype, sk)) match
@@ -820,3 +961,6 @@ object Store:
 
   def replayTxn(key: String, eventId: String): Unit =
     cell.withLock(st => st.txns = HashMap.put(st.txns, key, eventId))
+
+  def replayDmPair(p: DmPair): Unit =
+    cell.withLock(st => st.dmPairs = appendPair(st.dmPairs, p))

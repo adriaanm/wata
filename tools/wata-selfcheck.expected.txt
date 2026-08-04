@@ -24,6 +24,14 @@ join-rule invite
 send-added true
 redacted-content {}
 member-updated Alice Z
+dm-order true
+dm-pair-symmetric true
+dm-alias #dm.alice.bob:localhost
+dm-peers 1
+dm-peer @bob:localhost
+dm-mapped true
+dm-direct-projected true
+dm-migrate-idempotent 1
 sync-join-rooms 1
 sync-invite-rooms 0
 sync-joined-count 2
