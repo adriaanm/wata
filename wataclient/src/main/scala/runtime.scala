@@ -24,7 +24,8 @@
  *  SINGLE-CLIENT-PER-PROCESS: the engine is a singleton and the poll/stash
  *  cells below are module vars — one runtime at a time, phases run
  *  sequentially. Each var is touched by exactly ONE goroutine (stash cells:
- *  the driver; txn counter: the action loop; stop probe: the sync loop);
+ *  the driver; txn counter: the action loop; stop probe + backfill queue:
+ *  the sync loop);
  *  `lastAuth` crosses only over the supervised-join barrier. */
 
 // ---- actions -------------------------------------------------------------------
@@ -49,6 +50,11 @@ case class EvSendFailed(txnId: Int) extends UiEvent
 /** audio can be DECOUPLED (no audio thread wired up): a download-and-play
  *  still downloads, then surfaces this instead of playing. */
 case class EvPlaybackError() extends UiEvent
+
+/** one room's deferred backfill walk: the token to page from next and how
+ *  many pages this trigger has already fetched (`Runtime.maxBackfillPages`
+ *  caps the walk). Lives only in the sync loop's queue cell. */
+case class BackfillJob(roomId: String, from: String, pages: Int)
 
 /** login-published credentials, carried over a capacity-1 channel. A
  *  zero/empty accessToken = "login failed, stand down" (the channel-close
@@ -144,6 +150,7 @@ object Runtime:
       c.events.send(EvConn(Connected()))
       c.auth.send(creds)
       SyncEngine.reset()
+      backfillQC.set(Nil)
       SyncEngine.setSelfUser(creds.userId)
       syncRounds(c, Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken), creds.userId)
 
@@ -170,14 +177,17 @@ object Runtime:
 
   /** the long-poll loop: stop is checked FIRST each round and re-checked after
    *  the (blocking, <= syncTimeoutMs) sync call — the exit path is the ordinary
-   *  while-condition, never a mid-loop abort. */
+   *  while-condition, never a mid-loop abort. While deferred backfill is
+   *  pending the sync call uses timeout 0 (an immediate poll), so the queue
+   *  drains at `backfillPagesPerRound` per round instead of one bounded slice
+   *  per long-poll expiry. */
   def syncRounds(c: MatrixClient, hs: Hs, selfUid: String): Unit =
     var retryMs = 1000L
     var run = true
     while run do
       if isStopped(c) then run = false
       else
-        val resp = MatrixHttp.sync(hs, SyncEngine.nextBatch, c.cfg.syncTimeoutMs)
+        val resp = MatrixHttp.sync(hs, SyncEngine.nextBatch, roundTimeoutMs(c))
         if isStopped(c) then run = false
         else if resp.status != 200 then
           c.events.send(EvConn(ConnError()))
@@ -196,16 +206,22 @@ object Runtime:
     case _        => false
 
   /** one successful sync round: engine ingest -> invite auto-join -> backfill
-   *  -> snapshot publish. Auto-join runs after process() so the NEXT sync
-   *  carries the joined room. Backfill has ONE trigger, the standard Matrix
-   *  one: a `limited` timeline, paged via `prev_batch` — the server sets
-   *  `limited` whenever it withholds history and its `/messages` `from` takes
-   *  the same `s<seq>` position tokens, so the gap is always recoverable. */
+   *  enqueue + bounded drain -> snapshot publish. Auto-join runs after
+   *  process() so the NEXT sync carries the joined room. Backfill has ONE
+   *  trigger, the standard Matrix one: a `limited` timeline, paged via
+   *  `prev_batch` — the server sets `limited` whenever it withholds history
+   *  and its `/messages` `from` takes the same `s<seq>` position tokens, so
+   *  the gap is always recoverable. The paging itself is DEFERRED work: a
+   *  limited room becomes a queue entry, and each round drains at most
+   *  `backfillPagesPerRound` pages before publishing — so neither the
+   *  snapshot publish nor the next sync call ever waits behind an unbounded
+   *  serial page walk. */
   def processRound(c: MatrixClient, hs: Hs, selfUid: String, j: Json): Unit =
     SyncEngine.process(j)
     ()
     autoJoin(hs, WJson.objField(WJson.objField(j, "rooms"), "invite"))
-    backfillRooms(hs, WJson.objField(WJson.objField(j, "rooms"), "join"))
+    queueBackfills(WJson.objField(WJson.objField(j, "rooms"), "join"))
+    drainBackfill(hs)
     publishSnapshot(c)
 
   /** trusted family environment — accept ALL invites. */
@@ -223,38 +239,81 @@ object Runtime:
     val roomId: String = p._1
     drop(MatrixHttp.joinRoom(hs, roomId))
 
-  def backfillRooms(hs: Hs, joinMap: Json): Unit =
+  // ---- deferred backfill -------------------------------------------------------
+
+  /** cap on chained GET /messages pages per backfill trigger: 10 pages of 50
+   *  = 500 events per `limited` room. A gap deeper than that stays
+   *  unrecovered — deliberately: the oldest history of a very long absence is
+   *  not worth unbounded serial paging, and no later trigger reopens it (a
+   *  later `limited` sync starts from a NEWER `prev_batch`). */
+  val maxBackfillPages: Int = 10
+
+  /** deferred-backfill pages drained per sync round: 2 pages = 100 events of
+   *  bounded work between engine ingest and snapshot publish. */
+  val backfillPagesPerRound: Int = 2
+
+  /** enqueue a backfill job for every `limited` room in the round's
+   *  `rooms.join` map. */
+  def queueBackfills(joinMap: Json): Unit =
     var cur = MatrixHttp.objFields(joinMap)
     var going = true
     while going do
       cur match
         case p :: t =>
-          backfillIfLimited(hs, p)
+          queueIfLimited(p)
           cur = t
         case Nil => going = false
 
-  def backfillIfLimited(hs: Hs, p: (String, Json)): Unit =
+  /** a limited room becomes (or REPLACES) that room's queue entry, restarting
+   *  from the fresh `prev_batch`: a newer trigger supersedes any older walk in
+   *  progress — it holds the newer position, and the engine's dedup absorbs
+   *  the overlap. */
+  def queueIfLimited(p: (String, Json)): Unit =
     val roomId: String = p._1
     if WJson.boolField(WJson.objField(p._2, "timeline"), "limited") then
-      backfillRoom(hs, roomId)
+      val from = SyncEngine.prevBatchOf(roomId)
+      if from != "" then
+        backfillQC.set(BackfillJob(roomId, from, 0) :: dropJob(backfillQC.get(), roomId, Nil))
 
-  /** cap on chained GET /messages pages per backfill trigger: 10 pages of 50
-   *  = 500 events per `limited` room per sync round. A gap deeper than that
-   *  stays unrecovered — deliberately: the oldest history of a very long
-   *  absence is not worth unbounded serial paging, and no later trigger
-   *  reopens it (a later `limited` sync starts from a NEWER `prev_batch`). */
-  val maxBackfillPages: Int = 10
+  def dropJob(q: List[BackfillJob], roomId: String, acc: List[BackfillJob]): List[BackfillJob] = q match
+    case h :: t => dropJobStep(h, t, roomId, acc)
+    case Nil    => ListOps.reverse(acc)
 
-  /** page GET /messages(dir=b, 50) from the room's stored `prev_batch`,
-   *  chaining the server's `end` token until the gap closes (empty chunk / no
-   *  token progress / HTTP failure) or `maxBackfillPages` is hit. Every chunk
-   *  feeds the engine's dedup + voice extraction. */
-  def backfillRoom(hs: Hs, roomId: String): Unit =
-    var from = SyncEngine.prevBatchOf(roomId)
-    var pages = 0
-    while from != "" && pages < maxBackfillPages do
-      from = backfillPage(hs, roomId, from)
-      pages = pages + 1
+  def dropJobStep(h: BackfillJob, t: List[BackfillJob], roomId: String, acc: List[BackfillJob]): List[BackfillJob] =
+    if h.roomId == roomId then dropJob(t, roomId, acc) else dropJob(t, roomId, h :: acc)
+
+  /** drain up to `backfillPagesPerRound` pages of deferred backfill. A page
+   *  that leaves more to fetch re-queues its job at the TAIL, so several
+   *  limited rooms page round-robin. */
+  def drainBackfill(hs: Hs): Unit =
+    var budget = backfillPagesPerRound
+    var going = true
+    while going do
+      backfillQC.get() match
+        case job :: t =>
+          backfillQC.set(t)
+          stepJob(hs, job)
+          budget = budget - 1
+          if budget == 0 then going = false
+        case Nil => going = false
+
+  /** fetch the job's page; a continuation within the per-trigger page cap
+   *  goes back to the queue tail. */
+  def stepJob(hs: Hs, job: BackfillJob): Unit =
+    val next = backfillPage(hs, job.roomId, job.from)
+    if next != "" && job.pages + 1 < maxBackfillPages then
+      backfillQC.set(ListOps.reverse(
+        BackfillJob(job.roomId, next, job.pages + 1) :: ListOps.reverse(backfillQC.get())))
+
+  /** timeout for the next sync call: an immediate poll while deferred
+   *  backfill is pending (so the queue keeps draining), the configured long
+   *  poll otherwise. */
+  def roundTimeoutMs(c: MatrixClient): Int =
+    if backfillPending() then 0 else c.cfg.syncTimeoutMs
+
+  def backfillPending(): Boolean = backfillQC.get() match
+    case Nil => false
+    case _   => true
 
   /** ONE /messages page: ingest the chunk, return the token to continue from
    *  ("" = done — the server's `end` is a real continuation position, and a
@@ -374,6 +433,8 @@ object Runtime:
   // (`add` returns the new value, one read-modify-write); `lastAuthC`/`snapC`
   // swap immutable case-class snapshots (boxed cells, one alloc per store).
   private val txnCounterC: sgo.Atomic[Int] = sgo.atomic(0)
+  /** the deferred-backfill queue (sync-loop-only; reset per session). */
+  private val backfillQC: sgo.Atomic[List[BackfillJob]] = sgo.atomic(Nil)
   private val lastAuthC: sgo.Atomic[AuthCreds] = sgo.atomic(AuthCreds("", ""))
   /** the credentials the last login/resume produced (the app persists them as
    *  a `Session`; a caller reads this AFTER the supervised scope has joined). */

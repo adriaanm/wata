@@ -378,25 +378,37 @@ its `/messages` `from` parameter takes the same opaque `s<seq>` position
 tokens `/sync` hands out — so `wataclient` runs the standard recipe and
 carries no server-specific compensation.
 
-- `Runtime.processRound` calls `backfillRooms` over the sync response's
-  `rooms.join` map after `SyncEngine.process` has ingested it, and before
-  the snapshot is published.
-- `Runtime.backfillIfLimited` reads `timeline.limited` for one room and,
-  when set, calls `backfillRoom`.
-- `Runtime.backfillRoom` reads the room's stored `prevBatch`
-  (`SyncEngine.prevBatchOf`, "" when the room is unknown or no token was
-  stored) and pages `MatrixHttp.getMessages(dir = b, limit = 50)` from it,
-  chaining each response's `end` token as the next `from`
-  (`Runtime.backfillPage`). Each chunk arrives newest-first and is
-  ingested in that order. The walk stops when the gap is closed — an empty
-  chunk, a missing `end`, an `end` equal to the `from` just used (the
-  server's no-progress signal), or an HTTP failure — or at
-  `Runtime.maxBackfillPages` (10 pages, i.e. 500 events per `limited`
-  trigger). A gap deeper than the cap stays unrecovered, deliberately:
-  the oldest history of a very long absence is not worth unbounded serial
-  paging, and no later trigger reopens it — a later `limited` sync starts
-  from a *newer* `prev_batch`, so it re-covers the recent side of history,
-  not the abandoned deep end.
+The paging is **deferred work with a per-round bound**, so a deep gap
+never stalls the round that discovered it — the sync loop stays a single
+goroutine, and the queue is how it time-slices:
+
+- `Runtime.processRound` (engine ingest -> auto-join -> `queueBackfills`
+  -> `drainBackfill` -> `publishSnapshot`) turns each `limited` room in
+  the response's `rooms.join` map into a `BackfillJob` (room id, the
+  `from` token to page next, pages fetched so far) on the sync loop's
+  queue cell (`backfillQC`, sync-loop-only, reset per session). A room
+  already queued is *replaced*: the newer trigger holds a newer
+  `prev_batch`, and the engine's dedup absorbs the overlap.
+- `Runtime.drainBackfill` then fetches at most `backfillPagesPerRound`
+  (2) pages before the snapshot is published — each page one
+  `MatrixHttp.getMessages(dir = b, limit = 50)` call
+  (`Runtime.backfillPage`), its chunk arriving newest-first and ingested
+  in that order. A page whose walk isn't finished re-queues its job at
+  the tail, so several limited rooms page round-robin.
+- A job leaves the queue when its gap closes — an empty chunk, a missing
+  `end`, an `end` equal to the `from` just used (the server's no-progress
+  signal), or an HTTP failure — or at `Runtime.maxBackfillPages` (10
+  pages, i.e. 500 events per `limited` trigger). A gap deeper than the
+  cap stays unrecovered, deliberately: the oldest history of a very long
+  absence is not worth unbounded paging, and no later trigger reopens it
+  — a later `limited` sync starts from a *newer* `prev_batch`, so it
+  re-covers the recent side of history, not the abandoned deep end.
+- While the queue is non-empty, `Runtime.syncRounds` issues the next
+  `/sync` with **timeout 0** (`roundTimeoutMs`) instead of the configured
+  long poll: the loop keeps interleaving fresh sync ingest with backfill
+  slices instead of parking a pending walk behind a long-poll expiry.
+  Net effect: each round's snapshot publish and next sync call wait for
+  at most two `/messages` calls, and a 10-page gap drains in ~5 rounds.
 - Ingestion goes through `SyncEngine.ingestBackfill`, which is deliberately
   narrower than `process()`: it only dedups against `timelineEventIds` and
   extracts voice messages from `m.room.message` events — it does not
@@ -415,12 +427,6 @@ Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. The untagged ones are recorded as things to know before
 touching the surrounding code, not as work owed.
 
-- `[CLI-BACKFILL-BLOCKING]` **Backfill runs synchronously inside the sync loop
-  (`processRound`).** `backfillRooms` issues a blocking `/messages` call per
-  limited room before `publishSnapshot` is reached; a sync round with
-  several limited rooms will delay that round's snapshot publish (and the
-  next long-poll) by however long those calls take, serially, one room at a
-  time.
 - `[CLI-RAND-DEAD]` **`Rand` (`capabilities.scala:45`) has no consumer today** — it's
   defined for symmetry with `HttpDo`/`Clock` but transaction ids are
   produced from an `Atomic[Int]` counter (`runtime.scala:402`,

@@ -30,7 +30,7 @@
  *   - The engine intentionally does not process `rooms.leave` (it never
  *     removes rooms) and does not act on `limited` inside `process()` itself —
  *     room removal wata's flows don't need, and backfill is triggered a level
- *     up, by `Runtime.backfillIfLimited`.
+ *     up, by `Runtime.queueIfLimited`.
  *
  *  Event emission ORDER is asserted by the fixture oracle: joined rooms in
  *  wire order (state membership events, timeline events, receipt events, then
