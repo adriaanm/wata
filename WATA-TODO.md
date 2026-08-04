@@ -43,16 +43,23 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
-- Backend crash (filed 2026-08-05, `wata-thicket-recursive-unit-walk`):
-  a `Unit`-returning self-recursive list walk crashes `sgolaBackend`
-  ("unsupported expression (Thicket)"); file-context-dependent, does not
-  repro in isolation. Workaround everywhere: `while` over a `var cur`.
-- Facade gap (filed 2026-08-05, `wata-variadic-facade-gap`): no lowering
-  into Go `...T` variadic params — `exec.Command` is bound as five
-  explicit arities in `wata-tui/src/main/scala/facades.scala`.
-- Ruling wanted (filed 2026-08-05, `wata-try-stmt-shape-sensitivity`):
-  throwing calls in nested statement positions inside `try` are rejected
-  until val-bound on their own line; defect or intended restriction?
+- Backend crash (filed 2026-08-05, `wata-thicket-recursive-unit-walk`;
+  acked same day: sgola queue top): a `Unit`-returning self-recursive
+  list walk crashes `sgolaBackend` ("unsupported expression (Thicket)");
+  file-context-dependent. Workaround everywhere: `while` over a `var
+  cur`. Repin when the fix lands (see SGOLA-REPIN in TODO.jsonl).
+- Facade gap (filed 2026-08-05; ruled A upstream, ticketed
+  VARIADIC-FACADE-BIND — terminal state is a Scala-varargs bind with
+  call-site spread): until then `exec.Command` stays five explicit
+  arities in `wata-tui/src/main/scala/facades.scala`.
+- Try-shape sensitivity (filed 2026-08-05; ruled A upstream, ticketed
+  TRY-STMT-NESTED-THROWING-SHAPES — all three statement shapes should
+  lower via the 9d4f544 hoist machinery): keep val-bound shapes until it
+  lands.
+- FYI from upstream 2026-08-05: F104 (`29cf82e`) fixed
+  `sgo.makeChan/makeSlice/makeMap` in ctor/function-argument position;
+  we never dropped the bind-to-val convention, so nothing to unwind —
+  the next repin simply makes the convention optional there.
 
 - `go.Slice[T]` sub-slicing (blocked the Opus decoder consumer) —
   GRADUATION-BRIEF ch.D.
