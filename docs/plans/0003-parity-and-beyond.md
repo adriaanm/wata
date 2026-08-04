@@ -143,6 +143,16 @@ info rows are host-simulable and land with sim coverage ahead of the
 rootfs work; the power actions are device-only and verify in this
 phase's on-device checkpoint. `[FB-SETTINGS-DIAG]` in the queue.
 
+Later polish, same phase family (queued, not blocking the first boot):
+a boot logo instead of the kernel bootlog — the device has a splash
+path in aboot (sibling `bq268-aboot`) for the earliest frame, plus
+`quiet` and fbcon logo suppression for the rest, ending in wata-fb's
+first frame; and **boot into wata as early as init allows**, before
+the network/modem are up — the client already survives a dead server
+(sync backoff), so the UI change is a calm "starting up / waiting for
+network" presentation of the existing connection state rather than an
+error surface. `[FB-BOOT-LOGO]`, `[FB-EARLY-BOOT]`.
+
 **Phase 6 — Family deployment.** Raspberry Pi target (arm64 build +
 service unit, extending `amd64-smoke`), journal-on by default with
 compaction, provisioning the actual family accounts, invite security
