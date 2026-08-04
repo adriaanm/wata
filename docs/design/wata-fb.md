@@ -466,6 +466,76 @@ then runs, auto-joins, opens the conversation, and his conversation
 view renders the message row — golden-framed, along with both contact
 lists and the settings applet.
 
+## Parity with the Zig fbclient
+
+`src/fbclient/` (in-tree, read-only) is the behavioral spec for this
+module: it was feature-complete against the TUI before the Sgola port
+started. This table is the feature-by-feature comparison, derived by
+reading `src/fbclient/src/applets/wata.zig`, `applets/settings.zig`,
+`main.zig`, `shell.zig` and `config.zig` against `applets.scala`,
+`shell.scala` and `ui.scala`.
+
+**One divergence colors every row: panel orientation.** The Zig client
+draws a 128x160 PORTRAIT panel (`font.cols` 21, `font.rows` 19); this
+module drives the same hardware as 160x128 LANDSCAPE (`Font.COLS` 26,
+`Font.ROWS` 15). Pixel coordinates and grid rows therefore never
+transcribe directly — every "same" row below means the same
+information in the equivalent place, not the same number.
+
+Rows marked **GAP** are open; each is closed by a commit that also
+rewrites its row here.
+
+| feature | Zig | wata-fb | status |
+|---|---|---|---|
+| **Session / boot** ||||
+| session store (`config.json`: homeserver, username, access_token, user_id, device_id) | `config.zig` | none | **GAP** — nothing in this module reads or writes a config file |
+| boot with no credentials | yes | no | **GAP** — `ui`/`sim` demand `<base> <user> <pass>` every run |
+| session written after login | yes | no | **GAP** — `ClientConfig` is always built with an empty `Session` |
+| **Conversation view** ||||
+| contact list: select, scroll window, family accent | yes | yes | same |
+| unplayed-count badge, right-aligned | yes | yes | same |
+| open conversation + receipt for the latest message | yes | yes | same |
+| message rows: duration `m:ss`, sender, played check-mark, gray-when-played | yes | yes | same |
+| OK = receipt (if unplayed) + download-and-play | yes | yes | same |
+| F2 = redact the selected message | yes | yes | same |
+| message scrolling past the visible window | yes | yes | same |
+| any of the six rows above under test | n/a | no | **GAP** — `fb-ui-tests` walks the list and opens a conversation, nothing more |
+| **Settings** ||||
+| echo test driven over the audio command mailbox | yes | yes | same |
+| brightness ±5, clamped 0..40, sysfs write-through | yes | yes | same |
+| screen-timeout picker 30s/1m/2m/5m/Never | yes | yes | same |
+| display-name preset picker, OK sets it over Matrix | yes | yes | same |
+| network disconnect (stop sync + actions, restart to reconnect) | yes | yes | same |
+| brightness / screen-timeout / name survive a restart | no | no | **GAP** — neither client persists them; the store this needs is the session store |
+| battery percent in the Info detail | yes | no | **GAP** — no `readBatteryPercent` in `led.scala` |
+| detail area under the menu | rows 16..19 of 19 | row 15 of 15 | **GAP** — off the bottom of the panel, see below |
+| any settings item under test | n/a | no | **GAP** — the settings golden is the menu at rest |
+| **Chrome / feedback** ||||
+| 1px status line colored by connection | yes | yes | same |
+| header + connection indicator (`ok`/`..`/`ERR`/`off`) | yes | yes | same |
+| pre-sync placeholder (`Connecting…`/`Syncing…`/…) | yes | yes | same |
+| PTT overlay: red bar + hold timer | yes | yes | same, with a `REC` prefix |
+| `SENT` / `SEND FAILED` / `PLAY FAILED` flash | yes | yes | same |
+| screensaver blank + wake-swallows-the-keypress | yes | yes | same |
+| **Not ported** ||||
+| snake / clock / charmap applets | yes | no | toys, out of scope |
+| FreeType text rendering | optional | no | bitmap font only |
+
+Two things the audit turned up that are worth stating outright:
+
+- **The settings detail area renders off the bottom of the panel.** The
+  menu is six items at two-row spacing (grid rows 2..12); the detail
+  block sits at `2 + N_ITEMS * 2 + 1` = row 15, one past the last row
+  of the 15-row landscape grid, so its first line is clipped to seven
+  of eight pixel rows and its second line never appears at all. The
+  number is inherited from the portrait grid, where 16 is a real row.
+  (The Zig client has the same arithmetic and loses its own fourth
+  echo-test line to it.)
+- **Every applet ticks every frame here; the Zig shell ticks only the
+  active one.** That is a fix, not a divergence to undo: the wata
+  applet must keep draining recording-done audio events (which is what
+  triggers the upload) while the user is sitting in the settings menu.
+
 ## Cross-compilation and deployment
 
 `tools/fb-deploy.sh` is the one-command path from source to a running
