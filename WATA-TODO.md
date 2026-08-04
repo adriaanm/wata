@@ -9,16 +9,8 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## wata-server spec conformance
 
-- **`limited` is never set, and `/messages` `from` tokens are event
-  ids, not sync tokens** (M8 ch.4 live-fire find): the Zig backfill
-  recipe silently loses mid-history-join history against this
-  server. The Sgola client carries a client-side workaround
-  (our-own-join triggers a tail fetch, ingested oldest-first); the
-  server fix was noted as a "post-M8 candidate" and never made.
-  Fix `limited` + a real pagination token at minimum.
 - **Unexercised surface** (M7 exit "Open/deferred", dispositions
-  stand unchallenged but untested): `/messages` non-sequential
-  pagination, `/publicRooms`, `createRoom` extras
+  stand unchallenged but untested): `/publicRooms`, `createRoom` extras
   (initial_state/creation_content/PL-override).
 - **The `/sync` allocation tax** (M7 exit: "the strongest perf
   lever") — profiled, recorded, unscheduled.

@@ -33,9 +33,9 @@ and redacting `m.room.*` events, read receipts, media upload/download, and
 `m.room.encrypted` handling, no device-key endpoints), federation, user
 registration (users are a fixed, hardcoded pair — `wata-server/src/main/scala/model.scala:120-131`),
 power-level enforcement on ordinary state/message events (only membership is
-checked — see "Known gaps" below), `/publicRooms`, non-sequential `/messages`
-pagination, and `createRoom`'s `initial_state`/`creation_content`/
-`power_level_content_override` fields (`rooms.scala:13-18`).
+checked — see "Known gaps" below), `/publicRooms`, and `createRoom`'s
+`initial_state`/`creation_content`/`power_level_content_override` fields
+(`rooms.scala:13-18`).
 
 ## Request lifecycle
 
@@ -199,7 +199,28 @@ present-but-unused in the reference this was ported from, i.e. its dormant
 existence is itself the evidence the original intent had rotted away.
 Invited rooms are included incrementally only if the user's own
 `m.room.member` invite event is newer than the since-token
-(`Sync.isNewInvite`, `sync.scala:236`).
+(`Sync.memberEventIsNew`).
+
+**Timeline window, `limited`, `prev_batch`.** A room block carries at most
+`Sync.timelineWindow` (20) timeline events. When more would qualify, the
+oldest are withheld, `limited` is `true`, and `prev_batch` names the
+position immediately before the oldest event sent, so
+`GET /messages(from = prev_batch, dir = b)` returns exactly the withheld
+run. When nothing is withheld, `limited` is `false` and `prev_batch` is the
+position the block was measured from — `s0` for an initial sync, the
+since-token for an incremental one.
+
+A joined room whose member event for this user is newer than the
+since-token is *new to them in this delta*: its history predates the token,
+so a timeline delta would omit everything said before they joined.
+`Sync.incrBlock` sends such a room in the INITIAL block shape instead —
+full state plus a windowed timeline — which is what makes a mid-history
+join recoverable by a stock Matrix client. (A display-name change rewrites
+the member event too, so it re-sends the block; clients dedup, and the
+alternative is tracking per-user membership history in the store.)
+An incremental room block's `state` still carries the state deltas of every
+new event, including any the window withheld, so current state stays
+complete even when the timeline is `limited`.
 
 **Long-poll.** `Sync.handle` → `handleAuthed` → `syncResult`
 (`sync.scala:57`) builds the parts once; if it's an incremental sync
@@ -220,9 +241,18 @@ wake, or timeout are handled identically (rebuild once, return; there is no
 re-loop).
 
 `next_batch`/`prev_batch` tokens are the literal string `"s" + seq`
-(`sync.scala:128`, `parseSince`/`stripS` at `sync.scala:85-88`) — the global
-`seq` counter formatted with a `s` prefix, not an opaque or room-scoped
-token.
+(`Sync.tok`, `parseSince`/`stripS`) — the global `seq` counter formatted
+with an `s` prefix, not a room-scoped token. `GET /messages` reads and
+writes the same positions (`from`, `start`, `end`), so a token is
+interchangeable between the two endpoints: `s<N>` names the boundary just
+after the event whose sequence is N. Backward paging (`dir=b`, also the
+default) returns the newest `limit` events at or below the boundary,
+newest-first, with `end` one position below the oldest sent; forward paging
+returns the oldest `limit` above it, oldest-first, with `end` at the newest
+sent. `/messages` also still accepts an EVENT ID as `from` — it resolves to
+the boundary just outside that event in the paging direction, so a page
+never repeats its own anchor. A `from` that is neither a position nor an
+event of the room yields an empty chunk rather than an error.
 
 ## Persistence
 
@@ -270,10 +300,8 @@ silently skipped (best-effort, not validated).
 
 ## Known gaps / debt
 
-Beyond what `WATA-TODO.md` already tracks (missing `limited` flag on
-`/sync` timelines, `/messages` `from` tokens being event ids rather than
-opaque pagination tokens, unexercised `/publicRooms` and non-sequential
-`/messages` pagination, the unscheduled `/sync` allocation cost, and the
+Beyond what `WATA-TODO.md` already tracks (unexercised `/publicRooms`,
+the unscheduled `/sync` allocation cost, and the
 explicitly-deferred actor-store refactor), reading the code surfaced the following. Items with a `[KEY]` tag have a
 line in `TODO.jsonl`; grep the key here for the body.
 

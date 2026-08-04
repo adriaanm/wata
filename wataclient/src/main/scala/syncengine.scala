@@ -22,10 +22,9 @@
  *     tolerant absent-field defaulting a typed decode with optional fields
  *     would.
  *   - The engine intentionally does not process `rooms.leave` (it never
- *     removes rooms) or the standard `limited`/backfill trigger inside
- *     `process()` itself — wata's flows don't need either; see
- *     `Runtime.backfillNewJoins`/`backfillIfLimited` for how backfill is
- *     actually triggered.
+ *     removes rooms) and does not act on `limited` inside `process()` itself —
+ *     room removal wata's flows don't need, and backfill is triggered a level
+ *     up, by `Runtime.backfillIfLimited`.
  *
  *  Event emission ORDER is asserted by the fixture oracle: account_data
  *  first, then joined rooms in wire order (state membership events, timeline

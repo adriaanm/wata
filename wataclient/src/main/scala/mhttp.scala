@@ -130,15 +130,8 @@ object MatrixHttp:
   def setAccountData(hs: Hs, userId: String, dtype: String, body: String): HttpResponse =
     request(hs, "PUT", "/_matrix/client/v3/user/" + userId + "/account_data/" + dtype, JSON, body)
 
-  /** GET /messages backward with NO from token — the newest `limit` events
-   *  (the new-room tail backfill; wata-server's from is an event id, so a sync
-   *  token would match nothing). */
-  def getMessagesTail(hs: Hs, roomId: String, limit: Int): HttpResponse =
-    request(hs, "GET",
-      "/_matrix/client/v3/rooms/" + roomId + "/messages?dir=b&limit=" + Matrix.intStr(limit),
-      JSON, "")
-
-  /** GET /messages backward pagination (the limited-timeline backfill). */
+  /** GET /messages backward pagination (the limited-timeline backfill); `from`
+   *  is the room's `prev_batch`, an opaque `s<seq>` position token. */
   def getMessages(hs: Hs, roomId: String, from: String, limit: Int): HttpResponse =
     request(hs, "GET",
       "/_matrix/client/v3/rooms/" + roomId + "/messages?from=" + from + "&dir=b&limit=" + Matrix.intStr(limit),

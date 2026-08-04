@@ -346,63 +346,38 @@ checked against a separately pinned expected-output file in CI.
 | `syncoracle.scala` | 408 | 15 hand-scripted sync scenarios rendered as a deterministic text report, for CI pinning. |
 | `wjson.scala` | 61 | Defaulting JSON field-read helpers used everywhere a sync/response body is parsed. |
 
-## The `limited`/pagination workaround
+## Backfill: the `limited` timeline gap
 
-This is the one documented server-conformance workaround with real
-client-side logic behind it (also listed at a higher level in
-`WATA-TODO.md`, "wata-server spec conformance").
+The Matrix backfill trigger is `rooms.join.<roomId>.timeline.limited ==
+true` in a sync response: the server truncated that room's timeline, and
+the client pages backward through `/messages` with `from = <that room's
+prev_batch>` to close the gap. `wata-server` implements exactly that
+contract — it sets `limited` whenever a room block withholds history, and
+its `/messages` `from` parameter takes the same opaque `s<seq>` position
+tokens `/sync` hands out — so `wataclient` runs the standard recipe and
+carries no server-specific compensation.
 
-The Matrix spec's normal backfill trigger is `rooms.join.<roomId>.
-timeline.limited == true` in a sync response, which tells the client the
-timeline was truncated and it should page backward through `/messages`
-using `from = <that room's prev_batch>` to fill the gap. `wata-server`
-never sets `limited` (per `WATA-TODO.md`), and its `/messages` `from`
-parameter expects an **event id**, not a sync-style pagination token —
-so the "normal" recipe (used verbatim by the original Zig client this was
-ported from) silently fails to recover history for a room joined
-mid-history against this particular server.
-
-`wataclient` compensates with a second, independent backfill trigger that
-does not depend on `limited` at all:
-
-- `Runtime.processRound` (`runtime.scala:210-215`) always calls both
-  `backfillRooms` (the spec-standard `limited`-triggered path, still
-  present and functional if a server *does* set the flag — see
-  `Runtime.backfillIfLimited`, `runtime.scala:271-274`, which reads
-  `timeline.limited` and pages via `MatrixHttp.getMessages` from the
-  room's stored `prevBatch`) and `backfillNewJoins` (the workaround).
-- `backfillNewJoins` (`runtime.scala:220-228`) scans the `SyncEvent`s that
-  `SyncEngine.process` just emitted for a `MembershipChanged` where the
-  membership is `"join"` and the user id is *our own* — i.e., "we just
-  joined this room in this sync round" — and calls `backfillTail` for
-  that room.
-- `backfillTail` (`runtime.scala:240-244`) calls
-  `MatrixHttp.getMessagesTail`, which issues `GET /messages` with **no
-  `from` parameter at all**, `dir=b`, `limit=50` — i.e. "give me the
-  newest 50 events, whatever pagination scheme you use." The comment on
-  `MatrixHttp.getMessagesTail` (`mhttp.scala:135-137`) spells out why: a
-  sync-token-shaped `from` would match nothing against wata-server's
-  event-id-based `/messages`, so the only request guaranteed to work
-  without needing a token at all is the unparameterized "tail" request.
-- Because `/messages` returns events newest-first, `backfillTail` reverses
-  the chunk before ingesting it (`ListOps.reverse(...)` at
-  `runtime.scala:243`) so voice messages land in the room's
-  `voiceMessages` list in oldest-first order — the comment
-  (`runtime.scala:235-239`) notes this normalizes to a deterministic
-  order the codebase treats as a house rule, in contrast to the ported
-  Zig client which ingested as-served and relied on later dedup.
-- Ingestion goes through `SyncEngine.ingestBackfill`
-  (`syncengine.scala:210-225`), which is deliberately narrower than
-  `process()`: it only dedups against `timelineEventIds` and extracts
-  voice messages from `m.room.message` events — it does not process state
-  events or emit `SyncEvent`s, because (per its comment) "backfill repairs
+- `Runtime.processRound` calls `backfillRooms` over the sync response's
+  `rooms.join` map after `SyncEngine.process` has ingested it, and before
+  the snapshot is published.
+- `Runtime.backfillIfLimited` reads `timeline.limited` for one room and,
+  when set, calls `backfillRoom`.
+- `Runtime.backfillRoom` reads the room's stored `prevBatch`
+  (`SyncEngine.prevBatchOf`, "" when the room is unknown or no token was
+  stored) and issues `MatrixHttp.getMessages(from = prevBatch, dir = b,
+  limit = 50)`. The chunk arrives newest-first and is ingested in that
+  order.
+- Ingestion goes through `SyncEngine.ingestBackfill`, which is deliberately
+  narrower than `process()`: it only dedups against `timelineEventIds` and
+  extracts voice messages from `m.room.message` events — it does not
+  process state events or emit `SyncEvent`s, because "backfill repairs
   message history, it does not replay the room's life."
 
-Net effect: any room the client newly joins gets its most recent 50
-messages fetched regardless of whether the server ever sets `limited`,
-which is the client-side patch for the server's spec gap. The dedup logic
-in the engine absorbs any overlap between this tail fetch and whatever
-the room's later live `/sync` timeline delivers.
+A room the user joins mid-history needs no separate trigger: the server
+sends a newly-visible room in the initial block shape — full state and a
+windowed timeline that reports `limited` when it withheld anything — so the
+standard path recovers the history. The engine's dedup absorbs any overlap
+between a backfilled chunk and the room's later live `/sync` timeline.
 
 ## Known gaps / debt (beyond `WATA-TODO.md`)
 
@@ -410,19 +385,17 @@ Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. The untagged ones are recorded as things to know before
 touching the surrounding code, not as work owed.
 
-- `[CLI-BACKFILL-BOUND]` **No max-count bound on `backfillTail`'s 50-event tail fetch vs. actual
-  gap size.** If a room's real history gap is larger than 50 events (e.g.
-  rejoining after being away a long time), older messages are simply
-  never recovered — there's no follow-up pagination. `getMessages`
-  (paginated) exists and is used for the `limited` path but is never
-  chained after `getMessagesTail`.
+- `[CLI-BACKFILL-BOUND]` **`backfillRoom` fetches one 50-event page and never
+  chains.** The server's `end` token is a real continuation position, but
+  `backfillRoom` discards it, so a gap larger than 50 events (rejoining
+  after a long absence) leaves the oldest part of the history unrecovered
+  until some later sync marks the room `limited` again.
 - `[CLI-BACKFILL-BLOCKING]` **Backfill runs synchronously inside the sync loop
-  (`processRound`).** `backfillRooms`/`backfillNewJoins` issue additional
-  blocking HTTP calls per room before `publishSnapshot` is reached; a
-  sync round with several newly-joined or newly-limited rooms will delay
-  that round's snapshot publish (and the next long-poll) by however long
-  those `/messages` calls take, serially, one room at a time.
-  (`runtime.scala:210-215`, `261-269`, `247-255`.)
+  (`processRound`).** `backfillRooms` issues a blocking `/messages` call per
+  limited room before `publishSnapshot` is reached; a sync round with
+  several limited rooms will delay that round's snapshot publish (and the
+  next long-poll) by however long those calls take, serially, one room at a
+  time.
 - `[CLI-RAND-DEAD]` **`Rand` (`capabilities.scala:45`) has no consumer today** — it's
   defined for symmetry with `HttpDo`/`Clock` but transaction ids are
   produced from an `Atomic[Int]` counter (`runtime.scala:402`,

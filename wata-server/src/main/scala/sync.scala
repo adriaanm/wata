@@ -32,6 +32,11 @@ import JsonNav.*
  *  `hasChangesOf` can test emptiness WITHOUT re-navigating the built JSON. */
 case class SyncParts(joins: List[(String, Json)], invites: List[(String, Json)], global: List[AcctData], upTo: scala.Long)
 
+/** One room block's timeline window: the events actually sent, whether older
+ *  ones were withheld (`limited`), and the `prev_batch` position the client
+ *  pages back from. */
+case class TimelineWin(events: List[Event], limited: Boolean, prevBatch: String)
+
 object Sync:
 
   // ---- handler entry (auth + query parse + long-poll orchestration) ----------
@@ -149,10 +154,11 @@ object Sync:
     buildJoinsInitial(t, userId, acc2)
 
   def joinBlockInitial(room: Room, userId: String): Json =
+    val win = windowOf(room.timeline, 0L)
     var fs: List[(String, Json)] = startObj
     fs = ("summary", summaryOf(room, userId)) :: fs
     fs = ("state", obj1("events", stateValuesArr(room.state))) :: fs
-    fs = ("timeline", timelineObj(eventsArr(room.timeline), "s0")) :: fs
+    fs = ("timeline", timelineObj(eventsArr(win.events), win.limited, win.prevBatch)) :: fs
     fs = ("ephemeral", obj1("events", formatReceipts(Store.receiptsForRoom(room.roomId)))) :: fs
     fs = ("account_data", obj1("events", acctEventsArr(Store.allAccountData(userId, true, room.roomId)))) :: fs
     fs = ("unread_notifications", unreadZero) :: fs
@@ -182,15 +188,39 @@ object Sync:
     val allReceipts = Store.receiptsForRoom(h.roomId)
     val newReceipts = Store.receiptsSinceRoom(h.roomId, sinceSeq)
     var acc2: List[(String, Json)] = acc
-    if isEmptyEv(newEvents) && isEmptyR(newReceipts) then ()
-    else acc2 = (h.roomId, joinBlockIncr(h, userId, sinceSeq, newEvents, allReceipts)) :: acc2
+    acc2 = incrBlock(h, userId, sinceSeq, newEvents, allReceipts, newReceipts, acc)
     buildJoinsIncr(t, userId, sinceSeq, acc2)
 
+  /** A room whose member event for this user is NEWER than the since-token is
+   *  new to them in this delta: the room's history predates the token, so a
+   *  timeline DELTA would silently omit everything said before they joined.
+   *  Such a room is sent in the INITIAL shape instead — full state and a
+   *  windowed timeline that reports `limited` when it withholds anything, so
+   *  the client can page the rest back through /messages.
+   *
+   *  A display-name change rewrites the member event too and so re-sends the
+   *  block; the client dedups it, and the alternative is tracking per-user
+   *  membership history in the store for no behavioural gain. */
+  def incrBlock(room: Room, userId: String, sinceSeq: scala.Long, newEvents: List[Event],
+                receipts: List[Receipt], newReceipts: List[Receipt], acc: List[(String, Json)]): List[(String, Json)] =
+    if memberEventIsNew(room, userId, sinceSeq) then (room.roomId, joinBlockInitial(room, userId)) :: acc
+    else incrBlockDelta(room, userId, sinceSeq, newEvents, receipts, newReceipts, acc)
+
+  def incrBlockDelta(room: Room, userId: String, sinceSeq: scala.Long, newEvents: List[Event],
+                     receipts: List[Receipt], newReceipts: List[Receipt], acc: List[(String, Json)]): List[(String, Json)] =
+    if isEmptyEv(newEvents) && isEmptyR(newReceipts) then acc
+    else (room.roomId, joinBlockIncr(room, userId, sinceSeq, newEvents, receipts)) :: acc
+
+  /** `state` carries the state deltas of EVERY new event, including any the
+   *  timeline window withheld — the spec's "state between `since` and the start
+   *  of the timeline" plus the window's own, so current state stays complete
+   *  even when the timeline is `limited`. */
   def joinBlockIncr(room: Room, userId: String, sinceSeq: scala.Long, newEvents: List[Event], receipts: List[Receipt]): Json =
+    val win = windowOf(newEvents, sinceSeq)
     var fs: List[(String, Json)] = startObj
     fs = ("summary", summaryOf(room, userId)) :: fs
     fs = ("state", obj1("events", stateEventsIncr(newEvents))) :: fs
-    fs = ("timeline", timelineObj(eventsArr(newEvents), "s" + JsonNav.longStr(sinceSeq))) :: fs
+    fs = ("timeline", timelineObj(eventsArr(win.events), win.limited, win.prevBatch)) :: fs
     fs = ("ephemeral", obj1("events", formatReceipts(receipts))) :: fs
     fs = ("account_data", obj1("events", JArr(Nil))) :: fs
     fs = ("unread_notifications", unreadZero) :: fs
@@ -227,10 +257,12 @@ object Sync:
 
   def buildInvitesIncrStep(h: Room, t: List[Room], userId: String, sinceSeq: scala.Long, acc: List[(String, Json)]): List[(String, Json)] =
     var acc2: List[(String, Json)] = acc
-    if isNewInvite(h, userId, sinceSeq) then acc2 = (h.roomId, inviteBlock(h)) :: acc2 else ()
+    if memberEventIsNew(h, userId, sinceSeq) then acc2 = (h.roomId, inviteBlock(h)) :: acc2 else ()
     buildInvitesIncr(t, userId, sinceSeq, acc2)
 
-  def isNewInvite(room: Room, userId: String, sinceSeq: scala.Long): Boolean = Store.memberEvent(room, userId) match
+  /** is this user's `m.room.member` event in the room newer than the
+   *  since-token — i.e. did their membership change within this delta. */
+  def memberEventIsNew(room: Room, userId: String, sinceSeq: scala.Long): Boolean = Store.memberEvent(room, userId) match
     case s: Some[Event] => s.value.seq > sinceSeq
     case None => false
 
@@ -281,8 +313,50 @@ object Sync:
 
   // ---- event / state serialization -------------------------------------------
 
-  def timelineObj(events: Json, prevBatch: String): Json =
-    obj3("events", events, "limited", JBool(false), "prev_batch", JStr(prevBatch))
+  def timelineObj(events: Json, limited: Boolean, prevBatch: String): Json =
+    obj3("events", events, "limited", JBool(limited), "prev_batch", JStr(prevBatch))
+
+  // ---- the timeline window (`limited` + `prev_batch`) ------------------------
+  //
+  // A room block carries at most `timelineWindow` events. A longer run is a GAP:
+  // `limited` says so and `prev_batch` names the position immediately BEFORE the
+  // oldest event sent, so GET /messages(from = prev_batch, dir = b) returns
+  // exactly the withheld run — the tokens are the same `s<seq>` positions /sync
+  // hands out as `next_batch`.
+
+  def timelineWindow: scala.Int = 20
+
+  /** an `s<seq>` position token. */
+  def tok(seq: scala.Long): String = "s" + JsonNav.longStr(seq)
+
+  /** the newest `timelineWindow` events of `evs`. `floor` is the position the
+   *  caller measured `evs` from (0 for an initial sync, the since-token for an
+   *  incremental one) — it is the `prev_batch` when nothing was withheld. */
+  def windowOf(evs: List[Event], floor: scala.Long): TimelineWin =
+    val n = countEv(evs, 0)
+    if n <= timelineWindow then TimelineWin(evs, false, tok(floor))
+    else windowCut(evs, n - timelineWindow)
+
+  def windowCut(evs: List[Event], cut: scala.Int): TimelineWin =
+    TimelineWin(dropFirst(evs, cut), true, tok(seqAt(evs, cut - 1)))
+
+  def countEv(xs: List[Event], n: scala.Int): scala.Int = xs match
+    case _ :: t => countEv(t, n + 1)
+    case Nil  => n
+
+  def seqAt(xs: List[Event], i: scala.Int): scala.Long = xs match
+    case h :: t => seqAtStep(h, t, i)
+    case Nil  => 0L
+
+  def seqAtStep(h: Event, t: List[Event], i: scala.Int): scala.Long =
+    if i <= 0 then h.seq else seqAt(t, i - 1)
+
+  def dropFirst(xs: List[Event], n: scala.Int): List[Event] =
+    if n <= 0 then xs else dropFirstStep(xs, n)
+
+  def dropFirstStep(xs: List[Event], n: scala.Int): List[Event] = xs match
+    case _ :: t => dropFirst(t, n - 1)
+    case Nil  => Nil
 
   /** the wire event, with `unsigned.age = now - ts` merged in (the internal
    *  `Event.seq` never crosses the wire). */

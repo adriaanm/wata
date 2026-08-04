@@ -14,6 +14,10 @@ import JsonNav.*
  *     override` (rarely used; deferred).
  *   - /publicRooms is not implemented.
  */
+/** A resolved `/messages` pagination boundary. `ok` is false when the `from`
+ *  parameter named neither an `s<seq>` position nor an event in this room. */
+case class Anchor(ok: Boolean, seq: scala.Long)
+
 object Rooms:
 
   // ---- createRoom --------------------------------------------------------
@@ -348,12 +352,19 @@ object Rooms:
 
   // ---- GET /messages (timeline pagination) -----------------------------------
   //
-  // The client's backfill path calls this with `from` = a /sync prev_batch token
-  // (an "sN" seq token, never an event id) and dir='b'. When `from` is not an
-  // event id in the timeline we return an EMPTY chunk — the messages were
-  // already delivered by /sync (immediate consistency), so backfill is a no-op
-  // safety net here. When `from` IS an event id we paginate, for spec-correct
-  // clients.
+  // Pagination positions are the SAME opaque `s<seq>` tokens /sync hands out as
+  // `next_batch` and `prev_batch`: `s<N>` names the boundary just after the event
+  // whose sequence is N. Backward (`dir=b`, also the default) returns the newest
+  // `limit` events at or below the boundary, newest-first; forward returns the
+  // oldest `limit` events above it, oldest-first. `end` is the boundary to
+  // continue from, so repeated calls walk history without gap or overlap — which
+  // is what makes a `limited` /sync timeline recoverable.
+  //
+  // An EVENT ID is also accepted as `from`, for a client paginating from an event
+  // it already holds; it resolves to the boundary just OUTSIDE that event in the
+  // requested direction, so a page never repeats its own anchor. A `from` that is
+  // neither a position nor an event of this room yields an empty chunk rather
+  // than an error — the same thing a client sees paging a foreign token.
   //
   // The wire `chunk` is a FLAT array of events (matching the client's
   // GetMessagesResponse type and the Matrix spec), not a nested
@@ -380,24 +391,99 @@ object Rooms:
     val dir = q.get("dir")
     val limit = parseLimit(q.get("limit"))
     val reverse = dir == "b" || dir == ""
-    if from == "" then messagesSlice(room.timeline, "", reverse, limit, false)
+    if from == "" then page(room, "", tailAnchor(room, reverse), reverse, limit)
     else messagesFrom(room, from, reverse, limit)
 
+  /** no `from`: a backward page starts at the newest position in the room, a
+   *  forward one at the beginning of history. */
+  def tailAnchor(room: Room, reverse: Boolean): scala.Long =
+    if reverse then lastSeqOf(room.timeline, 0L) else 0L
+
   def messagesFrom(room: Room, from: String, reverse: Boolean, limit: scala.Int): Either[MErr, Json] =
-    if timelineHas(room.timeline, from) then messagesBase(room, from, reverse, limit)
+    val a = anchorOf(room, from, reverse)
+    if a.ok then page(room, from, a.seq, reverse, limit)
     else Right(obj3("start", JStr(from), "end", JStr(from), "chunk", JArr(Nil)))
 
-  def messagesBase(room: Room, from: String, reverse: Boolean, limit: scala.Int): Either[MErr, Json] =
-    val base = if reverse then eventsBefore(room.timeline, from, Nil) else eventsAfter(room.timeline, from)
-    messagesSlice(base, from, reverse, limit, true)
+  def anchorOf(room: Room, from: String, reverse: Boolean): Anchor =
+    if isSeqToken(from) then Anchor(true, Sync.parseLong(from.substring(1)))
+    else eventAnchor(room, from, reverse)
 
-  /** `base` is oldest-first; backward pagination returns the last `limit` events
-   *  newest-first, forward returns the first `limit` oldest-first. */
-  def messagesSlice(base: List[Event], from: String, reverse: Boolean, limit: scala.Int, hasFrom: Boolean): Either[MErr, Json] =
-    val chosen = if reverse then ListOps.reverse(takeLast(base, limit)) else takeFirst(base, limit)
-    val startTok = if hasFrom then from else headEventId(chosen)
-    val endTok = lastEventId(chosen, from)
-    Right(obj3("start", JStr(startTok), "end", JStr(endTok), "chunk", Sync.eventsArr(chosen)))
+  /** an `s` followed by at least one digit and nothing else. Event ids start
+   *  with `$`, so the two token spaces never collide. */
+  def isSeqToken(s: String): Boolean =
+    if s.length < 2 then false else tokenTail(s)
+
+  def tokenTail(s: String): Boolean =
+    if s.startsWith("s") then allDigits(s, 1) else false
+
+  def allDigits(s: String, i: scala.Int): Boolean =
+    if i >= s.length then true else digitStep(s, i)
+
+  def digitStep(s: String, i: scala.Int): Boolean =
+    val c = s.charAt(i)
+    if c < '0' then false else digitStep2(s, i, c)
+
+  def digitStep2(s: String, i: scala.Int, c: Char): Boolean =
+    if c > '9' then false else allDigits(s, i + 1)
+
+  def eventAnchor(room: Room, from: String, reverse: Boolean): Anchor = Store.findEv(room.timeline, from) match
+    case s: Some[Event] => Anchor(true, anchorSeq(s.value.seq, reverse))
+    case None => Anchor(false, 0L)
+
+  /** the boundary just outside the anchor event, in the paging direction. */
+  def anchorSeq(seq: scala.Long, reverse: Boolean): scala.Long =
+    if reverse then seq - 1L else seq
+
+  def page(room: Room, from: String, b: scala.Long, reverse: Boolean, limit: scala.Int): Either[MErr, Json] =
+    if reverse then backPage(room, from, b, limit) else fwdPage(room, from, b, limit)
+
+  /** the newest `limit` events at or below `b`, sent newest-first; `end` is one
+   *  position below the oldest one sent. */
+  def backPage(room: Room, from: String, b: scala.Long, limit: scala.Int): Either[MErr, Json] =
+    val kept = takeLast(eventsUpTo(room.timeline, b, Nil), limit)
+    pageJson(from, tokenOf(b), backEnd(kept, from, b), ListOps.reverse(kept))
+
+  /** the oldest `limit` events above `b`, sent oldest-first; `end` is the newest
+   *  one sent. */
+  def fwdPage(room: Room, from: String, b: scala.Long, limit: scala.Int): Either[MErr, Json] =
+    val kept = takeFirst(eventsAbove(room.timeline, b, Nil), limit)
+    pageJson(from, tokenOf(b), tokenOf(lastSeqOf(kept, b)), kept)
+
+  def pageJson(from: String, startTok: String, endTok: String, chunk: List[Event]): Either[MErr, Json] =
+    Right(obj3("start", JStr(startOr(from, startTok)), "end", JStr(endTok), "chunk", Sync.eventsArr(chunk)))
+
+  def startOr(from: String, dflt: String): String = if from == "" then dflt else from
+
+  /** `kept` is oldest-first, so its head is the oldest event on the page. */
+  def backEnd(kept: List[Event], from: String, b: scala.Long): String = kept match
+    case h :: _ => tokenOf(h.seq - 1L)
+    case Nil  => startOr(from, tokenOf(b))
+
+  def tokenOf(seq: scala.Long): String = Sync.tok(clampSeq(seq))
+
+  def clampSeq(seq: scala.Long): scala.Long = if seq < 0L then 0L else seq
+
+  def lastSeqOf(xs: List[Event], acc: scala.Long): scala.Long = xs match
+    case h :: t => lastSeqOf(t, h.seq)
+    case Nil  => acc
+
+  def eventsUpTo(xs: List[Event], b: scala.Long, acc: List[Event]): List[Event] = xs match
+    case h :: t => eventsUpToStep(h, t, b, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def eventsUpToStep(h: Event, t: List[Event], b: scala.Long, acc: List[Event]): List[Event] =
+    var acc2: List[Event] = acc
+    if h.seq <= b then acc2 = h :: acc2 else ()
+    eventsUpTo(t, b, acc2)
+
+  def eventsAbove(xs: List[Event], b: scala.Long, acc: List[Event]): List[Event] = xs match
+    case h :: t => eventsAboveStep(h, t, b, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def eventsAboveStep(h: Event, t: List[Event], b: scala.Long, acc: List[Event]): List[Event] =
+    var acc2: List[Event] = acc
+    if h.seq > b then acc2 = h :: acc2 else ()
+    eventsAbove(t, b, acc2)
 
   def parseLimit(s: String): scala.Int =
     var out = 10
@@ -407,28 +493,6 @@ object Rooms:
       ()
     catch case e: sgo.GoError => out = 10
     out
-
-  def timelineHas(xs: List[Event], id: String): Boolean = xs match
-    case h :: t => timelineHasStep(h, t, id)
-    case Nil  => false
-
-  def timelineHasStep(h: Event, t: List[Event], id: String): Boolean =
-    if h.eventId == id then true else timelineHas(t, id)
-
-  def eventsBefore(xs: List[Event], from: String, acc: List[Event]): List[Event] = xs match
-    case h :: t => eventsBeforeStep(h, t, from, acc)
-    case Nil  => ListOps.reverse(acc)
-
-  def eventsBeforeStep(h: Event, t: List[Event], from: String, acc: List[Event]): List[Event] =
-    if h.eventId == from then ListOps.reverse(acc)
-    else eventsBefore(t, from, h :: acc)
-
-  def eventsAfter(xs: List[Event], from: String): List[Event] = xs match
-    case h :: t => eventsAfterStep(h, t, from)
-    case Nil  => Nil
-
-  def eventsAfterStep(h: Event, t: List[Event], from: String): List[Event] =
-    if h.eventId == from then t else eventsAfter(t, from)
 
   def takeFirst(xs: List[Event], n: scala.Int): List[Event] = takeFirstAcc(xs, n, Nil)
 
@@ -440,13 +504,3 @@ object Rooms:
     case Nil  => ListOps.reverse(acc)
 
   def takeLast(xs: List[Event], n: scala.Int): List[Event] = ListOps.reverse(takeFirst(ListOps.reverse(xs), n))
-
-  def headEventId(xs: List[Event]): String = xs match
-    case h :: _ => h.eventId
-    case Nil  => "s0"
-
-  def lastEventId(xs: List[Event], from: String): String = ListOps.reverse(xs) match
-    case h :: _ => h.eventId
-    case Nil  => lastFallback(from)
-
-  def lastFallback(from: String): String = if from == "" then "s0" else from

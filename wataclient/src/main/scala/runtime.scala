@@ -197,48 +197,16 @@ object Runtime:
 
   /** one successful sync round: engine ingest -> invite auto-join -> backfill
    *  -> snapshot publish. Auto-join runs after process() so the NEXT sync
-   *  carries the joined room. Backfill fires on TWO triggers: a limited
-   *  timeline (the standard Matrix gap trigger, paging via prev_batch) and
-   *  OUR OWN join in the delta (a room that is new to us — wata-server never
-   *  sets `limited`, and its /messages `from` parameter expects an EVENT id
-   *  rather than a pagination token, so the standard trigger can't recover
-   *  history for a room we just joined; the new-room trigger fetches the
-   *  recent TAIL instead, and the engine's dedup absorbs any overlap between
-   *  the two paths). */
+   *  carries the joined room. Backfill has ONE trigger, the standard Matrix
+   *  one: a `limited` timeline, paged via `prev_batch` — the server sets
+   *  `limited` whenever it withholds history and its `/messages` `from` takes
+   *  the same `s<seq>` position tokens, so the gap is always recoverable. */
   def processRound(c: MatrixClient, hs: Hs, selfUid: String, j: Json): Unit =
-    val evs = SyncEngine.process(j)
+    SyncEngine.process(j)
+    ()
     autoJoin(hs, WJson.objField(WJson.objField(j, "rooms"), "invite"))
     backfillRooms(hs, WJson.objField(WJson.objField(j, "rooms"), "join"))
-    backfillNewJoins(hs, evs, selfUid)
     publishSnapshot(c)
-
-  /** the self-join trigger: process() emitted MembershipChanged(join) for US ->
-   *  fetch that room's message tail (duplicate membership events just repeat a
-   *  deduped fetch). */
-  def backfillNewJoins(hs: Hs, evs: List[SyncEvent], selfUid: String): Unit =
-    var cur = evs
-    var going = true
-    while going do
-      cur match
-        case e :: t =>
-          backfillIfSelfJoin(hs, e, selfUid)
-          cur = t
-        case Nil => going = false
-
-  def backfillIfSelfJoin(hs: Hs, e: SyncEvent, selfUid: String): Unit = e match
-    case m: MembershipChanged =>
-      if m.membership == "join" && m.userId == selfUid then backfillTail(hs, m.roomId)
-    case _ => ()
-
-  /** tail backfill for a newly joined room: /messages with NO from token
-   *  (against wata-server this returns the newest `limit` events), ingested
-   *  OLDEST-FIRST — the chunk arrives newest-first, and the engine appends in
-   *  ingest order, so reversing here keeps message order deterministic. */
-  def backfillTail(hs: Hs, roomId: String): Unit =
-    val resp = MatrixHttp.getMessagesTail(hs, roomId, 50)
-    if resp.status == 200 then
-      ingestChunk(roomId, ListOps.reverse(SyncEngine.arrItems(
-        WJson.objField(MatrixHttp.parseOrNull(resp.body), "chunk"))))
 
   /** trusted family environment — accept ALL invites. */
   def autoJoin(hs: Hs, inviteMap: Json): Unit =
