@@ -21,7 +21,6 @@ object SyncOracle:
     case _: TimelineEventE     => "timeline_event"
     case _: MembershipChanged  => "membership_changed"
     case _: ReceiptUpdated     => "receipt_updated"
-    case _: AccountDataUpdated => "account_data_updated"
 
   def eventCount(evs: List[SyncEvent]): Int =
     var n = 0
@@ -170,7 +169,7 @@ object SyncOracle:
     b.append(" joined "); b.append(SyncEngine.joinedMemberCount(room2)); b.append('\n')
     val bob2 = SyncEngine.findMember(room2.members, "@bob:test") match
       case s: Some[MemberInfo] => s.value
-      case None => MemberInfo("", "", "", false)
+      case None => MemberInfo("", "", "")
     b.append("t02 bob: display "); b.append(bob2.displayName)
     b.append(" membership "); b.append(bob2.membership); b.append('\n')
 
@@ -196,33 +195,32 @@ object SyncOracle:
     b.append(" durMs "); b.append(vm3.durationMs.toInt)
     b.append(" tsOk "); b.append(boolStr(vm3.timestamp == 1700000000000L)); b.append('\n')
 
-    // -- 4. m.direct account data ---------------------------------------------------
+    // -- 4. net.wata.dm classifies the room; is_direct classifies nothing -------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
-    val js4 = "{\"next_batch\":\"batch_4\",\"account_data\":{\"events\":[" +
-      "{\"type\":\"m.direct\",\"content\":{" +
-      "\"@bob:test\":[\"!dm1:test\",\"!dm2:test\"]," +
-      "\"@charlie:test\":[\"!dm3:test\"]}}]}}"
-    val evs4 = SyncEngine.process(parse(js4))
-    b.append("t04 mdirect: ad-event "); b.append(boolStr(hasEvent(evs4, "account_data_updated")))
-    b.append(" entries "); b.append(SyncEngine.directCount); b.append('\n')
-    val bobRooms4 = SyncEngine.findDirect("@bob:test") match
-      case s: Some[DirectEntry] => s.value.roomIds
-      case None => Nil
-    b.append("t04 bob: first ")
-    bobRooms4 match
-      case h :: _ => b.append(h)
-      case Nil  => b.append("<none>")
-    b.append('\n')
+    val js4 = "{\"next_batch\":\"batch_4\",\"rooms\":{\"join\":{" +
+      "\"!dm1:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
+      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}}," +
+      "\"!plain:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
+      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\",\"is_direct\":true}}]}}}}}"
+    SyncEngine.process(parse(js4))
+    val dm4 = SyncEngine.roomOr("!dm1:test", SyncEngine.emptyRoom("?"))
+    val plain4 = SyncEngine.roomOr("!plain:test", SyncEngine.emptyRoom("?"))
+    b.append("t04 classify: dm "); b.append(SyncDescribe.dmStr(dm4.dmMembers))
+    b.append(" is_direct-only "); b.append(SyncDescribe.dmStr(plain4.dmMembers))
+    b.append(" peer "); b.append(SyncEngine.dmPeerOf(dm4)); b.append('\n')
 
-    // -- 5. buildSnapshot contacts from m.direct --------------------------------------
+    // -- 5. buildSnapshot: a classified room IS the conversation ----------------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js5 = "{\"next_batch\":\"b5\"," +
-      "\"account_data\":{\"events\":[{\"type\":\"m.direct\",\"content\":{\"@bob:test\":[\"!dm1:test\"]}}]}," +
       "\"rooms\":{\"join\":{\"!dm1:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
       "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
-      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\",\"is_direct\":true}}]}}}}}"
+      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}}}}}"
     SyncEngine.process(parse(js5))
     val ss5 = SyncEngine.buildSnapshot()
     b.append("t05 snapshot: contacts "); b.append(contactCount(ss5))
@@ -254,29 +252,32 @@ object SyncOracle:
         case Nil                  => going6 = false
     b.append("t06 dedup: voice "); b.append(vmCount6); b.append('\n')
 
-    // -- 7. m.direct dedup: stale rooms skipped, first JOINED room wins ----------------
+    // -- 7. a peer's FIRST classified room wins (a loser of the pair map) --------------
+    // The server only ever maps one room per pair, but a room it lost the claim
+    // to stays joined and stamped, so the client still has to pick one.
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
-    val js7 = "{\"next_batch\":\"b7\"," +
-      "\"account_data\":{\"events\":[{\"type\":\"m.direct\",\"content\":{" +
-      "\"@bob:test\":[\"!stale:test\",\"!active:test\",\"!also_active:test\"]}}]}," +
-      "\"rooms\":{\"join\":{" +
-      "\"!active:test\":{\"state\":{\"events\":[{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
-      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\",\"is_direct\":true}}]}}," +
-      "\"!also_active:test\":{}}}}"
+    val js7 = "{\"next_batch\":\"b7\",\"rooms\":{\"join\":{" +
+      "\"!first:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
+      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}}," +
+      "\"!second:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}]}}}}}"
     SyncEngine.process(parse(js7))
     val ss7 = SyncEngine.buildSnapshot()
-    b.append("t07 stale-skip: convs "); b.append(convCount(ss7))
+    b.append("t07 first-wins: convs "); b.append(convCount(ss7))
     b.append(" room "); b.append(nthConv(ss7, 0).roomId); b.append('\n')
 
-    // -- 8. m.direct: contact with ONLY stale rooms is excluded ------------------------
+    // -- 8. a stamp that does not name US is somebody else's DM ------------------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
-    val js8 = "{\"next_batch\":\"b8\"," +
-      "\"account_data\":{\"events\":[{\"type\":\"m.direct\",\"content\":{\"@bob:test\":[\"!gone:test\"]}}]}}"
+    val js8 = "{\"next_batch\":\"b8\",\"rooms\":{\"join\":{\"!theirs:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@bob:test\",\"@charlie:test\"]}}]}}}}}"
     SyncEngine.process(parse(js8))
     val ss8 = SyncEngine.buildSnapshot()
-    b.append("t08 stale-only: convs "); b.append(convCount(ss8)); b.append('\n')
+    b.append("t08 not-ours: convs "); b.append(convCount(ss8))
+    b.append(" contacts "); b.append(contactCount(ss8)); b.append('\n')
 
     // -- 9. family room by #family: canonical alias -------------------------------------
     SyncEngine.reset()
@@ -302,7 +303,6 @@ object SyncOracle:
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js10 = "{\"next_batch\":\"b10\"," +
-      "\"account_data\":{\"events\":[{\"type\":\"m.direct\",\"content\":{\"@bob:test\":[\"!dm_bob:test\"]}}]}," +
       "\"rooms\":{\"join\":{" +
       "\"!fam:test\":{\"state\":{\"events\":[" +
       "{\"type\":\"m.room.canonical_alias\",\"state_key\":\"\",\"content\":{\"alias\":\"#family:test\"}}," +
@@ -311,7 +311,8 @@ object SyncOracle:
       "{\"type\":\"m.room.member\",\"state_key\":\"@charlie:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Charlie\"}}" +
       "]}}," +
       "\"!dm_bob:test\":{\"state\":{\"events\":[" +
-      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\",\"is_direct\":true}}" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}" +
       "]}}}}}"
     SyncEngine.process(parse(js10))
     val ss10 = SyncEngine.buildSnapshot()
@@ -322,24 +323,28 @@ object SyncOracle:
     b.append("\" type "); b.append(convTypeName(charlie10.convType))
     b.append(" msgs "); b.append(msgCount(charlie10)); b.append('\n')
 
-    // -- 11. self user excluded from contacts and family members --------------------------
+    // -- 11. self is never a contact of its own -------------------------------------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
-    val js11 = "{\"next_batch\":\"b11\"," +
-      "\"account_data\":{\"events\":[{\"type\":\"m.direct\",\"content\":{\"@alice:test\":[\"!self_dm:test\"]}}]}}"
+    val js11 = "{\"next_batch\":\"b11\",\"rooms\":{\"join\":{\"!fam:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"m.room.canonical_alias\",\"state_key\":\"\",\"content\":{\"alias\":\"#family:test\"}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@alice:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Alice\"}}" +
+      "]}}}}}"
     SyncEngine.process(parse(js11))
     val ss11 = SyncEngine.buildSnapshot()
     b.append("t11 self-skip: contacts "); b.append(contactCount(ss11))
+    b.append(" family-members "); b.append(famMemberCount(ss11.family))
     b.append(" convs "); b.append(convCount(ss11)); b.append('\n')
 
     // -- 12. is_played tracks read receipts ------------------------------------------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js12 = "{\"next_batch\":\"b12\"," +
-      "\"account_data\":{\"events\":[{\"type\":\"m.direct\",\"content\":{\"@bob:test\":[\"!dm1:test\"]}}]}," +
       "\"rooms\":{\"join\":{\"!dm1:test\":{" +
-      "\"state\":{\"events\":[{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
-      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\",\"is_direct\":true}}]}," +
+      "\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
+      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}," +
       "\"timeline\":{\"events\":[{\"type\":\"m.room.message\",\"event_id\":\"$msg1\",\"sender\":\"@bob:test\"," +
       "\"origin_server_ts\":1700000000000," +
       "\"content\":{\"msgtype\":\"m.audio\",\"url\":\"mxc://test/audio1\",\"info\":{\"duration\":2000}}}]}," +
@@ -357,10 +362,11 @@ object SyncOracle:
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js13 = "{\"next_batch\":\"b13\"," +
-      "\"account_data\":{\"events\":[{\"type\":\"m.direct\",\"content\":{\"@bob:test\":[\"!dm1:test\"]}}]}," +
       "\"rooms\":{\"join\":{\"!dm1:test\":{" +
-      "\"state\":{\"events\":[{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
-      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\",\"is_direct\":true}}]}," +
+      "\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
+      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}," +
       "\"timeline\":{\"events\":[" +
       "{\"type\":\"m.room.message\",\"event_id\":\"$msg1\",\"sender\":\"@bob:test\"," +
       "\"origin_server_ts\":1700000000000,\"content\":{\"msgtype\":\"m.audio\",\"url\":\"mxc://test/a1\",\"info\":{\"duration\":1000}}}," +
@@ -399,7 +405,7 @@ object SyncOracle:
     val room15 = SyncEngine.roomOr("!room1:test", SyncEngine.emptyRoom("?"))
     val bob15 = SyncEngine.findMember(room15.members, "@bob:test") match
       case s: Some[MemberInfo] => s.value
-      case None => MemberInfo("", "", "", false)
+      case None => MemberInfo("", "", "")
     b.append("t15 persist: batch "); b.append(SyncEngine.nextBatch)
     b.append(" name "); b.append(room15.name)
     b.append(" bob "); b.append(bob15.displayName); b.append('\n')

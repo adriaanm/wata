@@ -12,7 +12,7 @@
 # a regen (designer-reviewed, like baselines).
 #
 # Session (in order):
-#   alice: login, set displayname, createRoom(is_direct, invite bob), PUT m.direct
+#   alice: login, set displayname, resolve the DM with bob (the dialect endpoint)
 #   alice: /sync initial                       -> alice__01-initial.json
 #   bob:   login, join room
 #   alice: upload voice bytes, send m.audio, send m.text
@@ -25,11 +25,11 @@ cd "$(dirname "$0")/.."
 WATA="$(pwd)"
 . "$WATA/tools/sgo-env.sh"                        # SGOLA_HOME, GOTOOLCHAIN, SGO
 FIXDIR="$WATA/wataclient/test-fixtures"
-PORT=18119
+PORT="${FIXTURES_PORT:-18119}"
 BASE="http://127.0.0.1:$PORT"
 
 mkdir -p "$FIXDIR"
-"$SGO" build --app wata-server >/dev/null
+( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null
 
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 TMP=$(mktemp -d); LOG="$TMP/server.log"
@@ -62,12 +62,10 @@ curl -s -X PUT "${A[@]}" -d '{"displayname":"Alice W"}' \
 curl -s -X PUT "${B[@]}" -d '{"displayname":"Bob B"}' \
   "$BASE/_matrix/client/v3/profile/@bob:localhost/displayname" >/dev/null
 
-# ---- DM room + m.direct --------------------------------------------------------
-ROOMID=$(curl -s -X POST "${A[@]}" \
-  -d '{"is_direct":true,"invite":["@bob:localhost"]}' \
-  "$BASE/_matrix/client/v3/createRoom" | jget room_id)
-curl -s -X PUT "${A[@]}" -d "{\"@bob:localhost\":[\"$ROOMID\"]}" \
-  "$BASE/_matrix/client/v3/user/@alice:localhost/account_data/m.direct" >/dev/null
+# ---- the canonical DM ----------------------------------------------------------
+# One idempotent call: the server mints the room, stamps net.wata.dm + the
+# canonical alias, joins alice and invites bob, and derives the compat m.direct.
+ROOMID=$(curl -s -X POST "${A[@]}" "$BASE/_wata/v1/dm/bob" | jget room_id)
 
 # ---- alice initial sync ---------------------------------------------------------
 curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" > "$FIXDIR/alice__01-initial.json"

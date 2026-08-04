@@ -44,6 +44,8 @@ object Integ:
       else if name == "download-bytes" then ok = s08()
       else if name == "family-room" then ok = s09()
       else if name == "session-resume" then ok = s10()
+      else if name == "dm-idempotent" then ok = s11()
+      else if name == "dm-stock-create" then ok = s12()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -547,3 +549,56 @@ object Integ:
         val config = ClientConfig(base, "alice", "WRONG-PASSWORD", 1000, stored)
         if !phaseCfg(config)(c => grabSelf(c)) then false
         else Runtime.lastAuth.accessToken == creds.accessToken
+
+  // ---- canonical DMs -----------------------------------------------------------
+
+  /** BOTH sides resolve the DM, each unaware of the other, and converge on ONE
+   *  room — the property the old client's dedup/convergence dance existed to
+   *  approximate. Asking twice from the same side is the same answer again, and
+   *  the room the client actually sends into is that same room. */
+  def s11(): Boolean =
+    val atok = directToken("alice")
+    val btok = directToken("bob")
+    if atok == "" || btok == "" then false
+    else
+      val a1 = dmRoomId(atok, "@bob:localhost")
+      val b1 = dmRoomId(btok, "@alice:localhost")
+      val a2 = dmRoomId(atok, "bob")
+      if a1 == "" then false
+      else if a1 != b1 then false
+      else if a1 != a2 then false
+      else aliceSendsInto(a1)
+
+  /** alice's first send resolves the DM through the endpoint (roomId "") and
+   *  lands in exactly the room both sides already agreed on. */
+  def aliceSendsInto(want: String): Boolean =
+    if !phase("bob")(c => grabSelf(c)) then false
+    else
+      val bobId = outId
+      if !phase("alice")(c => aliceSendsMarker(c, bobId, 111L)) then false
+      else outRoom == want
+
+  /** a stock Matrix client's DM-shaped createRoom is answered with the SAME
+   *  canonical room — twice over, and from the other side too, so no duplicate
+   *  DM can appear even from a client that never heard of the endpoint. */
+  def s12(): Boolean =
+    val atok = directToken("alice")
+    val btok = directToken("bob")
+    if atok == "" || btok == "" then false
+    else
+      val canonical = dmRoomId(atok, "@bob:localhost")
+      val c1 = stockDmRoomId(atok, "@bob:localhost")
+      val c2 = stockDmRoomId(atok, "@bob:localhost")
+      val c3 = stockDmRoomId(btok, "@alice:localhost")
+      if canonical == "" then false
+      else canonical == c1 && canonical == c2 && canonical == c3
+
+  /** the dialect endpoint, out of band; "" on failure. */
+  def dmRoomId(token: String, peer: String): String =
+    val resp = MatrixHttp.dmRoom(directHs(token), peer)
+    if resp.status != 200 then "" else MatrixHttp.parseRoomId(resp.body)
+
+  /** what a stock client sends: createRoom with is_direct + one invitee. */
+  def stockDmRoomId(token: String, peer: String): String =
+    val resp = MatrixHttp.createRoomStockDm(directHs(token), peer)
+    if resp.status != 200 then "" else MatrixHttp.parseRoomId(resp.body)

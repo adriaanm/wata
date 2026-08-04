@@ -283,7 +283,7 @@ object Runtime:
   def execAction(c: MatrixClient, hs: Hs, selfUid: String, a: Action): Boolean = a match
     case _: ActQuit     => false
     case r: ActReceipt  => execReceipt(hs, r)
-    case m: ActSendVoice => execSendVoice(c, hs, selfUid, m)
+    case m: ActSendVoice => execSendVoice(c, hs, m)
     case d: ActPlay     => execPlay(c, hs, d)
     case n: ActSetName  => execSetName(hs, selfUid, n)
     case x: ActRedact   => execRedact(hs, x)
@@ -292,10 +292,10 @@ object Runtime:
     drop(MatrixHttp.sendReadReceipt(hs, r.roomId, r.eventId)) // best-effort, failure ignored
     true
 
-  def execSendVoice(c: MatrixClient, hs: Hs, selfUid: String, m: ActSendVoice): Boolean =
+  def execSendVoice(c: MatrixClient, hs: Hs, m: ActSendVoice): Boolean =
     val txn = txnCounterC.add(1)
     var roomId = m.roomId
-    if roomId == "" then roomId = resolveDmRoom(hs, selfUid, m.contactId)
+    if roomId == "" then roomId = resolveDmRoom(hs, m.contactId)
     if roomId == "" then c.events.send(EvSendFailed(txn))
     else
       val up = MatrixHttp.uploadMedia(hs, m.ogg)
@@ -308,27 +308,14 @@ object Runtime:
         else c.events.send(EvSendFailed(txn))
     true
 
-  /** DM-room resolution: reuse the first m.direct room for the contact, else
-   *  create one and tag it in m.direct. */
-  def resolveDmRoom(hs: Hs, selfUid: String, contactId: String): String =
+  /** DM-room resolution: ONE call to the server's DM endpoint, which owns DM
+   *  identity. There is nothing to reconcile here — the server answers with THE
+   *  room for the pair, idempotently, having joined us to it. */
+  def resolveDmRoom(hs: Hs, contactId: String): String =
     if contactId == "" then ""
     else
-      var roomId = ""
-      val got = MatrixHttp.getAccountData(hs, selfUid, "m.direct")
-      if got.status == 200 then roomId = MatrixHttp.findRoomForContact(got.body, contactId)
-      if roomId == "" then
-        val cr = MatrixHttp.createRoom(hs, contactId)
-        if cr.status == 200 then roomId = MatrixHttp.parseRoomId(cr.body)
-        if roomId != "" then updateMDirect(hs, selfUid, contactId, roomId)
-      roomId
-
-  /** GET current m.direct ("{}"-when-absent) -> upsert -> PUT (best-effort). */
-  def updateMDirect(hs: Hs, selfUid: String, contactId: String, roomId: String): Unit =
-    val got = MatrixHttp.getAccountData(hs, selfUid, "m.direct")
-    var existing = "{}"
-    if got.status == 200 then existing = got.body
-    drop(MatrixHttp.setAccountData(hs, selfUid, "m.direct",
-      MatrixHttp.mdirectWithRoom(existing, contactId, roomId)))
+      val resp = MatrixHttp.dmRoom(hs, contactId)
+      if resp.status == 200 then MatrixHttp.parseRoomId(resp.body) else ""
 
   /** the download-play action: download; on failure -> `EvPlaybackError`; on
    *  success -> route the Ogg bytes to the audio thread (drop-on-full

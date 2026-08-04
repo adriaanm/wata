@@ -99,8 +99,19 @@ object MatrixHttp:
   def joinRoom(hs: Hs, roomId: String): HttpResponse =
     request(hs, "POST", "/_matrix/client/v3/join/" + roomId, JSON, "{}")
 
-  /** POST /createRoom — a DM (is_direct + trusted_private_chat). */
-  def createRoom(hs: Hs, contactUserId: String): HttpResponse =
+  /** POST /_wata/v1/dm/{userId} — the wata dialect's DM resolution: ONE
+   *  idempotent call that answers with THE room for this pair, minting it and
+   *  joining both sides if it does not exist yet. Repeat calls, and calls from
+   *  the two sides at once, all return the same room, so there is nothing here
+   *  to reconcile — which is the whole point of the endpoint. */
+  def dmRoom(hs: Hs, contactUserId: String): HttpResponse =
+    request(hs, "POST", "/_wata/v1/dm/" + contactUserId, JSON, "{}")
+
+  /** POST /createRoom in the DM shape a STOCK Matrix client sends (`is_direct`
+   *  + one invitee). The client core never calls this — `dmRoom` is its path —
+   *  but the live oracle does, to hold the server to answering a stock client
+   *  with the same canonical room. */
+  def createRoomStockDm(hs: Hs, contactUserId: String): HttpResponse =
     var inv: List[Json] = Nil
     inv = JStr(contactUserId) :: inv
     var fs: List[(String, Json)] = Nil
@@ -122,14 +133,6 @@ object MatrixHttp:
     fs = ("room_alias_name", JStr(aliasLocal)) :: fs
     request(hs, "POST", "/_matrix/client/v3/createRoom", JSON, Json.write(JObj(fs)))
 
-  /** GET account data (m.direct — may 404 when none yet, caller-handled). */
-  def getAccountData(hs: Hs, userId: String, dtype: String): HttpResponse =
-    request(hs, "GET", "/_matrix/client/v3/user/" + userId + "/account_data/" + dtype, JSON, "")
-
-  /** PUT account data. */
-  def setAccountData(hs: Hs, userId: String, dtype: String, body: String): HttpResponse =
-    request(hs, "PUT", "/_matrix/client/v3/user/" + userId + "/account_data/" + dtype, JSON, body)
-
   /** GET /messages backward pagination (the limited-timeline backfill); `from`
    *  is the room's `prev_batch`, an opaque `s<seq>` position token. */
   def getMessages(hs: Hs, roomId: String, from: String, limit: Int): HttpResponse =
@@ -149,65 +152,10 @@ object MatrixHttp:
   def parseMxcUrl(body: String): String =
     WJson.strField(parseOrNull(body), "content_uri", "")
 
-  /** createRoom response -> `room_id`, "" when absent. */
+  /** createRoom / DM-endpoint response -> `room_id`, "" when absent. */
   def parseRoomId(body: String): String =
     WJson.strField(parseOrNull(body), "room_id", "")
-
-  /** m.direct body -> the FIRST room listed for `contactId`, "" when none. */
-  def findRoomForContact(body: String, contactId: String): String =
-    firstString(WJson.objField(parseOrNull(body), contactId))
-
-  def firstString(j: Json): String = j match
-    case a: JArr => firstStringIn(a.items)
-    case _       => ""
-
-  def firstStringIn(items: List[Json]): String = items match
-    case h :: t => WJson.strOr(h, "")
-    case Nil  => ""
-
-  /** parse the current m.direct object ("{}" when absent), append `roomId` to
-   *  the contact's list (position-preserving upsert), serialize back. */
-  def mdirectWithRoom(body: String, contactId: String, roomId: String): String =
-    val j = parseOrNull(body)
-    val fields = objFields(j)
-    Json.write(JObj(upsertRoomList(fields, contactId, roomId, Nil)))
 
   def objFields(j: Json): List[(String, Json)] = j match
     case o: JObj => o.fields
     case _       => Nil
-
-  def upsertRoomList(fs: List[(String, Json)], contactId: String, roomId: String,
-                     acc: List[(String, Json)]): List[(String, Json)] = fs match
-    case p :: t => upsertRoomStep(p, t, contactId, roomId, acc)
-    case Nil  => ListOps.reverse((contactId, oneRoomArr(roomId)) :: acc)
-
-  def upsertRoomStep(p: (String, Json), t: List[(String, Json)], contactId: String,
-                     roomId: String, acc: List[(String, Json)]): List[(String, Json)] =
-    val k: String = p._1
-    if k == contactId then
-      // cons BOUND first — a `::` in argument position does not lower
-      // correctly here.
-      val updated = (contactId, appendRoomArr(p._2, roomId)) :: acc
-      revAppendFields(updated, t)
-    else upsertRoomList(t, contactId, roomId, p :: acc)
-
-  /** reverse `acc` onto `t` (the core List has no `:::`). */
-  def revAppendFields(acc: List[(String, Json)], t: List[(String, Json)]): List[(String, Json)] = acc match
-    case h :: r => revAppendStep(h, r, t)
-    case Nil  => t
-
-  def revAppendStep(h: (String, Json), r: List[(String, Json)],
-                    t: List[(String, Json)]): List[(String, Json)] =
-    revAppendFields(r, h :: t)
-
-  def oneRoomArr(roomId: String): Json =
-    var xs: List[Json] = Nil
-    xs = JStr(roomId) :: xs
-    JArr(xs)
-
-  def appendRoomArr(j: Json, roomId: String): Json = j match
-    case a: JArr => JArr(appendJson(a.items, JStr(roomId)))
-    case _       => oneRoomArr(roomId)
-
-  def appendJson(xs: List[Json], x: Json): List[Json] =
-    ListOps.reverse(x :: ListOps.reverse(xs))

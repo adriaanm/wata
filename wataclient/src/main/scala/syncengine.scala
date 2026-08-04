@@ -7,11 +7,17 @@
  *     classes / objects), so the engine is a module `object` with private
  *     `var` state + `reset()`. One engine per process (the real client has
  *     exactly one; tests `reset()` between scenarios).
- *   - The rooms/members/receipts/m_direct collections are insertion-ordered
- *     `List`s with replace-keeps-position upsert, matching insertion-ordered
- *     map semantics — `buildSnapshot`'s contact/conversation order depends on
+ *   - The rooms/members/receipts collections are insertion-ordered `List`s
+ *     with replace-keeps-position upsert, matching insertion-ordered map
+ *     semantics — `buildSnapshot`'s contact/conversation order depends on
  *     this. Lookups are linear scans; wata's room/member counts are
  *     family-sized, so this is not a scaling concern here.
+ *   - DM CLASSIFICATION is structural: a room is a DM when its state carries
+ *     the server's `net.wata.dm` stamp, whose `members` pair says who it is
+ *     with. The engine holds no `m.direct` state and infers nothing from
+ *     `is_direct` — DM identity is the server's (docs/plans/0007), and the
+ *     `m.direct` the server still emits is a compat projection for stock
+ *     clients that this engine simply ignores.
  *   - Optional wire fields (`next_batch`, `canonical_alias`, `prev_batch`,
  *     `redacts`, `state_key`) become "" -or- has-flag pairs. Where PRESENCE
  *     matters (canonical_alias clearing, state_key gating) the code tests
@@ -26,10 +32,10 @@
  *     room removal wata's flows don't need, and backfill is triggered a level
  *     up, by `Runtime.backfillIfLimited`.
  *
- *  Event emission ORDER is asserted by the fixture oracle: account_data
- *  first, then joined rooms in wire order (state membership events, timeline
- *  events, receipt events, then `room_updated` LAST per room), then invited
- *  rooms (invite_state membership events, `room_updated`).
+ *  Event emission ORDER is asserted by the fixture oracle: joined rooms in
+ *  wire order (state membership events, timeline events, receipt events, then
+ *  `room_updated` LAST per room), then invited rooms (invite_state membership
+ *  events, `room_updated`).
  */
 object SyncEngine:
 
@@ -43,17 +49,14 @@ object SyncEngine:
   private val roomsC: sgo.Atomic[List[RoomState]] = sgo.atomic(Nil)
   private val selfUserIdC: sgo.Atomic[String] = sgo.atomic("")
   private val batchC: sgo.Atomic[String] = sgo.atomic("")
-  private val mDirectC: sgo.Atomic[List[DirectEntry]] = sgo.atomic(Nil)
   private def rooms: List[RoomState] = roomsC.get()
   private def selfUserId: String = selfUserIdC.get()
   private def batch: String = batchC.get()
-  private def mDirect: List[DirectEntry] = mDirectC.get()
 
   def reset(): Unit =
     roomsC.set(Nil)
     selfUserIdC.set("")
     batchC.set("")
-    mDirectC.set(Nil)
 
   /** set after login/whoami. */
   def setSelfUser(uid: String): Unit = selfUserIdC.set(uid)
@@ -61,9 +64,8 @@ object SyncEngine:
   def nextBatch: String = batch
   def selfUser: String = selfUserId
 
-  /** read-only views for oracles/drivers (insertion order preserved). */
+  /** read-only view for oracles/drivers (insertion order preserved). */
   def allRooms: List[RoomState] = rooms
-  def allDirect: List[DirectEntry] = mDirect
 
   // ---- room-list plumbing (insertion-ordered, replace keeps position) --------
 
@@ -97,7 +99,7 @@ object SyncEngine:
 
   def emptyRoom(roomId: String): RoomState =
     RoomState(roomId, "", false, "", Nil, Nil,
-      Nil, Nil, "", false)
+      Nil, Nil, "", Nil)
 
   /** getOrCreateRoom: append a fresh RoomState if absent (insertion order). */
   def ensureRoom(roomId: String): Unit =
@@ -217,7 +219,7 @@ object SyncEngine:
     val r0 = roomOr(roomId, emptyRoom(roomId))
     if hasEid && !strListContains(r0.timelineEventIds, eid) then
       updateRoom(RoomState(r0.roomId, r0.name, r0.hasAlias, r0.alias, r0.members,
-        appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.isDm))
+        appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers))
       if WJson.strField(ev, "type", "") == "m.room.message" then extractVoice(roomId, ev)
 
   // ---- json array helpers -----------------------------------------------------
@@ -239,63 +241,12 @@ object SyncEngine:
   def process(resp: Json): List[SyncEvent] =
     batchC.set(WJson.strField(resp, "next_batch", ""))
     var evs: List[SyncEvent] = Nil          // built REVERSED
-    evs = accountDataLoop(eventsOf(WJson.objField(resp, "account_data")), evs)
     val roomsJ = WJson.objField(resp, "rooms")
     evs = joinMapLoop(WJson.objField(roomsJ, "join"), evs)
     evs = inviteMapLoop(WJson.objField(roomsJ, "invite"), evs)
     ListOps.reverse(evs)
 
-  // ---- account data (m.direct) ------------------------------------------------
-
-  def accountDataLoop(events: List[Json], evs0: List[SyncEvent]): List[SyncEvent] =
-    var evs = evs0
-    var cur = events
-    var going = true
-    while going do
-      cur match
-        case c: ::[Json] =>
-          evs = accountDataEvent(c.head, evs)
-          cur = c.tail
-        case Nil => going = false
-    evs
-
-  def accountDataEvent(ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
-    val etype = WJson.strField(ev, "type", "")
-    if etype != "m.direct" then evs0
-    else
-      rebuildDirect(WJson.getField(ev, "content"))
-      AccountDataUpdated("m.direct") :: evs0             // emitted even without content
-
-  /** clear-and-rebuild m_direct from `{userId: [roomIds]}` (non-array values
-   *  SKIP the user entirely — only an array value is accepted per user). */
-  def rebuildDirect(content: Option[Json]): Unit = content match
-    case s: Some[Json] => rebuildDirectFrom(s.value)
-    case None => ()
-
-  def rebuildDirectFrom(c: Json): Unit = c match
-    case o: JObj =>
-      mDirectC.set(Nil)
-      directFieldsLoop(o.fields)
-    case _ => ()
-
-  def directFieldsLoop(fs: List[(String, Json)]): Unit =
-    var cur = fs
-    var going = true
-    while going do
-      cur match
-        case c: ::[(String, Json)] =>
-          directField(c.head)
-          cur = c.tail
-        case Nil => going = false
-
-  def directField(p: (String, Json)): Unit =
-    val uid: String = p._1
-    p._2 match
-      case a: JArr => mDirectC.set(appendDirect(mDirect, DirectEntry(uid, stringItems(a.items))))
-      case _       => ()
-
-  def appendDirect(ds: List[DirectEntry], d: DirectEntry): List[DirectEntry] =
-    ListOps.reverse(d :: ListOps.reverse(ds))
+  // ---- json string arrays -----------------------------------------------------
 
   def stringItems(items: List[Json]): List[String] =
     var acc: List[String] = Nil
@@ -313,25 +264,9 @@ object SyncEngine:
     case s: JStr => s.s :: acc
     case _       => acc
 
-  def findDirect(userId: String): Option[DirectEntry] = findDirectIn(mDirect, userId)
-
-  def findDirectIn(ds: List[DirectEntry], userId: String): Option[DirectEntry] = ds match
-    case h :: t => findDirectStep(h, t, userId)
-    case Nil  => None
-
-  def findDirectStep(h: DirectEntry, t: List[DirectEntry], userId: String): Option[DirectEntry] =
-    val k: String = h.userId
-    if k == userId then Some(h) else findDirectIn(t, userId)
-
-  def directCount: Int =
-    var n = 0
-    var cur = mDirect
-    var going = true
-    while going do
-      cur match
-        case c: ::[DirectEntry] => n += 1; cur = c.tail
-        case Nil              => going = false
-    n
+  def notEmptyStr(xs: List[String]): Boolean = xs match
+    case _ :: _ => true
+    case Nil  => false
 
   // ---- joined / invited room maps ----------------------------------------------
 
@@ -410,15 +345,29 @@ object SyncEngine:
     val etype = WJson.strField(ev, "type", "")
     if etype == "m.room.name" then { stateName(roomId, ev); evs0 }
     else if etype == "m.room.canonical_alias" then { stateAlias(roomId, ev); evs0 }
+    else if etype == "net.wata.dm" then { stateDm(roomId, ev); evs0 }
     else if etype == "m.room.member" then stateMember(roomId, ev, evs0)
     else evs0
+
+  /** the server's structural DM stamp, `{"members": [a, b]}`. This IS the
+   *  classification: a room is a DM the moment this state event arrives, and
+   *  the pair says who with. No account data, no ordering race, no inference
+   *  from `is_direct` — which is why nothing here has to be sticky. */
+  def stateDm(roomId: String, ev: Json): Unit =
+    val members = stringItems(arrItems(WJson.objField(WJson.objField(ev, "content"), "members")))
+    if notEmptyStr(members) then setDmMembers(roomId, members)
+
+  def setDmMembers(roomId: String, members: List[String]): Unit =
+    val r = roomOr(roomId, emptyRoom(roomId))
+    updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, members))
 
   def stateName(roomId: String, ev: Json): Unit =
     val content = WJson.objField(ev, "content")
     if WJson.hasStr(content, "name") then
       val r = roomOr(roomId, emptyRoom(roomId))
       updateRoom(RoomState(r.roomId, WJson.strField(content, "name", ""), r.hasAlias, r.alias,
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.isDm))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
 
   /** canonical_alias: an alias string sets it; a PRESENT content without one
    *  CLEARS it; an absent content changes nothing. */
@@ -430,10 +379,10 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     if WJson.hasStr(content, "alias") then
       updateRoom(RoomState(r.roomId, r.name, true, WJson.strField(content, "alias", ""),
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.isDm))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
     else
       updateRoom(RoomState(r.roomId, r.name, false, "",
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.isDm))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
 
   def stateMember(roomId: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
     if !hasField(ev, "state_key") then evs0                 // no state_key: not a state event
@@ -447,12 +396,10 @@ object SyncEngine:
   def stateMemberContent(roomId: String, uid: String, content: Json, evs0: List[SyncEvent]): List[SyncEvent] =
     val membership = WJson.strField(content, "membership", "leave")
     val display = WJson.strField(content, "displayname", uid)
-    val isDirect = WJson.boolField(content, "is_direct")
     val r = roomOr(roomId, emptyRoom(roomId))
-    val newMembers = upsertMember(r.members, MemberInfo(uid, display, membership, isDirect))
-    val newDm = if isDirect then true else r.isDm           // sticky once set
+    val newMembers = upsertMember(r.members, MemberInfo(uid, display, membership))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, newMembers,
-      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, newDm))
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
     MembershipChanged(roomId, uid, membership) :: evs0
 
   // ---- timeline -------------------------------------------------------------------
@@ -460,7 +407,7 @@ object SyncEngine:
   def setPrevBatch(roomId: String, pb: String): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, r.receipts, pb, r.isDm))
+      r.timelineEventIds, r.voiceMessages, r.receipts, pb, r.dmMembers))
 
   def timelineLoop(roomId: String, events: List[Json], evs0: List[SyncEvent]): List[SyncEvent] =
     var evs = evs0
@@ -482,7 +429,7 @@ object SyncEngine:
     else
       if hasEid then
         updateRoom(RoomState(r0.roomId, r0.name, r0.hasAlias, r0.alias, r0.members,
-          appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.isDm))
+          appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers))
       var evs = evs0
       if hasField(ev, "state_key") then evs = stateEvent(roomId, ev, evs)
       val etype = WJson.strField(ev, "type", "")
@@ -509,7 +456,7 @@ object SyncEngine:
         WJson.longField(ev, "origin_server_ts", 0L))
       val r = roomOr(roomId, emptyRoom(roomId))
       updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-        r.timelineEventIds, appendVoice(r.voiceMessages, vm), r.receipts, r.prevBatch, r.isDm))
+        r.timelineEventIds, appendVoice(r.voiceMessages, vm), r.receipts, r.prevBatch, r.dmMembers))
 
   def appendVoice(vs: List[VoiceMessageRaw], v: VoiceMessageRaw): List[VoiceMessageRaw] =
     ListOps.reverse(v :: ListOps.reverse(vs))
@@ -525,7 +472,7 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
       r.timelineEventIds, dropVoice(r.voiceMessages, targetId, Nil),
-      r.receipts, r.prevBatch, r.isDm))
+      r.receipts, r.prevBatch, r.dmMembers))
 
   def dropVoice(vs: List[VoiceMessageRaw], targetId: String, acc: List[VoiceMessageRaw]): List[VoiceMessageRaw] = vs match
     case h :: t => dropVoiceStep(h, t, targetId, acc)
@@ -586,7 +533,7 @@ object SyncEngine:
       case None => ReceiptEntry(eventId, Nil)
     val updated = ReceiptEntry(eventId, appendUserKeys(existing.userIds, users))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.isDm))
+      r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.dmMembers))
     ReceiptUpdated(roomId, eventId) :: evs0
 
   /** append every user key (no dedup — duplicates are appended as-is). */
@@ -608,65 +555,94 @@ object SyncEngine:
 
   // ============================ buildSnapshot ==================================
 
+  /** the UI view, derived from TWO things and nothing else: the rooms the
+   *  server classified as DMs (`net.wata.dm`), and the family roster. A DM room
+   *  IS the conversation with its peer; a roster member with no DM room yet
+   *  gets the roomless sentinel, and the first send resolves it. */
   def buildSnapshot(): StateSnapshot =
-    val contacts0 = contactsFromDirect()
+    var contacts: List[Contact] = Nil
     var conversations: List[Conversation] = Nil
-    var contacts = contacts0
-    // conversations from m.direct (insertion order; first JOINED room wins)
-    conversations = convsFromDirect(contacts, conversations)
-    // sticky is_dm inference for rooms not covered by m.direct
-    val inferred = inferDmConvs(contacts, conversations)
-    contacts = inferred._1
-    conversations = inferred._2
+    val dm = dmConvs(contacts, conversations)
+    contacts = dm._1
+    conversations = dm._2
     // family room by "#family:" canonical alias (first match wins; conv PREPENDED)
     val fam = findFamily()
     val hasFamily = fam._1
     val family = fam._2
     if hasFamily then
+      contacts = rosterContacts(family.members, contacts)
       conversations = familyConv(family.id) :: conversations
       conversations = roomlessFamilyConvs(family, conversations)
     StateSnapshot(Syncing(), selfUserId != "", User(selfUserId, resolveSelfDisplay()),
       contacts, conversations, hasFamily, family)
 
-  // ---- contacts from m.direct ----------------------------------------------------
+  // ---- conversations from the classified DM rooms ---------------------------------
 
-  def contactsFromDirect(): List[Contact] =
-    var acc: List[Contact] = Nil
-    var cur = mDirect
+  /** every classified DM room, in room order. Returns (contacts', convs') —
+   *  Tuple2, the blessed value composite. */
+  def dmConvs(contacts0: List[Contact], convs0: List[Conversation]): (List[Contact], List[Conversation]) =
+    var contacts = contacts0
+    var convs = convs0
+    var cur = rooms
     var going = true
     while going do
       cur match
-        case c: ::[DirectEntry] =>
-          acc = contactFromEntry(c.head, acc)
+        case c: ::[RoomState] =>
+          val step = dmConvOf(c.head, contacts, convs)
+          contacts = step._1
+          convs = step._2
           cur = c.tail
         case Nil => going = false
-    ListOps.reverse(acc)
+    (contacts, convs)
 
-  def contactFromEntry(d: DirectEntry, acc: List[Contact]): List[Contact] =
-    if selfUserId != "" && d.userId == selfUserId then acc  // skip self
-    else Contact(User(d.userId, resolveDisplay(d.userId, d.roomIds))) :: acc
+  def dmConvOf(r: RoomState, contacts: List[Contact], convs: List[Conversation]): (List[Contact], List[Conversation]) =
+    val peerId = dmPeerOf(r)
+    if peerId == "" then (contacts, convs)
+    else if peerHasConv(convs, peerId) then (contacts, convs)   // the first room for a peer wins
+    else dmConvFor(r, peerId, contacts, convs)
 
-  /** display name: first room in the entry's list that exists and knows the user. */
-  def resolveDisplay(userId: String, roomIds: List[String]): String =
-    var result = userId
-    var found = false
-    var cur = roomIds
+  def dmConvFor(r: RoomState, peerId: String, contacts0: List[Contact],
+                convs: List[Conversation]): (List[Contact], List[Conversation]) =
+    val contact = Contact(User(peerId, dmDisplay(r, peerId)))
+    var contacts = contacts0
+    if !contactExists(contacts, peerId) then contacts = appendContact(contacts, contact)
+    val messages = buildMessages(r)
+    (contacts, appendConv(convs, Conversation(r.roomId, DmConv(), true, contact, messages, unplayedOf(messages))))
+
+  /** the OTHER member of the room's stamped pair — "" when the room carries no
+   *  stamp, or the pair does not name us (someone else's DM). */
+  def dmPeerOf(r: RoomState): String =
+    if selfUserId == "" then "" else peerIn(r.dmMembers, selfUserId, false, "")
+
+  def peerIn(members: List[String], selfId: String, sawSelf: Boolean, other: String): String = members match
+    case h :: t => peerInStep(h, t, selfId, sawSelf, other)
+    case Nil  => peerDone(sawSelf, other)
+
+  def peerInStep(h: String, t: List[String], selfId: String, sawSelf: Boolean, other: String): String =
+    if h == selfId then peerIn(t, selfId, true, other) else peerIn(t, selfId, sawSelf, h)
+
+  def peerDone(sawSelf: Boolean, other: String): String =
+    if sawSelf then other else ""
+
+  def dmDisplay(r: RoomState, peerId: String): String =
+    val dn = displayInRoom(r, peerId)
+    if dn != "" then dn else peerId
+
+  /** everyone on the family roster is a contact, whether or not a DM room for
+   *  them exists yet. */
+  def rosterContacts(ms: List[Contact], contacts0: List[Contact]): List[Contact] =
+    var contacts = contacts0
+    var cur = ms
     var going = true
     while going do
       cur match
-        case c: ::[String] =>
-          if !found then
-            val dn = displayIn(c.head, userId)
-            if dn != "" then { result = dn; found = true }
+        case c: ::[Contact] =>
+          if !contactExists(contacts, c.head.user.id) then contacts = appendContact(contacts, c.head)
           cur = c.tail
         case Nil => going = false
-    result
+    contacts
 
-  /** the member's display name in a room, or "" (room missing / member missing). */
-  def displayIn(roomId: String, userId: String): String = findRoom(roomId) match
-    case s: Some[RoomState] => displayInRoom(s.value, userId)
-    case None => ""
-
+  /** the member's display name in a room, or "" (member missing). */
   def displayInRoom(r: RoomState, userId: String): String = findMember(r.members, userId) match
     case s: Some[MemberInfo] => s.value.displayName
     case None => ""
@@ -682,49 +658,6 @@ object SyncEngine:
   def contactExists(cs: List[Contact], userId: String): Boolean = findContact(cs, userId) match
     case _: Some[Contact] => true
     case None => false
-
-  // ---- conversations from m.direct -----------------------------------------------
-
-  def convsFromDirect(contacts: List[Contact], convs0: List[Conversation]): List[Conversation] =
-    var convs = convs0
-    var cur = mDirect
-    var going = true
-    while going do
-      cur match
-        case c: ::[DirectEntry] =>
-          convs = convFromEntry(c.head, contacts, convs)
-          cur = c.tail
-        case Nil => going = false
-    convs
-
-  def convFromEntry(d: DirectEntry, contacts: List[Contact], convs: List[Conversation]): List[Conversation] =
-    if selfUserId != "" && d.userId == selfUserId then convs
-    else
-      val rid = firstJoinedRoom(d.roomIds)
-      if rid == "" then convs                              // stale-only entry: excluded
-      else
-        val r = roomOr(rid, emptyRoom(rid))
-        val messages = buildMessages(r)
-        val found = findContact(contacts, d.userId)
-        val hasContact = contactExists(contacts, d.userId)
-        val contact = found match
-          case s: Some[Contact] => s.value
-          case None => Contact(User(d.userId, d.userId))
-        appendConv(convs, Conversation(rid, DmConv(), hasContact, contact, messages, unplayedOf(messages)))
-
-  /** the FIRST room id in the m.direct list that we have joined ("" if none) —
-   *  m.direct preserves insertion order (oldest first); stale entries skipped. */
-  def firstJoinedRoom(roomIds: List[String]): String =
-    var result = ""
-    var cur = roomIds
-    var going = true
-    while going do
-      cur match
-        case c: ::[String] =>
-          if result == "" && hasRoom(c.head) then result = c.head
-          cur = c.tail
-        case Nil => going = false
-    result
 
   def appendConv(cs: List[Conversation], c: Conversation): List[Conversation] =
     ListOps.reverse(c :: ListOps.reverse(cs))
@@ -768,52 +701,10 @@ object SyncEngine:
         case Nil => going = false
     n
 
-  // ---- sticky is_dm inference (rooms not covered by m.direct) ----------------------
-
-  /** returns (contacts', conversations') — Tuple2, the blessed value composite. */
-  def inferDmConvs(contacts0: List[Contact], convs0: List[Conversation]): (List[Contact], List[Conversation]) =
-    var contacts = contacts0
-    var convs = convs0
-    var cur = rooms
-    var going = true
-    while going do
-      cur match
-        case c: ::[RoomState] =>
-          val step = inferDmRoom(c.head, contacts, convs)
-          contacts = step._1
-          convs = step._2
-          cur = c.tail
-        case Nil => going = false
-    (contacts, convs)
-
-  def inferDmRoom(r: RoomState, contacts: List[Contact], convs: List[Conversation]): (List[Contact], List[Conversation]) =
-    if !r.isDm then (contacts, convs)
-    else if convHasRoom(convs, r.roomId) then (contacts, convs)
-    else
-      val peer = findPeer(r)
-      peer match
-        case s: Some[MemberInfo] => inferDmPeer(r, s.value, contacts, convs)
-        case None => (contacts, convs)
-
-  def inferDmPeer(r: RoomState, other: MemberInfo, contacts0: List[Contact], convs: List[Conversation]): (List[Contact], List[Conversation]) =
-    if peerHasConv(convs, other.userId) then (contacts0, convs)  // m.direct is the authority
-    else
-      val contact = Contact(User(other.userId, other.displayName))
-      var contacts = contacts0
-      if !contactExists(contacts, other.userId) then contacts = appendContact(contacts, contact)
-      val messages = buildMessages(r)
-      (contacts, appendConv(convs, Conversation(r.roomId, DmConv(), true, contact, messages, unplayedOf(messages))))
+  // ---- contact / conversation lookups ---------------------------------------------
 
   def appendContact(cs: List[Contact], c: Contact): List[Contact] =
     ListOps.reverse(c :: ListOps.reverse(cs))
-
-  def convHasRoom(convs: List[Conversation], roomId: String): Boolean = convs match
-    case h :: t => convHasRoomStep(h, t, roomId)
-    case Nil  => false
-
-  def convHasRoomStep(h: Conversation, t: List[Conversation], roomId: String): Boolean =
-    val k: String = h.roomId
-    if k == roomId then true else convHasRoom(t, roomId)
 
   def peerHasConv(convs: List[Conversation], userId: String): Boolean = convs match
     case h :: t => peerHasConvStep(h, t, userId)
@@ -822,24 +713,6 @@ object SyncEngine:
   def peerHasConvStep(h: Conversation, t: List[Conversation], userId: String): Boolean =
     val k: String = h.contact.user.id
     if h.hasContact && k == userId then true else peerHasConv(t, userId)
-
-  /** the "other" joined/invited member — the DM peer (first in member order). */
-  def findPeer(r: RoomState): Option[MemberInfo] =
-    var result: Option[MemberInfo] = None
-    var found = false
-    var cur = r.members
-    var going = true
-    while going do
-      cur match
-        case c: ::[MemberInfo] =>
-          if !found && isPeer(c.head) then { result = Some(c.head); found = true }
-          cur = c.tail
-        case Nil => going = false
-    result
-
-  def isPeer(m: MemberInfo): Boolean =
-    if selfUserId != "" && m.userId == selfUserId then false
-    else m.membership == "join" || m.membership == "invite"
 
   // ---- family ---------------------------------------------------------------------
 
