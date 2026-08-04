@@ -66,6 +66,14 @@ blocks + git log; each entry cites where it was recorded.*
   (`List(KeyDown(...), KeyUp(...))`) fails at `go build` (concrete slice
   vs collapsed `[]any` template param) — build such lists via cons until
   LIST-VARARGS-FAMILY-ELEM-COLLAPSE lands.
+- Emitter trap (from the backfill-oracle build): a mutable user variable
+  literally named `ok`, assigned inside a pattern-match case body, is
+  silently shadowed by the case's own type-assertion temp (`if x, ok :=
+  scrut.(*T); ok { ... }`) — the assignment lands on the temp, the
+  computation is silently wrong, and everything compiles clean. Avoid
+  `var ok` wherever a match case assigns it (any other name is safe)
+  until MATCH-CASE-OK-VAR-SHADOW lands. Filed:
+  `MATCH-CASE-OK-VAR-SHADOW`.
 - Emitter trap (from the `[FB-PNG-BLOCK]` build): an Int-LED string
   concatenation (`blocks + " blocks"`, i.e. `any2stringadd` with the Int
   on the left) compiles and links clean but emits `int + string` Go —

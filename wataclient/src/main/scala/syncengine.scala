@@ -220,7 +220,7 @@ object SyncEngine:
     if hasEid && !strListContains(r0.timelineEventIds, eid) then
       updateRoom(RoomState(r0.roomId, r0.name, r0.hasAlias, r0.alias, r0.members,
         appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers))
-      if WJson.strField(ev, "type", "") == "m.room.message" then extractVoice(roomId, ev)
+      if WJson.strField(ev, "type", "") == "m.room.message" then extractVoiceBackfill(roomId, ev)
 
   // ---- json array helpers -----------------------------------------------------
 
@@ -438,10 +438,20 @@ object SyncEngine:
       if hasEid then evs = TimelineEventE(roomId, eid) :: evs
       evs
 
-  /** extract a voice message: msgtype m.audio + url + event_id + sender all
-   *  required; timestamp defaults to 0; duration from content.info.duration
-   *  (>0 else 0). */
+  /** extract a voice message from a LIVE timeline event: appended — /sync
+   *  delivers timelines oldest-first, so append keeps the list chronological. */
   def extractVoice(roomId: String, ev: Json): Unit =
+    extractVoiceWith(roomId, ev, false)
+
+  /** extract a voice message from a BACKFILLED /messages event: inserted by
+   *  timestamp — the backfill walk pages BACKWARD (each chunk newest-first),
+   *  so an append would reverse the recovered run. */
+  def extractVoiceBackfill(roomId: String, ev: Json): Unit =
+    extractVoiceWith(roomId, ev, true)
+
+  /** msgtype m.audio + url + event_id + sender all required; timestamp
+   *  defaults to 0; duration from content.info.duration (>0 else 0). */
+  def extractVoiceWith(roomId: String, ev: Json, backfill: Boolean): Unit =
     val content = WJson.objField(ev, "content")
     val msgtype = WJson.strField(content, "msgtype", "")
     if msgtype == "m.audio" && WJson.hasStr(content, "url") &&
@@ -455,11 +465,34 @@ object SyncEngine:
         dur,
         WJson.longField(ev, "origin_server_ts", 0L))
       val r = roomOr(roomId, emptyRoom(roomId))
+      val vs = if backfill then insertVoiceByTs(r.voiceMessages, vm)
+               else appendVoice(r.voiceMessages, vm)
       updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-        r.timelineEventIds, appendVoice(r.voiceMessages, vm), r.receipts, r.prevBatch, r.dmMembers))
+        r.timelineEventIds, vs, r.receipts, r.prevBatch, r.dmMembers))
 
   def appendVoice(vs: List[VoiceMessageRaw], v: VoiceMessageRaw): List[VoiceMessageRaw] =
     ListOps.reverse(v :: ListOps.reverse(vs))
+
+  /** insert a BACKFILLED message before the FIRST message whose timestamp is
+   *  >= its own (append when none is). The >= tie rule is what keeps a
+   *  same-millisecond run ordered: the walk ingests newest-first, so of two
+   *  equal-timestamp messages the one ingested later is the OLDER one and
+   *  must land in front of the one already inserted. */
+  def insertVoiceByTs(vs: List[VoiceMessageRaw], vm: VoiceMessageRaw): List[VoiceMessageRaw] =
+    insertVoiceWalk(vs, vm, Nil)
+
+  def insertVoiceWalk(vs: List[VoiceMessageRaw], vm: VoiceMessageRaw, acc: List[VoiceMessageRaw]): List[VoiceMessageRaw] = vs match
+    case h :: t => insertVoiceStep(h, t, vm, acc)
+    case Nil  => ListOps.reverse(vm :: acc)
+
+  def insertVoiceStep(h: VoiceMessageRaw, t: List[VoiceMessageRaw], vm: VoiceMessageRaw, acc: List[VoiceMessageRaw]): List[VoiceMessageRaw] =
+    if h.timestamp >= vm.timestamp then revPrepend(acc, vm :: h :: t)
+    else insertVoiceWalk(t, vm, h :: acc)
+
+  /** reverse `acc` onto `tail`. */
+  def revPrepend(acc: List[VoiceMessageRaw], tail: List[VoiceMessageRaw]): List[VoiceMessageRaw] = acc match
+    case a :: r => revPrepend(r, a :: tail)
+    case Nil  => tail
 
   /** redaction target: top-level `redacts` (v1.10+) else content.redacts. */
   def applyRedaction(roomId: String, ev: Json): Unit =

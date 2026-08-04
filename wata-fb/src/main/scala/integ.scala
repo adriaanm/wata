@@ -46,6 +46,8 @@ object Integ:
       else if name == "session-resume" then ok = s10()
       else if name == "dm-idempotent" then ok = s11()
       else if name == "dm-stock-create" then ok = s12()
+      else if name == "backfill-paged" then ok = s13()
+      else if name == "backfill-cap" then ok = s14()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -592,6 +594,107 @@ object Integ:
       val c3 = stockDmRoomId(btok, "@alice:localhost")
       if canonical == "" then false
       else canonical == c1 && canonical == c2 && canonical == c3
+
+  // ---- limited-timeline backfill (the paged /messages walk + queue drain) ------
+  //
+  // Both scenarios force a DEEP GAP while alice's client is away: the DM room
+  // is minted out-of-band (the dm endpoint joins both sides), bob pumps voice
+  // events into it by direct HTTP, and only THEN does alice's client start.
+  // Her initial sync's room block carries the newest `timelineWindow` (20)
+  // events with `limited: true`, so everything older arrives only through the
+  // deferred GET /messages walk (50-event pages, 2 per round, 10-page cap).
+  // The pump gives message i duration i, so ONE walk of the final snapshot
+  // (`dursRun`) asserts completeness, exact count, and chronological order at
+  // once — and the counts are chosen against the server's window (20) and the
+  // client's page size (50) so that the assertion can only pass if the paged
+  // walk really ran.
+
+  /** alice syncs into a room holding 130 pumped messages: 20 arrive in the
+   *  limited window, the other 110 need THREE backward /messages pages (50 >
+   *  110/3 > 2×50 − 110), so a single-page backfill cannot satisfy the exact
+   *  1..130 run. */
+  def s13(): Boolean =
+    val atok = directToken("alice")
+    val btok = directToken("bob")
+    if atok == "" || btok == "" then false
+    else
+      val room = dmRoomId(atok, "@bob:localhost")
+      // the dm endpoint joins only its CALLER (the peer holds an invite), so
+      // bob asks too before pumping — and must get the same canonical room.
+      if room == "" || dmRoomId(btok, "@alice:localhost") != room then false
+      else if !pumpVoices(btok, room, 130) then false
+      else phase("alice")(c => grabSelf(c) &&
+        Runtime.waitForSnapshot(c, s => dursRun(s, "@bob:localhost", 1L, 130), 30000L))
+
+  /** a gap deeper than the 10-page cap STAYS a gap: 531 pumped messages =
+   *  20 in the window + 10 pages × 50 recovered = exactly 520 present,
+   *  starting at duration 12 (messages 1..11 are the abandoned deep end),
+   *  and the count never grows past 520 afterwards. */
+  def s14(): Boolean =
+    val atok = directToken("alice")
+    val btok = directToken("bob")
+    if atok == "" || btok == "" then false
+    else
+      val room = dmRoomId(atok, "@bob:localhost")
+      if room == "" || dmRoomId(btok, "@alice:localhost") != room then false
+      else if !pumpVoices(btok, room, 531) then false
+      else phase("alice")(c => capChecks(c))
+
+  def capChecks(c: MatrixClient): Boolean =
+    if !grabSelf(c) then false
+    else if !Runtime.waitForSnapshot(c, s => dursRun(s, "@bob:localhost", 12L, 520), 60000L) then false
+    // no later snapshot may exceed the cap's yield — the walk must NOT resume.
+    else if Runtime.waitForSnapshot(c, s => hasMsgFrom(s, "@bob:localhost", 521), 2500L) then false
+    else true
+
+  /** pump `n` voice events by direct HTTP (each ~1ms on loopback — a client
+   *  phase would long-poll between sends). Message i gets duration i; the mxc
+   *  is a shared fake (nothing downloads it here). */
+  def pumpVoices(token: String, roomId: String, n: Int): Boolean =
+    val hs = directHs(token)
+    var i = 1
+    var ok = true
+    while ok && i <= n do
+      val resp = MatrixHttp.sendVoiceMessage(hs, roomId, "mxc://localhost/pumped", i.toLong, 12, i)
+      ok = resp.status == 200
+      i += 1
+    ok
+
+  /** the conversation with `contactId` holds EXACTLY `n` messages with
+   *  durations `firstDur, firstDur+1, …` in order — completeness, count, and
+   *  chronological order in one walk. */
+  def dursRun(s: StateSnapshot, contactId: String, firstDur: Long, n: Int): Boolean =
+    findConv(s.conversations, contactId) match
+      case cv: Some[Conversation] => runMatches(cv.value.messages, firstDur, n)
+      case None => false
+
+  // NB the accumulator must NOT be named `ok`: it is assigned inside a match
+  // case, and the emitter's type-assertion temp for a case is also `ok` — the
+  // Go if-scope shadows the user var, so the assignment lands on the temp and
+  // the result is silently wrong (WATA-MATCH-CASE-OK-VAR-SHADOW).
+  def runMatches(ms: List[VoiceMessage], firstDur: Long, n: Int): Boolean =
+    var cur = ms
+    var want = firstDur
+    var left = n
+    var good = true
+    var going = true
+    while going do
+      cur match
+        case m :: t =>
+          if left == 0 then
+            good = false
+            going = false
+          else if m.durationMs != want then
+            good = false
+            going = false
+          else
+            want += 1L
+            left -= 1
+            cur = t
+        case Nil =>
+          if left != 0 then good = false
+          going = false
+    good
 
   /** the dialect endpoint, out of band; "" on failure. */
   def dmRoomId(token: String, peer: String): String =

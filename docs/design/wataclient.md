@@ -398,6 +398,14 @@ goroutine, and the queue is how it time-slices:
   (`Runtime.backfillPage`), its chunk arriving newest-first and ingested
   in that order. A page whose walk isn't finished re-queues its job at
   the tail, so several limited rooms page round-robin.
+- Because the walk runs BACKWARD, a backfilled message cannot simply be
+  appended to the room's (chronological, oldest-first) message list the
+  way a live timeline event is: `SyncEngine.extractVoiceBackfill` instead
+  inserts it before the first message with an equal-or-newer
+  `origin_server_ts` (`insertVoiceByTs`). The `>=` tie rule is what keeps
+  a same-millisecond run ordered — of two equal-timestamp messages the
+  one ingested later in the walk is the older one, so it lands in front
+  of the one already inserted.
 - A job leaves the queue when its gap closes — an empty chunk, a missing
   `end`, an `end` equal to the `from` just used (the server's no-progress
   signal), or an HTTP failure — or at `Runtime.maxBackfillPages` (10
@@ -423,6 +431,21 @@ sends a newly-visible room in the initial block shape — full state and a
 windowed timeline that reports `limited` when it withheld anything — so the
 standard path recovers the history. The engine's dedup absorbs any overlap
 between a backfilled chunk and the room's later live `/sync` timeline.
+
+The whole recipe is pinned live by two integ scenarios
+(`wata-fb/src/main/scala/integ.scala`, run by `tools/wataclient-integ.sh`),
+each forcing a deep gap by pumping voice events into a DM by direct HTTP
+before the client's first sync, with message *i* given duration *i* so one
+walk of the final snapshot asserts completeness, exact count, and
+chronological order at once (`dursRun`):
+
+- **`backfill-paged`** — 130 pumped messages: 20 arrive in the limited
+  initial window, the other 110 only through three backward `/messages`
+  pages, so the exact 1..130 run cannot pass without the multi-page walk.
+- **`backfill-cap`** — 531 pumped messages: exactly
+  20 (window) + 10 pages × 50 = 520 arrive, starting at duration 12, and a
+  follow-up wait asserts no later snapshot ever exceeds 520 — the
+  documented stays-a-gap behavior at `maxBackfillPages`.
 
 ## Known gaps / debt (beyond `WATA-TODO.md`)
 

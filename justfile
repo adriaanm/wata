@@ -88,7 +88,7 @@ fb-sim *ARGS:
 client-tests:
     bash tools/wataclient-tests.sh
 
-# client core: 10 live client-server scenarios, fresh server each
+# client core: 14 live client-server scenarios, fresh server each
 integ:
     bash tools/wataclient-integ.sh
 
