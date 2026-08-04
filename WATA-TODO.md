@@ -47,7 +47,12 @@ blocks + git log; each entry cites where it was recorded.*
   acked same day: sgola queue top): a `Unit`-returning self-recursive
   list walk crashes `sgolaBackend` ("unsupported expression (Thicket)");
   file-context-dependent. Workaround everywhere: `while` over a `var
-  cur`. Repin when the fix lands (see SGOLA-REPIN in TODO.jsonl).
+  cur`. FIXED upstream at `2083ef6` (2026-08-05): the Unit statement
+  path lacked the tailrec recognizer; any reachable Unit-returning
+  self-recursive method triggered it (the file-context sensitivity was
+  dead-code elimination masking the isolated repro). Tail recursion
+  emits bounded Go loops, so recursive walks are safe once the repin
+  (SGOLA-REPIN in TODO.jsonl) lands.
 - Facade gap (filed 2026-08-05; ruled A upstream, ticketed
   VARIADIC-FACADE-BIND — terminal state is a Scala-varargs bind with
   call-site spread): until then `exec.Command` stays five explicit
