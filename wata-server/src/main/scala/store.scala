@@ -62,13 +62,17 @@ object Store:
   // touch the store state without going through `withLock`).
   private val cell: Mutex[StoreState] = mutex(new StoreState())
 
-  /** seed the config users' default profiles. The two config users are seeded
-   *  explicitly (`Config` exposes them as a lookup, not a list). */
+  /** load the accounts, then seed each one's default profile. Every entry point
+   *  that brings the store up calls this, so the server and `SelfCheck` see the
+   *  same users. A journal replay runs after and overrides where it set. */
   def init(): Unit =
-    cell.withLock { st =>
-      st.profiles = seedProfile(st.profiles, "alice", "Alice")
-      st.profiles = seedProfile(st.profiles, "bob", "Bob")
-    }
+    Config.load()
+    val users = Config.allUsers()
+    cell.withLock(st => st.profiles = seedProfiles(st.profiles, users))
+
+  def seedProfiles(acc: HashMap[String, Profile], us: List[UserCfg]): HashMap[String, Profile] = us match
+    case h :: t => seedProfiles(seedProfile(acc, h.localpart, h.displayName), t)
+    case Nil  => acc
 
   def seedProfile(acc: HashMap[String, Profile], localpart: String, displayName: String): HashMap[String, Profile] =
     HashMap.put(acc, userIdOf(localpart), Profile(displayName, ""))

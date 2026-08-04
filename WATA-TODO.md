@@ -17,7 +17,8 @@ blocks + git log; each entry cites where it was recorded.*
 - **The actor-store refactor** — recorded M7 verdict: no evidence
   demands it; keep as a non-goal unless load says otherwise.
 - Behavior pin worth remembering: wata-server does NOT auto-create
-  users (seeded alice/bob in all harnesses).
+  users. Accounts come from `$WATA_USERS`; with it unset the built-in
+  alice/bob pair applies, which is what all harnesses log in as.
 
 ## client / device
 

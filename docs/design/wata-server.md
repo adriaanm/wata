@@ -24,8 +24,8 @@ lines:
 
 ## Scope
 
-Implemented: password login (`m.login.password`) against two hardcoded users
-(alice/bob — `model.scala:120-131`, `Config.userByLocalpart`), device/access-token
+Implemented: password login (`m.login.password`) against the configured users
+(`config.scala`), device/access-token
 sessions, profile (displayname/avatar_url), global and per-room account data,
 room creation with the common presets, join (by id or alias), invite, leave,
 kick, ban, setting arbitrary state events, sending and redacting `m.room.*`
@@ -35,10 +35,39 @@ encryption (no `m.room.encrypted` handling; the `/keys/*` routes store
 nothing and hand no key to anyone — they exist only so a stock client
 completes its post-login device-key handshake and reaches `/sync`),
 federation, user
-registration (users are a fixed, hardcoded pair — `wata-server/src/main/scala/model.scala:120-131`),
+registration (accounts are provisioned, not self-served — see "Accounts"),
 `/publicRooms`, and `createRoom`'s
 `initial_state`/`creation_content`/`power_level_content_override` fields
 (`rooms.scala:13-18`).
+
+## Accounts
+
+wata provisions accounts; nobody registers one. That is the trust model — the
+network is the boundary, and who is on it is decided out of band — so the
+accounts are configuration, read once at boot from the JSON file named by
+`WATA_USERS`:
+
+```
+WATA_USERS=/etc/wata/users.json wata-server :8008
+```
+
+```json
+[ {"user": "alice", "password": "…", "displayname": "Alice"},
+  {"user": "bob",   "password": "…", "displayname": "Bob"} ]
+```
+
+`displayname` is optional and defaults to the localpart; an entry with no
+`user` is skipped. An unset, unreadable, unparseable, or empty `WATA_USERS`
+falls back to a built-in alice/bob pair with password `testpass123`, which is
+what every harness and script in this repo logs in as, so they run unchanged
+with no file present. A bad file falls back rather than refusing to boot: a
+homeserver on a device has to come up on its own.
+
+`Config.load` is called from `Store.init`, so the server and `SelfCheck` see
+the same accounts; `Store.init` then seeds each user's default profile. The
+loaded list sits behind its own small `Mutex` (separate from the store's cell,
+like the journal's) because logins read it from per-request goroutines; it is
+written exactly once, before serving.
 
 ## Request lifecycle
 
@@ -332,7 +361,8 @@ silently skipped (best-effort, not validated).
 
 ## File-by-file map
 
-- **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and `Config` (the two hardcoded users, `serverName = "localhost"`).
+- **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`.
+- **`config.scala`** — `Config`: the accounts, loaded once at boot from `WATA_USERS` (built-in alice/bob otherwise), and `serverName`.
 - **`membership.scala`** — the membership sealed types and the join/invite/leave/ban transition table; every row is reachable from an HTTP route.
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
 - **`power.scala`** — `Power`: the `m.room.power_levels` authorization table (send/state/redact/invite/kick/ban).

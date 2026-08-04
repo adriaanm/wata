@@ -41,7 +41,7 @@ case class Auth(userId: String, deviceId: String)
 
 // ---- config + store records --------------------------------------------------
 
-/** A configured user, immutable, from `Config`. */
+/** A configured user, immutable, from `Config` (config.scala). */
 case class UserCfg(localpart: String, password: String, displayName: String)
 
 /** A device/session created on login. */
@@ -100,17 +100,3 @@ case class Receipt(roomId: String, userId: String, eventId: String, ts: scala.Lo
  *  channel), so the value-struct shape is exactly what we want. */
 case class Waiter(id: scala.Long, userId: String, ch: sgo.Chan[Boolean])
 
-// ---- config ---------------------------------------------------------------------
-//
-// The two config users are exposed as a lookup + a seed hook rather than a
-// `List[UserCfg]` — with only two fixed users and a keyed lookup, a list buys
-// nothing here; List is still exercised hard by the account-data + JObj-field
-// paths.
-object Config:
-  def serverName: String = "localhost"
-
-  /** the configured users, by localpart. */
-  def userByLocalpart(localpart: String): Option[UserCfg] =
-    if localpart == "alice" then Some(UserCfg("alice", "testpass123", "Alice"))
-    else if localpart == "bob" then Some(UserCfg("bob", "testpass123", "Bob"))
-    else None
