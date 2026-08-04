@@ -56,3 +56,13 @@ blocks + git log; each entry cites where it was recorded.*
   GRADUATION-BRIEF consumer-driven ledger.
 - ADT-valued `Atomic` cells / RWMutex reader-parallel cell — same
   ledger, first-consumer-triggered (Wata is the likely consumer).
+- `[PIN-BUMP-BLOCKED]` pin bump to sgola `b0d02aef7b19` is parked on
+  branch `pin-bump-b0d02aef`: the new compiler inserts an unsound
+  narrowing cast building the `(String, Json)` tuple in
+  `MatrixHttp.upsertRoomList` — emitted `wataclient_mhttp.go` wraps
+  `oneRoomArr`/`appendRoomArr` (a `JArr`) in `sgolaAsInstanceOf[*JStr]`,
+  so every `m.direct` update panics `class JArr cannot be cast to class
+  JStr` (6/10 integ scenarios red; server gates green; the caps.scala
+  non-nullable `newRequest` adaptation on that branch is correct and
+  ready). Needs a sgola-side fix to the tuple-instantiation cast;
+  then repin to the fixed commit and merge the branch.
