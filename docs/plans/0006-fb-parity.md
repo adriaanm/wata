@@ -1,6 +1,6 @@
 # 0006 — device-client parity with the Zig fbclient
 
-Status: accepted
+Status: done
 
 `[FB-PARITY]`
 
@@ -60,3 +60,24 @@ against `just server` mirrors the Zig client's flows.
 - Boot-into-wata rootfs integration (phase 4).
 - Audio beyond the existing device path and sim stub.
 - Any server change (phase 2 is closed; file gaps as TODO items).
+
+## Outcome
+
+The audit is the table in
+[docs/design/wata-fb.md](../design/wata-fb.md#parity-with-the-zig-fbclient),
+which is now gap-free. It found less missing than expected: the
+conversation view and the settings menu were already at feature parity
+item for item, so most of this plan turned into the coverage that was
+supposed to be proving them, plus the three defects writing that
+coverage exposed.
+
+What landed: the config store (`config.scala`) and boot-without-
+arguments; a cursor that survives a list shrinking under it; a settings
+detail block sized to the landscape grid instead of the Zig client's
+portrait one; preferences that persist; battery percent in Device Info;
+and four `fb-ui-tests` scenarios where there was one.
+
+The snake/clock/charmap applets and FreeType stayed out, as planned.
+Still open, and recorded in the design doc rather than here: the
+`SEND FAILED` / `PLAY FAILED` flashes have no coverage, because they
+need a server that fails on demand rather than another script.

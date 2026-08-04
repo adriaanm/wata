@@ -551,9 +551,6 @@ module drives the same hardware as 160x128 LANDSCAPE (`Font.COLS` 26,
 transcribe directly — every "same" row below means the same
 information in the equivalent place, not the same number.
 
-Rows marked **GAP** are open; each is closed by a commit that also
-rewrites its row here.
-
 | feature | Zig | wata-fb | status |
 |---|---|---|---|
 | **Session / boot** ||||
