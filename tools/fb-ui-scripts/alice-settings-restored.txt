@@ -16,3 +16,19 @@ checkpoint settings-restored-brightness
 tap down
 advance 5
 checkpoint settings-restored-timeout
+
+# The screensaver, from the same item: two `<` presses take the timeout from
+# the restored 2m down to 30s, then dot1 goes back to the wata applet and the
+# session sits idle past it. `idle` runs the frames with no real pause — a
+# timer needs simulated time, not network progress — so 30 device-seconds of
+# blanking cost the suite nothing.
+tap left
+tap left
+tap dot1
+idle 950
+expect screenoff 1
+
+# any key wakes the panel, and that keypress is swallowed rather than routed
+# into the applet under it.
+tap down
+expect screenoff 0

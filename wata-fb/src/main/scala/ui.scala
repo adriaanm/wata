@@ -92,6 +92,8 @@ object Ui:
   def shellState: ShellState = stateC.get()
   /** the snapshot this frame drew from. */
   def frameSnap: StateSnapshot = snapC.get()
+  /** is the screensaver holding the panel blanked? */
+  def screenOff: Boolean = offC.get()
   /** the connection the status line and the LEDs are mirroring. */
   def connection: ConnectionState = connC.get()
 

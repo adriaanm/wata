@@ -524,13 +524,16 @@ one-user phases:
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, and device info. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
 
-Two things the scripts need that are worth knowing. `waitmax` is the
+Three things the scripts need that are worth knowing. `waitmax` is the
 mirror of `wait` — advance until a probe drops to a bound — because a
 redaction shrinks a count, which an ordinary `wait` (a `>=` test)
-already satisfies. And a phase whose credentials are `-` cannot also
-run the out-of-band `family` bootstrap, since that logs in directly and
-a resumed run has no password: bootstrap in one phase, resume in a
-later one.
+already satisfies. `idle` runs frames with the real per-frame pause
+switched off: a timer expiring needs simulated time, not network
+progress, which is what makes the screensaver's half-minute of blanking
+cost the suite nothing. And a phase whose credentials are `-` cannot
+also run the out-of-band `family` bootstrap, since that logs in
+directly and a resumed run has no password: bootstrap in one phase,
+resume in a later one.
 
 ## Parity with the Zig fbclient
 
@@ -584,7 +587,7 @@ rewrites its row here.
 | pre-sync placeholder (`Connecting…`/`Syncing…`/…) | yes | yes | same |
 | PTT overlay: red bar + hold timer | yes | yes | same, with a `REC` prefix |
 | `SENT` / `SEND FAILED` / `PLAY FAILED` flash | yes | yes | same |
-| screensaver blank + wake-swallows-the-keypress | yes | yes | same |
+| screensaver blank + wake-swallows-the-keypress | yes | yes | same, and covered by `settings-walk` |
 | **Not ported** ||||
 | snake / clock / charmap applets | yes | no | toys, out of scope |
 | FreeType text rendering | optional | no | bitmap font only |
@@ -666,9 +669,9 @@ is enough.
 | `applets.scala` | 840 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
-| `ui.scala` | 291 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
+| `ui.scala` | 310 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
 | `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
-| `uiscript.scala` | 450 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
+| `uiscript.scala` | 480 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
 
 ## Known gaps / debt observed while reading
 
@@ -727,10 +730,11 @@ gap, the `/dev/shm`-only deploy), a few things stood out during this read:
 - **`just fb-ui-tests` covers the frame loop, not every applet path.**
   The scenarios walk the contact list, PTT send, applet switching, the
   conversation view's selection/scroll/play/delete inputs, the
-  read-receipt round-trip and session resume. Still untouched: the
-  screensaver timeout, and every settings item's effect (the settings
-  goldens are menu renders). Adding coverage is a script file plus a
-  golden, not code.
+  read-receipt round-trip, every settings item and its detail block,
+  preference and session restore, and the screensaver blank/wake. Still
+  untouched: the `SEND FAILED` and `PLAY FAILED` flashes, which need a
+  server that fails on demand rather than another script. Adding
+  coverage is otherwise a script file plus a golden, not code.
 - **`Ui.frameStep`'s `dt` is the only thing the scripted clock
   virtualizes.** Anything a frame renders that depends on WALL-clock
   time or on network arrival order would still be non-deterministic;

@@ -34,6 +34,10 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              the bootstrap that gives both users a
  *                              conversation to talk in
  *    advance <n>               run n frames
+ *    idle <n>                  run n frames with NO real pause between them —
+ *                              a timer expiring needs simulated time, not
+ *                              network progress, so the screensaver's minutes
+ *                              cost nothing
  *    tap <key>                 press + release <key>, then one frame
  *    key <key> <press|release> one edge of <key>, then one frame (PTT needs
  *                              its press and release separated)
@@ -49,7 +53,8 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
  *  msgs (messages in the conversation the wata applet is pointing at), played
  *  (of those, how many are marked played), nameset (1 once the self user's
- *  display name equals the settings applet's currently picked preset). */
+ *  display name equals the settings applet's currently picked preset),
+ *  screenoff (1 while the screensaver has the panel blanked). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -69,7 +74,7 @@ final class ScriptDevice extends UiDevice:
   def leds(green: Boolean, red: Boolean): Unit = ()
   def backlight(level: scala.Int): Unit = ()
   def buttonBacklight(on: Boolean): Unit = ()
-  def frameSleep(ms: Long): Unit = FbCaps.sleepMs(UiScript.PACE_MS)
+  def frameSleep(ms: Long): Unit = FbCaps.sleepMs(UiScript.pace())
 
 object UiScript:
 
@@ -79,11 +84,17 @@ object UiScript:
 
   // `val`-held Atomic cells (the UI goroutine's own, like Ui's).
   private val clkC: sgo.Atomic[Long] = sgo.atomic(0L)
+  // the real pause a scripted frame takes. `PACE_MS` normally, 0 while an
+  // `idle` directive is burning simulated time (see `idle`).
+  private val paceC: sgo.Atomic[Long] = sgo.atomic(PACE_MS)
   private val pendC: sgo.Atomic[List[KeyEvent]] = sgo.atomic(Nil)
   private val outC: sgo.Atomic[String] = sgo.atomic("")
   private val baseC: sgo.Atomic[String] = sgo.atomic("")
   private val userC: sgo.Atomic[String] = sgo.atomic("")
   private val passC: sgo.Atomic[String] = sgo.atomic("")
+
+  /** the real pause `ScriptDevice.frameSleep` takes this frame. */
+  def pace(): Long = paceC.get()
 
   /** the virtual clock read: advance one frame, return the new time. */
   def tick(): Long = clkC.add(Ui.FRAME_MS)
@@ -167,6 +178,8 @@ object UiScript:
     if cmd == "" || cmd.startsWith("#") then ()
     else if cmd == "advance" then
       advance(num(nth(ts, 1), 1), c, clock, evts, dev, px)
+    else if cmd == "idle" then
+      idle(num(nth(ts, 1), 1), c, clock, evts, dev, px)
     else if cmd == "tap" then
       err = tap(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "key" then
@@ -201,6 +214,16 @@ object UiScript:
     while i < n do
       step(c, clock, evts, dev, px)
       i = i + 1
+
+  /** frames with the real pause switched off: the UI clock still advances a
+   *  frame each step, so a timer measured in simulated seconds expires, but
+   *  nothing waits on the network. Only safe when the script is waiting on a
+   *  TIMER rather than on something arriving. */
+  def idle(n: scala.Int, c: MatrixClient, clock: Clock,
+           evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): Unit =
+    paceC.set(0L)
+    advance(n, c, clock, evts, dev, px)
+    paceC.set(PACE_MS)
 
   def tap(name: String, c: MatrixClient, clock: Clock,
           evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
@@ -311,7 +334,13 @@ object UiScript:
     else if name == "msgs" then WataLogic.msgCount(Ui.frameSnap, curConvIdx())
     else if name == "played" then playedCount(Ui.frameSnap, curConvIdx())
     else if name == "nameset" then nameSetProbe()
+    else if name == "screenoff" then boolProbe(Ui.screenOff)
     else -1
+
+  def boolProbe(b: Boolean): scala.Int =
+    var out = 0
+    if b then out = 1
+    out
 
   /** 1 once the self user's display name in the snapshot equals the preset the
    *  settings applet is currently pointing at — the round trip of `OK` on the
