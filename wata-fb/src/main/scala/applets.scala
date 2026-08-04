@@ -28,7 +28,9 @@ case class VConversation() extends WataView
 
 /** wata applet state (the UI-only fields; snapshot/queues are per-frame
  *  params). `pttHeld`/`pttHoldTime` drive the record overlay; send/play
- *  status flash for `statusTimer` seconds then clears. */
+ *  status flash for `statusTimer` seconds then clears; `backHeld`/
+ *  `backHoldTime` track the red key in a conversation (tap = back on
+ *  release, hold past `BACK_HOLD_DELETE` = delete the selected message). */
 case class WataState(
   view: WataView,
   selected: scala.Int,
@@ -42,7 +44,9 @@ case class WataState(
   sendError: Boolean,
   sendOk: Boolean,
   playError: Boolean,
-  statusTimer: scala.Double
+  statusTimer: scala.Double,
+  backHeld: Boolean,
+  backHoldTime: scala.Double
 )
 
 object WataLogic:
@@ -50,7 +54,7 @@ object WataLogic:
   val FOOTER_ROW = Font.ROWS - 1
 
   def initial(): WataState =
-    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, false, false, false, 0.0)
+    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, false, false, false, 0.0, false, 0.0)
 
   /** visible list rows between header and footer (bitmap grid). */
   def visibleRows(): scala.Int = FOOTER_ROW - FONT_ROWS_HEADER
@@ -59,42 +63,48 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
 
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
 
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer)
+      held, hold, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
 
   def withPlaying(s: WataState, playing: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, s.playError, s.statusTimer)
+      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
 
   /** the full status-flash tuple (hold + timer + the three flash flags). */
   def withFlash(s: WataState, hold: scala.Double, timer: scala.Double,
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, hold, s.playing, sendErr, sendOk, playErr, timer)
+      s.pttHeld, hold, s.playing, sendErr, sendOk, playErr, timer, s.backHeld, s.backHoldTime)
 
   def withPlayErr(s: WataState, playing: Boolean, playErr: Boolean, timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, timer)
+      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, timer, s.backHeld, s.backHoldTime)
+
+  def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
+    WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer,
+      held, hold)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
   /** full input with per-frame context (snapshot + queues). Returns new state. */
   def handleInput(s: WataState, k: Key, ks: KeyState, ctx: FrameCtx): WataState =
     if isPtt(k) then pttInput(s, ks, ctx)
+    else if isBack(k) && isConvView(s) then backInput(s, ks)
     else if !Shell.isPressed(ks) then s
     else s.view match
       case _: VContacts     => contactsInput(s, k, ctx)
@@ -103,6 +113,30 @@ object WataLogic:
   def isPtt(k: Key): Boolean = k match
     case KPtt() => true
     case _      => false
+
+  def isBack(k: Key): Boolean = k match
+    case KBack() => true
+    case _       => false
+
+  def isConvView(s: WataState): Boolean = s.view match
+    case _: VConversation => true
+    case _                => false
+
+  /** red in a conversation: tap = back on release; a hold is timed by
+   *  `tickTimers`, which fires the delete and drops the held flag, so the
+   *  eventual release then does nothing. */
+  def backInput(s: WataState, ks: KeyState): WataState = ks match
+    case Pressed()  => withBack(s, true, 0.0)
+    case Released() => backRelease(s)
+    case _          => s
+
+  /** NB a plain body, not an if-expression inside the match case above: the
+   *  emitter mis-types an if-else case body against the nested constructor
+   *  (WataView vs WataState) — see MATCH-CASE-IF-EXPR-LUB. */
+  def backRelease(s: WataState): WataState =
+    var out = s
+    if s.backHeld then out = withBack(withView(s, VContacts()), false, 0.0)
+    out
 
   /** PTT: press starts recording, release stops + (via the audio thread) sends.
    *  The effect (trySend) runs in statement position; the result rides a
@@ -152,11 +186,10 @@ object WataLogic:
     enterConv(s, s.selected)
 
   def conversationInput(s: WataState, k: Key, ctx: FrameCtx): WataState = k match
-    case _: KBack  => withView(s, VContacts())
     case _: KDown  => downMsg(s, ctx)
     case _: KUp    => upMsg(s)
     case _: KEnter => playSelected(s, ctx)
-    case _: KF2    => deleteSelected(s, ctx)
+    case _: KF2    => deleteSelected(s, ctx)   // sim/script delete; no F2 key on the case
     case _           => s
 
   def downMsg(s: WataState, ctx: FrameCtx): WataState =
@@ -210,7 +243,7 @@ object WataLogic:
    *  arrive via `Shell.routeAudio` -> `onAudioEvent`, NOT a drain here — the
    *  shell owns the mailbox's single drain (plan 0009). */
   def update(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
-    clampSelection(tickTimers(s, dt), ctx)
+    clampSelection(tickTimers(s, dt, ctx), ctx)
 
   /** Reconcile the cursors with the live snapshot. The lists shrink under the
    *  cursor without any input — a redaction drops a message row, a peer
@@ -247,13 +280,19 @@ object WataLogic:
     if out < 0 then out = 0
     out
 
-  def tickTimers(s: WataState, dt: scala.Double): WataState =
+  val BACK_HOLD_DELETE: scala.Double = 0.8
+
+  def tickTimers(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
     val hold = if s.pttHeld then s.pttHoldTime + dt else s.pttHoldTime
     var out = withFlash(s, hold, s.statusTimer, s.sendError, s.sendOk, s.playError)
     if s.statusTimer > 0.0 then
       val t = s.statusTimer - dt
       if t <= 0.0 then out = withFlash(s, hold, 0.0, false, false, false)
       else out = withFlash(s, hold, t, s.sendError, s.sendOk, s.playError)
+    if out.backHeld then
+      val bt = out.backHoldTime + dt
+      if bt >= BACK_HOLD_DELETE then out = withBack(deleteSelected(out, ctx), false, 0.0)
+      else out = withBack(out, true, bt)
     out
 
   /** one audio event, routed here by `Shell.routeAudio`: a finished recording
@@ -348,7 +387,7 @@ object WataLogic:
       Font.drawText(px, "ESC back", 0, FOOTER_ROW, Color.midGray, false, 0)
     else
       renderMsgRows(s, px, conv, n)
-      Font.drawText(px, "OK play F2 del", 0, FOOTER_ROW, Color.midGray, false, 0)
+      Font.drawText(px, "OK play  hold red del", 0, FOOTER_ROW, Color.midGray, false, 0)
 
   def renderMsgRows(s: WataState, px: go.Bytes, conv: Conversation, n: scala.Int): Unit =
     val vis = visibleRows()

@@ -17,7 +17,7 @@ case class KBack() extends Key       // BACK / ESC
 case class KPtt() extends Key        // F1 — main PTT
 case class KDot1() extends Key       // F3 — prev applet
 case class KDot2() extends Key       // F10 — next applet
-case class KF2() extends Key         // F2 — headset PTT / spare
+case class KF2() extends Key         // F2 — sim/script only; no such key on the case
 case class KUnknown() extends Key
 
 sealed trait KeyState derives CanEqual
@@ -36,7 +36,7 @@ object Evdev:
   val KEY_ESC: scala.Int = 1       // Matrix keypad: Back
   val KEY_ENTER: scala.Int = 28    // Matrix keypad: Center
   val KEY_F1: scala.Int = 59       // GPIO: Main PTT
-  val KEY_F2: scala.Int = 60       // GPIO: Headset PTT
+  val KEY_F2: scala.Int = 60       // GPIO: headset PTT line (no key on the case)
   val KEY_F3: scala.Int = 61       // GPIO: Side button 3 (prev applet)
   val KEY_F10: scala.Int = 68      // GPIO: Side button 4 (next applet)
   val KEY_UP: scala.Int = 103

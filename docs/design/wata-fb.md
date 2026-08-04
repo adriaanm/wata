@@ -217,9 +217,13 @@ explicit state machine, not a generic widget framework:
 (`Evdev.open`, `input.scala:92`), reads raw 16-byte
 `struct input_event`s (32-bit-ARM layout: 4+4+2+2+4 bytes,
 `input.scala:34`), and maps kernel key codes to an app-level `Key`
-sum type (`input.scala:11-22`): d-pad, enter/back, PTT (F1), a
-headset/spare PTT (F2), and two "dot" buttons (F3/F10) used to switch
-applets. `KeyState` distinguishes pressed/released/repeat.
+sum type (`input.scala:11-22`): d-pad, enter/back, PTT (F1), the
+headset PTT line (F2 — the BQ268 case has no such key; the code is
+kept for the sim/script vocabulary), and two "dot" buttons (F3/F10)
+used to switch applets. `KeyState` distinguishes
+pressed/released/repeat. On the case, the front matrix keys are the
+green (answer) key = enter, the red (hang-up) key = back, up/down,
+and P1/P2 = left/right; on-screen hints name keys by those labels.
 
 **Known gap, called out in the code itself**: only three input
 devices are opened. `shell.scala:21-27` documents that this mirrors a
@@ -568,7 +572,7 @@ one-user phases:
 | scenario | what it pins |
 |---|---|
 | `voice-alice-to-bob` | the send path end to end: alice bootstraps the family room, holds PTT and sends; bob runs, auto-joins, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
-| `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, and redacts one with F2; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, and the played marks. |
+| `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, and redacts one by holding red past `BACK_HOLD_DELETE`; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, and the played marks. |
 | `dm-roundtrip` | the canonical-DM flow (plan 0007) rendered: alice selects bob's ROOMLESS roster row, the first PTT send resolves the room through `POST /_wata/v1/dm`, bob receives with an unplayed badge, receipts, plays, replies, and alice's second session pins the reply and the badge clearing. Goldens the roster before/after, both conversation views, and the badge lifecycle. |
 | `family-three` | a third account (per-scenario `$WATA_USERS`): all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
 | `badges-across-restart` | unplayed counts across a restart: bob sees family=1 / DM=2, resumes with no credentials, and the badge frame is byte-identical; playing out the DM clears only its own badge. |
@@ -608,7 +612,7 @@ a rediscovery):
 | DM: select a contact, first-send room resolution, receive, reply | `dm-roundtrip` |
 | unplayed badges: accumulate, survive restart, clear per-conversation | `dm-roundtrip`, `badges-across-restart` |
 | play a message: receipt + played mark round trip | `conversation-actions`, `dm-roundtrip` |
-| delete a message (F2 redact) | `conversation-actions` |
+| delete a message (hold-red redact) | `conversation-actions` |
 | long conversation: scroll window, selection clamp | `conversation-actions` |
 | sender attribution, >2 participants, interleaved ordering | `family-three` |
 | send failure feedback (`SEND FAILED`) and recovery | `send-play-failed` |
@@ -646,7 +650,7 @@ information in the equivalent place, not the same number.
 | open conversation + receipt for the latest message | yes | yes | same |
 | message rows: duration `m:ss`, sender, played check-mark, gray-when-played | yes | yes | same |
 | OK = receipt (if unplayed) + download-and-play | yes | yes | same |
-| F2 = redact the selected message | yes | yes | same |
+| hold red (or F2 in sim/scripts) = redact the selected message | F2 only | yes | wata-fb adds the red hold; a red tap still navigates back |
 | message scrolling past the visible window | yes | yes | same |
 | a selection left past the end of a shrunk list | not reconciled | reconciled every frame | wata-fb only, see below |
 | the rows above under test | n/a | yes | the `conversation-actions` scenario |

@@ -101,11 +101,14 @@ tap down
 advance 5
 checkpoint conv-scrolled
 
-# back up two rows, then F2 redacts the selected message. The row count drops,
-# which `wait` cannot see (it tests >=), so `waitmax` is what asserts it.
+# back up two rows, then holding red past BACK_HOLD_DELETE redacts the
+# selected message (a red TAP would navigate back instead). The row count
+# drops, which `wait` cannot see (it tests >=), so `waitmax` asserts it.
 tap up
 tap up
-tap f2
+key back press
+advance 30
+key back release
 waitmax msgs 12 1500
 advance 5
 checkpoint conv-deleted
