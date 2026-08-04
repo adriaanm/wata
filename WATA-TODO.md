@@ -49,6 +49,15 @@ blocks + git log; each entry cites where it was recorded.*
   GRADUATION-BRIEF consumer-driven ledger.
 - ADT-valued `Atomic` cells / RWMutex reader-parallel cell — same
   ledger, first-consumer-triggered (Wata is the likely consumer).
+- Emitter trap (from the settings-diagnostics build, all loud): a
+  `go.Slice` with a facade-trait element type emits pointer-to-interface
+  casts that fail `go build` — avoid facade-trait slice elements (filed
+  FACADE-SLICE-ELEM-PTR-IFACE). Related lowering edges (filed
+  THROWS-CALL-IN-ARG-POSITION): a throws-lowered call inline in argument
+  position mis-emits (hoist to a val); an ignored `(T, error)` result
+  trips Go's unused-variable check; a lone-`error` facade method (e.g.
+  `exec.Cmd.Run`) gets no throws lowering — curate a `(T, error)` shape
+  such as `Output()` instead.
 - Emitter trap (residual of the fixed CATCH-ERR-SHADOW): a *parameter*
   literally named `err` still bypasses the emitter's rename machinery —
   avoid that spelling for params until PARAM-ERR-COLLISION lands. Local
