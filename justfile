@@ -76,6 +76,10 @@ fb-smoke:
 golden:
     bash tools/fb-golden.sh
 
+# device UI: the real frame loop in this terminal, against a live server
+fb-sim *ARGS:
+    bash tools/fb-sim.sh {{ARGS}}
+
 # client core: portability tripwire, sync/fixture/ogg byte oracles
 client-tests:
     bash tools/wataclient-tests.sh

@@ -90,6 +90,8 @@ object Ui:
   def shellState: ShellState = stateC.get()
   /** the snapshot this frame drew from. */
   def frameSnap: StateSnapshot = snapC.get()
+  /** the connection the status line and the LEDs are mirroring. */
+  def connection: ConnectionState = connC.get()
 
   def run(args: Array[String]): Unit =
     if args.length < 4 then println("ui: want  wata-fb ui <base> <user> <pass>")
@@ -148,10 +150,14 @@ object Ui:
     snapC.set(Runtime.emptySnapshot())
     lastMsC.set(0L)
 
+  /** seed the frame clock — every driver calls this once before its first
+   *  `frameStep`, so the first frame's dt is a frame and not the epoch. */
+  def beginFrames(clock: Clock): Unit = lastMsC.set(clock.nowUnixMillis())
+
   /** the device's run-until-quit driver: frames until a quit edge. */
   def frameLoop(c: MatrixClient, clock: Clock, evts: sgo.Chan[AudioEvt],
                 dev: UiDevice, px: go.Bytes): Unit =
-    lastMsC.set(clock.nowUnixMillis())
+    beginFrames(clock)
     var run = true
     while run do
       if frameStep(c, clock, evts, dev, px) then run = false

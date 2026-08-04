@@ -66,6 +66,12 @@ object Main:
     // host build compiles it but reports "device unavailable".
     else if args.length > 0 && args(0) == "ui" then
       Ui.run(args)
+    // the HOST front ends over the same frame loop (no framebuffer, no evdev,
+    // no audio hardware — only a live wata-server):
+    //   wata-fb sim <base> <user> <pass> [--once]  interactive ANSI half-block
+    //                                              terminal client (sim.scala)
+    else if args.length > 0 && args(0) == "sim" then
+      Sim.run(args)
     else
       skeleton()
 
