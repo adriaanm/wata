@@ -175,7 +175,7 @@ object SimTerm:
 /** the terminal `UiDevice`. `prev` is the last presented frame, kept so an
  *  unchanged frame writes nothing. */
 final class SimDevice(prev: go.Bytes) extends UiDevice:
-  def pollInput(): KeyBatch = KeyBatch(Sim.pollKeys())
+  def pollInput(): List[KeyEvent] = Sim.pollKeys()
   def present(px: go.Bytes): Unit = Sim.present(prev, px)
   def leds(green: Boolean, red: Boolean): Unit = Sim.setLeds(green, red)
   def backlight(level: scala.Int): Unit = ()          // no panel to dim

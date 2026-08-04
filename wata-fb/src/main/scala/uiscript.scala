@@ -69,7 +69,7 @@ class ScriptClock extends Clock:
  *  itself at a checkpoint). The frame pace is REAL time, small — it is what
  *  lets the live sync loop make progress between frames. */
 final class ScriptDevice extends UiDevice:
-  def pollInput(): KeyBatch = KeyBatch(UiScript.takeKeys())
+  def pollInput(): List[KeyEvent] = UiScript.takeKeys()
   def present(px: go.Bytes): Unit = ()
   def leds(green: Boolean, red: Boolean): Unit = ()
   def backlight(level: scala.Int): Unit = ()

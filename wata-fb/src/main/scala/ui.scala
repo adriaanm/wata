@@ -34,10 +34,8 @@ import language.experimental.saferExceptions
  *  built and used by the UI goroutine alone, so the real impl may hold the
  *  mmap'd framebuffer slice as a plain field. */
 trait UiDevice:
-  /** every input event pending since the last call (never blocks). Boxed in a
-   *  `KeyBatch` because a trait method result may not be generic — see
-   *  input.scala. */
-  def pollInput(): KeyBatch
+  /** every input event pending since the last call (never blocks). */
+  def pollInput(): List[KeyEvent]
   /** blit the RGB565 pixel buffer to the display. */
   def present(px: go.Bytes): Unit
   /** the connection-state LEDs, set together (green = live, red = bad). */
@@ -53,7 +51,7 @@ trait UiDevice:
  *  Every method is the call `frameLoop` used to make inline, in the same
  *  order — the emitted device path is unchanged. */
 final class FbUiDevice(fds: List[scala.Int], mem: go.Bytes) extends UiDevice:
-  def pollInput(): KeyBatch = KeyBatch(Evdev.poll(fds))
+  def pollInput(): List[KeyEvent] = Evdev.poll(fds)
   def present(px: go.Bytes): Unit = FbTest.present(mem, px)
   def leds(green: Boolean, red: Boolean): Unit =
     Led.setGreenLed(green)
@@ -197,7 +195,7 @@ object Ui:
     val ctx = FrameCtx(snapC.get(), connV, c, c.audioCmds, evts)
 
     // poll input; a quit edge (back in contacts) ends the loop
-    val keyEvents = dev.pollInput().events
+    val keyEvents = dev.pollInput()
     val quit = handleFrameInput(keyEvents, ctx, dev)
     if !quit then
       // screensaver idle timeout

@@ -27,13 +27,6 @@ case class Repeat() extends KeyState
 
 case class KeyEvent(key: Key, state: KeyState)
 
-/** one frame's input events, boxed in a NON-GENERIC record. A trait's abstract
- *  method may not carry a generic result type: the emitter stamps
- *  `List[KeyEvent]` at the impl (`List__KeyEvent`) but leaves the interface
- *  declaration a bare, undefined `List`. So the `UiDevice` input edge
- *  (ui.scala) hands back a `KeyBatch` rather than the list itself. */
-case class KeyBatch(events: List[KeyEvent])
-
 object Evdev:
   // struct input_event field/type constants
   val EV_KEY: scala.Int = 0x01
