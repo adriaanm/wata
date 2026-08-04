@@ -10,12 +10,19 @@ import JsonNav.*
 
 /** The single handler behind every registered pattern. Reads the body at the
  *  top of the try (the only real `throws sgo.GoError`), routes, and serializes
- *  the `Either[MErr, Json]` result to the wire. */
+ *  the `Either[MErr, Json]` result to the wire.
+ *
+ *  The body read is BOUNDED: the reader is capped at `maxBodyBytes + 1` via
+ *  `io.LimitReader` (go.iolimit, iolimit.scala), so one request can hand the
+ *  server at most that much memory; a result longer than `maxBodyBytes` means
+ *  the body was over the cap -> 413 `M_TOO_LARGE`. The cap is sized for the
+ *  largest legitimate payload — device voice-message Ogg uploads run tens of
+ *  KB (~120 KB/min at 16 kbps opus) — with orders-of-magnitude headroom. */
 class WataHandler() extends go.net.http.Handler:
   def serveHTTP(w: go.net.http.ResponseWriter, r: go.net.http.Request): Unit =
     try
-      val raw = go.io.readAll(r.body)
-      MediaEdge.dispatch(w, r, go.string(raw))
+      val raw = go.io.readAll(go.iolimit.limitReader(r.body, MediaEdge.maxBodyBytes.toLong + 1L))
+      MediaEdge.dispatchSized(w, r, raw)
     catch case e: sgo.GoError =>
       Respond.finish(w, 500, Json.write(errEnvelope(MErr(500, M_UNKNOWN(), "Internal server error"))))
 
@@ -24,6 +31,15 @@ class WataHandler() extends go.net.http.Handler:
  *  request body arrives as a byte-preserving Go String (`string([]byte)`), so an
  *  upload's binary bytes survive the round-trip to `Store.storeMedia`. */
 object MediaEdge:
+  /** the request-body cap, bytes (8 MiB). */
+  def maxBodyBytes: scala.Int = 8388608
+
+  /** the over-cap check: a read that filled past `maxBodyBytes` is a 413. */
+  def dispatchSized(w: go.net.http.ResponseWriter, r: go.net.http.Request, raw: go.Bytes): Unit =
+    if raw.length > maxBodyBytes then
+      Respond.finish(w, 413, Json.write(errEnvelope(MErr(413, M_TOO_LARGE(), "Request body too large"))))
+    else dispatch(w, r, go.string(raw))
+
   def dispatch(w: go.net.http.ResponseWriter, r: go.net.http.Request, reqBody: String): Unit =
     if r.uRL.path.contains("/download/") then download(w, r)
     else jsonReply(w, r, reqBody)

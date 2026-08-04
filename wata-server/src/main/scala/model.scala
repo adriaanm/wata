@@ -27,6 +27,7 @@ case class M_UNKNOWN_TOKEN() extends ErrCode
 case class M_MISSING_TOKEN() extends ErrCode
 case class M_UNRECOGNIZED() extends ErrCode
 case class M_BAD_JSON() extends ErrCode
+case class M_TOO_LARGE() extends ErrCode
 case class M_UNKNOWN() extends ErrCode
 
 /** A Matrix-level failure as a VALUE (not a thrown exception): the handler

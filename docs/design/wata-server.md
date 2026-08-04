@@ -85,7 +85,14 @@ pattern (`Server.registerRoutes`, `server.scala:93`), adds a catch-all `"/"` →
 
 Every registered route shares the *same* `WataHandler` object
 (`server.scala:15`). `serveHTTP` reads the whole request body up front (the
-only place a real `throws sgo.GoError` is caught in the server) and hands off
+only place a real `throws sgo.GoError` is caught in the server), through an
+`io.LimitReader` capped at `MediaEdge.maxBodyBytes + 1` (8 MiB + 1;
+`go.iolimit`, iolimit.scala, is the app-owned facade for `io.LimitReader`) —
+so one request can hand the server at most that much memory. A read that
+fills past `maxBodyBytes` means the body was over the cap and gets `413
+M_TOO_LARGE` (`MediaEdge.dispatchSized`); the cap leaves orders-of-magnitude
+headroom over the largest legitimate payload, the device voice-message Ogg
+uploads (~120 KB/min at 16 kbps opus). Under-cap bodies hand off
 to `MediaEdge.dispatch` (`server.scala:27`), which special-cases media
 *download* — the only endpoint that writes raw, non-JSON bytes with a stored
 `Content-Type` (`MediaEdge.download`, `server.scala:36`) — and routes
@@ -487,10 +494,6 @@ line in `TODO.jsonl`; grep the key here for the body.
   on, every upload is also base64-encoded into the JSONL log
   (`Journal.mediaOp`, `persist.scala:153`) with no size check, so a handful of
   large uploads could make the journal (and boot-replay time) balloon.
-- `[SRV-BODY-LIMIT]` **No request body size limit.** `WataHandler.serveHTTP` (`server.scala:18`)
-  calls `go.io.readAll(r.body)` unconditionally — no `MaxBytesReader` or
-  equivalent — so a single request (including a media upload) can consume
-  unbounded memory.
 - `[SRV-HARDENING]` **Password and token comparisons are plain string equality**
   (`Router.loginCheck`, `handlers.scala:116-118`; `Store.deviceByToken`,
   `store.scala:114`), not constant-time — a timing side channel in principle,
