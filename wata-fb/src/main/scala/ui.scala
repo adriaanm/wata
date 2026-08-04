@@ -1,20 +1,22 @@
 import language.experimental.saferExceptions
 
-/** The on-device UI runtime: the main loop that ties the sync runtime, the
- *  audio thread, the framebuffer/input/LED device layer, and the
- *  shell/applets together into the live fbclient.
+/** The UI runtime: the frame loop that ties the sync runtime, the audio thread,
+ *  a `UiDevice` backend, and the shell/applets together.
  *
- *    wata-fb ui <base> <user> <pass>   run the full client against a live
- *                                      wata-server (device only).
+ *    wata-fb ui   <base> <user> <pass>   the real device (fbdev/evdev/sysfs).
+ *    wata-fb sim  <base> <user> <pass>   the host terminal front end (sim.scala).
+ *    wata-fb uitest <script> …           the scripted CI driver (uiscript.scala).
  *
  *  LOOP: each frame — pick up the newest snapshot, drain UI events
  *  (connection -> status + LEDs, send/play -> wata flash), poll input, route to
  *  the shell, screensaver idle-timeout, then update + render + present + ~33ms
- *  sleep (~30fps for the panel).
+ *  sleep (~30fps for the panel). `frameStep` IS one frame; `frameLoop` is the
+ *  device's run-until-quit driver over it, and the host front ends run their own
+ *  driver over the same `frameStep` so every backend shares one frame.
  *
  *  THREADING: sync loop + action loop (Runtime.start) + audio thread all run as
  *  `fork`s in the app's `supervised` scope; the main loop IS the UI thread. The
- *  shell state is a module var touched only by this loop (see shell.scala's
+ *  shell state is a module cell touched only by this loop (see shell.scala's
  *  header for the single-goroutine-per-cell discipline). A sibling failure
  *  cancels the whole scope (structured concurrency).
  *
@@ -22,7 +24,48 @@ import language.experimental.saferExceptions
  *  device is otherwise meant to run until powered off; this gives a dev/ssh
  *  run a clean way to terminate. Cleanup restores the backlight and tears the
  *  loops down through the ordinary stop edges. */
+
+/** The FOUR device edges of the frame loop, behind one seam so the same loop
+ *  drives real hardware, a terminal, and a deterministic script. Time is NOT
+ *  here: the loop already takes a `Clock` capability (capabilities.scala), and
+ *  the frame pace is the one sleep this trait owns.
+ *
+ *  Not `Shareable`: a `UiDevice` never crosses a goroutine boundary — it is
+ *  built and used by the UI goroutine alone, so the real impl may hold the
+ *  mmap'd framebuffer slice as a plain field. */
+trait UiDevice:
+  /** every input event pending since the last call (never blocks). Boxed in a
+   *  `KeyBatch` because a trait method result may not be generic — see
+   *  input.scala. */
+  def pollInput(): KeyBatch
+  /** blit the RGB565 pixel buffer to the display. */
+  def present(px: go.Bytes): Unit
+  /** the connection-state LEDs, set together (green = live, red = bad). */
+  def leds(green: Boolean, red: Boolean): Unit
+  /** panel backlight, 0..255 (0 = off). */
+  def backlight(level: scala.Int): Unit
+  /** keypad backlight. */
+  def buttonBacklight(on: Boolean): Unit
+  /** pace one frame. */
+  def frameSleep(ms: Long): Unit
+
+/** the REAL device: evdev fds in, the mmap'd /dev/fb0 out, LEDs over sysfs.
+ *  Every method is the call `frameLoop` used to make inline, in the same
+ *  order — the emitted device path is unchanged. */
+final class FbUiDevice(fds: List[scala.Int], mem: go.Bytes) extends UiDevice:
+  def pollInput(): KeyBatch = KeyBatch(Evdev.poll(fds))
+  def present(px: go.Bytes): Unit = FbTest.present(mem, px)
+  def leds(green: Boolean, red: Boolean): Unit =
+    Led.setGreenLed(green)
+    Led.setRedLed(red)
+  def backlight(level: scala.Int): Unit = Led.setBacklight(level)
+  def buttonBacklight(on: Boolean): Unit = Led.setButtonBacklight(on)
+  def frameSleep(ms: Long): Unit = FbCaps.sleepMs(ms)
+
 object Ui:
+
+  /** the frame pace (~30fps for the panel). */
+  val FRAME_MS: Long = 33L
 
   // The UI-goroutine shell state lives in `val`-held Atomic cells: still
   // driven by the one UI goroutine by protocol, but data-race-freedom is
@@ -34,10 +77,21 @@ object Ui:
   private val connC: sgo.Atomic[ConnectionState] = sgo.atomic(Disconnected())
   private val idleC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
   private val offC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  // the frame carry-over that used to be `frameLoop`'s two loop vars — cells
+  // now, so `frameStep` is one self-contained frame any driver can call.
+  private val snapC: sgo.Atomic[StateSnapshot] = sgo.atomic(Runtime.emptySnapshot())
+  private val lastMsC: sgo.Atomic[Long] = sgo.atomic(0L)
   private def stateV: ShellState = stateC.get()
   private def connV: ConnectionState = connC.get()
   private def idleTime: scala.Double = idleC.get()
   private def displayOff: Boolean = offC.get()
+
+  /** the live shell state — what a host driver renders assertions against. */
+  def shellState: ShellState = stateC.get()
+  /** the snapshot this frame drew from. */
+  def frameSnap: StateSnapshot = snapC.get()
+  /** the connection the status line and the LEDs are mirroring. */
+  def connection: ConnectionState = connC.get()
 
   def run(args: Array[String]): Unit =
     if args.length < 4 then println("ui: want  wata-fb ui <base> <user> <pass>")
@@ -56,16 +110,13 @@ object Ui:
     val clock = FbCaps.clock()
     val cfg = ClientConfig(base, user, pass, 5000, Session("", "", "", "", ""))
     val c = Runtime.makeWithAudio(cfg, FbCaps.httpDo(), clock)
-    // reset UI cells (a fresh session per run)
-    stateC.set(Shell.initial())
-    connC.set(Disconnected())
-    idleC.set(0.0)
-    offC.set(false)
-    // device init: backlight + button LEDs on
-    Led.setBacklight(40)
-    Led.setButtonBacklight(true)
+    resetCells()
     val fds = Evdev.open()
     println("ui: input devices open: " + Evdev.count(fds))
+    val dev = FbUiDevice(fds, mem)
+    // device init: backlight + button LEDs on
+    dev.backlight(40)
+    dev.buttonBacklight(true)
     val px = Draw.newBuffer()
     sgo.supervised {
       val evts = sgo.makeChan[AudioEvt](16)
@@ -74,61 +125,79 @@ object Ui:
       val audioCmds = c.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       Runtime.start(c)
-      frameLoop(c, clock, evts, fds, mem, px)
+      frameLoop(c, clock, evts, dev, px)
       c.audioCmds.send(AcQuit())
       Runtime.stopClient(c)
     }
     // teardown: clear screen + LEDs, release fb
     Draw.clear(px, Color.black)
-    FbTest.present(mem, px)
-    Led.setBacklight(0)
-    Led.setButtonBacklight(false)
-    Led.setRedLed(false)
-    Led.setGreenLed(false)
+    dev.present(px)
+    dev.backlight(0)
+    dev.buttonBacklight(false)
+    dev.leds(false, false)
     Evdev.closeAll(fds)
     go.syscall.munmap(mem)
     go.syscall.close(fd)
     println("ui: done")
 
-  /** the frame loop. The `FrameCtx` is rebuilt each frame from the live
-   *  snapshot + connection. Returns on a quit edge. */
+  /** reset the UI cells — a fresh session per run (the host drivers reuse the
+   *  process across sequential sessions, so this is not merely cosmetic). */
+  def resetCells(): Unit =
+    stateC.set(Shell.initial())
+    connC.set(Disconnected())
+    idleC.set(0.0)
+    offC.set(false)
+    snapC.set(Runtime.emptySnapshot())
+    lastMsC.set(0L)
+
+  /** seed the frame clock — every driver calls this once before its first
+   *  `frameStep`, so the first frame's dt is a frame and not the epoch. */
+  def beginFrames(clock: Clock): Unit = lastMsC.set(clock.nowUnixMillis())
+
+  /** the device's run-until-quit driver: frames until a quit edge. */
   def frameLoop(c: MatrixClient, clock: Clock, evts: sgo.Chan[AudioEvt],
-                fds: List[scala.Int], mem: go.Bytes, px: go.Bytes): Unit =
-    var snap = Runtime.emptySnapshot()
-    var lastMs = clock.nowUnixMillis()
+                dev: UiDevice, px: go.Bytes): Unit =
+    beginFrames(clock)
     var run = true
     while run do
-      val nowMs = clock.nowUnixMillis()
-      val dtMs = clampDt(nowMs - lastMs)
-      lastMs = nowMs
-      val dt = dtMs.toDouble / 1000.0
+      if frameStep(c, clock, evts, dev, px) then run = false
 
-      // pick up the newest snapshot (Runtime.pollSnap TAKES it)
-      Runtime.pollSnap(c) match
-        case s: Some[StateSnapshot] => snap = s.value
-        case None => ()
+  /** ONE frame. The `FrameCtx` is rebuilt from the live snapshot + connection.
+   *  Returns true on a quit edge — on which nothing is updated, rendered,
+   *  presented or slept, exactly as the device loop always behaved. */
+  def frameStep(c: MatrixClient, clock: Clock, evts: sgo.Chan[AudioEvt],
+                dev: UiDevice, px: go.Bytes): Boolean =
+    val nowMs = clock.nowUnixMillis()
+    val dtMs = clampDt(nowMs - lastMsC.get())
+    lastMsC.set(nowMs)
+    val dt = dtMs.toDouble / 1000.0
 
-      // drain UI events (connection -> status/LEDs, send/play -> wata flash)
-      drainUiEvents(c)
+    // pick up the newest snapshot (Runtime.pollSnap TAKES it)
+    Runtime.pollSnap(c) match
+      case s: Some[StateSnapshot] => snapC.set(s.value)
+      case None => ()
 
-      // build this frame's context: ONE unified FrameCtx shared by every applet
-      val ctx = FrameCtx(snap, connV, c, c.audioCmds, evts)
+    // drain UI events (connection -> status/LEDs, send/play -> wata flash)
+    drainUiEvents(c, dev)
 
-      // poll input; a quit edge (back in contacts) ends the loop
-      val keyEvents = Evdev.poll(fds)
-      val quit = handleFrameInput(keyEvents, ctx)
-      if quit then run = false
-      else
-        // screensaver idle timeout
-        idleC.set(tickIdle(dt, keyEvents))
-        // update + render + present (skip render when display off)
-        stateC.set(Shell.update(stateV, dt, ctx))
-        stateC.set(Shell.withStatus(stateV, ShellStatus.fromConnection(connV)))
-        if !displayOff then
-          Draw.clear(px, Color.black)
-          Shell.render(stateV, px, ctx)
-          FbTest.present(mem, px)
-        FbCaps.sleepMs(33L)
+    // build this frame's context: ONE unified FrameCtx shared by every applet
+    val ctx = FrameCtx(snapC.get(), connV, c, c.audioCmds, evts)
+
+    // poll input; a quit edge (back in contacts) ends the loop
+    val keyEvents = dev.pollInput().events
+    val quit = handleFrameInput(keyEvents, ctx, dev)
+    if !quit then
+      // screensaver idle timeout
+      idleC.set(tickIdle(dt, keyEvents, dev))
+      // update + render + present (skip render when display off)
+      stateC.set(Shell.update(stateV, dt, ctx))
+      stateC.set(Shell.withStatus(stateV, ShellStatus.fromConnection(connV)))
+      if !displayOff then
+        Draw.clear(px, Color.black)
+        Shell.render(stateV, px, ctx)
+        dev.present(px)
+      dev.frameSleep(FRAME_MS)
+    quit
 
   def clampDt(raw: Long): Long =
     if raw < 0L then 0L else if raw > 1000L then 1000L else raw
@@ -136,14 +205,14 @@ object Ui:
   /** apply this frame's input to the shell; returns true if a quit edge fired
    *  (back pressed while on the contacts view with no active applet override).
    *  Wake-from-screensaver swallows the first input. */
-  def handleFrameInput(evs: List[KeyEvent], ctx: FrameCtx): Boolean =
+  def handleFrameInput(evs: List[KeyEvent], ctx: FrameCtx, dev: UiDevice): Boolean =
     var cur = evs
     var quit = false
     var going = true
     while going do
       cur match
         case ev :: t =>
-          if displayOff then wake()               // swallow the wake input
+          if displayOff then wake(dev)              // swallow the wake input
           else quit = applyOne(ev, ctx) || quit
           cur = t
         case Nil => going = false
@@ -167,23 +236,23 @@ object Ui:
     case _: VContacts => true
     case _              => false
 
-  def wake(): Unit =
+  def wake(dev: UiDevice): Unit =
     if displayOff then
-      Led.setBacklight(SettingsLogic.getBrightness(Shell.settingsState(stateV)))
-      Led.setButtonBacklight(true)
+      dev.backlight(SettingsLogic.getBrightness(Shell.settingsState(stateV)))
+      dev.buttonBacklight(true)
       offC.set(false)
     idleC.set(0.0)
 
   /** accumulate idle time; blank the panel past the settings timeout (0=never). */
-  def tickIdle(dt: scala.Double, evs: List[KeyEvent]): scala.Double =
+  def tickIdle(dt: scala.Double, evs: List[KeyEvent], dev: UiDevice): scala.Double =
     if hasEvent(evs) then 0.0
     else
       val t = idleTime + dt
       if !displayOff then
         val timeout = SettingsLogic.getScreenTimeout(Shell.settingsState(stateV))
         if timeout > 0 && t >= timeout.toDouble then
-          Led.setBacklight(0)
-          Led.setButtonBacklight(false)
+          dev.backlight(0)
+          dev.buttonBacklight(false)
           offC.set(true)
       t
 
@@ -192,25 +261,24 @@ object Ui:
     case Nil  => false
 
   // ---- UI event drain (connection -> LEDs/status, send/play flash) ------------
-  def drainUiEvents(c: MatrixClient): Unit =
+  def drainUiEvents(c: MatrixClient, dev: UiDevice): Unit =
     var run = true
     while run do
       Runtime.pollEvent(c) match
-        case e: Some[UiEvent] => onUiEvent(e.value)
+        case e: Some[UiEvent] => onUiEvent(e.value, dev)
         case None => run = false
 
-  def onUiEvent(e: UiEvent): Unit = e match
-    case cs: EvConn        => onConn(cs.state)
+  def onUiEvent(e: UiEvent, dev: UiDevice): Unit = e match
+    case cs: EvConn        => onConn(cs.state, dev)
     case _: EvSendComplete => stateC.set(Shell.notifyWataSend(stateV, false))
     case _: EvSendFailed   => stateC.set(Shell.notifyWataSend(stateV, true))
     case _: EvPlaybackError => stateC.set(Shell.notifyWataPlayError(stateV))
     case _: EvSnapshot     => () // snapshot is picked up via pollSnap
 
   /** connection change -> mirror on the red/green LEDs. */
-  def onConn(cs: ConnectionState): Unit =
+  def onConn(cs: ConnectionState, dev: UiDevice): Unit =
     connC.set(cs)
-    Led.setGreenLed(isLive(cs))
-    Led.setRedLed(isBad(cs))
+    dev.leds(isLive(cs), isBad(cs))
 
   def isLive(cs: ConnectionState): Boolean = cs match
     case _: Syncing   => true
@@ -221,4 +289,3 @@ object Ui:
     case _: ConnError    => true
     case _: Disconnected => true
     case _               => false
-

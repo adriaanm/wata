@@ -142,9 +142,11 @@ to subagents. A brief points at the governing plan/design doc and the
 oracle that judges the work (a conformance suite, an integ scenario, a
 golden), states the acceptance checks, and demands a gotcha report back —
 durable gotchas get folded into the design docs at review. **At most one
-subagent works in this tree at a time**: agents share `.toolchain`, the
-emitted Go, and the ci gate, so two in-tree agents poison each other's
-runs; further work queues or runs out-of-tree.
+subagent works in a given checkout at a time**: agents in the same tree
+share `.toolchain`, the emitted Go, and the ci gate, so two of them
+poison each other's runs. Parallel agents are fine when each has its own
+isolated worktree; keep the overall parallelism low enough to stay
+clear of session limits while agents are mid-flight.
 
 ### Open work — `TODO.jsonl`
 

@@ -47,20 +47,20 @@ framework, just a chain of `if/else if`. The two "real product"
 entry points are:
 
 - `wata-fb ui <base> <user> <pass>` — the actual on-device client
-  (`Ui.run`, `ui.scala:43`).
+  (`Ui.run`).
 - `wata-fb login|voicesend|voiceplay|audiosoak ...` — scripted,
   non-interactive drivers used for development and load testing
   (`DevCli`, `devcli.scala:20`).
 
 Everything else (`synctest`, `oggtest`, `oggforeign`, `fbdump`,
-`fbsmoke`, `syncfix`, `integ`, `--selftest`) is test/oracle tooling,
-covered under "dev/test surface" below.
+`fbsmoke`, `syncfix`, `integ`, `sim`, `uitest`, `--selftest`) is
+test/oracle tooling, covered under "dev/test surface" below.
 
-`Ui.runUi` (`ui.scala:47`) is the process shape for the live client:
-it opens and mmaps `/dev/fb0`, builds a `wataclient` `MatrixClient`
-via `Runtime.makeWithAudio`, then runs everything inside one
-`sgo.supervised { ... }` structured-concurrency scope
-(`ui.scala:71`). Inside that scope:
+`Ui.runUi` is the process shape for the live client: it opens and
+mmaps `/dev/fb0`, builds a `wataclient` `MatrixClient` via
+`Runtime.makeWithAudio`, then runs everything inside one
+`sgo.supervised { ... }` structured-concurrency scope. Inside that
+scope:
 
 - the **audio thread** runs as a `fork` of `AudioThread.mainLoop`
   (`audiothread.scala:50`), driven by a command channel
@@ -68,23 +68,57 @@ via `Runtime.makeWithAudio`, then runs everything inside one
   (`sgo.Chan[AudioEvt]`);
 - `Runtime.start(c)` (owned by `wataclient`, not this module) spins up
   the sync loop and the action-queue loop as further forks;
-- the **UI/main loop** (`Ui.frameLoop`, `ui.scala:96`) runs on the
-  calling goroutine itself — it is not forked. It polls the newest
-  state snapshot, drains UI events, polls input devices, updates the
-  shell/applet state machine, renders, and presents a frame, at a
-  fixed ~33ms sleep (~30fps).
+- the **UI/main loop** runs on the calling goroutine itself — it is
+  not forked. `Ui.frameStep` is ONE frame: it polls the newest state
+  snapshot, drains UI events, polls input, updates the shell/applet
+  state machine, renders, and presents, then sleeps ~33ms (~30fps).
+  `Ui.frameLoop` is the device's run-until-quit driver over
+  `frameStep`.
 
 If any of the sibling forks fails, the whole `supervised` scope is
 cancelled (structured concurrency) and the process unwinds through
 the ordinary teardown path (screen cleared, LEDs off, fb unmapped).
 
 Shared mutable state between the UI loop and the forked threads is
-held in a handful of module-level `sgo.Atomic` cells (`ui.scala:34-41`
-— `stateC`, `connC`, `idleC`, `offC`), read only by the UI goroutine
-by convention and written from event handlers. `shell.scala:56-63`
-documents the same discipline for `ShellState`, which additionally
-derives `Shareable` so it type-checks as safe to publish across the
-atomic cell.
+held in module-level `sgo.Atomic` cells in `Ui` (`stateC`, `connC`,
+`idleC`, `offC`, plus `snapC`/`lastMsC`, the frame carry-over the loop
+used to hold in local vars), read only by the UI goroutine by
+convention and written from event handlers. `Ui.resetCells` clears
+them all, which is what lets one process run several sequential UI
+sessions — the scripted harness does exactly that.
+`shell.scala:56-63` documents the same discipline for `ShellState`,
+which additionally derives `Shareable` so it type-checks as safe to
+publish across the atomic cell.
+
+### The `UiDevice` seam
+
+The frame loop's only contact with hardware is the `UiDevice` trait
+(`ui.scala`): **input poll, present, LEDs, button/panel backlight, and
+the frame pace**. Time is not part of it — the loop already takes a
+`Clock` capability from `wataclient`, and `UiDevice` owns only the one
+sleep. It is deliberately NOT `Shareable`: a `UiDevice` never crosses a
+goroutine boundary, which is what lets the real implementation hold the
+mmap'd framebuffer slice as a plain field.
+
+Three implementations:
+
+| impl | file | edges |
+|---|---|---|
+| `FbUiDevice` | `ui.scala` | the real thing: `Evdev.poll` over `/dev/input/event{0,1,2}`, `FbTest.present` into the mmap'd `/dev/fb0`, `Led.*` over sysfs. |
+| `SimDevice` | `sim.scala` | a terminal: ANSI truecolor half-blocks out, raw stdin in, LEDs as colored cells in a status row. |
+| `ScriptDevice` | `uiscript.scala` | deterministic: input from a script's injection cell, no display (the driver encodes the pixel buffer itself at a checkpoint). |
+
+One sgola shape to know: `pollInput` returns a `KeyBatch`, a
+non-generic record wrapping `List[KeyEvent]`, because the emitter
+stamps a generic result type at the IMPL (`List__KeyEvent`) but leaves
+the interface declaration a bare, undefined `List` — a `go build`
+failure, not a compiler diagnostic. Any trait method here that wants a
+collection result needs the same boxing.
+
+Two device edges are NOT behind the seam and stay best-effort no-ops
+off-device: `SettingsLogic.setBl` writes the backlight sysfs node
+directly from the settings applet, and `Led.writeSysfs` swallows every
+error (see `[FB-SYSCALL-SILENT]`).
 
 ## The display stack
 
@@ -358,12 +392,79 @@ All of these are subcommands dispatched from `main.scala`:
 | `integ <scenario> <baseUrl>` | `integ.scala` | ten scenarios (login, two-user sync, voice send/receive, read receipts, ordering, redaction, download-byte-equality, the family room, session resume) run against a live `wata-server`, each driven through `wataclient`'s real `Runtime`/action queue, printing `INTEG PASS/FAIL <scenario>`. |
 | `--selftest [echo\|play\|all]` | `selftest.scala` | on-device audio-thread selftest described above. |
 | `login\|voicesend\|voiceplay\|audiosoak ...` | `devcli.scala` | scripted, non-interactive actions against a live server: provision/login a user, record-and-send a clip, sync-and-play the newest clip, or run a long record/send/sync/download/play soak loop (intended to run under `GODEBUG=gctrace=1` to watch GC pressure — `devcli.scala:105`). |
+| `sim <base> <user> <pass> [--once]` | `sim.scala` | the host simulator: the real frame loop drawn into a terminal — see below. |
+| `uitest <script> <base> <user> <pass> <outdir>` | `uiscript.scala` | one scripted, deterministic UI session with PNG checkpoints — see below. |
 | `ui <base> <user> <pass>` | `ui.scala` | the actual product: the full on-device client. |
 
-Ten `integ` scenarios are the closest thing this module has to an
-end-to-end test suite; they require a running `wata-server` and are
-invoked by shell scripts elsewhere in the repo (`tools/`), not from
-this module directly.
+`integ` (ten scenarios, `wataclient`'s `Runtime` directly) and
+`fb-ui-tests` (scripted runs of the real frame loop) are this module's
+two end-to-end suites; both require a running `wata-server` and are
+invoked by scripts in `tools/`, not from this module directly.
+
+## The host simulator
+
+`wata-fb ui` needs a real `/dev/fb0`, so for a long time the
+applet/shell layer could only be exercised on the device. The
+`UiDevice` seam gives the same frame loop two host front ends, so the
+whole UI — input routing, applet state machines, rendering, the PTT
+send path — runs on a dev box against nothing but a live
+`wata-server`.
+
+**`just fb-sim [BASE [USER [PASS]]]`** — the interactive one
+(`tools/fb-sim.sh` + `sim.scala`). The 160x128 RGB565 frame is drawn as
+ANSI truecolor half-blocks: one character cell is two stacked pixels
+(`U+2580 UPPER HALF BLOCK`, foreground = upper pixel, background =
+lower), giving a 160x64 character grid at the panel's true aspect
+ratio. A frame is written only when the pixel buffer actually changed,
+and within a frame an SGR sequence only where the fg/bg pair changes
+from the previous cell — which collapses the flat regions that
+dominate this UI. Keys come from raw stdin: arrows = d-pad, Enter =
+select, Backspace/`b` = back, `z`/`x` = prev/next applet, `f` = F2,
+Space = PTT, `q` = quit. The wrapper script owns nothing but the
+terminal mode (`stty raw -echo min 0 time 0`, which is what makes the
+per-frame stdin poll return immediately) and restoring it on every exit
+path. **A terminal reports no key-up**, so PTT release is INFERRED: a
+gap longer than 250ms in the space-key repeat stream is the release —
+the same trick the TypeScript TUI's `usePtt` hook uses. Without a tty
+the script renders one frame and returns, so the recipe stays
+exercisable unattended.
+
+**`just fb-ui-tests`** — the ci one (`tools/fb-ui-tests.py` +
+`uiscript.scala`). Each scenario starts a FRESH `wata-server` and runs
+its phases in order, one `wata-fb uitest` process per phase, each
+driven by a script in `tools/fb-ui-scripts/`. Phases are sequential
+rather than concurrent clients because `wataclient`'s `Runtime` is a
+single-client-per-process engine; the server carries state between
+them, exactly as `tools/wataclient-integ.sh` does it. Every checkpoint
+dumps the live pixel buffer through the same deterministic PNG encoder
+`fbdump` uses, byte-compared against `tools/fb-ui-golden/`; regenerate
+those reviewed baselines with `just fb-ui-tests --update` and eyeball
+the images.
+
+What is virtual and what is not: **the UI loop's clock is virtual**
+(`ScriptClock` advances exactly one frame per read), so every frame's
+`dt` is 33ms of simulated time and the time-dependent pixels — the PTT
+hold counter, the send/play status flash — are reproducible. The
+CLIENT keeps the real clock and the real network, so a `wait` directive
+advances frames (each pausing 10ms of real time) until the snapshot
+catches up. Checkpoints are therefore taken from a SETTLED state: wait
+for the thing, advance past every animation, then dump. Giving the
+scripted client the virtual clock too would be wrong — the sync loop's
+backoff and `wataclient`'s wait helpers would spin.
+
+Audio on the host is `SimAudio` (`sim.scala`), which speaks the real
+`AudioCmd`/`AudioEvt` mailbox protocol with no codec behind it: a
+recording yields the canned Ogg payload `integ.scala` uses at a FIXED
+duration (a scripted frame must be byte-reproducible, and the real hold
+time is wall-clock), and playback succeeds silently. So the full send
+path — PTT, upload, `m.audio`, the other client's timeline — runs
+host-side; only the codec stays device-only.
+
+The scripted scenario `voice-alice-to-bob` is the coverage that
+matters: alice bootstraps the family room, holds PTT, and sends; bob
+then runs, auto-joins, opens the conversation, and his conversation
+view renders the message row — golden-framed, along with both contact
+lists and the settings applet.
 
 ## Cross-compilation and deployment
 
@@ -399,7 +500,7 @@ is enough.
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 404 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |
 | `png.scala` | 127 | Minimal deterministic PNG encoder (CRC-32, Adler-32, one stored DEFLATE block) used only for the host-side golden-frame dump. |
-| `input.scala` | 153 | `/dev/input/event{0,1,2}` reader: raw `input_event` decoding, kernel-keycode → `Key`/`KeyState` mapping. |
+| `input.scala` | 159 | `/dev/input/event{0,1,2}` reader: raw `input_event` decoding, kernel-keycode → `Key`/`KeyState` mapping, and `KeyBatch` (the non-generic box the `UiDevice` input edge needs). |
 | `led.scala` | 31 | Backlight/LED control via sysfs writes; best-effort, errors swallowed. |
 | `oggforeign.scala` | 22 | `wata-fb oggforeign` driver: reads a fixture file and prints `wataclient`'s foreign-Ogg oracle report. |
 | `syncfixdriver.scala` | 28 | `wata-fb syncfix` driver: reads captured `/sync` fixture files and feeds them to `wataclient`'s sync-fixture oracle. |
@@ -410,7 +511,9 @@ is enough.
 | `applets.scala` | 769 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
-| `ui.scala` | 226 | The real product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs the ~30fps main loop. |
+| `ui.scala` | 291 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
+| `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
+| `uiscript.scala` | 399 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
 
 ## Known gaps / debt observed while reading
 
@@ -475,14 +578,20 @@ gap, the `/dev/shm`-only deploy), a few things stood out during this read:
   if `Display.W`/`Display.H` are ever changed for a different panel,
   since there is no chunking of the DEFLATE stream into multiple
   stored blocks.
-- `[FB-UI-UNTESTED]` It's worth flagging explicitly for a new engineer: **there is no
-  automated test that exercises `Ui.run` end to end** — the closest
-  things are `fbsmoke` (manual, on-device) and `integ` (automated but
-  bypasses the UI/applet/input layer entirely, talking to
-  `wataclient`'s `Runtime` directly). A bug purely in `shell.scala` or
-  `applets.scala` input routing would not be caught by any existing
-  automation; it would need `[HUMAN-VERIFY]`-style manual device
-  testing.
+- **`just fb-ui-tests` covers the frame loop, not every applet path.**
+  The scripted scenario walks the contact list, PTT send, applet
+  switching, opening a conversation and the read-receipt round-trip;
+  it does not touch playback selection, delete (`F2`), scrolling past
+  the visible rows, the screensaver timeout, or any settings item
+  beyond the menu render. Those remain manual. Adding coverage is a
+  script file plus a golden, not code.
+- **`Ui.frameStep`'s `dt` is the only thing the scripted clock
+  virtualizes.** Anything a frame renders that depends on WALL-clock
+  time or on network arrival order would still be non-deterministic;
+  today nothing does, which is why the goldens hold. A future
+  timestamp in the message rows, say, would break every golden and
+  would need the client's clock virtualized too — which the sync
+  loop's backoff cannot tolerate as things stand.
 
 The untagged items are recorded as things worth knowing before touching
 the surrounding code, not as work owed.

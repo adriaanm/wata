@@ -14,8 +14,9 @@ import language.experimental.saferExceptions
  *  Bound surface: syscall.{Open,Close,Read,Write,Mmap,Munmap} + the O_* /
  *  PROT_* / MAP_* constants. `Close`/`Write`/`Munmap` declare `Unit` and drop
  *  their `error`/`n` returns (best-effort); `Read`/`Mmap`/`Open` ride the
- *  `(T, error)` throws val-bind lowering. `perm` is always passed as the
- *  literal `0` at call sites (no O_CREAT is used) so it lands as an untyped
+ *  `(T, error)` throws val-bind lowering. `perm` is always passed as a LITERAL
+ *  at call sites (`0` for the read/write-existing paths, `420` = 0644 for the
+ *  one create path, the uitest PNG checkpoint dump) so it lands as an untyped
  *  constant into Go's `uint32`. */
 @go.bind("syscall")
 object syscall:
@@ -24,6 +25,8 @@ object syscall:
   def O_WRONLY: scala.Int  = ???
   def O_RDWR: scala.Int    = ???
   def O_NONBLOCK: scala.Int = ???
+  def O_CREAT: scala.Int    = ???
+  def O_TRUNC: scala.Int    = ???
   // --- mmap prot / flags ---------------------------------------------------
   def PROT_READ: scala.Int  = ???
   def PROT_WRITE: scala.Int = ???

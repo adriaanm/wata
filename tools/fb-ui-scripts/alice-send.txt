@@ -1,0 +1,35 @@
+# alice: bootstrap the family room with bob, hold PTT, send a voice message,
+# then step through to the settings applet.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
+# directive vocabulary. Every checkpoint is taken from a SETTLED state: wait for
+# the thing, advance past every animation, then dump.
+
+# out-of-band room setup: `#family:localhost` with bob invited.
+family @bob:localhost
+
+wait syncing 1 900
+# alice's only conversation in this phase is the family room: the roomless DM
+# rows come from the family's JOINED members, and bob has not run yet — his
+# invite is still outstanding. So this phase talks into the family room, and
+# bob picks the message up there once his own phase auto-joins him.
+wait convs 1 900
+advance 30
+checkpoint alice-contacts
+
+# push-to-talk into the selected (family) conversation: press, hold ~0.7s of
+# frame time, release. The sim audio actor answers the release with the canned
+# Ogg at a fixed duration, which the applet uploads and sends.
+key ptt press
+advance 20
+key ptt release
+wait msgs 1 1500
+
+# the SENT flash lasts 1.5s of frame time; outrun it before dumping
+advance 120
+checkpoint alice-sent
+
+# dot2 switches to the settings applet
+tap dot2
+advance 30
+checkpoint alice-settings
