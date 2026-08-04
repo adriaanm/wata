@@ -202,10 +202,11 @@ explicit state machine, not a generic widget framework:
   from the Zig client's `applets/snake.zig`; see the parity table) and
   `SettingsApplet`/`SettingsLogic` (menu: audio echo test,
   brightness, screen timeout, display name, disconnect, info, plus
-  the diagnostics absorbed from system-menu — the wlan0-IP and
-  cellular-data info rows and the power off / reboot-to-BL /
-  reboot-to-EDL actions). The menu outgrew the grid at eleven items,
-  so it renders as a scrolling window of six with `^`/`v` cues in the
+  everything absorbed from system-menu — the IP and cellular info
+  rows, the net test, the wifi and cellular-data toggles and the
+  power off / reboot-to-BL / reboot-to-EDL actions; see "The settings
+  device rows"). The menu outgrew the grid at fourteen items, so it
+  renders as a scrolling window of six with `^`/`v` cues in the
   last column; the window start is derived from the selection (no
   scroll state), which keeps the frames the goldens pin
   deterministic.
@@ -231,6 +232,52 @@ explicit state machine, not a generic widget framework:
   pauses the game, and an always-ticking port would run it into a wall
   unwatched. The snake takes no part in the audio routing the
   always-tick rule exists for.
+
+### The settings device rows
+
+The settings applet is the whole of what system-menu offered a parent
+or a kid (plan 0003's retirement checklist): wata is the only
+framebuffer occupant after the tty1 flip, so anything system-menu did
+that still matters had to move here. `diag.scala` is that half — every
+source and command line is system-menu's own, so the two never disagree
+about what "Data: off" means:
+
+| row | what it shows / does | source, as system-menu reads it |
+|---|---|---|
+| Device Info | battery %, uptime, free memory | `Led.readBatteryPercent` (the battery sysfs node), `/proc/uptime` first field, `/proc/meminfo`'s `MemAvailable` — both parsed in `Diag`, not shelled out to awk |
+| IP | wlan0's IPv4 address | `net.InterfaceByName("wlan0")` (system-menu's `ip -4 addr show wlan0`) |
+| Cell data | ppp0 link state + signal strength, e.g. `up -85dBm` | the ppp0 sysfs node, plus `qmicli -p -d msmipc://0 --nas-get-signal-strength` parsed the way `modem_info` parses it (`-128` = no measurement, shown `--`). The ppp0 ADDRESS has no room next to the signal, so it moves to the row's detail line |
+| Net test | OK runs four probes, verdicts in the detail block | `ping -c2 -W3` against the auto-detected default gateway (`ip route show dev wlan0`, then ppp0), `1.1.1.1` and `8.8.8.8`, plus the `nslookup google.com` DNS probe judged by system-menu's own test (an `Address` line, no `NXDOMAIN`) |
+| Wifi | ON/OFF, OK toggles | `rc-service wifi start` / `stop`; the state is whether wlan0 exists |
+| Data link | ON/OFF, OK toggles | `pppd call cellular &` / `killall pppd`; the state is the same ppp0 read the info row does |
+| Power off / Reboot to BL / Reboot to EDL | OK arms, OK again runs | `poweroff`, `/usr/local/bin/reboot-bootloader`, `/usr/local/bin/reboot-edl` |
+
+Three rules hold this together:
+
+- **`Diag.onDevice()` gates every read and every command** (it probes
+  the lcd-bl sysfs node, hardware no dev host has). Off-device the info
+  rows answer `n/a`, the net test runs NOTHING and says `n/a` /
+  `not on device`, and a toggle arms and then reports `not on device`
+  instead of pretending. That is what makes the whole menu walkable in
+  the sim and byte-reproducible in the goldens — including on a Linux
+  CI host, which does have a `/proc/uptime` of its own.
+- **Both toggles take the power rows' two-OK confirm** (`isActionRow`):
+  cutting a kid's wifi, or spending the boot's ONE cellular data call,
+  is as much an accident as a reboot. Nothing retries — a failed
+  `pppd call cellular` is reported on the row (`actionMsg`, red, until
+  the next keypress) rather than attempted again, because this modem
+  accepts a single data call per boot and a silent second attempt would
+  spend it. `pppd` is backgrounded, so the outcome arrives through the
+  row's own ~5s ppp0 refresh, not through the exec's exit status.
+- **The net test blocks the frame loop** for the few seconds its pings
+  take, exactly as system-menu's does. A background probe would need
+  its own thread and a result mailbox for a diagnostic that is used
+  once in a blue moon; the row's detail says it takes a few seconds.
+
+Commands run as `sh -c "<system-menu's line>"` through the `go.exec`
+facade, which is why the lines keep their redirections verbatim; the
+two shapes bound are `Run()` (exit status: the toggles, the pings) and
+`Output()` (stdout: the gateway, the signal strength).
 
 ### The connectivity element
 
@@ -654,7 +701,7 @@ one-user phases:
 | `badges-across-restart` | unplayed counts across a restart: bob sees family=1 / DM=2, resumes with no credentials, and the badge frame is byte-identical; playing out the DM clears only its own badge. |
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED`, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm. |
 | `conn-status` | the header's connectivity element and the status line it shares its computed state with: connected (`NET` off-device), reconnecting on both phases of the `..` alternation, disconnected, and — through the `netpipe` override — the device-only wifi and cellular glyphs and the `OFF` state, whose red status line the client's own belief that it is syncing does not override. |
-| `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, device info, and the diagnostics rows — the IP and cellular info rows (an honest `n/a` on the host), the power-action confirm arming, the guarded no-op on the second OK, and a move-away cancelling an armed action. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
+| `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Twenty checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
 | `snake` | the snake applet end to end, on exact frame counts (the game is pure virtual-clock work once open, and the food PRNG is fixed-seed, so `idle N` lands on exact game states — `tools/snake-frames.py` is the mirror that designs the counts): the fresh board, the first eat (score, growth, the next food), the turn-and-wall game over with its overlay, the OK restart continuing the PRNG sequence, and red leaving back to the wata applet. |
 
@@ -745,7 +792,10 @@ information in the equivalent place, not the same number.
 | network disconnect (stop sync + actions, restart to reconnect) | yes | yes | same |
 | brightness / screen-timeout / name survive a restart | no | yes | wata-fb only — the same config store the session lives in |
 | battery percent in the Info detail | yes | yes | same, `Led.readBatteryPercent`; absent hardware reads -1 and the line is left out |
-| wlan0 IP + cellular-data info rows | no (system-menu) | yes | absorbed from system-menu (plan 0003 phase 5): `Diag.wlanIp`/`cellData` mirror its sources — `ip -4 addr show <iface>` and the ppp0 sysfs node — re-read every ~5s; off-device both rows answer `n/a` |
+| battery / uptime / free memory in the Info detail | battery only | yes | uptime and `MemAvailable` read straight out of `/proc` (system-menu shells out to awk for the same number); `n/a` off-device |
+| wlan0 IP + cellular-data info rows (link + signal dBm) | no (system-menu) | yes | absorbed from system-menu (plan 0003 phase 5): `Diag.wlanIp`/`cellData` mirror its sources — `ip -4 addr show <iface>`, the ppp0 sysfs node, and `qmicli --nas-get-signal-strength` — re-read every ~5s; off-device both rows answer `n/a` |
+| net test: ping gateway / 1.1.1.1 / 8.8.8.8 + DNS probe | no (system-menu) | yes | same four probes, same command lines, verdicts in the row's detail block; synchronous (a frozen frame loop for a few seconds, as in system-menu); off-device it runs nothing and says `n/a` |
+| wifi ON/OFF, cellular data start/stop | no (system-menu) | yes | `rc-service wifi start`/`stop` and `pppd call cellular &`/`killall pppd`; both take the power rows' two-OK confirm and NEVER retry — the modem accepts one data call per boot, so a failure is reported on the row instead |
 | power off / reboot to BL / reboot to EDL | no (system-menu) | yes | same commands system-menu runs (`poweroff`, `/usr/local/bin/reboot-bootloader`, `/usr/local/bin/reboot-edl`) via `go.exec`; OK arms (the detail rows become a red confirm prompt), a second OK runs, any other key cancels. `Diag.runOnDevice` gates on the lcd-bl sysfs node so off the hardware the run is a logged no-op; on-device verification is the boot-into-wata phase's checkpoint |
 | detail area under the menu | rows 16..19 of 19 | rows 13..14 of 15 | same idea, sized to the landscape grid |
 | every settings item under test | n/a | yes | the `settings-walk` scenario |
@@ -881,10 +931,10 @@ it is not part of `just ci`.
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
 | `shell.scala` | 214 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, red-in-snake goes back to wata, everything else goes to the active applet; the snake is also the one applet ticked only while active). |
 | `snake.scala` | 275 | The snake applet, ported from the Zig client's `applets/snake.zig`: packed-cell body, deterministic minstd food PRNG, tick/step game logic, and rendering; frame counts for its uitest scenario are designed with `tools/snake-frames.py`, an exact Python mirror. |
-| `applets.scala` | 986 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `applets.scala` | 1101 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `netstatus.scala` | 176 | The connectivity element's computed state (`NetState` = pipe + health + blink phase): the cached ~5s interface read, the `ConnectionState` mapping, the reconnecting animation's phase, and what the header draws for each combination — read by both the header indicator and the 1px status line. |
-| `diag.scala` | 107 | The settings applet's diagnostics + power actions (`Diag`): the wlan0/ppp0 reads and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources; `onDevice()` (the lcd-bl sysfs probe) gates the reads and the destructive paths. |
-| `netexec.scala` | 24 | The `go.exec` facade over `os/exec`, curated to `Command`/`Output` — what `Diag` runs `ip` and the power commands through. |
+| `diag.scala` | 336 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
+| `netexec.scala` | 59 | The `go.exec` facade over `os/exec` (`Command` at one and three arities, `Run`, `Output`) and the `go.netif` facade over `net` — what `Diag` runs system-menu's shell lines and its interface reads through. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
 | `ui.scala` | 380 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |

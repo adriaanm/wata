@@ -59,6 +59,44 @@ tap down
 advance 5
 checkpoint settings-cell
 
+# The net test: OK runs system-menu's own four probes (gateway ping, 1.1.1.1,
+# 8.8.8.8, nslookup). Off the hardware it runs NOTHING — the row answers "n/a"
+# and the detail says why, rather than pinging from a dev laptop.
+tap down
+advance 5
+checkpoint settings-nettest
+
+tap enter
+advance 5
+checkpoint settings-nettest-run
+
+# The two radio toggles (wifi, cellular data). Both read "n/a" on the host,
+# and both take the power rows' two-OK confirm: cutting a kid's wifi, or
+# spending the boot's one cellular data call, is as much an accident as a
+# reboot. OK arms...
+tap down
+advance 5
+checkpoint settings-wifi
+
+tap enter
+advance 5
+checkpoint settings-wifi-armed
+
+# ...and the second OK runs it: off-device the guarded no-op, whose "not on
+# device" the row states outright instead of looking like it worked.
+tap enter
+advance 5
+checkpoint settings-wifi-run
+
+# the data toggle, armed and run in one go — the run never retries (the modem
+# accepts one data call per boot).
+tap down
+tap enter
+advance 2
+tap enter
+advance 5
+checkpoint settings-data-run
+
 # The power actions render everywhere but only act on the hardware: OK arms
 # (the detail rows become the red confirm prompt), a second OK runs the
 # action — here a logged no-op, the device guard.

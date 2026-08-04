@@ -1,12 +1,19 @@
 import language.experimental.saferExceptions
 
+/** the net test's verdicts, as the two 26-column lines the row's detail
+ *  block has room for. */
+case class NetTestResult(line1: String, line2: String)
+
 /** Device diagnostics + power actions for the settings applet — the minimum
  *  absorbed from system-menu (plan 0003, phase 5): the wlan0 address for the
- *  IP row, the ppp0 link for the cellular-data row, and poweroff /
- *  reboot-bootloader / reboot-edl for the power rows (stdlib `net` for the
- *  addresses, the ppp0 sysfs node, and system-menu's own three power
- *  commands). Device-layer app code over the `go.netif` / `go.exec` /
- *  `go.sys` facades.
+ *  IP row, the ppp0 link plus the modem's signal for the cellular-data row,
+ *  uptime and free memory for the Device Info block, the ping/DNS net test,
+ *  the wifi and cellular-data toggles, and poweroff / reboot-bootloader /
+ *  reboot-edl for the power rows. Every source and command line is
+ *  system-menu's own (stdlib `net` for the addresses, the sysfs nodes,
+ *  /proc/uptime and /proc/meminfo read directly, and its qmicli / ping /
+ *  nslookup / rc-service / pppd lines run through `sh -c`). Device-layer app
+ *  code over the `go.netif` / `go.exec` / `go.sys` facades.
  *
  *  Everything compiles and renders on the host; `onDevice()` gates both the
  *  destructive paths and the reads, so the info rows answer "n/a" honestly
@@ -65,18 +72,245 @@ object Diag:
       else going = false
     s.substring(0, n)
 
-  /** the cellular-data row, system-menu's Data row: ppp0 up -> "up" + its
-   *  address, ppp0 absent -> "off"; off-device there is no modem to ask, so
-   *  the row says "n/a" instead of faking an "off". */
+  /** the cellular-data row, system-menu's Data + Sig rows in one: the ppp0
+   *  link state ("up"/"off") followed by the modem's signal strength
+   *  ("-85dBm", or "--" when the modem reports nothing). Off-device there is
+   *  no modem to ask, so the row says "n/a" instead of faking an "off".
+   *
+   *  The ppp0 ADDRESS does not fit next to the signal on a 26-column row, so
+   *  it moves to the row's detail block (`cellAddr`). `NetStatus.readPipe`
+   *  keys on the "up " prefix, which this keeps. */
   def cellData(): String =
     var out = UNAVAILABLE
-    if onDevice() then out = pppStatus()
+    if onDevice() then out = pppStatus() + " " + signalDbm()
     out
 
   def pppStatus(): String =
     var out = "off"
-    if readable("/sys/class/net/ppp0/operstate") then out = "up " + ifaceIp("ppp0")
+    if readable("/sys/class/net/ppp0/operstate") then out = "up"
     out
+
+  /** the ppp0 address for the cellular row's detail line; "" when the link is
+   *  down or there is no device to ask. */
+  def cellAddr(): String =
+    var out = ""
+    if onDevice() && readable("/sys/class/net/ppp0/operstate") then out = ifaceIp("ppp0")
+    out
+
+  /** signal strength from the modem, system-menu's `modem_info` source:
+   *  `qmicli --nas-get-signal-strength` over the shared proxy on msmipc://0.
+   *  `--` when the modem is silent or the call fails. */
+  def signalDbm(): String =
+    parseDbm(shOut("qmicli -p -d msmipc://0 --nas-get-signal-strength 2>&1"))
+
+  /** qmicli prints a block per source under `Current:`; the number wanted is
+   *  the one before the first ` dBm'` after that header. -128 is qmicli's
+   *  "no measurement", which system-menu also drops. */
+  def parseDbm(out: String): String =
+    var res = "--"
+    val ci = out.indexOf("Current:")
+    if ci >= 0 then
+      val rest = out.substring(ci, out.length)
+      val di = rest.indexOf(" dBm'")
+      if di >= 0 then
+        val num = numberBefore(rest, di)
+        if num != "" && num != "-128" then res = num + "dBm"
+    res
+
+  /** the run of digits (with a leading `-`) ending at `end`. */
+  def numberBefore(s: String, end: scala.Int): String =
+    var n = end
+    var going = true
+    while n > 0 && going do
+      val ch = s.substring(n - 1, n)
+      if "0123456789-".indexOf(ch) >= 0 then n = n - 1 else going = false
+    s.substring(n, end)
+
+  // ---- Device Info: uptime and free memory --------------------------------------
+
+  /** uptime as "2h13m", from `/proc/uptime`'s first field (seconds) — the
+   *  same source system-menu's sysinfo reads. Gated on `onDevice()` like
+   *  every other row: a dev host HAS a /proc/uptime, and a row whose value
+   *  depends on which machine ran the build is a row no golden can pin. */
+  def uptime(): String =
+    var out = UNAVAILABLE
+    if onDevice() then out = uptimeText(readText("/proc/uptime"))
+    out
+
+  def uptimeText(raw: String): String =
+    val secs = intPrefix(raw)
+    var out = UNAVAILABLE
+    if secs >= 0 then out = "" + (secs / 3600) + "h" + ((secs % 3600) / 60) + "m"
+    out
+
+  /** available memory as "123M", read out of `/proc/meminfo`'s MemAvailable
+   *  line directly (system-menu shells out to awk for the same number). */
+  def memAvail(): String =
+    var out = UNAVAILABLE
+    if onDevice() then out = memText(readText("/proc/meminfo"))
+    out
+
+  def memText(raw: String): String =
+    var out = UNAVAILABLE
+    val i = raw.indexOf("MemAvailable:")
+    if i >= 0 then
+      val kb = intPrefix(skipSpaces(raw.substring(i + 13, raw.length)))
+      if kb >= 0 then out = "" + (kb / 1024) + "M"
+    out
+
+  def skipSpaces(s: String): String =
+    var n = 0
+    while n < s.length && s.substring(n, n + 1) == " " do n = n + 1
+    s.substring(n, s.length)
+
+  /** the leading run of decimal digits as an Int, or -1 when there is none. */
+  def intPrefix(s: String): scala.Int =
+    var acc = 0
+    var seen = false
+    var going = true
+    var i = 0
+    while i < s.length && going do
+      val ch = s.substring(i, i + 1)
+      val d = "0123456789".indexOf(ch)
+      if d >= 0 then
+        acc = acc * 10 + d
+        seen = true
+        i = i + 1
+      else going = false
+    var out = -1
+    if seen then out = acc
+    out
+
+  /** a whole small text file as a String; "" when it does not exist. */
+  def readText(path: String): String =
+    var out = ""
+    try
+      val raw = go.sys.readFile(path)
+      out = go.string(raw)
+    catch case e: sgo.GoError => out = ""
+    out
+
+  // ---- net test ------------------------------------------------------------------
+
+  /** the net test's four probes, system-menu's `show_nettest` line for line:
+   *  ping the default gateway (auto-detected off wlan0, then ppp0), 1.1.1.1
+   *  and 8.8.8.8, then an nslookup DNS probe. Returns the two detail lines
+   *  the row renders; off-device it runs NOTHING and says so.
+   *
+   *  The probes are synchronous — a few seconds of frozen UI, the same cost
+   *  system-menu's own net test has. */
+  def netTest(): NetTestResult =
+    var out = NetTestResult(UNAVAILABLE, "not on device")
+    if onDevice() then out = runNetTest()
+    out
+
+  def runNetTest(): NetTestResult =
+    val gw = defaultGateway()
+    var gwRes = "skip"
+    if gw != "" then gwRes = pingResult(gw)
+    NetTestResult("GW:" + gwRes + " 1.1.1.1:" + pingResult("1.1.1.1"),
+      "8.8.8.8:" + pingResult("8.8.8.8") + " DNS:" + dnsResult())
+
+  def pingResult(addr: String): String =
+    var out = "fail"
+    if shOk("ping -c2 -W3 " + addr + " >/dev/null 2>&1") then out = "ok"
+    out
+
+  /** system-menu's own DNS verdict: an answer with an Address line and no
+   *  NXDOMAIN. busybox nslookup's exit status is not trustworthy enough to
+   *  key on alone. */
+  def dnsResult(): String =
+    val out = shOut("nslookup google.com 2>&1")
+    var res = "fail"
+    if out.indexOf("Address") >= 0 && out.indexOf("NXDOMAIN") < 0 then res = "ok"
+    res
+
+  /** `ip route show dev <iface>` -> the address after "default via", wlan0
+   *  first then ppp0 (system-menu's order); "" when neither has a default. */
+  def defaultGateway(): String =
+    var gw = gatewayOn("wlan0")
+    if gw == "" then gw = gatewayOn("ppp0")
+    gw
+
+  def gatewayOn(iface: String): String =
+    val out = shOut("ip route show dev " + iface + " 2>/dev/null")
+    var gw = ""
+    val i = out.indexOf("default via ")
+    if i >= 0 then gw = wordAt(out, i + 12)
+    gw
+
+  /** the run of non-space characters starting at `from`. */
+  def wordAt(s: String, from: scala.Int): String =
+    var n = from
+    var going = true
+    while n < s.length && going do
+      val ch = s.substring(n, n + 1)
+      if ch == " " || ch == "\n" || ch == "\t" then going = false else n = n + 1
+    s.substring(from, n)
+
+  // ---- wifi / cellular-data toggles ----------------------------------------------
+
+  /** the wifi row's state, system-menu's own test: wlan0 exists iff the
+   *  service is up. "n/a" off-device. */
+  def wifiState(): String =
+    var out = UNAVAILABLE
+    if onDevice() then
+      var s = "OFF"
+      if readable("/sys/class/net/wlan0/operstate") then s = "ON"
+      out = s
+    out
+
+  /** `rc-service wifi start` / `stop` — system-menu's wifi toggle. */
+  def wifiStart(): String = runGuarded("rc-service wifi start")
+  def wifiStop(): String = runGuarded("rc-service wifi stop")
+
+  /** the cellular data call, system-menu's `show_cellular` commands. Start is
+   *  BACKGROUNDED (pppd takes ~15s to bring ppp0 up) so the UI is not frozen
+   *  waiting on it; the row's own ppp0 refresh is what reports the outcome.
+   *  Nothing retries: this modem accepts ONE data call per boot, so a silent
+   *  second attempt would burn the only one there is. */
+  def dataStart(): String = runGuarded("pppd call cellular &")
+  def dataStop(): String = runGuarded("killall pppd 2>/dev/null")
+
+  /** run a command for its exit status, reporting the failure as text for the
+   *  row to show: "" on success, a short reason otherwise. Off-device it runs
+   *  nothing and says so — the rows still arm, so the whole gesture is
+   *  walkable in the sim. */
+  def runGuarded(line: String): String =
+    var out = "not on device"
+    if onDevice() then out = shStatus(line)
+    out
+
+  def shStatus(line: String): String =
+    var out = ""
+    try go.exec.command2("sh", "-c", line).run()
+    catch case e: sgo.GoError => out = clipReason(e.message)
+    out
+
+  /** an exec error's text is long enough to run off a 26-column row. */
+  def clipReason(m: String): String =
+    var out = m
+    if m.length > 24 then out = m.substring(0, 24)
+    out
+
+  // ---- shell helpers --------------------------------------------------------------
+
+  /** stdout of `sh -c <line>`; "" when the command fails to run or exits
+   *  non-zero (the callers all treat no output as "no answer"). */
+  def shOut(line: String): String =
+    var out = ""
+    try
+      val raw = go.exec.command2("sh", "-c", line).output()
+      out = go.string(raw)
+    catch case e: sgo.GoError => out = ""
+    out
+
+  /** whether `sh -c <line>` exited zero. */
+  def shOk(line: String): Boolean =
+    var ok = true
+    try go.exec.command2("sh", "-c", line).run()
+    catch case e: sgo.GoError => ok = false
+    ok
 
   // ---- power actions -----------------------------------------------------------
 

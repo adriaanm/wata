@@ -151,24 +151,30 @@ and their **on-device verification remains part of this phase's
 boot-into-wata checkpoint** — nothing has exercised them on hardware
 yet.
 
-`[FB-SETTINGS-FULL]` audit ruled 2026-08-05 — the full system-menu
-feature delta (source: `bq268-alpine/tools/system-menu.py`, 816 lines)
-and each item's fate, which is the retirement checklist:
+`[FB-SETTINGS-FULL]` audit ruled 2026-08-05, folds landed — the full
+system-menu feature delta (source: `bq268-alpine/tools/system-menu.py`,
+816 lines) and each item's fate, which is the retirement checklist:
 
 | system-menu offers | settings has | fate |
 |---|---|---|
 | launch wata | n/a — wata becomes the tty1 program | retire with the flip |
-| sysinfo: battery, wifi SSID/IP, uptime, free mem, signal dBm, live refresh | battery, IP row, cellular info row | fold: uptime+mem into Device Info, signal dBm into the cellular row |
-| net test: ping gateway/1.1.1.1/8.8.8.8 + DNS probe | absent | fold: one "Net test" diagnostics action row running the same probes via the exec facade |
-| cellular start/stop data (`pppd call cellular` / stop) | info only | fold: a data on/off toggle row, same commands (mind the one-data-call-per-boot kernel constraint — the row surfaces failure honestly rather than retrying) |
-| wifi ON/OFF (`rc-service wifi start/stop`) | absent | fold: a wifi toggle row (provisioning a *new* network stays TUI-WIFI-PANEL's job) |
+| sysinfo: battery, wifi SSID/IP, uptime, free mem, signal dBm, live refresh | battery, IP row, cellular info row | DONE: uptime + `MemAvailable` read straight out of `/proc` into Device Info, signal dBm appended to the cellular row (the ppp0 address moved to that row's detail line to make room) |
+| net test: ping gateway/1.1.1.1/8.8.8.8 + DNS probe | absent | DONE: a "Net test" row running the same four probes through the exec facade, verdicts in its detail block; synchronous, as system-menu's is |
+| cellular start/stop data (`pppd call cellular` / stop) | info only | DONE: a "Data link" toggle row, same commands, behind the two-OK confirm; failure lands on the row and is NEVER retried (one data call per boot) |
+| wifi ON/OFF (`rc-service wifi start/stop`) | absent | DONE: a "Wifi" toggle row, same two-OK confirm (provisioning a *new* network stays TUI-WIFI-PANEL's job) |
 | brightness, screen timeout | present | done |
 | reboot / power off / reboot-to-BL (+EDL in wata) | present, on-device-unverified | done pending the hardware pass above |
 | dmesg-VT chord toggle (F3+F4) | absent | retire — kernel-log debugging lives on the serial console/ssh, not on a kid's screen |
 
-The toggles and the net test are the only new code; all reuse the
-`Diag`/exec patterns the absorbed rows established, and each lands
-with `settings-walk` golden coverage (honest `n/a`/no-op off-device).
+The toggles and the net test were the only new code; all reuse the
+`Diag`/exec patterns the absorbed rows established, and each landed
+with `settings-walk` golden coverage (honest `n/a`/no-op off-device) —
+twenty checkpoints now, six of them new. `Diag.onDevice()` gates every
+new read and command, including the `/proc` ones, so a Linux CI host
+cannot drift the goldens. What remains of this phase's settings work is
+the ON-DEVICE verification of the power actions and the two toggles:
+nothing has run them on hardware yet, and the `[FB-EARLY-BOOT]` tty1
+flip is gated on that pass.
 
 Later polish, same phase family (queued, not blocking the first boot):
 a boot logo instead of the kernel bootlog — the device has a splash
