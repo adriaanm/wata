@@ -27,10 +27,23 @@ lines:
 | `rooms.scala` | 721 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
 | `sync.scala` | 509 | `/sync` (initial + incremental + leave) and the long-poll wait |
 | `testhooks.scala` | 65 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
-| `server.scala` | 425 | HTTP boot, mux registration, request edge, `SelfCheck` |
+| `server.scala` | 437 | HTTP boot, mux registration, request edge, `SelfCheck` |
 | `iolimit.scala` | 11 | app-owned facade: `io.LimitReader` (the request-body cap) |
 | `subtle.scala` | 12 | app-owned facade: `crypto/subtle` constant-time compare |
 | `osfile.scala` | 24 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove` for the blob store |
+| `irohnet.scala` | 22 | app-owned `@go.bind` facade for `go-pkgs/irohnet` (the embedded iroh transport) |
+
+## Serving transports
+
+The mux serves over one of two transports, selected at boot
+(`Server.serve`): plain TCP HTTP (`:8008` by default — every harness, and
+the default), or, when `WATA_IROH_CONFIG=<json>` is set, an embedded iroh
+listener (`go.irohnet.serve`, plan 0013) — the server IS the iroh endpoint,
+the node-id allowlist is enforced at accept inside `go-pkgs/irohnet`, and no
+TCP port exists. The handler surface is identical in both modes. The real
+iroh transport is compiled in only on darwin with the `iroh` Go build tag
+(`just tunnel-smoke` builds it); every other build links the package's
+loud-error stub, so ordinary builds need no cargo.
 
 ## Scope
 

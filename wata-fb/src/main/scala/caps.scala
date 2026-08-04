@@ -43,7 +43,25 @@ object FbCaps:
     if ms > 0L then go.time.After(go.time.milliseconds(ms.toInt)).recv()
     ()
 
-  def httpDo(): HttpDo = FbHttp(go.net.http.DefaultClient)
+  /** Transport selection (plan 0013): `WATA_IROH_CONFIG=<json>` swaps the
+   *  underlying client for one whose connections are iroh streams to the
+   *  configured peer — same `go.net.http.Client` facade type, so `FbHttp`
+   *  and everything above the capability line are untouched. Unset (the
+   *  default, and what every harness uses) is the plain DefaultClient. */
+  def httpDo(): HttpDo =
+    val irohCfg = go.sys.getenv("WATA_IROH_CONFIG")
+    if irohCfg == "" then FbHttp(go.net.http.DefaultClient)
+    else FbHttp(irohClient(irohCfg))
+
+  /** the iroh-backed client, or — on a failed init (bad config, stub build)
+   *  — a loud line + the DefaultClient, whose requests to the placeholder
+   *  iroh base URL then fail visibly (there is no os.Exit facade). */
+  def irohClient(cfgPath: String): go.net.http.Client =
+    var out = go.net.http.DefaultClient
+    try out = go.irohnet.newHTTPClient(cfgPath)
+    catch case e: sgo.GoError =>
+      println("irohnet: client init failed: " + e.message)
+    out
 
   def send(req: HttpRequest, client: go.net.http.Client): HttpResponse =
     var out = HttpResponse(0, "")

@@ -58,7 +58,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist fb-smoke client-tests integ golden fb-ui-tests amd64-smoke
+ci: smoke persist fb-smoke client-tests integ golden fb-ui-tests amd64-smoke tunnel-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -118,6 +118,11 @@ fb-deploy *FLAGS:
 # linux/amd64 server smoke — the always-on box is a real target
 amd64-smoke:
     bash tools/linux-amd64-smoke.sh
+
+# embedded iroh (plan 0013): server + client session over iroh streams, two
+# processes, one machine, no real network and no TCP port. Needs cargo.
+tunnel-smoke:
+    tools/tunnel-smoke.py
 # --- iroh-tunnel (connectivity spike; see docs/planning/connectivity-iroh.md) ---
 
 # Server side: run next to the homeserver. Prints a stable NodeID to provision

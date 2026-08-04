@@ -137,12 +137,24 @@ object Server:
     val h = new WataHandler()
     registerRoutes(mux, h)
     mux.handle("/", new NotFound())
+    // Transport selection (plan 0013): `WATA_IROH_CONFIG=<json>` serves the
+    // SAME mux over an embedded iroh listener — no TCP port exists in that
+    // mode. Unset (the default, and what every harness uses) is plain HTTP.
+    val irohCfg = go.sys.getenv("WATA_IROH_CONFIG")
+    if irohCfg != "" then serveIroh(irohCfg, mux) else serveTcp(addr, mux)
+
+  def serveIroh(cfgPath: String, mux: go.net.http.ServeMux): Unit =
+    println("Wata server listening over iroh (" + cfgPath + ")")
+    val fin = go.irohnet.serve(cfgPath, mux)
+    println("wata stopped " + fin.message)
+
+  def serveTcp(addr: String, mux: go.net.http.ServeMux): Unit =
     val server = go.net.http.newServer()
     server.addr = addr
     server.handler = mux
     println("Wata server listening on " + addr)
-    val err = server.listenAndServe()
-    println("wata stopped " + err.message)
+    val fin = server.listenAndServe()
+    println("wata stopped " + fin.message)
 
   /** the routing table, as method-qualified Go-1.22 patterns. */
   def registerRoutes(mux: go.net.http.ServeMux, h: go.net.http.Handler): Unit =

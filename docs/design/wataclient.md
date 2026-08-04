@@ -310,7 +310,11 @@ bytes over a socket":
   from an `Atomic[Int]` counter (`Runtime.txnCounterC`) — deterministic
   and sufficient for a single-client process — and nothing else in the
   core consumes randomness, so a `Rand` trait would be dead contract
-  surface every consumer had to implement. `HttpRequest`/`HttpResponse` are
+  surface every consumer had to implement. The seam is also where the
+  transport is swappable without this module knowing: wata-fb's `HttpDo`
+  impl can carry either a plain net/http client or one whose connections
+  are embedded iroh streams (plan 0013; `WATA_IROH_CONFIG`) — same trait,
+  same records. `HttpRequest`/`HttpResponse` are
   the plain records that cross the boundary; network failure is
   represented as a non-2xx (or, per `mhttp.scala:97`, status `0` for a
   malformed mxc URL) status rather than a Go error — the portable core
