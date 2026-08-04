@@ -256,7 +256,13 @@ def main():
             time.sleep(3)
         if not ping_ok:
             fail("cellular (ppp0) does not pass traffic after 8 probes")
-        ser.cmd("echo 'nameserver 1.1.1.1' > /etc/resolv.conf")
+        # /etc/ppp/ip-up installs the carrier's resolvers (kernel/alpine side);
+        # fall back to a public one only if it did not, so the run still works
+        # on a device without that hook.
+        rc, out = ser.cmd("grep -q 'nameserver 192.168' /etc/resolv.conf && "
+                          "echo 'nameserver 1.1.1.1' > /etc/resolv.conf; "
+                          "head -1 /etc/resolv.conf")
+        print(f"iroh-roam-smoke: resolver during the window: {out.strip()[:60]}")
         print(f"iroh-roam-smoke: dialing {ann['id'][:16]}… via relay n0 over cellular…")
         ok = True
         for scenario in SCENARIOS:
