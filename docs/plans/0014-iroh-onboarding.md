@@ -88,6 +88,23 @@ Reed-Solomon at 100% redundancy, 111 bytes in 13.3 s), with the TS
 version as its oracle the way the Ogg writer had one. Until then it is
 not built.
 
+## Rulings (owner, 2026-08-05 — unblocking implementation)
+
+- **The admin page announces.** The QR fragment
+  (`#enroll/<nodeId>/<nonce>`) makes the logged-in page post the
+  announce itself when no pending row exists, then highlight it for
+  approval. The device therefore needs ZERO server connectivity to
+  enroll — a cellular-only handset works — and the id's provenance is
+  the parent's authenticated session reading the physical screen.
+  `POST /_wata/v1/enroll` stays for the typed-code fallback.
+- **QR encoding: vendor `rsc.io/qr`** (pure Go, BSD) in-tree as
+  `go-pkgs/qr`; the offline build is preserved. No hand-written
+  encoder unless the vendored one proves inadequate.
+- **The handset flips to iroh.** Server node id baked into the device
+  config at deploy time (as ruled above), keypair minted on first
+  boot, enrolment run for real on hardware. TCP-LAN remains the
+  fallback transport and the harnesses' default.
+
 ## Milestones
 
 Nothing here is started; the hold above is why.

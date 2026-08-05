@@ -79,7 +79,11 @@ the UI always names the state and always has a live key.**
 1. **A bounded on-disk outbox.** A failed voice send persists the Ogg
    plus target under the config dir (cap ~16, oldest dropped loudly);
    the runtime retries the outbox head on each successful sync round
-   (connectivity is proven at that moment), in order. UI: an unsent
+   (connectivity is proven at that moment), in order. Failure policy
+   (owner ruling 2026-08-05): CLASSIFY — a server rejection (4xx)
+   drops that message with a loud persistent marker (a poisoned head
+   cannot block the queue); transport failure and 5xx retry forever
+   (a long outage never loses messages). UI: an unsent
    marker on the conversation row rather than a transient flash;
    "SEND FAILED" remains for the moment of failure. Outbox survives
    restart.
