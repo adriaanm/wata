@@ -234,7 +234,16 @@ def stage_sim():
          "-o", str(OUT / "watashell-sim"),
          str(HERE / "swift" / "main.swift")])
 
-    runtimes = subprocess.run(["xcrun", "simctl", "list", "runtimes", "-j"],
+    # The device set lives OUTSIDE ~/Library/Developer: with that path
+    # symlinked to an external volume, CoreSimulatorService takes a TCC
+    # "removable volume" EPERM it can never prompt its way out of. A custom
+    # set on the internal disk sidesteps the gate entirely, and a smoke
+    # device costs ~0.1 GiB.
+    devset = os.environ.get("WATA_SIM_DEVSET",
+                            os.path.expanduser("~/.wata-simdevices"))
+    pathlib.Path(devset).mkdir(parents=True, exist_ok=True)
+    simctl = ["xcrun", "simctl", "--set", devset]
+    runtimes = subprocess.run(simctl + ["list", "runtimes", "-j"],
                               capture_output=True, text=True, check=True).stdout
     ios = [r for r in json.loads(runtimes)["runtimes"]
            if r.get("isAvailable") and r["identifier"].startswith(
@@ -242,16 +251,16 @@ def stage_sim():
     if not ios:
         sys.exit("spike: no iOS simulator runtime — rerun with --with-ios-runtime")
     dev = subprocess.run(
-        ["xcrun", "simctl", "create", "wata-spike",
-         "com.apple.CoreSimulator.SimDeviceType.iPhone-17", ios[-1]["identifier"]],
+        simctl + ["create", "wata-spike",
+                  "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+                  ios[-1]["identifier"]],
         capture_output=True, text=True)
     if dev.returncode != 0:
         sys.exit("spike: simctl create failed — see ~/Library/Logs/CoreSimulator/"
-                 "CoreSimulator.log; a device store on an external volume needs a "
-                 "TCC grant for CoreSimulatorService (REPORT.md)\n" + dev.stderr)
+                 "CoreSimulator.log\n" + dev.stderr)
     udid = dev.stdout.strip()
     try:
-        run(["xcrun", "simctl", "bootstatus", udid, "-b"])
+        run(simctl + ["bootstatus", udid, "-b"])
         run([str(WATA / "tools" / "sgo"), "build"], cwd=WATA / "wata-server")
         server = WATA / "wata-server" / ".sgo" / "wata-server" / "wata-server"
         port = free_port()
@@ -261,13 +270,13 @@ def stage_sim():
         try:
             time.sleep(2)
             seed(base)
-            run(["xcrun", "simctl", "spawn", udid, str(OUT / "watashell-sim"),
-                 base, "alice", "testpass123", "30000"])
+            run(simctl + ["spawn", udid, str(OUT / "watashell-sim"),
+                          base, "alice", "testpass123", "30000"])
         finally:
             proc.terminate()
             proc.wait(timeout=10)
     finally:
-        subprocess.run(["xcrun", "simctl", "delete", udid])
+        subprocess.run(simctl + ["delete", udid])
 
 
 def stage_ios_runtime(runtime_dir):

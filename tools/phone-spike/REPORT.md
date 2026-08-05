@@ -138,10 +138,19 @@ accordingly if a macOS build ever ships.
 - Contacts are built from family-room MEMBERSHIP: an *invited* user is not a
   contact. A fixture that only invites produces an empty contact list.
 
-## The simulator leg — attempted, blocked outside the spike
+## The simulator leg — GREEN (custom device set sidesteps the TCC wall)
 
-The iOS simulator runtime was installed as a bonus leg and the shell was built
-for it, but **no iOS process ever ran**. Where it got to:
+`spike.py --only sim` passes end to end: the shell runs INSIDE the iOS 26.3
+simulator via `simctl spawn`, logs in, syncs, and prints the same report as
+the macOS leg. The block below was real but is fully sidestepped: the device
+set must simply not live under the symlinked `~/Library/Developer`. The sim
+stage now runs every `simctl` call with `--set ~/.wata-simdevices` (override:
+`WATA_SIM_DEVSET`) — a custom device set on the internal disk, which
+CoreSimulatorService can write without any TCC grant. A smoke device costs
+~0.1 GiB; the multi-GB runtime image was already on the internal disk either
+way. No interactive grant, no daemon restart, nothing system-global.
+
+How it originally failed, kept for the record:
 
 - `xcodebuild -downloadPlatform iOS -exportPath /Volumes/MoorsExt/xcode-runtimes`
   succeeded. Note it BOTH exports the dmg (8.4 GB, on the external volume) and
@@ -162,8 +171,6 @@ for it, but **no iOS process ever ran**. Where it got to:
   moving device storage back to the internal disk is not an option at 4.5 GiB
   free.
 
-`spike.py --only sim` builds the simulator binary and then tries to create,
-boot, and `simctl spawn` a device against a live server; it will work as soon
-as that grant exists. Until then the macOS leg is the functional proof, and it
-is the same Go compiled by the same toolchain through the same gobind-generated
-ObjC surface.
+With the sim leg green, the functional proof now exists on BOTH platforms:
+the same Go compiled by the same toolchain through the same gobind-generated
+ObjC surface, exercised natively on macOS and inside the iOS simulator.
