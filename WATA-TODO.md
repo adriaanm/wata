@@ -27,6 +27,14 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## client / device
 
+- **Device-command mailbox: the node-id credential's positive leg is
+  ungated.** cmd-smoke pins the negatives (forged header + no token →
+  401; unbound node → 403) and the bearer-token path end to end, but no
+  gate exercises a real iroh peer polling the mailbox by its
+  handshake-proven `X-Wata-Node-Id` alone — that needs a live iroh
+  listener, so it belongs in tunnel-smoke when the mailbox first
+  matters over iroh (the device poller today runs inside a logged-in
+  session, so the token path is the one in production use).
 - **FFmpeg EOS-flag nuance on our Ogg/Opus output** (DOGFOOD M8
   ch.6b) — one look, as promised there: third-party tools reading
   our streams is ecosystem courtesy. (The writer itself is
