@@ -106,12 +106,14 @@ blocks + git log; each entry cites where it was recorded.*
   FIXED and verified downstream: pin `ade6b1e` full-gate green with
   `mac.sum(go.makeSlice[Byte](0))` inline (standing proof) and the
   IdList/MediaList wrappers gone (folds go straight to `List[T]`).
-  RESIDUAL filed: WATA-FOLD-RETURN-POS — the recovered adapter cast
-  misses RETURN position, so fold results are val-bound then returned
-  (store.scala, commented); fix dispatching upstream. ~~IF-EXPR-DOUBLE-
-  BOXES~~ FIXED and verified downstream: pin `4834bec` full-gate green
-  with tickQuitArm's direct if-expression restored (standing proof);
-  walls of that class are POSITIONED now. Still open:
+  ~~WATA-FOLD-RETURN-POS~~ FIXED and verified downstream: pin
+  `5663647` full-gate green with both store.scala folds inlined again
+  (def-result and withLock-lambda-tail, kept as standing proofs).
+  ~~IF-EXPR-DOUBLE-BOXES~~ FIXED and verified downstream: pin
+  `4834bec`, tickQuitArm's direct if-expression restored (standing
+  proof); walls of that class are POSITIONED now. **Every compiler
+  ticket wata has filed to date is landed and downstream-verified.**
+  Still open:
   WATA-SKIP-FRESH-CHECKOUT (sgo driver; build in the original
   checkout).
 - FYI from upstream 2026-08-05 (`4cbea19..d30adec`): several

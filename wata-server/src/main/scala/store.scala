@@ -175,12 +175,11 @@ object Store:
       closeUser(old, userId)
     }
 
+  // the fold returned directly from result position: the standing proof of
+  // the WATA-FOLD-RETURN-POS fix (pin 5663647).
   def userDeviceIds(devices: HashMap[String, Device], userId: String): List[String] =
-    // val-bound rather than returned directly: the per-call-site adapter cast
-    // (sgola ade6b1e) is not recovered in return position — WATA-FOLD-RETURN-POS.
-    val out: List[String] = HashMap.foldLeft[String, Device, List[String]](devices, Nil,
+    HashMap.foldLeft[String, Device, List[String]](devices, Nil,
       (acc: List[String], k: String, d: Device) => consIfUser(acc, k, d, userId))
-    out
 
   def consIfUser(acc: List[String], k: String, d: Device, userId: String): List[String] =
     if d.userId == userId then k :: acc else acc
@@ -218,14 +217,11 @@ object Store:
 
   /** every stored media item (metadata; `data` is "" in file-backed mode) —
    *  the admin status panel's count and byte total. */
+  /** the fold as a withLock lambda tail: the other WATA-FOLD-RETURN-POS
+   *  proof shape (pin 5663647). */
   def allMedia(): List[MediaItem] =
-    cell.withLock(st => mediaFold(st))
-
-  /** val-bound fold: see `userDeviceIds` (WATA-FOLD-RETURN-POS). */
-  def mediaFold(st: StoreState): List[MediaItem] =
-    val out: List[MediaItem] = HashMap.foldLeft[String, MediaItem, List[MediaItem]](st.media, Nil,
-      (acc: List[MediaItem], k: String, m: MediaItem) => consMedia(acc, m))
-    out
+    cell.withLock(st => HashMap.foldLeft[String, MediaItem, List[MediaItem]](st.media, Nil,
+      (acc: List[MediaItem], k: String, m: MediaItem) => consMedia(acc, m)))
 
   def consMedia(acc: List[MediaItem], m: MediaItem): List[MediaItem] = m :: acc
 
