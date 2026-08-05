@@ -25,7 +25,7 @@ for it. It is not in `just ci` — it needs Xcode and a several-minute bind.
 | path | what it is |
 |------|------------|
 | `watabind/` | a Sgola module linking `wataclient` whole-program; its `Bind` object is the surface the phone reaches |
-| `wataclient` | a symlink to the repo-root library — `sgo`'s in-link dep search only looks in the declaring module's parent dir |
+| `watabind/sgo.deps` | names `wataclient` by explicit relative path (`wataclient ../../../wataclient`) — the nested-module form `sgo.deps` grew for exactly this layout |
 | `aslib.py` | rewrites the emitted `package main` into an importable `package watacore` |
 | `watamobile/` | the hand-written Go shim that gobind actually binds: strings in, strings out |
 | `swift/` | the Swift shell (+ its bridging header) that drives the bound macOS framework |

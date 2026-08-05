@@ -126,13 +126,6 @@ blocks + git log; each entry cites where it was recorded.*
   `tools/phone-spike/aslib.py`, which rewrites the emitted `package main`
   into `package watacore` after every `sgo build`; delete that file when
   an `emitpackage` marker (or an equivalent third mode) lands.
-- In-link dep resolution searches only the declaring module's PARENT dir
-  and the toolchain home, so a module nested in this repo cannot name a
-  library at the repo root (filed 2026-08-05,
-  `INLINK-DEP-SEARCH-PARENT-ONLY`; plan 0023 M1). Worked around with a
-  committed symlink `tools/phone-spike/wataclient -> ../../wataclient`;
-  drop it when the search walks up to the repo root or `sgo.deps` accepts
-  a relative path.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —
@@ -157,9 +150,13 @@ blocks + git log; each entry cites where it was recorded.*
   and verified downstream: pin `b38f999` full-gate green (incl. the
   armv7 cross-cgo leg) with the `GOFLAGS=-mod=mod` export deleted from
   sgo-env.sh and toolchain.py — the rsc.io/qr build now rides the
-  propagated go.sum alone (standing proof). Open upstream:
-  NO-LIB-EMIT-FOR-RUNTIME-LIBS + INLINK-DEP-SEARCH-PARENT-ONLY
-  (plan 0023 M1, workarounds above). ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
+  propagated go.sum alone (standing proof).
+  ~~INLINK-DEP-SEARCH-PARENT-ONLY~~ FIXED and verified downstream: pin
+  `0d45d7f`, the committed symlink deleted and `watabind/sgo.deps`
+  naming `wataclient ../../../wataclient` explicitly (standing proof;
+  spike emit + full gate green). Open upstream:
+  NO-LIB-EMIT-FOR-RUNTIME-LIBS (plan 0023 M1, workaround above; fix
+  dispatching). ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
   `94ce542`, verified by the original repro: a fresh worktree with the
   shared toolchain home rebuilds the liblink dep (RUN) and the
   cross-build succeeds; isolated-worktree deploy builds work directly
