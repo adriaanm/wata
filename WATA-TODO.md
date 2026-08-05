@@ -43,16 +43,10 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
-- Backend crash (filed 2026-08-05, `wata-thicket-recursive-unit-walk`;
-  acked same day: sgola queue top): a `Unit`-returning self-recursive
-  list walk crashes `sgolaBackend` ("unsupported expression (Thicket)");
-  file-context-dependent. Workaround everywhere: `while` over a `var
-  cur`. FIXED upstream at `2083ef6` (2026-08-05): the Unit statement
-  path lacked the tailrec recognizer; any reachable Unit-returning
-  self-recursive method triggered it (the file-context sensitivity was
-  dead-code elimination masking the isolated repro). Tail recursion
-  emits bounded Go loops, so recursive walks are safe once the repin
-  (SGOLA-REPIN in TODO.jsonl) lands.
+- ~~Thicket backend crash~~ FIXED and verified downstream: pin `2083ef6`
+  full-gate green with `Repl.printConvs` returned to the exact recursive
+  shape that crashed (kept recursive as the standing proof). Recursion is
+  safe again; the while/var walks elsewhere are style, not necessity.
 - Facade gap (filed 2026-08-05; ruled A upstream, ticketed
   VARIADIC-FACADE-BIND — terminal state is a Scala-varargs bind with
   call-site spread): until then `exec.Command` stays five explicit

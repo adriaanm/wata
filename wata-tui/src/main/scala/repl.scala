@@ -83,7 +83,7 @@ object Repl:
     println("self " + s.selfUser.id + " " + display(s.selfUser))
     printContacts(s.contacts)
     convsC.set(s.conversations)
-    printConvs(s.conversations)
+    printConvs(s.conversations, 1)
 
   def drainSnaps(c: MatrixClient): Unit =
     var going = true
@@ -112,17 +112,14 @@ object Repl:
           cur = t
         case Nil => going = false
 
-  def printConvs(cs: List[Conversation]): Unit =
-    var cur = cs
-    var i = 1
-    var going = true
-    while going do
-      cur match
-        case h :: t =>
-          println(convLine(h, i))
-          i = i + 1
-          cur = t
-        case Nil => going = false
+  /** the recursive shape — this exact def was the THICKET-RECURSIVE-UNIT-WALK
+   *  backend crash before toolchain `2083ef6`; it stays recursive as the
+   *  repin's downstream proof (tail recursion emits a bounded Go loop). */
+  def printConvs(cs: List[Conversation], i: scala.Int): Unit = cs match
+    case h :: t =>
+      println(convLine(h, i))
+      printConvs(t, i + 1)
+    case Nil => ()
 
   def convLine(cv: Conversation, i: scala.Int): String =
     var who = "-"
