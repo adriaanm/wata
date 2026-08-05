@@ -169,18 +169,21 @@ object Store:
    *  out now rather than at its timeout. */
   def dropUserDevices(userId: String): Unit =
     cell.withLock { st =>
-      dropEach(st, userDeviceIds(st.devices, userId).xs)
+      dropEach(st, userDeviceIds(st.devices, userId))
       val old = st.waiters
       st.waiters = dropUser(old, userId, Nil)
       closeUser(old, userId)
     }
 
-  def userDeviceIds(devices: HashMap[String, Device], userId: String): IdList =
-    HashMap.foldLeft[String, Device, IdList](devices, IdList(Nil),
-      (acc: IdList, k: String, d: Device) => consIfUser(acc, k, d, userId))
+  def userDeviceIds(devices: HashMap[String, Device], userId: String): List[String] =
+    // val-bound rather than returned directly: the per-call-site adapter cast
+    // (sgola ade6b1e) is not recovered in return position — WATA-FOLD-RETURN-POS.
+    val out: List[String] = HashMap.foldLeft[String, Device, List[String]](devices, Nil,
+      (acc: List[String], k: String, d: Device) => consIfUser(acc, k, d, userId))
+    out
 
-  def consIfUser(acc: IdList, k: String, d: Device, userId: String): IdList =
-    if d.userId == userId then IdList(k :: acc.xs) else acc
+  def consIfUser(acc: List[String], k: String, d: Device, userId: String): List[String] =
+    if d.userId == userId then k :: acc else acc
 
   def dropEach(st: StoreState, ids: List[String]): Unit = ids match
     case h :: t => dropEachStep(st, h, t)
@@ -215,11 +218,16 @@ object Store:
 
   /** every stored media item (metadata; `data` is "" in file-backed mode) —
    *  the admin status panel's count and byte total. */
-  def allMedia(): MediaList =
-    cell.withLock(st => HashMap.foldLeft[String, MediaItem, MediaList](st.media, MediaList(Nil),
-      (acc: MediaList, k: String, m: MediaItem) => consMedia(acc, m)))
+  def allMedia(): List[MediaItem] =
+    cell.withLock(st => mediaFold(st))
 
-  def consMedia(acc: MediaList, m: MediaItem): MediaList = MediaList(m :: acc.xs)
+  /** val-bound fold: see `userDeviceIds` (WATA-FOLD-RETURN-POS). */
+  def mediaFold(st: StoreState): List[MediaItem] =
+    val out: List[MediaItem] = HashMap.foldLeft[String, MediaItem, List[MediaItem]](st.media, Nil,
+      (acc: List[MediaItem], k: String, m: MediaItem) => consMedia(acc, m))
+    out
+
+  def consMedia(acc: List[MediaItem], m: MediaItem): List[MediaItem] = m :: acc
 
   /** how many rooms exist — the admin status panel. */
   def roomCount(): scala.Long =

@@ -50,13 +50,6 @@ case class Auth(userId: String, deviceId: String)
  *  `/_wata/v1/admin/…` surface. */
 case class UserCfg(localpart: String, hash: String, displayName: String, admin: Boolean)
 
-/** List accumulators crossing a `HashMap.foldLeft` (store.scala). A bare
- *  `List[T]` cannot be the fold's result type — the linker leaves the fold's
- *  `B` unspecialized and emits an `any` the caller cannot use (sgola
- *  WATA-FOLD-LIST-B) — so a one-field wrapper carries it. */
-case class IdList(xs: List[String])
-case class MediaList(xs: List[MediaItem])
-
 /** A device/session created on login. */
 case class Device(deviceId: String, userId: String, accessToken: String)
 

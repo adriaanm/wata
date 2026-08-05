@@ -84,12 +84,9 @@ object Pwhash:
   def prf(mac: go.hashpkg.Hash, msg: go.Bytes): go.Bytes =
     mac.reset()
     macWrite(mac, msg)
-    // `go.makeSlice[Byte](0)` is VAL-BOUND rather than passed inline: on the
-    // pinned toolchain, argument position emits an undefined
-    // `go__gocore_package_makeSlice`. Upstream F104 fixed that; the bind can
-    // go at the repin that consumes it.
-    val zero: go.Bytes = go.makeSlice[Byte](0)
-    mac.sum(zero)
+    // makeSlice inline in argument position: the standing proof of the
+    // WATA-MAKESLICE-ARGPOS fix (pin ade6b1e).
+    mac.sum(go.makeSlice[Byte](0))
 
   /** `hash.Hash.Write` never fails (that is its documented contract), but the
    *  facade surfaces Go's `(int, error)` faithfully — so the error is caught
@@ -178,13 +175,12 @@ object Pwhash:
     n
 
   def decodeB64(s: String): go.Bytes =
-    val zero: go.Bytes = go.makeSlice[Byte](0)
-    var out: go.Bytes = zero
+    var out: go.Bytes = go.makeSlice[Byte](0)
     try
       val v = go.b64std.StdEncoding.decodeString(s)
       out = v
       ()
-    catch case e: sgo.GoError => out = zero
+    catch case e: sgo.GoError => out = go.makeSlice[Byte](0)
     out
 
   /** the `want`-th `$`-separated field of the stored string ("" out of range).

@@ -237,13 +237,13 @@ object Admin:
   def transport(): String =
     if go.sys.getenv("WATA_IROH_CONFIG") != "" then "iroh" else "tcp"
 
-  def mediaCount(): scala.Long = countMedia(Store.allMedia().xs, 0L)
+  def mediaCount(): scala.Long = countMedia(Store.allMedia(), 0L)
 
   def countMedia(xs: List[MediaItem], n: scala.Long): scala.Long = xs match
     case _ :: t => countMedia(t, n + 1L)
     case Nil  => n
 
-  def mediaBytes(): scala.Long = sumMedia(Store.allMedia().xs, 0L)
+  def mediaBytes(): scala.Long = sumMedia(Store.allMedia(), 0L)
 
   def sumMedia(xs: List[MediaItem], n: scala.Long): scala.Long = xs match
     case h :: t => sumMedia(t, n + mediaSize(h))

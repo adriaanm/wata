@@ -97,17 +97,16 @@ blocks + git log; each entry cites where it was recorded.*
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —
   nothing to unwind here.
 
-- OPEN (filed 2026-08-05 by the plan-0021 milestone-A implementation,
-  acked at sgola `d30adec`): WATA-MAKESLICE-ARGPOS **fixed upstream at
-  `0d15632`** (repin queued: SGOLA-REPIN-MAKESLICE — inline pwhash's
-  two commented val-binds); WATA-DATA10-PLUGIN-CRASH **fixed at
-  `d51e968`** (reporting only — the DATA-10 restriction stands, the
-  string-concat shape stays as ordinary style, nothing to unwind);
-  WATA-FOLD-LIST-B fix in progress upstream (on its repin: drop the
-  IdList/MediaList one-field wrappers in model.scala). Also filed
-  2026-08-05: WATA-SKIP-FRESH-CHECKOUT (sgo driver: fresh checkout of
-  a built tree SKIPs a liblink dep, starving the downstream frontend —
-  workaround: build in the original checkout), triaged upstream.
+- ~~makeSlice-argpos~~ ~~DATA10 crash banner~~ ~~fold-B collapse~~
+  FIXED and verified downstream: pin `ade6b1e` full-gate green with
+  `mac.sum(go.makeSlice[Byte](0))` inline (standing proof) and the
+  IdList/MediaList wrappers gone (folds go straight to `List[T]`).
+  RESIDUAL filed: WATA-FOLD-RETURN-POS — the recovered adapter cast
+  misses RETURN position, so fold results are val-bound then returned
+  (store.scala, commented). Also open upstream: IF-EXPR-DOUBLE-BOXES
+  (primitive if-expression in argument position boxes; var-out idiom
+  as workaround, netstatus/ui), WATA-SKIP-FRESH-CHECKOUT (sgo driver;
+  build in the original checkout).
 - FYI from upstream 2026-08-05 (`4cbea19..d30adec`): several
   template-body construction lifts landed, plus GEN-7 — a new registry
   row RESTRICTING four construction shapes inside generic bodies
