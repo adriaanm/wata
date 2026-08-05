@@ -97,29 +97,87 @@ not built.
   enroll — a cellular-only handset works — and the id's provenance is
   the parent's authenticated session reading the physical screen.
   `POST /_wata/v1/enroll` stays for the typed-code fallback.
-- **QR encoding: vendor `rsc.io/qr`** (pure Go, BSD) in-tree as
-  `go-pkgs/qr`; the offline build is preserved. No hand-written
-  encoder unless the vendored one proves inadequate.
+- **QR encoding: `rsc.io/qr` as an ORDINARY Go dependency** (ruling
+  revised same day, superseding "vendor it"): a normal `require` +
+  committed `go.sum`, fetched through the module proxy like any Go
+  project. The offline-build invariant was self-imposed while sgola
+  flew under the radar; the owner wants external deps EXERCISED now —
+  this is the first real-world proof that normal Go dependencies work
+  through the sgo build, and any friction it surfaces is a ticket,
+  not a reason to retreat to vendoring. CLAUDE.md's deps section
+  updates when this lands.
 - **The handset flips to iroh.** Server node id baked into the device
   config at deploy time (as ruled above), keypair minted on first
   boot, enrolment run for real on hardware. TCP-LAN remains the
   fallback transport and the harnesses' default.
 
+### The handset flip — prepared, not done
+
+Everything the flip needs is in place and nothing has been flipped:
+`tools/fb-deploy.sh` provisions `/etc/wata/iroh.json` (peer, relay,
+`adminUrl`; never a secret) when `BQ268_IROH_PEER` is set and runs the
+transient binary against it. Making iroh the handset's PERMANENT
+transport means editing the real device's `/opt/wata/start.sh` (and the
+`bq268-alpine` overlay it comes from) to pass `WATA_IROH_CONFIG`, which
+is an on-hardware step for whoever holds the device. The exact command
+sequence — server side, device side, the flip, the first refusal, the
+approval — is written down in the deploy section of
+`docs/design/wata-fb.md`.
+
 ## Milestones
 
-Milestone 2 landed with plan 0021-B; 1, 3 and 4 are open.
+All four have landed. Milestone 2 came with plan 0021-B; 1, 3 and 4 with
+this plan's device half (`wata-fb/src/main/scala/enrol.scala`,
+`go-pkgs/qr`, `irohnet.EnsureKey`, the admin page's announce and code
+box). What is left is not a milestone but a step on hardware: the flip
+itself — see "The handset flip" below.
 
-1. **Device-minted identity**: the device generates its keypair on
-   first boot and persists it with the rest of its config; nothing
-   mints keys by hand any more. This one is independently useful — it
-   removes hand-minted keys whatever the enrolment channel turns out
-   to be — so it is the natural first thing to pick up when the hold
-   lifts, or sooner if key handling starts to itch.
-2. **Pending enrolment**: the server takes an announced id + nonce,
-   holds it with an expiry, and grows the allowlist on approval.
-3. **The QR**: rendered on the device's own framebuffer, goldened like
-   every other frame, plus the approval page the phone lands on.
-4. **The typed-code fallback** over the same endpoint.
+1. **Device-minted identity** — DONE. `irohnet.EnsureKey(configPath)`
+   mints an ed25519 key into the device's iroh config on first use
+   (temp + rename, `0600`, every other field preserved) and answers
+   only the public node id. A handset is deployed with a config that
+   names the family's server and carries no secret at all. Idempotent,
+   so a re-deploy never re-mints an enrolled identity.
+   `tools/tunnel-smoke.py`'s allowlist-negative leg now provisions its
+   device exactly that way, driving the same call through
+   `irohnet-keygen -config`; nothing in the repo mints a device key by
+   hand any more.
+2. **Pending enrolment** — DONE (plan 0021-B).
+3. **The QR** — DONE. `enrol.scala` renders
+   `<adminUrl>/admin#enroll/<nodeId>/<nonce>` through `go-pkgs/qr`
+   (vendored `rsc.io/qr`, level L) into the framebuffer: 37 modules at
+   2px each, an 82x82 block with a two-module quiet zone. It appears
+   automatically as the boot screen when the transport has refused this
+   node id (`not allowlisted`) and on demand from Settings -> Enroll.
+   Goldened by the `enroll` uitest scenario. The page half is the
+   admin interface announcing on the fragment, per the ruling above.
+4. **The typed-code fallback** — DONE, with a scope limit; see below.
+
+### The fallback, and what it can honestly do
+
+The QR screen also prints `<nonce>-<first 8 hex of the node id>`, and
+the admin page matches that against the pending rows.
+
+It **selects** a row; it cannot create one. The alternative was
+considered and refused: if a typed prefix were accepted as an announce,
+the server would have to invent the other 56 characters of the id, and
+whatever it invented would be an allowlist entry no device ever asked
+for. The pending set is a *reference* to an announced id, and the only
+way to keep that true is to accept nothing shorter than a full key
+anywhere on the enrol surface — which the server already did.
+
+The consequence is the honest one, and it is the reason page-side
+announce exists: **the typed path needs a device that could reach the
+server to announce itself**, i.e. one on the family LAN (or already
+holding a working iroh route). A cellular-only handset — the case that
+made page-side announce the ruling — has the QR and only the QR,
+because the full node id has to reach the server somehow and a parent's
+phone that only knows what was typed cannot carry it.
+
+That is not a gap to close later by loosening the endpoint. If typing
+ever has to work for an unreachable device, the code has to carry the
+whole id (a longer typed string, or a second channel that carries the
+remaining bytes), not a prefix the server completes.
 
 ## Out of scope
 
@@ -133,3 +191,19 @@ An enrolment test in the same shape as `just tunnel-smoke`'s
 allowlist-negative leg: a fresh device identity is refused, completes
 the pending-enrolment handshake, and is then accepted — with the
 refusal still loud for an id that never enrolled.
+
+Built, and green:
+
+- `just tunnel-smoke` — the device identity is now MINTED (a config
+  deployed with no secret; `irohnet.EnsureKey`), and the leg asserts the
+  mint wrote a 0600 file, preserved every other field, and is
+  idempotent. That id is refused (loudly, `not allowlisted`), announces,
+  is approved, and is accepted by the same process with no restart.
+- `just admin-smoke` — the endpoint sequence the page performs for a
+  scanned fragment nobody announced, and the prefix negative: a node-id
+  prefix is refused as an announce, as a 63-character near-miss, and as
+  an approve target, leaving no row behind.
+- `just fb-ui-tests enroll` — four goldens: the not-allowlisted boot
+  frame, the Settings -> Enroll row, the QR opened from it, and the
+  close. The QR's module grid was checked against the encoder's own
+  output pixel for pixel when the goldens were minted.
