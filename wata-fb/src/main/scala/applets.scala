@@ -510,18 +510,21 @@ object WataLogic:
    *  beside it (two indicators would have to agree). One pipe mark (the wifi
    *  or cellular glyph on the device, a plain `NET` off it, `OFF` when no
    *  interface has an address) plus `..` while the client is reconnecting,
-   *  alternating on the blink phase. The 1px status line derives from the same
-   *  `NetState` (`ShellStatus.fromNet`), so the two always agree. */
+   *  alternating on the blink phase. The mark is ANCHORED at the right edge
+   *  and the dots blink in a fixed slot to its left — the blink must never
+   *  reflow the mark (a mark that shuffles with the phase reads as glitch).
+   *  The 1px status line derives from the same `NetState`
+   *  (`ShellStatus.fromNet`), so the two always agree. */
   def renderNet(px: go.Bytes, net: NetState): Unit =
     val g = NetStatus.glyph(net.pipe)
     val text = if g >= 0 then "" else NetStatus.label(net.pipe)
     val dots = if NetStatus.showsDots(net) then ".." else ""
     val markCols = if g >= 0 then 1 else text.length
-    val col = Font.COLS - markCols - dots.length
+    val col = Font.COLS - markCols
     val fg = NetStatus.color(net)
     if g >= 0 then Font.drawChar(px, g, col * Font.GLYPH_W, 1, fg, false, 0)
     else Font.drawText(px, text, col, 0, fg, false, 0)
-    if dots != "" then Font.drawText(px, dots, col + markCols, 0, fg, false, 0)
+    if dots != "" then Font.drawText(px, dots, col - 2, 0, fg, false, 0)
 
   // ---- string / snapshot helpers --------------------------------------------
   def connectingMsg(c: ConnectionState): String = c match
