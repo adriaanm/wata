@@ -48,9 +48,13 @@ STAGE_DIR = WATA / ".service-stage"
 LABEL = "net.wata.server"
 DEFAULT_LISTEN = ":8008"
 
+# REPLACE these before going live — see docs/design/wata-server.md#accounts.
+# Plaintext `password` is accepted as INPUT: the server hashes it and rewrites
+# this file at its first boot, so nothing here stays plaintext (which is also
+# why there is no comment entry — the rewrite would drop it). `alice` is the
+# admin, i.e. the account that can reach /admin.
 USERS_JSON = json.dumps([
-    {"_comment": "REPLACE these before going live — see docs/design/wata-server.md#accounts"},
-    {"user": "alice", "password": "testpass123", "displayname": "Alice"},
+    {"user": "alice", "password": "testpass123", "displayname": "Alice", "admin": True},
     {"user": "bob", "password": "testpass123", "displayname": "Bob"},
 ], indent=2) + "\n"
 

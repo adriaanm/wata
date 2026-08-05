@@ -57,6 +57,10 @@ object Journal:
   /** the persistence gate, read at every store mutation site (off by default). */
   def enabled: Boolean = cell.withLock(js => js.on)
 
+  /** the journal file's path, "" when persistence is off — the admin status
+   *  panel reports its size. */
+  def path(): String = cell.withLock(js => js.path)
+
   /** boot: read `WATA_LOG`; if set, replay the existing log then enable append.
    *  Called from `Server.serve` after `Store.init()` (which seeds the config
    *  users' default profiles — replay builds on top, overriding where it set). */

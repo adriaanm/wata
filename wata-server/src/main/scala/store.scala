@@ -52,6 +52,11 @@ class StoreState:
   var seq: scala.Long = 0L
   var waiters: List[Waiter] = Nil
   var waiterSeq: scala.Long = 0L
+  /** when each user last called `/sync`, epoch ms — what the admin status
+   *  panel reports as "last seen". Transient (never journaled): it describes
+   *  this process's uptime, not the account. */
+  var lastSync: HashMap[String, scala.Long] =
+    HashMap.empty[String, scala.Long](k => sgo.hash(k), (a, b) => a == b)
 
 /** A pure snapshot crossing out of `updateMemberProfile`'s `withLock` (the
  *  guarded room-id list + the user's profile, both immutable) — a named case
@@ -155,6 +160,74 @@ object Store:
     st.tokens = HashMap.remove(st.tokens, d.accessToken)
     st.devices = HashMap.remove(st.devices, deviceId)
     if Journal.enabled then Journal.rec(Journal.rmDeviceOp(deviceId, d.accessToken)) else ()
+
+  /** Revoke EVERY live session of one user — the store half of an admin
+   *  account removal (adminapi.scala). One transaction: the devices and their
+   *  tokens go (so the removed user's token is dead on the very next request,
+   *  mid-session), and the user's long-poll waiters are woken in the same
+   *  block, exactly as `notifyUser` does, so a client parked in `/sync` finds
+   *  out now rather than at its timeout. */
+  def dropUserDevices(userId: String): Unit =
+    cell.withLock { st =>
+      dropEach(st, userDeviceIds(st.devices, userId).xs)
+      val old = st.waiters
+      st.waiters = dropUser(old, userId, Nil)
+      closeUser(old, userId)
+    }
+
+  def userDeviceIds(devices: HashMap[String, Device], userId: String): IdList =
+    HashMap.foldLeft[String, Device, IdList](devices, IdList(Nil),
+      (acc: IdList, k: String, d: Device) => consIfUser(acc, k, d, userId))
+
+  def consIfUser(acc: IdList, k: String, d: Device, userId: String): IdList =
+    if d.userId == userId then IdList(k :: acc.xs) else acc
+
+  def dropEach(st: StoreState, ids: List[String]): Unit = ids match
+    case h :: t => dropEachStep(st, h, t)
+    case Nil  => ()
+
+  def dropEachStep(st: StoreState, h: String, t: List[String]): Unit =
+    dropDevice(st, HashMap.get(st.devices, h), h)
+    dropEach(st, t)
+
+  /** how many live devices (sessions) this user has — the admin status panel. */
+  def deviceCount(userId: String): scala.Long =
+    cell.withLock(st => HashMap.foldLeft[String, Device, scala.Long](st.devices, 0L,
+      (acc: scala.Long, k: String, d: Device) => addIfUser(acc, d, userId)))
+
+  def addIfUser(acc: scala.Long, d: Device, userId: String): scala.Long =
+    if d.userId == userId then acc + 1L else acc
+
+  // ---- last-seen (the admin status panel) ------------------------------------
+
+  /** stamp "this user just synced". Called from the `/sync` handler; a plain
+   *  map write, never journaled — it describes the running process. */
+  def touchSync(userId: String): Unit =
+    cell.withLock(st => st.lastSync = HashMap.put(st.lastSync, userId, nowMs()))
+
+  /** when this user last synced, epoch ms; `0` if never (since boot). */
+  def lastSyncMs(userId: String): scala.Long =
+    cell.withLock(st => longOrZero(HashMap.get(st.lastSync, userId)))
+
+  def longOrZero(o: Option[scala.Long]): scala.Long = o match
+    case s: Some[scala.Long] => s.value
+    case None => 0L
+
+  /** every stored media item (metadata; `data` is "" in file-backed mode) —
+   *  the admin status panel's count and byte total. */
+  def allMedia(): MediaList =
+    cell.withLock(st => HashMap.foldLeft[String, MediaItem, MediaList](st.media, MediaList(Nil),
+      (acc: MediaList, k: String, m: MediaItem) => consMedia(acc, m)))
+
+  def consMedia(acc: MediaList, m: MediaItem): MediaList = MediaList(m :: acc.xs)
+
+  /** how many rooms exist — the admin status panel. */
+  def roomCount(): scala.Long =
+    cell.withLock(st => lenOf(st.roomIds, 0L))
+
+  def lenOf(xs: List[String], n: scala.Long): scala.Long = xs match
+    case _ :: t => lenOf(t, n + 1L)
+    case Nil  => n
 
   // ---- profiles --------------------------------------------------------------
 

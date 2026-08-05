@@ -34,6 +34,7 @@ object Router:
     else if path == "/_matrix/client/v3/sync" then Sync.handle(r)
     else if isDmPath(path, n) then Dm.route(r)
     else if isFavoritePath(path, n) then Favorite.route(r)
+    else if isAdminPath(path, n) then Admin.route(r, m, body)
     else if TestHooks.enabled && isTestFailPath(path) then TestHooks.route(body)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)
@@ -95,6 +96,12 @@ object Router:
   /** `/_wata/v1/favorite/{roomId}/{eventId}` */
   def isFavoritePath(path: String, n: scala.Int): Boolean =
     n == 5 && seg(path, 0) == "_wata" && seg(path, 1) == "v1" && seg(path, 2) == "favorite"
+
+  /** `/_wata/v1/admin/…` — the whole admin surface (adminapi.scala) behind one
+   *  predicate; `Admin.dispatch` splits it by shape. Every route under it is
+   *  admin-gated, so a new one cannot be added ungated by accident. */
+  def isAdminPath(path: String, n: scala.Int): Boolean =
+    n >= 4 && seg(path, 0) == "_wata" && seg(path, 1) == "v1" && seg(path, 2) == "admin"
 
   /** `/_wata/v1/test/fail` — dispatched only when `TestHooks.enabled`,
    *  mirroring its conditional registration (server.scala). */
@@ -213,8 +220,11 @@ object Router:
     case None => Left(MErr(403, M_FORBIDDEN(), "Invalid username or password"))
     case s: Some[UserCfg] => loginCheck(s.value, lp, j)
 
+  /** the password check: derive with the stored hash's own parameters and
+   *  compare constant-time (`Pwhash.verify`). An account with no usable hash
+   *  (a malformed file entry) verifies against nothing. */
   def loginCheck(u: UserCfg, lp: String, j: Json): Either[MErr, Json] =
-    if Store.ctEq(u.password, strField(j, "password", "")) then loginOk(lp)
+    if Pwhash.verify(u.hash, strField(j, "password", "")) then loginOk(lp)
     else Left(MErr(403, M_FORBIDDEN(), "Invalid username or password"))
 
   def loginOk(lp: String): Either[MErr, Json] =

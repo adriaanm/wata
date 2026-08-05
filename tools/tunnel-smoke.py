@@ -2,7 +2,9 @@
 """The iroh tunnel smoke (plan 0013 milestone 1): wata-server serving over an
 EMBEDDED iroh listener + a wataclient session over an embedded iroh dial —
 two processes, one machine, no real network (relay "none", loopback UDP
-only, no TCP port anywhere).
+only). The server's ONLY TCP port is the admin listener the iroh mode also
+brings up (plan 0021, WATA_LISTEN) — the wata traffic itself never touches
+one.
 
 Steps:
   1. the irohnet glue's own tests (go test -tags iroh: net/http over iroh,
@@ -21,12 +23,15 @@ the only places that do.
 
 import json
 import os
+import random
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -36,6 +41,10 @@ WATA = Path(__file__).resolve().parent.parent
 IROHNET = WATA / "go-pkgs" / "irohnet"
 # a fresh server per scenario, the wataclient-integ.sh discipline.
 SCENARIOS = ["login-syncing", "voice-to-bob"]
+# The DUAL LISTENER (plan 0021): in iroh mode the server also serves the same
+# mux over plain TCP, because no browser can dial iroh and /admin has to be
+# reachable. Checked once, against the first scenario's server.
+HTTP_PORT = int(os.environ.get("TUNNEL_SMOKE_HTTP_PORT") or random.randint(20000, 39999))
 
 
 def run(cmd, env, cwd=None, **kw):
@@ -64,16 +73,39 @@ def keygen(env, keygen_bin):
     return json.loads(out.stdout)
 
 
-def start_server(server_bin, env, cfg_path, log_path):
+def start_server(server_bin, env, cfg_path, log_path, listen=None):
     log = open(log_path, "w")
+    extra = {"WATA_LISTEN": listen} if listen else {}
     proc = subprocess.Popen(
         [server_bin],
-        env={**env, "WATA_IROH_CONFIG": str(cfg_path)},
+        env={**env, "WATA_IROH_CONFIG": str(cfg_path), **extra},
         stdout=log,
         stderr=subprocess.STDOUT,
         cwd=WATA,
     )
     return proc, log
+
+
+def dual_listener():
+    """In iroh mode the SAME mux is also served over plain TCP (WATA_LISTEN),
+    so a browser on the LAN can load /admin — the one thing iroh cannot carry.
+    Asserted here because this harness owns the only real iroh server the gate
+    boots."""
+    url = f"http://127.0.0.1:{HTTP_PORT}/admin"
+    for _ in range(100):
+        try:
+            with urllib.request.urlopen(url, timeout=1) as r:
+                body = r.read().decode()
+                ctype = r.headers.get("Content-Type", "")
+                good = r.status == 200 and ctype.startswith("text/html") and "wata admin" in body
+                print(f"tunnel-smoke: dual-listener /admin over TCP: {'PASS' if good else 'FAIL'}")
+                if not good:
+                    print(f"  status={r.status} content-type={ctype!r}")
+                return good
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.1)
+    print("tunnel-smoke: dual-listener /admin over TCP: FAIL (never answered)")
+    return False
 
 
 def main():
@@ -127,7 +159,8 @@ def main():
 
         # ---- 4. boot the server over iroh (fresh state: fresh cwd? the
         # server keeps state in memory; a fresh process is a fresh store) ----
-        proc, log = start_server(str(server_bin), env, srv_cfg, sdir / "server.log")
+        listen = f":{HTTP_PORT}" if scenario == SCENARIOS[0] else None
+        proc, log = start_server(str(server_bin), env, srv_cfg, sdir / "server.log", listen)
         try:
             for _ in range(100):
                 if announce.exists():
@@ -138,6 +171,8 @@ def main():
                 time.sleep(0.1)
             else:
                 fail(f"server never announced ({scenario})")
+            if scenario == SCENARIOS[0] and not dual_listener():
+                ok = False
             ann = json.loads(announce.read_text())
             v4 = [a for a in ann["addrs"] if not a.startswith("[")]
             cli_cfg = sdir / "client.json"
@@ -238,7 +273,7 @@ def main():
 
     if ok:
         shutil.rmtree(tmp, ignore_errors=True)
-        print("TUNNEL-SMOKE PASS (embedded iroh, relay none, no TCP port)")
+        print("TUNNEL-SMOKE PASS (embedded iroh, relay none, + the admin TCP listener)")
         return 0
     print(f"tunnel-smoke: artifacts kept at {tmp}")
     print("TUNNEL-SMOKE FAIL")

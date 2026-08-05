@@ -50,6 +50,7 @@ object Sync:
     case rr: Right[MErr, Auth] => handleAuthed(rr.right.userId, r)
 
   def handleAuthed(userId: String, r: go.net.http.Request): Either[MErr, Json] =
+    Store.touchSync(userId)                 // "last seen", for the admin status panel
     val q = r.uRL.query()
     val since = q.get("since")
     val hasSince = since != ""

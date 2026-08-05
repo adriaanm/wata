@@ -41,7 +41,8 @@ object MediaEdge:
     else dispatch(w, r, go.string(raw))
 
   def dispatch(w: go.net.http.ResponseWriter, r: go.net.http.Request, reqBody: String): Unit =
-    if isDownload(r.uRL.path) then download(w, r)
+    if r.uRL.path == "/admin" then AdminPage.serve(w)
+    else if isDownload(r.uRL.path) then download(w, r)
     else jsonReply(w, r, reqBody)
 
   /** exact match on the three registered download patterns —
@@ -77,6 +78,18 @@ object MediaEdge:
   def download3(w: go.net.http.ResponseWriter, r: go.net.http.Request): Unit = Store.getMedia(r.pathValue("mediaId")) match
     case s: Some[MediaItem] => Respond.raw(w, s.value.contentType, s.value.data)
     case None => Respond.finish(w, 404, Json.write(errEnvelope(MErr(404, M_NOT_FOUND(), "Media not found"))))
+
+/** `GET /admin` — the admin web page (plan 0021), served as HTML rather than
+ *  through the JSON pipeline. It is UNAUTHENTICATED, and deliberately so: the
+ *  page is inert markup that carries no data, and it is what a parent's
+ *  browser has to be able to load in order to reach the login form. Every
+ *  fetch it then makes is admin-gated (adminapi.scala).
+ *
+ *  The bytes are compiled in (`go.webembed` -> `wata-server/adminui`, a
+ *  `go:embed`ed file), so a deployment copies one binary and nothing else. */
+object AdminPage:
+  def serve(w: go.net.http.ResponseWriter): Unit =
+    Respond.raw(w, "text/html; charset=utf-8", go.webembed.indexHTML())
 
 /** The catch-all: a Matrix 404 envelope for unmatched paths, 204 for CORS
  *  OPTIONS preflight. */
@@ -128,6 +141,7 @@ object Respond:
 
 object Server:
   def serve(addr: String): Unit =
+    Admin.bootClock()                   // uptime, for the admin status panel
     Store.init()
     MediaFiles.boot()                   // before Journal.boot: replay migrates blobs out
     Journal.boot()
@@ -138,15 +152,28 @@ object Server:
     registerRoutes(mux, h)
     mux.handle("/", new NotFound())
     // Transport selection (plan 0013): `WATA_IROH_CONFIG=<json>` serves the
-    // SAME mux over an embedded iroh listener — no TCP port exists in that
-    // mode. Unset (the default, and what every harness uses) is plain HTTP.
+    // SAME mux over an embedded iroh listener. Unset (the default, and what
+    // every harness uses) is plain HTTP.
     val irohCfg = go.sys.getenv("WATA_IROH_CONFIG")
-    if irohCfg != "" then serveIroh(irohCfg, mux) else serveTcp(addr, mux)
+    if irohCfg != "" then serveIroh(irohCfg, addr, mux) else serveTcp(addr, mux)
 
-  def serveIroh(cfgPath: String, mux: go.net.http.ServeMux): Unit =
+  /** iroh mode serves BOTH listeners over the one mux (plan 0021): the iroh
+   *  endpoint the devices dial, and a plain TCP HTTP listener a browser on the
+   *  LAN can reach `/admin` on — no browser can dial iroh, and the TCP port
+   *  sits inside exactly the same trust boundary the default mode already
+   *  relies on. The HTTP address is `WATA_LISTEN`, else the positional listen
+   *  argument (`:8008` by default). The TCP listener runs on a spawned
+   *  goroutine; the iroh one keeps the main goroutine, so a terminal iroh
+   *  error still stops the process as before. */
+  def serveIroh(cfgPath: String, addr: String, mux: go.net.http.ServeMux): Unit =
+    go.spawn(() => serveTcp(httpAddr(addr), mux))
     println("Wata server listening over iroh (" + cfgPath + ")")
     val fin = go.irohnet.serve(cfgPath, mux)
     println("wata stopped " + fin.message)
+
+  def httpAddr(addr: String): String =
+    val v = go.sys.getenv("WATA_LISTEN")
+    if v == "" then addr else v
 
   def serveTcp(addr: String, mux: go.net.http.ServeMux): Unit =
     val server = go.net.http.newServer()
@@ -177,6 +204,17 @@ object Server:
     // the wata dialect: favorites (favorite.scala) — the joined-member rule a
     // raw state PUT cannot express.
     mux.handle("POST /_wata/v1/favorite/{roomId}/{eventId}", h)
+    // the wata dialect: the admin surface (adminapi.scala) + the page it
+    // drives. Every /_wata/v1/admin/… route is admin-gated; /admin itself is
+    // inert markup and is not.
+    mux.handle("GET /admin", h)
+    mux.handle("GET /_wata/v1/admin/status", h)
+    mux.handle("GET /_wata/v1/admin/users", h)
+    mux.handle("POST /_wata/v1/admin/users", h)
+    mux.handle("DELETE /_wata/v1/admin/users/{user}", h)
+    mux.handle("POST /_wata/v1/admin/users/{user}/password", h)
+    mux.handle("POST /_wata/v1/admin/users/{user}/displayname", h)
+    mux.handle("POST /_wata/v1/admin/users/{user}/admin", h)
     // the fail-on-demand test hook (testhooks.scala): REGISTERED only under
     // WATA_TEST_HOOKS=1 — without the env var the path 404s like any other
     // unknown path, so the production surface is unchanged.
@@ -236,6 +274,7 @@ object SelfCheck:
     roomsDemo()
     dmDemo()
     syncDemo()
+    pwhashDemo()
 
   def printProfile(userId: String): Unit = Store.getProfile(userId) match
     case s: Some[Profile] => println("profile " + Json.write(Router.profileJson(s.value)))
@@ -438,3 +477,29 @@ object SelfCheck:
   def firstStr(xs: List[String]): String = xs match
     case h :: _ => h
     case Nil  => "none"
+
+  // ---- PBKDF2-HMAC-SHA256: the published test vectors -------------------------
+
+  /** The password hasher's ORACLE (plan 0021): the widely published
+   *  PBKDF2-HMAC-SHA256 vectors — the SHA-256 counterparts of RFC 6070's
+   *  SHA-1 set, same inputs — rendered as lowercase hex, so the derivation
+   *  (pwhash.scala) is byte-compared against numbers this repo did not
+   *  produce. The last vector uses dkLen 40 > the 32-byte digest, which is the
+   *  only case that exercises the multi-block `T1 || T2` path.
+   *
+   *  Then the stored form: a fixed-salt hash round-trips through `verify`, a
+   *  wrong password does not, and a bare plaintext string is never accepted as
+   *  a stored hash. */
+  def pwhashDemo(): Unit =
+    println("pbkdf2-c1 " + vec("password", "salt", 1, 32))
+    println("pbkdf2-c2 " + vec("password", "salt", 2, 32))
+    println("pbkdf2-c4096 " + vec("password", "salt", 4096, 32))
+    println("pbkdf2-long " + vec("passwordPASSWORDpassword", "saltSALTsaltSALTsaltSALTsaltSALTsalt", 4096, 40))
+    val h = Pwhash.hashWith("hunter2", go.bytes("0123456789abcdef"), 1000)
+    println("pwhash-format " + h)
+    println("pwhash-verify " + boolStr(Pwhash.verify(h, "hunter2")))
+    println("pwhash-verify-wrong " + boolStr(Pwhash.verify(h, "hunter3")))
+    println("pwhash-plaintext-never " + boolStr(Pwhash.verify("hunter2", "hunter2")))
+
+  def vec(pw: String, salt: String, iters: scala.Int, dkLen: scala.Int): String =
+    Pwhash.hex(Pwhash.derive(go.bytes(pw), go.bytes(salt), iters, dkLen))

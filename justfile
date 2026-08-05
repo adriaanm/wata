@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist fb-smoke client-tests integ golden fb-ui-tests amd64-smoke tunnel-smoke
+ci: smoke persist admin-smoke fb-smoke client-tests integ golden fb-ui-tests amd64-smoke tunnel-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -71,6 +71,11 @@ smoke:
 # homeserver: kill -9 and replay the JSONL journal
 persist:
     bash tools/wata-persist-smoke.sh
+
+# homeserver: the admin surface — password hashing at rest, the admin gate,
+# accounts CRUD against a live server, /admin
+admin-smoke:
+    tools/wata-admin-smoke.py
 
 # device client: native build+run, armv7 cross-cgo build
 fb-smoke:

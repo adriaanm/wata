@@ -7,31 +7,35 @@ compiles to Go source — see the repo root for the toolchain) and built as an
 `wata-server/go.mod`). There is no JVM at runtime: `sgo build` emits Go, which
 is compiled and run like any other Go program.
 
-The source lives entirely in `wata-server/src/main/scala/` — 20 files, ~4800
+The source lives entirely in `wata-server/src/main/scala/` — 25 files, ~5700
 lines:
 
 | file | lines | role |
 |---|---|---|
-| `model.scala` | 126 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts, DM pairs |
-| `config.scala` | 112 | the accounts, loaded once at boot from `$WATA_USERS`; `serverName` |
+| `model.scala` | 138 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts, DM pairs |
+| `config.scala` | 278 | the accounts: read at boot from `$WATA_USERS`, hashed at rest, rewritten by admin mutations; `serverName` |
 | `membership.scala` | 86 | the room-membership state machine (join/invite/leave/ban transitions) |
 | `power.scala` | 80 | the `m.room.power_levels` authorization table |
-| `jsonnav.scala` | 203 | JSON object/field helpers over the `json` module's `Json` type |
-| `store.scala` | 1061 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping, media reclaim |
-| `persist.scala` | 315 | append-only JSONL journal + boot-time replay + old-journal media migration |
+| `jsonnav.scala` | 204 | JSON object/field helpers over the `json` module's `Json` type |
+| `store.scala` | 1134 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping, media reclaim |
+| `persist.scala` | 319 | append-only JSONL journal + boot-time replay + old-journal media migration |
 | `mediafiles.scala` | 89 | the file-backed media blob store under `<dataDir>/media/` |
-| `retain.scala` | 128 | the media retention sweep (boot + daily), favorites exempted |
+| `retain.scala` | 130 | the media retention sweep (boot + daily), favorites exempted |
 | `favorite.scala` | 100 | the favorite toggle endpoint + the `net.wata.favorite` marker |
-| `handlers.scala` | 344 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
+| `handlers.scala` | 359 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
 | `keys.scala` | 83 | the E2EE device-key routes, as no-op stubs |
 | `dm.scala` | 308 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
 | `rooms.scala` | 721 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
-| `sync.scala` | 509 | `/sync` (initial + incremental + leave) and the long-poll wait |
+| `sync.scala` | 510 | `/sync` (initial + incremental + leave) and the long-poll wait |
 | `testhooks.scala` | 65 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
-| `server.scala` | 437 | HTTP boot, mux registration, request edge, `SelfCheck` |
+| `server.scala` | 505 | HTTP boot, mux registration, request edge, the `/admin` page edge, `SelfCheck` |
 | `iolimit.scala` | 11 | app-owned facade: `io.LimitReader` (the request-body cap) |
 | `subtle.scala` | 12 | app-owned facade: `crypto/subtle` constant-time compare |
-| `osfile.scala` | 24 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove` for the blob store |
+| `pwhash.scala` | 222 | PBKDF2-HMAC-SHA256: the derivation, the stored-hash format, verification |
+| `adminapi.scala` | 254 | the admin surface: the admin gate, `/_wata/v1/admin/…` status + accounts CRUD |
+| `osfile.scala` | 44 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove`/`Rename`/`Stat`, plus `io/fs.FileInfo` |
+| `gocrypto.scala` | 54 | app-owned facades: `hash.Hash`, `crypto/sha256`, `crypto/hmac`, base64 `StdEncoding` |
+| `webembed.scala` | 16 | app-owned `@go.bind` facade for `wata-server/adminui` (the `go:embed`ed admin page) |
 | `irohnet.scala` | 22 | app-owned `@go.bind` facade for `go-pkgs/irohnet` (the embedded iroh transport) |
 
 ## Serving transports
@@ -40,8 +44,17 @@ The mux serves over one of two transports, selected at boot
 (`Server.serve`): plain TCP HTTP (`:8008` by default — every harness, and
 the default), or, when `WATA_IROH_CONFIG=<json>` is set, an embedded iroh
 listener (`go.irohnet.serve`, plan 0013) — the server IS the iroh endpoint,
-the node-id allowlist is enforced at accept inside `go-pkgs/irohnet`, and no
-TCP port exists. The handler surface is identical in both modes. The real
+and the node-id allowlist is enforced at accept inside `go-pkgs/irohnet`.
+The handler surface is identical in both modes.
+
+**iroh mode serves BOTH listeners** (plan 0021): alongside the iroh endpoint,
+the same mux is served over plain TCP at `$WATA_LISTEN` (defaulting to the
+positional listen argument, i.e. `:8008`), on a spawned goroutine, while the
+iroh listener keeps the main goroutine so a terminal iroh error still stops
+the process. The reason is the admin interface: no browser can dial iroh, so
+`/admin` would be unreachable in the transport the family server actually
+runs. The TCP listener sits inside exactly the trust boundary the default
+mode already relies on — the LAN. The real
 iroh transport is compiled in only with the `iroh` Go build tag on the wired
 targets — darwin (`just tunnel-smoke` builds it) and linux/arm, the device
 cross-build (`just iroh-lan-smoke`); every other build links the package's
@@ -69,7 +82,7 @@ registration (accounts are provisioned, not self-served — see "Accounts"),
 
 wata provisions accounts; nobody registers one. That is the trust model — the
 network is the boundary, and who is on it is decided out of band — so the
-accounts are configuration, read once at boot from the JSON file named by
+accounts are configuration, read at boot from the JSON file named by
 `WATA_USERS`:
 
 ```
@@ -77,22 +90,120 @@ WATA_USERS=/etc/wata/users.json wata-server :8008
 ```
 
 ```json
-[ {"user": "alice", "password": "…", "displayname": "Alice"},
-  {"user": "bob",   "password": "…", "displayname": "Bob"} ]
+[ {"user": "alice", "hash": "pbkdf2-sha256$600000$…$…", "displayname": "Alice", "admin": true},
+  {"user": "bob",   "hash": "pbkdf2-sha256$600000$…$…", "displayname": "Bob",   "admin": false} ]
 ```
 
-`displayname` is optional and defaults to the localpart; an entry with no
-`user` is skipped. An unset, unreadable, unparseable, or empty `WATA_USERS`
-falls back to a built-in alice/bob pair with password `testpass123`, which is
-what every harness and script in this repo logs in as, so they run unchanged
-with no file present. A bad file falls back rather than refusing to boot: a
+`displayname` is optional and defaults to the localpart; `admin` defaults to
+false and is what gates the `/_wata/v1/admin/` surface (see "The admin
+surface"); an entry with no `user` is skipped. An unset, unreadable,
+unparseable, or empty `WATA_USERS` falls back to a built-in alice/bob pair
+with password `testpass123` — **alice carries the admin flag** — which is what
+every harness and script in this repo logs in as, so they run unchanged with
+no file present. A bad file falls back rather than refusing to boot: a
 homeserver on a device has to come up on its own.
 
 `Config.load` is called from `Store.init`, so the server and `SelfCheck` see
 the same accounts; `Store.init` then seeds each user's default profile. The
 loaded list sits behind its own small `Mutex` (separate from the store's cell,
-like the journal's) because logins read it from per-request goroutines; it is
-written exactly once, before serving.
+like the journal's) because logins and admin requests read it from per-request
+goroutines.
+
+**No plaintext at rest.** A password is stored as
+`pbkdf2-sha256$<iterations>$<saltB64>$<dkB64>` — PBKDF2-HMAC-SHA256, standard
+base64, a 16-byte random salt, a 32-byte derived key, 600000 iterations
+(`Pwhash.defaultIterations`, the one place the cost is written).
+`pwhash.scala` implements the RFC 2898 §5.2 derivation directly over Go's
+`crypto/hmac` + `crypto/sha256` (the `go.hmac`/`go.sha256`/`go.hashpkg`
+facades in `gocrypto.scala`), so there is no external dependency; the loop is
+oracled by `SelfCheck` against the published PBKDF2-HMAC-SHA256 test vectors
+(including a dkLen-40 vector, the only one that exercises the multi-block
+`T1 || T2` path) and byte-compared by `tools/wata-smoke.sh`. Verification
+derives with the *stored* hash's own parameters and compares constant-time
+through `Store.ctEq`, so raising the iteration count later re-hashes lazily on
+the next password set — the number rides the string, and no migration exists.
+600000 iterations cost ~70 ms of HMAC on a dev Mac, which is why the built-in
+fallback pair is hashed at boot like anything else rather than getting a
+cheaper path.
+
+A hand-written plaintext `"password"` field is still accepted as **input** —
+provisioning by hand means typing a password once — but it is hashed as the
+file is read and the file is rewritten, so plaintext never survives the first
+boot. An entry carrying both fields keeps its `hash`. An entry with neither is
+an account nothing can log in as, which is the deliberate outcome for a
+malformed line rather than an open door. A file that did not *parse* is left
+untouched (the boot fell back to the built-in pair): rewriting it would
+destroy whatever the human meant to write.
+
+**The server owns the file.** Admin mutations (below) reseat the in-memory
+list and rewrite `users.json` in the same `Config` transaction, so a created
+account can log in with no restart while the file stays the source of truth
+for the next boot. The write is atomic — a temp file in the *same* directory,
+mode 0600, then `os.Rename` over the target — so a reader (the next boot, or a
+human) sees either the old file or the new one, never a partial write. The
+rendering is one JSON object per line, so the file stays something a human
+opens and edits. Accounts remain config, not journal: nothing about them is
+written to the event log.
+
+## The admin surface
+
+`adminapi.scala` (plan 0021). Every route under `/_wata/v1/admin/` requires an
+authenticated session whose *account* carries `"admin": true`: no token is
+`401`, a non-admin token is `403 M_FORBIDDEN`. There is no second credential —
+login is the ordinary password login, so the browser page and a handset use
+the same endpoint. The gate lives in one predicate (`Router.isAdminPath`
+routes the whole prefix to `Admin.route`, which authenticates before it
+dispatches), so a new admin route cannot be added ungated by accident.
+
+| route | what it does |
+|---|---|
+| `GET /_wata/v1/admin/status` | version, uptime, transport, the accounts file and journal paths + journal size, retention setting, room count, media count/bytes, and a per-account row: display name, admin flag, live device count, and how long ago that user last synced |
+| `GET /_wata/v1/admin/users` | the account rows on their own |
+| `POST /_wata/v1/admin/users` | create `{user, password, displayname, admin}` — `400 M_USER_IN_USE` if taken, `400 M_BAD_JSON` for an invalid localpart or a missing password |
+| `POST /_wata/v1/admin/users/{user}/password` | reset a password |
+| `POST /_wata/v1/admin/users/{user}/displayname` | rename |
+| `POST /_wata/v1/admin/users/{user}/admin` | grant/revoke the flag |
+| `DELETE /_wata/v1/admin/users/{user}` | remove the account |
+
+Two of them are more than a file edit. A **rename** also runs the store's
+profile fan-out (`Store.setDisplayName`), which rewrites the user's
+`m.room.member` event in every joined room, so clients see the new name
+without a restart; a **create** seeds the new account's profile the same way
+a boot seeds a configured one. A **removal** revokes the account's live
+sessions in one store transaction (`Store.dropUserDevices`): its devices and
+tokens are dropped and its long-poll waiters are woken inside the same block,
+so the removed user's token is dead on its very next request rather than at
+its next login. Removing the *calling* account is refused (`403`) — an admin
+cannot lock themselves out mid-session. The admin API never touches rooms,
+events, or media: a removed user's messages stay where they are, and
+retention (`retain.scala`) remains the only thing that deletes content. It
+also never hands a password hash to a client; the account rows carry no
+`hash` field.
+
+Last-sync ages come from one transient store slice (`StoreState.lastSync`,
+stamped by the `/sync` handler) — never journaled, because it describes this
+process's uptime rather than the account.
+
+**The page.** `GET /admin` serves a hand-written, dependency-free HTML page:
+a login form, the status panel, the account table, and add/rename/reset/remove
+controls, all plain `fetch` against the routes above, with the access token
+kept in `localStorage`. The bytes are compiled in — `wata-server/adminui/` is
+a small plain-Go package whose `index.html` sits next to it and rides a
+`go:embed`, reached through the `go.webembed` facade — because `go:embed`
+cannot read outside its own package directory and a deployment should still
+copy exactly one binary. The route itself is *unauthenticated* and
+deliberately so: the page is inert markup carrying no data, and it is what a
+browser must be able to load in order to reach the login form. It is served
+off the HTML edge (`AdminPage.serve`, alongside the media-download special
+case) rather than through the JSON pipeline.
+
+`tools/wata-admin-smoke.py` (`just admin-smoke`, in `just ci`) is the gate for
+all of this: the plaintext rewrite (no plaintext substring survives the first
+boot), the 401/403 gate on every admin route, create → login with no restart,
+reset, rename, remove → the token dead mid-session, the admin flag toggling on
+a live token, every mutation landing in `users.json`, a reboot reading it back,
+and `/admin` answering 200 `text/html`. `tools/tunnel-smoke.py` covers the
+same page over the iroh mode's TCP listener.
 
 ## Request lifecycle
 
@@ -144,13 +255,17 @@ calls first: `Router.requireAuth(r)` (`handlers.scala:49`) reads the
 an unrecognized token is `401 M_UNKNOWN_TOKEN`. Ownership checks (e.g. "can
 only set your own displayname") are then done by comparing the resolved
 `Auth.userId` against the path's `{userId}` (`handlers.scala:166` and
-elsewhere) — there is no admin/impersonation concept.
+elsewhere) — there is no impersonation concept. The one authorization
+question that is *not* per-path ownership is the admin flag, which
+`Admin.requireAdmin` asks on top of `requireAuth` for the whole
+`/_wata/v1/admin/` prefix (see "The admin surface").
 
 Secret comparisons are constant-time: `Store.ctEq` wraps
 `crypto/subtle.ConstantTimeCompare` through the app-owned `go.subtle`
 facade (`subtle.scala`, same mechanism as `go.iolimit`), and both the login
-password check (`Router.loginCheck`) and the token resolution go through
-it. `Store.deviceByToken` deliberately does NOT `HashMap.get` the guess —
+password check (`Router.loginCheck` -> `Pwhash.verify`, which compares the
+base64 of the freshly derived key against the stored one) and the token
+resolution go through it. `Store.deviceByToken` deliberately does NOT `HashMap.get` the guess —
 a hash lookup's early exit is its own timing channel — but folds over
 every stored token comparing each in constant time, then resolves the
 matched stored key; work per request is constant in the guess and linear
@@ -678,7 +793,12 @@ sudo just server-uninstall --purge --yes      # also delete /usr/local/wata (dat
 ```
 
 Editing `etc/wata.env` or `etc/users.json` and running `server-restart` is
-the whole config-change workflow — no plist regen, no reinstall.
+the whole config-change workflow — no plist regen, no reinstall. Accounts are
+usually not edited by hand at all any more: `http://<host>:8008/admin` is the
+same job with a browser (see "The admin surface"), and the server rewrites
+`etc/users.json` itself. The installed template writes plaintext `password`
+fields, which the first boot hashes and rewrites in place, and marks `alice`
+the admin.
 `tools/server-service.py prune` deletes every release except the one
 `current` points at, when old builds pile up. A real-root `install`
 deliberately does **not** build: it consumes the newest staged release from
@@ -706,14 +826,18 @@ acceptance check for that run.
 ## File-by-file map
 
 - **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and the canonical-DM values (`DmPair`, `DmPeer`, `DmRoom`, `StateSeed`).
-- **`config.scala`** — `Config`: the accounts, loaded once at boot from `WATA_USERS` (built-in alice/bob otherwise), and `serverName`.
+- **`config.scala`** — `Config`: the accounts — read at boot from `WATA_USERS` (built-in alice/bob otherwise), hashed at rest, and rewritten atomically by the admin mutations — plus `serverName`.
+- **`pwhash.scala`** — `Pwhash`: PBKDF2-HMAC-SHA256 derivation, the `pbkdf2-sha256$…` stored form, constant-time verification, and the hex rendering `SelfCheck` oracles.
+- **`adminapi.scala`** — `Admin`: the admin gate, the status panel, the accounts CRUD, and the boot clock uptime is measured from.
+- **`gocrypto.scala`** — `go.hashpkg`/`go.sha256`/`go.hmac`/`go.b64std`: the app-owned facades the hasher needs (`hash.Hash` as a trait — Go interfaces are traits here; `sha256.New` bound parenless so it lands as the function *value* `hmac.New` takes).
+- **`webembed.scala`** — `go.webembed`: the `@go.bind` facade for `wata-server/adminui`, the `go:embed`ed admin page.
 - **`membership.scala`** — the membership sealed types and the join/invite/leave/ban transition table; every row is reachable from an HTTP route.
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
 - **`power.scala`** — `Power`: the `m.room.power_levels` authorization table (send/state/redact/invite/kick/ban).
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
-- **`osfile.scala`** — `go.osfile`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove`) the blob store needs; perms passed as literals, errors dropped (best-effort).
+- **`osfile.scala`** — `go.osfile`/`go.fsx`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove` for the blob store, `Rename` for the accounts file's atomic write, `Stat` for the sizes the status panel reports) plus `io/fs.FileInfo`; perms passed as literals, errors dropped except `Stat`'s.
 - **`retain.scala`** — `Retain`: the media retention sweep — `WATA_MEDIA_RETAIN_DAYS`, the boot + daily passes, the server-side redaction of expired voice messages, and the favorite/exempt checks that spare one.
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
 - **`keys.scala`** — `Keys`: the three E2EE device-key routes as authenticated no-op stubs; `/keys/upload` tallies the one-time-key counts back per algorithm, which matrix-dart-sdk requires, and discards the keys.
@@ -722,7 +846,7 @@ acceptance check for that run.
 - **`dm.scala`** — `Dm`: canonical DMs. The `POST /_wata/v1/dm/{userId}` endpoint, the `net.wata.dm`/alias identity, the boot migration, and the one-way `m.direct` compat projection.
 - **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental, account data through `Dm.project`) and the long-poll orchestration.
 - **`testhooks.scala`** — `TestHooks`: the `WATA_TEST_HOOKS=1`-only fail-on-demand counter and its `POST /_wata/v1/test/fail` route (see "Test hooks").
-- **`server.scala`** — `WataHandler`/`MediaEdge`/`NotFound`/`Respond` (the HTTP edge), `Server` (boot + route table), `Main`, and `SelfCheck` (a deterministic smoke test of the store/handler logic, diffed against a golden file by the build's smoke script).
+- **`server.scala`** — `WataHandler`/`MediaEdge`/`AdminPage`/`NotFound`/`Respond` (the HTTP edge), `Server` (boot + route table + the dual listener), `Main`, and `SelfCheck` (a deterministic smoke test of the store/handler logic, diffed against a golden file by the build's smoke script).
 
 ## Known gaps / debt
 

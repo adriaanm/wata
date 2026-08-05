@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wata admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; max-width: 60rem; padding: 1.5rem 1rem 4rem; }
+  h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+  h2 { font-size: 1rem; margin: 2rem 0 .5rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid rgba(128,128,128,.35); vertical-align: middle; }
+  th { font-weight: 600; font-size: .85rem; opacity: .75; }
+  dl.status { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1rem; margin: 0; }
+  dl.status dt { opacity: .7; }
+  dl.status dd { margin: 0; font-variant-numeric: tabular-nums; }
+  input, button, select { font: inherit; padding: .25rem .4rem; }
+  form.row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: .6rem 0; }
+  #msg { min-height: 1.4rem; margin: .6rem 0; }
+  #msg.err { color: #c0392b; }
+  .hidden { display: none; }
+  .muted { opacity: .6; }
+</style>
+</head>
+<body>
+<h1>wata admin</h1>
+<div id="msg"></div>
+
+<section id="login">
+  <h2>Sign in</h2>
+  <form class="row" id="login-form">
+    <input id="login-user" placeholder="user" autocomplete="username" required>
+    <input id="login-pass" type="password" placeholder="password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+  </form>
+</section>
+
+<section id="app" class="hidden">
+  <form class="row" id="signout-form"><button type="submit">Sign out</button>
+    <span class="muted" id="whoami"></span></form>
+
+  <h2>Status</h2>
+  <dl class="status" id="status"></dl>
+
+  <h2>Accounts</h2>
+  <table id="users">
+    <thead><tr><th>user</th><th>display name</th><th>admin</th><th>devices</th><th>last sync</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Add an account</h2>
+  <form class="row" id="add-form">
+    <input id="add-user" placeholder="user" required>
+    <input id="add-display" placeholder="display name">
+    <input id="add-pass" type="password" placeholder="password" required>
+    <label><input id="add-admin" type="checkbox"> admin</label>
+    <button type="submit">Create</button>
+  </form>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let token = localStorage.getItem("wata_admin_token") || "";
+let me = localStorage.getItem("wata_admin_user") || "";
+
+function say(text, isErr) {
+  const el = $("msg");
+  el.textContent = text || "";
+  el.className = isErr ? "err" : "";
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: {} };
+  if (token) opts.headers["Authorization"] = "Bearer " + token;
+  if (body !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (e) { data = {}; }
+  if (!res.ok) throw new Error(data.error || (res.status + " " + res.statusText));
+  return data;
+}
+
+function ms(v) {
+  if (v === null || v === undefined || v < 0) return "—";
+  const s = Math.floor(v / 1000);
+  if (s < 60) return s + "s";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "m";
+  const h = Math.floor(m / 60);
+  if (h < 48) return h + "h";
+  return Math.floor(h / 24) + "d";
+}
+
+function bytes(v) {
+  if (!v) return "0";
+  const u = ["B", "KiB", "MiB", "GiB"];
+  let i = 0, n = v;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(1)) + " " + u[i];
+}
+
+function row(dl, label, value) {
+  const dt = document.createElement("dt"); dt.textContent = label;
+  const dd = document.createElement("dd"); dd.textContent = value;
+  dl.append(dt, dd);
+}
+
+function renderStatus(s) {
+  const dl = $("status");
+  dl.textContent = "";
+  row(dl, "version", s.version);
+  row(dl, "uptime", ms(s.uptime_ms));
+  row(dl, "transport", s.transport);
+  row(dl, "server name", s.server_name);
+  row(dl, "accounts file", s.users_file || "(built-in defaults)");
+  row(dl, "journal", (s.journal_file || "(off)") + (s.journal_file ? "  " + bytes(s.journal_bytes) : ""));
+  row(dl, "retention", s.retention_days > 0 ? s.retention_days + " days" : "off");
+  row(dl, "rooms", s.rooms);
+  row(dl, "media", s.media_count + " blobs, " + bytes(s.media_bytes));
+}
+
+function button(label, fn) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = label;
+  b.addEventListener("click", () => fn().catch((e) => say(e.message, true)));
+  return b;
+}
+
+function cell(tr, text) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  tr.append(td);
+  return td;
+}
+
+function renderUsers(users) {
+  const tb = $("users").querySelector("tbody");
+  tb.textContent = "";
+  for (const u of users) {
+    const tr = document.createElement("tr");
+    cell(tr, u.user);
+    cell(tr, u.displayname);
+    cell(tr, u.admin ? "yes" : "no");
+    cell(tr, u.devices);
+    cell(tr, ms(u.last_sync_age_ms));
+    const actions = document.createElement("td");
+    actions.append(button("rename", async () => {
+      const name = prompt("New display name for " + u.user, u.displayname);
+      if (!name) return;
+      await api("POST", "/_wata/v1/admin/users/" + u.user + "/displayname", { displayname: name });
+      say("renamed " + u.user);
+      await refresh();
+    }));
+    actions.append(button("password", async () => {
+      const pw = prompt("New password for " + u.user);
+      if (!pw) return;
+      await api("POST", "/_wata/v1/admin/users/" + u.user + "/password", { password: pw });
+      say("password reset for " + u.user);
+    }));
+    actions.append(button(u.admin ? "revoke admin" : "make admin", async () => {
+      await api("POST", "/_wata/v1/admin/users/" + u.user + "/admin", { admin: !u.admin });
+      await refresh();
+    }));
+    if (u.user !== me) {
+      actions.append(button("remove", async () => {
+        if (!confirm("Remove " + u.user + "? Their sessions end immediately.")) return;
+        await api("DELETE", "/_wata/v1/admin/users/" + u.user);
+        say("removed " + u.user);
+        await refresh();
+      }));
+    }
+    tr.append(actions);
+    tb.append(tr);
+  }
+}
+
+async function refresh() {
+  const s = await api("GET", "/_wata/v1/admin/status");
+  renderStatus(s);
+  renderUsers(s.users);
+}
+
+function signedIn(on) {
+  $("login").classList.toggle("hidden", on);
+  $("app").classList.toggle("hidden", !on);
+  $("whoami").textContent = on ? "signed in as " + me : "";
+}
+
+function signOut() {
+  token = ""; me = "";
+  localStorage.removeItem("wata_admin_token");
+  localStorage.removeItem("wata_admin_user");
+  signedIn(false);
+}
+
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  say("");
+  try {
+    const r = await api("POST", "/_matrix/client/v3/login", {
+      identifier: { type: "m.id.user", user: $("login-user").value },
+      password: $("login-pass").value,
+    });
+    token = r.access_token;
+    me = $("login-user").value;
+    localStorage.setItem("wata_admin_token", token);
+    localStorage.setItem("wata_admin_user", me);
+    $("login-pass").value = "";
+    await start();
+  } catch (err) { say(err.message, true); }
+});
+
+$("signout-form").addEventListener("submit", (e) => { e.preventDefault(); signOut(); say("signed out"); });
+
+$("add-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("POST", "/_wata/v1/admin/users", {
+      user: $("add-user").value,
+      displayname: $("add-display").value,
+      password: $("add-pass").value,
+      admin: $("add-admin").checked,
+    });
+    say("created " + $("add-user").value);
+    $("add-form").reset();
+    await refresh();
+  } catch (err) { say(err.message, true); }
+});
+
+async function start() {
+  if (!token) { signedIn(false); return; }
+  try {
+    await refresh();
+    signedIn(true);
+    say("");
+  } catch (err) {
+    signOut();
+    say(err.message, true);
+  }
+}
+
+start();
+</script>
+</body>
+</html>

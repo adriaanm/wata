@@ -29,6 +29,7 @@ case class M_UNRECOGNIZED() extends ErrCode
 case class M_BAD_JSON() extends ErrCode
 case class M_TOO_LARGE() extends ErrCode
 case class M_UNKNOWN() extends ErrCode
+case class M_USER_IN_USE() extends ErrCode
 
 /** A Matrix-level failure as a VALUE (not a thrown exception): the handler
  *  pipeline returns `Either[MErr, Json]` and the edge serializes a `Left` to the
@@ -42,8 +43,19 @@ case class Auth(userId: String, deviceId: String)
 
 // ---- config + store records --------------------------------------------------
 
-/** A configured user, immutable, from `Config` (config.scala). */
-case class UserCfg(localpart: String, password: String, displayName: String)
+/** A configured user, immutable, from `Config` (config.scala). `hash` is the
+ *  `pbkdf2-sha256$...` string a password verifies against (pwhash.scala) —
+ *  never a plaintext password: a hand-written plaintext entry is hashed as the
+ *  file is read, and the file is rewritten. `admin` gates the
+ *  `/_wata/v1/admin/…` surface. */
+case class UserCfg(localpart: String, hash: String, displayName: String, admin: Boolean)
+
+/** List accumulators crossing a `HashMap.foldLeft` (store.scala). A bare
+ *  `List[T]` cannot be the fold's result type — the linker leaves the fold's
+ *  `B` unspecialized and emits an `any` the caller cannot use (sgola
+ *  WATA-FOLD-LIST-B) — so a one-field wrapper carries it. */
+case class IdList(xs: List[String])
+case class MediaList(xs: List[MediaItem])
 
 /** A device/session created on login. */
 case class Device(deviceId: String, userId: String, accessToken: String)
