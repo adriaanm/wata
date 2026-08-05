@@ -961,7 +961,10 @@ scripted driver appends the connection tag and the session's
 send-ok/send-fail/conn-error tallies (`Ui.sendOks` etc.), so a timeout
 log already classifies its cause. `wata-tests.sh` stays pinned to :8008
 because the read-only TS suites hardcode that URL per file; it cannot
-run concurrently across checkouts, and says so.
+run concurrently across checkouts, and says so. Even single-checkout, a
+full multi-suite run has shown a rare one-off failure on that shared
+port (an auto-login case, green in isolation and on rerun) — rerun a
+red conformance leg once before treating it as real.
 
 ## The host simulator
 

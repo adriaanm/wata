@@ -770,6 +770,15 @@ ensure does not walk over — kick undoes itself at the next ensure, ban holds
 until lifted. Client-side auto-join survives only as compat for stock
 clients' invite flows.
 
+Two edges to keep in mind. The alias is a courtesy, not the identity:
+`Store.setAlias` overwrites, so a room later claiming `#family:<server>`
+steals the alias mapping while classification (stamp-keyed everywhere)
+stays put — an alias lookup can drift, a stamp lookup cannot. And account
+*removal* does not touch membership: `ensure()` joins configured accounts
+but removes nobody, so a removed account's join event stays in the room
+(harmless — its tokens are dead — but roster-derived UI must count
+accounts, not `m.room.member` rows).
+
 **Groups are the same concept with a member list** (`group.scala`). A group
 is a room stamped `net.wata.group` with `{"name": …}` — the name is the key,
 one group per name, like one DM per pair — minted through one dialect

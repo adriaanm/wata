@@ -167,3 +167,34 @@ without a phone, and it is a real second consumer of the generator.
 Growing either one is a reviewed diff of `bindgen.json` plus regenerated
 output. `AVAudioEngine` and the UIKit views M4's backend will want are the next
 entries; neither is in yet.
+
+## The landscape this design sits in
+
+Constraints that shaped the design, and the boundaries it lives inside:
+
+- **The allowlist is the viability argument.** General ObjC bindings are a
+  maintained-by-a-team product (Xamarin's iOS bindings; DarwinKit for
+  macOS/AppKit). This generator binds only what wata calls, regenerated
+  against the SDK each build runs on, with every gap an explicit refusal —
+  the slice of that problem one project can carry. The mechanism itself is
+  well-proven ground (Rust's objc2, PyObjC): the ObjC runtime's openness,
+  not the binding approach, is what everything rests on.
+- **The ObjC-visible subset is the hard boundary.** Everything reachable
+  here is reachable because the framework ships ObjC headers and dispatches
+  through `objc_msgSend`. Swift-only API (SwiftUI, some newer frameworks)
+  is invisible to this pipeline; if one ever becomes a must-have, the exit
+  is a Swift shim compiled with Xcode — a leaf artifact, but a toolchain
+  reintroduction. PushToTalk, AVFoundation, and UIKit are ObjC-visible.
+- **Main-thread-only API needs a generated trampoline, not a convention.**
+  UIKit and parts of AVFoundation must be called on the main thread; Go's
+  scheduler migrates goroutines across OS threads freely. When the
+  allowlist grows main-thread-annotated declarations, the wrapper must
+  carry the dispatch hop itself — a caller-side rule would rot.
+- **ObjC exceptions do not cross the boundary.** An NSException unwinding
+  into Go frames is undefined behavior, and catching one needs an ObjC
+  compiler. The stance: any NSException is a bug in our calling code
+  (wrong thread, bad argument); crash loudly, fix the caller.
+- **purego couples to the Go runtime by design** (`go:linkname` into the
+  cgocall path), so a Go version bump can break it until purego catches
+  up. Fenced here: the Go version is a pinned-toolchain product, so the
+  pair moves in lockstep, never by surprise.
