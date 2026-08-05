@@ -195,7 +195,11 @@ refusal still loud for an id that never enrolled.
 
 Built, and green:
 
-- `just tunnel-smoke` — the device identity is now MINTED (a config
+- `just tunnel-smoke` — its enrolment-leg server boots in the BOOTSTRAP
+  state: an EMPTY allowlist, which listens and refuses every peer (a fresh
+  install has approved nobody; `irohnet` no longer demands a non-empty list
+  to start, so no placeholder node id is needed anywhere). The device
+  identity is MINTED (a config
   deployed with no secret; `irohnet.EnsureKey`), and the leg asserts the
   mint wrote a 0600 file, preserved every other field, and is
   idempotent. That id is refused (loudly, `not allowlisted`), announces,

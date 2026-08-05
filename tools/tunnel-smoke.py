@@ -15,15 +15,17 @@ Steps:
   4. boot wata-server with WATA_IROH_CONFIG, read its announce file;
   5. run integ scenarios (integ.scala) over iroh — a FRESH server per
      scenario, exactly like tools/wataclient-integ.sh;
-  6. the allowlist negative: a FRESH DEVICE IDENTITY — minted by
-     irohnet.EnsureKey into a config that was deployed with no secret at all
-     (plan 0014 milestone 1), the same call wata-fb makes on first boot — is
-     refused at accept, loudly;
+  6. the allowlist negative, against a server in the BOOTSTRAP state: an
+     EMPTY allowlist — a fresh install that has approved nobody — listens
+     anyway, and a FRESH DEVICE IDENTITY — minted by irohnet.EnsureKey into a
+     config that was deployed with no secret at all (plan 0014 milestone 1),
+     the same call wata-fb makes on first boot — is refused at accept, loudly;
   7. enrolment (plan 0021 milestone B + plan 0014): that same refused node
-     announces itself, an admin approves it over the admin listener, and it is
-     then accepted — by the same SERVER process and, in the second half, by the
-     same CLIENT process, which is left running across the approval and has to
-     redial its way in on its own retry cadence.
+     announces itself, an admin approves it over the admin listener — the
+     first entry in the previously-empty allowlist — and it is then accepted:
+     by the same SERVER process and, in the second half, by the same CLIENT
+     process, which is left running across the approval and has to redial its
+     way in on its own retry cadence.
 
 Prints TUNNEL-SMOKE PASS / FAIL. Needs cargo (the Rust toolchain) on top of
 the repo's usual prerequisites — this recipe and fb-deploy's successors are
@@ -386,10 +388,17 @@ def main():
         sdir.mkdir()
         announce = sdir / "announce.json"
         srv_cfg = sdir / "server.json"
+        # An EMPTY allowlist — the BOOTSTRAP state of a fresh install, which
+        # has approved nobody yet. The server must come up and listen anyway
+        # (the announce below proves it), refuse every peer with the ordinary
+        # loud refusal, and admit the first node the enrolment leg approves
+        # into that empty list live, same process. A guard that refused to
+        # even start on an empty allowlist forced installs to ship a
+        # placeholder node id; this leg pins its absence.
         srv_cfg.write_text(json.dumps({
             "secretKey": srv_key["secretKey"],
             "relay": "none",
-            "allowlist": [cli_key["id"]],
+            "allowlist": [],
             "announceFile": str(announce),
         }))
         spare_key = keygen(env, str(keygen_bin))

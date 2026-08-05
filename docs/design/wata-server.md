@@ -293,6 +293,17 @@ spelling of the same key) because a junk id that reached the allowlist file
 would fail the *listener's* parse at the next boot — one bad announce would
 otherwise be able to stop the server from listening at all.
 
+**An empty allowlist is the bootstrap state, and it listens.** A fresh
+install has approved nobody, so its config's `allowlist` is empty — and the
+listener comes up anyway, refusing every peer with the ordinary loud
+not-allowlisted refusal, because the only way out of that state is an
+enrolment approval landing on a server that is already up. `["*"]` still
+means admit any peer. The refuse-everything and refuse-this-node paths are
+one path (the accept gate in `go-pkgs/irohnet/rust/src/lib.rs`), so the
+client-side refusal cooldown and redial behavior are identical, and the first
+approved node is admitted live with no restart. `tools/tunnel-smoke.py`'s
+enrolment leg runs its server from exactly this state.
+
 **Approval is durable first, live second.**
 
 1. the node id is appended to the `allowlist` array of the iroh config
