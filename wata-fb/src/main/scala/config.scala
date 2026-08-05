@@ -33,9 +33,11 @@ import language.experimental.saferExceptions
  *  half that did not change is preserved. */
 
 /** the settings the settings applet owns and this store persists: panel
- *  brightness 0..40, an index into the screen-timeout choices, and an index
- *  into the display-name presets. */
-case class FbPrefs(brightness: scala.Int, timeoutIdx: scala.Int, nameIdx: scala.Int)
+ *  brightness 0..40 and an index into the screen-timeout choices. Both are
+ *  the DEVICE's, not the account's — a display name belongs to the account
+ *  and is set through the admin interface (plan 0021), so nothing about a
+ *  person is stored here. */
+case class FbPrefs(brightness: scala.Int, timeoutIdx: scala.Int)
 
 object FbConfig:
 
@@ -62,13 +64,12 @@ object FbConfig:
   def load(): Session = Sessions.fromJson(readJson())
 
   /** the stored preferences, or the defaults (full brightness, 1m screen
-   *  timeout, the first name preset) for anything absent. */
+   *  timeout) for anything absent. */
   def loadPrefs(): FbPrefs = prefsFrom(readJson())
 
   def prefsFrom(j: Json): FbPrefs =
     FbPrefs(WJson.longField(j, "brightness", 40L).toInt,
-      WJson.longField(j, "screen_timeout_idx", 1L).toInt,
-      WJson.longField(j, "name_idx", 0L).toInt)
+      WJson.longField(j, "screen_timeout_idx", 1L).toInt)
 
   /** the parsed config object; `JNull` for absent/unreadable/malformed. */
   def readJson(): Json =
@@ -101,7 +102,6 @@ object FbConfig:
 
   def toJson(s: Session, p: FbPrefs): Json =
     var fs: List[(String, Json)] = Nil
-    fs = ("name_idx", JInt(p.nameIdx.toLong)) :: fs
     fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
     fs = ("brightness", JInt(p.brightness.toLong)) :: fs
     fs = ("device_id", JStr(s.deviceId)) :: fs

@@ -29,6 +29,20 @@
 <h1>wata admin</h1>
 <div id="msg"></div>
 
+<section id="setup" class="hidden">
+  <h2>Create the first account</h2>
+  <p class="muted">This server has no accounts yet. The account you create here is the
+    administrator — the one that manages everyone else. Whoever gets here first claims it,
+    so do this now, on your own network.</p>
+  <form class="row" id="setup-form">
+    <input id="setup-user" placeholder="username (the login)" autocomplete="username" required>
+    <input id="setup-display" placeholder="display name (what others see)" required>
+    <input id="setup-pass" type="password" placeholder="password" autocomplete="new-password" required>
+    <input id="setup-pass2" type="password" placeholder="repeat password" autocomplete="new-password" required>
+    <button type="submit">Create</button>
+  </form>
+</section>
+
 <section id="login">
   <h2>Sign in</h2>
   <form class="row" id="login-form">
@@ -54,15 +68,18 @@
   </table>
 
   <h2>Accounts</h2>
+  <p class="muted">The <em>username</em> is the login and never changes; the
+    <em>display name</em> is what everyone sees in the app, and you can change it here at
+    any time.</p>
   <table id="users">
-    <thead><tr><th>user</th><th>display name</th><th>admin</th><th>devices</th><th>last sync</th><th></th></tr></thead>
+    <thead><tr><th>username</th><th>display name</th><th>admin</th><th>devices</th><th>last sync</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 
   <h2>Add an account</h2>
   <form class="row" id="add-form">
-    <input id="add-user" placeholder="user" required>
-    <input id="add-display" placeholder="display name">
+    <input id="add-user" placeholder="username (the login)" required>
+    <input id="add-display" placeholder="display name (what others see)">
     <input id="add-pass" type="password" placeholder="password" required>
     <label><input id="add-admin" type="checkbox"> admin</label>
     <button type="submit">Create</button>
@@ -251,33 +268,55 @@ async function refresh() {
   renderEnroll(e.pending || []);
 }
 
-function signedIn(on) {
-  $("login").classList.toggle("hidden", on);
-  $("app").classList.toggle("hidden", !on);
-  $("whoami").textContent = on ? "signed in as " + me : "";
+// Exactly one of the three screens is up: first-run setup, the login form, or
+// the interface itself. Which one is not a guess — GET /_wata/v1/admin/mode is
+// unauthenticated and says whether this server still has zero accounts.
+function screen(name) {
+  for (const id of ["setup", "login", "app"]) $(id).classList.toggle("hidden", id !== name);
+  $("whoami").textContent = name === "app" ? "signed in as " + me : "";
 }
 
 function signOut() {
   token = ""; me = "";
   localStorage.removeItem("wata_admin_token");
   localStorage.removeItem("wata_admin_user");
-  signedIn(false);
+  screen("login");
+}
+
+async function signIn(user, password) {
+  const r = await api("POST", "/_matrix/client/v3/login", {
+    identifier: { type: "m.id.user", user }, password,
+  });
+  token = r.access_token;
+  me = user;
+  localStorage.setItem("wata_admin_token", token);
+  localStorage.setItem("wata_admin_user", me);
 }
 
 $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   say("");
   try {
-    const r = await api("POST", "/_matrix/client/v3/login", {
-      identifier: { type: "m.id.user", user: $("login-user").value },
-      password: $("login-pass").value,
-    });
-    token = r.access_token;
-    me = $("login-user").value;
-    localStorage.setItem("wata_admin_token", token);
-    localStorage.setItem("wata_admin_user", me);
+    await signIn($("login-user").value, $("login-pass").value);
     $("login-pass").value = "";
     await start();
+  } catch (err) { say(err.message, true); }
+});
+
+$("setup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  say("");
+  const user = $("setup-user").value;
+  const password = $("setup-pass").value;
+  if (password !== $("setup-pass2").value) { say("The two passwords do not match.", true); return; }
+  try {
+    await api("POST", "/_wata/v1/admin/setup", {
+      user, password, displayname: $("setup-display").value,
+    });
+    $("setup-form").reset();
+    await signIn(user, password);
+    await start();
+    say("This server is yours. Add an account for each person next.");
   } catch (err) { say(err.message, true); }
 });
 
@@ -299,10 +338,15 @@ $("add-form").addEventListener("submit", async (e) => {
 });
 
 async function start() {
-  if (!token) { signedIn(false); return; }
+  let setup = false;
+  try {
+    setup = (await api("GET", "/_wata/v1/admin/mode")).setup === true;
+  } catch (err) { /* an unreachable server: fall through to the login form */ }
+  if (setup) { screen("setup"); return; }
+  if (!token) { screen("login"); return; }
   try {
     await refresh();
-    signedIn(true);
+    screen("app");
     say("");
   } catch (err) {
     signOut();

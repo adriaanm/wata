@@ -8,7 +8,9 @@ Plan: docs/plans/0015-server-service-mac.md (`[SRV-PACKAGE]`). Layout:
     current -> releases/<version>      the running release
     bin/wata-server-run                wrapper the daemon execs
     etc/wata.env                       config as env lines (sourced by the wrapper)
-    etc/users.json                     provisioned accounts (WATA_USERS)
+    etc/users.json                     accounts (WATA_USERS) — NOT installed;
+                                       the server writes it when the first
+                                       admin is created at /admin
     data/                              WATA_DATA: journal.jsonl, media/, FORMAT
     log/wata-server.log                daemon stdout+stderr
   <root>/Library/LaunchDaemons/net.wata.server.plist
@@ -36,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -48,15 +51,11 @@ STAGE_DIR = WATA / ".service-stage"
 LABEL = "net.wata.server"
 DEFAULT_LISTEN = ":8008"
 
-# REPLACE these before going live — see docs/design/wata-server.md#accounts.
-# Plaintext `password` is accepted as INPUT: the server hashes it and rewrites
-# this file at its first boot, so nothing here stays plaintext (which is also
-# why there is no comment entry — the rewrite would drop it). `alice` is the
-# admin, i.e. the account that can reach /admin.
-USERS_JSON = json.dumps([
-    {"user": "alice", "password": "testpass123", "displayname": "Alice", "admin": True},
-    {"user": "bob", "password": "testpass123", "displayname": "Bob"},
-], indent=2) + "\n"
+# NOTE: no accounts file is written by an install. `WATA_USERS` names a path
+# that does not exist yet, which puts the server in SETUP MODE: browse
+# http://<server>:8008/admin and create the first (admin) account there, and
+# the server writes the file itself, hashed. A shipped placeholder account
+# would be a shipped credential — see docs/design/wata-server.md#accounts.
 
 
 # ---- path re-rooting --------------------------------------------------------
@@ -250,7 +249,6 @@ def do_install(layout: Layout, iroh: bool):
     # etc/ and data/ are never overwritten once present — they hold the
     # human's config and the journal.
     write_if_absent(layout.etc / "wata.env", env_file(layout).encode())
-    write_if_absent(layout.etc / "users.json", USERS_JSON.encode())
     write_if_absent(layout.data / "FORMAT", b"1\n")
 
     # The daemon runs as the INSTALLING USER (plist UserName), but a sudo
@@ -262,6 +260,9 @@ def do_install(layout: Layout, iroh: bool):
         chown_layout(layout.prefix, installing_user())
 
     print(f"server-service: installed {version} at {layout.prefix} (current -> {release_dir})")
+    if not (layout.etc / "users.json").exists():
+        print("server-service: no accounts yet — browse http://<this-host>:8008/admin "
+              "and create the first (admin) account")
 
     if layout.real:
         subprocess.run(["launchctl", "bootout", f"system/{LABEL}"], capture_output=True)
@@ -395,6 +396,99 @@ def selftest_fail(msg: str) -> int:
     return 1
 
 
+def http(base: str, method: str, path: str, body=None):
+    """-> (status, parsed body). An error status is a value here, not a raise:
+    the setup legs assert on 409 as much as on 200."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        try:
+            return e.code, json.loads(raw or b"{}")
+        except ValueError:
+            return e.code, {}
+
+
+SETUP_USER = "parent"
+SETUP_PASS = "selftest-pw-1"
+
+
+def run_server(layout: Layout, port: int):
+    return subprocess.Popen([str(layout.bin / "wata-server-run")],
+                            env={**os.environ, "WATA_LISTEN": f":{port}"})
+
+
+def stop(proc):
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+def selftest_setup(layout: Layout, base: str):
+    """The first-run flow a fresh install boots into (plan 0021 C): no accounts
+    file, so the server is in setup mode; the unauthenticated setup endpoint
+    creates the first admin, closes the window, and writes the file hashed."""
+    users = layout.etc / "users.json"
+    if users.exists():
+        return f"a fresh install wrote {users} — it must not seed accounts"
+
+    status, mode = http(base, "GET", "/_wata/v1/admin/mode")
+    if status != 200 or mode.get("setup") is not True:
+        return f"a fresh install is not in setup mode (saw {status} {mode})"
+    status, _ = http(base, "GET", "/_wata/v1/admin/status")
+    if status != 503:
+        return f"an admin route answered {status} during setup, expected 503"
+    print("server-service: setup mode reported, other admin routes 503")
+
+    status, body = http(base, "POST", "/_wata/v1/admin/setup", {
+        "user": SETUP_USER, "password": SETUP_PASS, "displayname": "Parent"})
+    if status != 200 or body.get("user_id") != f"@{SETUP_USER}:localhost":
+        return f"setup returned {status} {body}"
+    status, _ = http(base, "POST", "/_wata/v1/admin/setup", {
+        "user": "second", "password": "x", "displayname": "Second"})
+    if status != 409:
+        return f"a second setup answered {status}, expected 409 (the window closed)"
+    _, mode = http(base, "GET", "/_wata/v1/admin/mode")
+    if mode.get("setup") is not False:
+        return f"setup mode did not close (mode {mode})"
+    print("server-service: first admin created, the setup window is closed")
+
+    if not users.exists():
+        return f"setup did not write {users}"
+    entries = json.loads(users.read_text())
+    if [e["user"] for e in entries] != [SETUP_USER]:
+        return f"{users} holds unexpected accounts: {entries}"
+    entry = entries[0]
+    if not entry.get("hash", "").startswith("pbkdf2-sha256$") or "password" in entry:
+        return f"the account is not stored hashed: {entry}"
+    if SETUP_PASS in users.read_text():
+        return f"the password appears in {users} in plaintext"
+    if entry.get("admin") is not True or entry.get("displayname") != "Parent":
+        return f"the first account is not the admin, or lost its display name: {entry}"
+    if users.stat().st_mode & 0o777 != 0o600:
+        return f"{users} is mode {users.stat().st_mode & 0o777:o}, expected 600"
+    print(f"server-service: {users} holds one hashed admin account, mode 600")
+    return None
+
+
+def selftest_login(base: str) -> tuple[str | None, str | None]:
+    """-> (token, failure message)."""
+    status, body = http(base, "POST", "/_matrix/client/v3/login", {
+        "identifier": {"type": "m.id.user", "user": SETUP_USER}, "password": SETUP_PASS})
+    if status != 200 or not body.get("access_token") or \
+            body.get("user_id") != f"@{SETUP_USER}:localhost":
+        return None, f"login as {SETUP_USER} returned {status} {body}"
+    return body["access_token"], None
+
+
 def cmd_selftest(args):
     root = Path(tempfile.mkdtemp(prefix="wata-service-selftest."))
     layout = Layout(root)
@@ -409,8 +503,7 @@ def cmd_selftest(args):
 
     port = free_port()
     base = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen([str(layout.bin / "wata-server-run")],
-                             env={**os.environ, "WATA_LISTEN": f":{port}"})
+    proc = run_server(layout, port)
     try:
         if not poll_until_up(f"{base}/_matrix/client/versions", time.monotonic() + 15):
             proc.poll()
@@ -418,27 +511,51 @@ def cmd_selftest(args):
                                   f"(exit code {proc.returncode})")
         print("server-service: GET /_matrix/client/versions -> 200")
 
-        body = json.dumps({"identifier": {"type": "m.id.user", "user": "alice"},
-                            "password": "testpass123"}).encode()
-        req = urllib.request.Request(f"{base}/_matrix/client/v3/login", data=body, method="POST")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            login = json.loads(resp.read())
-        if not login.get("access_token") or login.get("user_id") != "@alice:localhost":
-            return selftest_fail(f"login as alice (from etc/users.json) returned unexpected body: {login}")
-        print(f"server-service: login as alice OK ({login['user_id']})")
+        failure = selftest_setup(layout, base)
+        if failure:
+            return selftest_fail(failure)
+
+        token, failure = selftest_login(base)
+        if failure:
+            return selftest_fail(failure)
+        print(f"server-service: login as {SETUP_USER} OK (the account setup created)")
+        status, _ = http(base, "GET", "/_wata/v1/admin/status")
+        if status != 401:
+            return selftest_fail(f"the admin surface answered {status} unauthenticated "
+                                  "after setup, expected 401")
 
         journal = layout.data / "journal.jsonl"
         if not journal.exists() or journal.stat().st_size == 0:
             return selftest_fail(f"{journal} missing or empty after a login")
         print(f"server-service: {journal} present, {journal.stat().st_size} bytes")
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        stop(proc)
     print(f"server-service: process exited (code {proc.returncode}) on SIGTERM")
+
+    # The restart: the account the setup flow created is the FILE's now, so a
+    # fresh process reads it back and is no longer in setup mode.
+    proc = run_server(layout, port)
+    try:
+        if not poll_until_up(f"{base}/_matrix/client/versions", time.monotonic() + 15):
+            return selftest_fail("server never came back up after a restart")
+        _, mode = http(base, "GET", "/_wata/v1/admin/mode")
+        if mode.get("setup") is not False:
+            return selftest_fail(f"the restarted server went back into setup mode ({mode})")
+        token, failure = selftest_login(base)
+        if failure:
+            return selftest_fail(f"after a restart, {failure}")
+        status, body = http(base, "GET", "/_wata/v1/admin/status")
+        if status != 401:
+            return selftest_fail(f"admin status answered {status} unauthenticated, expected 401")
+        req = urllib.request.Request(f"{base}/_wata/v1/admin/status")
+        req.add_header("Authorization", "Bearer " + token)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            status_body = json.loads(resp.read())
+        if [u["user"] for u in status_body.get("users", [])] != [SETUP_USER]:
+            return selftest_fail(f"the account did not survive the restart: {status_body.get('users')}")
+        print("server-service: the account survives a restart and is still the admin")
+    finally:
+        stop(proc)
 
     print("SRV-PACKAGE SELFTEST PASS")
     return 0

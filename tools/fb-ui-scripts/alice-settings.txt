@@ -3,8 +3,9 @@
 # these frames are really pinning — it renders on the last two grid rows, and
 # every item has its own.
 
-# The self display name is resolved from ROOM MEMBERSHIP, not from the profile
-# endpoint, so the name round trip below needs alice to be in a room at all.
+# A room, so the roster the wata applet under this menu was built from is a
+# real one (the settings frames are what these checkpoints pin, but the walk
+# starts from a synced client).
 family @bob:localhost
 
 wait syncing 1 900
@@ -28,15 +29,9 @@ tap right
 advance 5
 checkpoint settings-timeout
 
-# display name: `<`/`>` pick a preset, OK pushes it to the homeserver. The
-# `nameset` probe is 1 once the name comes back around through /sync.
-tap down
-tap right
-tap enter
-wait nameset 1 2000
-advance 5
-checkpoint settings-name
-
+# There is no display-name row: a person's name is their account's, set
+# through the admin interface (plan 0021), not picked from presets here.
+#
 # network and device info: the last two items, both detail-only.
 tap down
 advance 5

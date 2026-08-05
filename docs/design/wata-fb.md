@@ -202,11 +202,15 @@ explicit state machine, not a generic widget framework:
   `SnakeApplet`/`SnakeLogic` (the snake game, `snake.scala` — ported
   from the Zig client's `applets/snake.zig`; see the parity table) and
   `SettingsApplet`/`SettingsLogic` (menu: audio echo test,
-  brightness, screen timeout, display name, disconnect, info, plus
+  brightness, screen timeout, disconnect, info, plus
   everything absorbed from system-menu — the IP and cellular info
   rows, the net test, the wifi and cellular-data toggles and the
   power off / reboot-to-BL / reboot-to-EDL actions; see "The settings
-  device rows"). The menu outgrew the grid at fourteen items, so it
+  device rows"). There is deliberately no display-name row: a person's
+  name is their account's, set by whoever administers the server (the
+  admin interface, plan 0021), not picked from presets on a handset —
+  so the menu holds thirteen items and every row is about this device.
+  The menu outgrew the grid, so it
   renders as a scrolling window of six with `^`/`v` cues in the
   last column; the window start is derived from the selection (no
   scroll state), which keeps the frames the goldens pin
@@ -629,9 +633,10 @@ app layer's decision. `config.scala` is that decision:
   a dev host, and every test run points the env var at its own file
   rather than sharing the operator's.
 - **Contents**: `{homeserver, username, access_token, user_id,
-  device_id}` — the Zig client's file shape — plus three fields the
-  settings applet owns: `brightness`, `screen_timeout_idx`,
-  `name_idx`. Those are the device's preferences, not the account's:
+  device_id}` — the Zig client's file shape — plus two fields the
+  settings applet owns: `brightness` and `screen_timeout_idx`.
+  Those are the device's preferences, not the account's (a display
+  name IS the account's, and lives on the server):
   someone who set the backlight low and the timeout long should not
   have to set them again after a reboot. Session and preferences are
   written together, and each writer reads the other half back first,
@@ -717,14 +722,14 @@ All of these are subcommands dispatched from `main.scala`:
 | `oggforeign <fixture.ogg>` | `oggforeign.scala` | decodes a pinned Ogg fixture produced by a different (foreign) encoder and prints a report — the host-side half of the `OPUS_BUFFER_TOO_SMALL` regression guard described above; the actual on-device Opus decode is exercised separately by `go-pkgs/audio/foreign_decode_test.go`. |
 | `fbdump` | `fbtest.scala:41` | draws the deterministic test pattern into an in-memory buffer and writes a PNG to stdout — the host-side "golden frame" check, no real display involved. |
 | `fbsmoke` | `fbtest.scala:49` | on-device only: opens the real framebuffer, draws the pattern, blinks LEDs, and echoes evdev key presses for ~20s — a manual hardware smoke test. |
-| `integ <scenario> <baseUrl>` | `integ.scala` | ten scenarios (login, two-user sync, voice send/receive, read receipts, ordering, redaction, download-byte-equality, the family room, session resume) run against a live `wata-server`, each driven through `wataclient`'s real `Runtime`/action queue, printing `INTEG PASS/FAIL <scenario>`. |
+| `integ <scenario> <baseUrl>` | `integ.scala` | the live scenarios (login, two-user sync, voice send/receive, read receipts, ordering, redaction, download-byte-equality, the family room, session resume, canonical DMs, backfill, offline retry, auth rejection, and an admin rename reaching a syncing client) run against a live `wata-server`, each driven through `wataclient`'s real `Runtime`/action queue, printing `INTEG PASS/FAIL <scenario>`. |
 | `--selftest [echo\|play\|all]` | `selftest.scala` | on-device audio-thread selftest described above. |
 | `login\|voicesend\|voiceplay\|audiosoak ...` | `devcli.scala` | scripted, non-interactive actions against a live server: provision/login a user, record-and-send a clip, sync-and-play the newest clip, or run a long record/send/sync/download/play soak loop (intended to run under `GODEBUG=gctrace=1` to watch GC pressure — `devcli.scala:105`). |
 | `sim [base] [user] [pass] [--once]` | `sim.scala` | the host simulator: the real frame loop drawn into a terminal — see below. |
 | `uitest <script> <base> <user> <pass> <outdir>` (`-` in a credential slot = resume from the store) | `uiscript.scala` | one scripted, deterministic UI session with PNG checkpoints — see below. |
 | `ui [base] [user] [pass]` | `ui.scala` | the actual product: the full on-device client. |
 
-`integ` (ten scenarios, `wataclient`'s `Runtime` directly) and
+`integ` (the live scenarios, `wataclient`'s `Runtime` directly) and
 `fb-ui-tests` (scripted runs of the real frame loop) are this module's
 two end-to-end suites; both require a running `wata-server` and are
 invoked by scripts in `tools/`, not from this module directly.
@@ -828,7 +833,7 @@ one-user phases:
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED`, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm. |
 | `early-boot` | the applet's boot presentation and its session latch: the earliest cold-boot frame (`starting up...`, no interface), the frame after an interface appears and the client starts trying (`waiting for network`), the ordinary contact list once the link has been live once, and — after a scripted health drop — that the boot screen does NOT come back. Forced with `conn`/`netpipe` from the first frame the script steps, so no frame is ever polled live before the boot frames are taken. |
 | `conn-status` | the header's connectivity element and the status line it shares its computed state with: connected (`NET` off-device), reconnecting on both phases of the `..` alternation, disconnected, and — through the `netpipe` override — the device-only wifi and cellular glyphs and the `OFF` state, whose red status line the client's own belief that it is syncing does not override. |
-| `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Twenty checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
+| `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Nineteen checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
 | `boot-retry` | the connect lifecycle off the happy path (plan 0022): the phase starts with NO server (the scenario's `late_server` key boots one four seconds in), so the client faces a failed first login. Goldens the `can't reach server / retrying...` boot copy with its key footer, the armed two-step quit, and — with no restart, the same process — the ordinary contact list once the server appears. Also asserts the loop is still attempting (`logins`) and that the quit arm ages out. |
 | `auth-rejected` | the scenario's `password` key hands the phase the wrong one: the boot screen must say `account rejected / check server`, not `waiting for network`, and the loop must still be alive behind it (OK pokes it). Needs no `conn` forcing — a rejected login reads as DOWN, and a down header draws no `..`. |
@@ -925,9 +930,9 @@ information in the equivalent place, not the same number.
 | echo test driven over the audio command mailbox | yes | yes | same |
 | brightness ±5, clamped 0..40, sysfs write-through | yes | yes | same |
 | screen-timeout picker 30s/1m/2m/5m/Never | yes | yes | same |
-| display-name preset picker, OK sets it over Matrix | yes | yes | same |
+| display-name preset picker, OK sets it over Matrix | yes | no | dropped (plan 0021): display names are account state an admin sets on the server, and the fan-out puts the new name on a syncing handset with no restart |
 | network disconnect (stop sync + actions, restart to reconnect) | yes | yes | same |
-| brightness / screen-timeout / name survive a restart | no | yes | wata-fb only — the same config store the session lives in |
+| brightness / screen-timeout survive a restart | no | yes | wata-fb only — the same config store the session lives in |
 | battery percent in the Info detail | yes | yes | same, `Led.readBatteryPercent`; absent hardware reads -1 and the line is left out |
 | battery / uptime / free memory in the Info detail | battery only | yes | uptime and `MemAvailable` read straight out of `/proc` (system-menu shells out to awk for the same number); `n/a` off-device |
 | wlan0 IP + cellular-data info rows (link + signal dBm) | no (system-menu) | yes | absorbed from system-menu (plan 0003 phase 5): `Diag.wlanIp`/`cellData` mirror its sources — `ip -4 addr show <iface>`, the ppp0 sysfs node, and `qmicli --nas-get-signal-strength` — re-read every ~5s; off-device both rows answer `n/a` |
@@ -1074,7 +1079,7 @@ it is not part of `just ci`.
 | `diag.scala` | 336 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
 | `netexec.scala` | 59 | The `go.exec` facade over `os/exec` (`Command` at one and three arities, `Run`, `Output`) and the `go.netif` facade over `net` — what `Diag` runs system-menu's shell lines and its interface reads through. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
-| `integ.scala` | 546 | Ten live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, and session resume. |
+| `integ.scala` | 831 | Live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, session resume, canonical DMs, backfill, offline retry, auth rejection, and an admin rename landing on a syncing client. |
 | `ui.scala` | 380 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
 | `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
 | `uiscript.scala` | 583 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |

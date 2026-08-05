@@ -17,6 +17,11 @@ of a pure function:
     created account logs in with no restart, a removed account's token dies
     mid-session) AND land in `users.json`, which a reboot reads back;
   * `/admin` answers 200 text/html;
+  * first-run setup (milestone C) — a `WATA_USERS` path with no file behind it
+    boots into setup mode: the unauthenticated `mode` route says so, every
+    other admin route is 503, the built-in alice/bob pair is NOT in force, and
+    the one unauthenticated `setup` POST creates the first admin, writes the
+    file hashed, and closes the window (a second one is 409);
   * device enrolment (milestone B) — an UNauthenticated announce parks a node
     id in memory and nothing else, the pending set is bounded by both an
     expiry and a cap, approve appends the id to the allowlist file atomically
@@ -186,6 +191,7 @@ def allowlist(path):
 
 
 def run(server, env, tmp):
+    setup_mode(server, env, tmp)
     users = os.path.join(tmp, "users.json")
     # Provisioned BY HAND, the way a human writes one: plaintext passwords.
     with open(users, "w") as f:
@@ -237,6 +243,79 @@ def run(server, env, tmp):
         stop_server(proc, log)
 
 
+def setup_mode(server, env, tmp):
+    """Milestone C: an install that has never had an account. `WATA_USERS`
+    names a file that does not exist, so the server has no accounts at all —
+    not even the harness fallback pair — until someone claims it through the
+    one unauthenticated endpoint."""
+    fresh = os.path.join(tmp, "fresh")
+    os.mkdir(fresh)
+    users = os.path.join(fresh, "users.json")
+    senv = dict(env, WATA_USERS=users, WATA_LOG=os.path.join(fresh, "journal.jsonl"))
+    proc, log = start_server(server, os.path.join(fresh, "setup.log"), senv)
+    try:
+        print("setup mode")
+        status, body, _ = req("GET", "/_wata/v1/admin/mode")
+        check(status == 200 and body.get("setup") is True,
+              f"an empty install reports setup mode, unauthenticated (saw {status} {body})")
+        others = {req(m, p, b)[0] for m, p, b in ADMIN_ROUTES}
+        check(others == {503}, f"every other admin route is 503 during setup (saw {sorted(others)})")
+        check(login("alice", "testpass123") is None,
+              "the built-in fallback pair is NOT in force when WATA_USERS is set")
+        check(req("GET", "/admin")[0] == 200, "the page is still served during setup")
+        check(not os.path.exists(users), "nothing is written before the first claim")
+
+        print("setup: the claim")
+        check(req("POST", "/_wata/v1/admin/setup",
+                  {"user": "Bad/Name", "password": "x"})[0] == 400,
+              "an invalid localpart is refused")
+        check(req("POST", "/_wata/v1/admin/setup", {"user": "parent"})[0] == 400,
+              "a passwordless setup is refused")
+        check(req("GET", "/_wata/v1/admin/mode")[1].get("setup") is True,
+              "a refused setup leaves the window open")
+        status, body, _ = req("POST", "/_wata/v1/admin/setup",
+                              {"user": "parent", "password": "parentpw1", "displayname": "Parent"})
+        check(status == 200 and body.get("user_id") == "@parent:localhost",
+              f"setup creates the first account (saw {status} {body})")
+        check(req("GET", "/_wata/v1/admin/mode")[1].get("setup") is False,
+              "the window closes with that first write")
+        check(req("POST", "/_wata/v1/admin/setup",
+                  {"user": "intruder", "password": "x", "displayname": "X"})[0] == 409,
+              "a second setup is 409 — first comer claims the install")
+        check(login("intruder", "x") is None, "the loser's account was never created")
+
+        print("setup: what it left behind")
+        es = entries(users)
+        check(list(es) == ["parent"], f"the file holds exactly the claimed account ({list(es)})")
+        check(hashed(es["parent"]), "the first account is stored hashed")
+        check("parentpw1" not in open(users).read(), "no plaintext password in the file")
+        check(es["parent"]["admin"] is True, "the first account is the admin")
+        check(es["parent"]["displayname"] == "Parent", "the display name is stored")
+        check(oct(os.stat(users).st_mode & 0o777) == "0o600",
+              f"the file is 0600 (saw {oct(os.stat(users).st_mode & 0o777)})")
+
+        ptok = login("parent", "parentpw1")
+        check(ptok is not None, "the claimed account logs in with NO restart")
+        check(req("GET", "/_wata/v1/admin/status", None, ptok)[0] == 200,
+              "it reaches the admin surface")
+        check(req("GET", "/_wata/v1/admin/status")[0] == 401,
+              "the admin gate is back to 401 once setup is done")
+    finally:
+        stop_server(proc, log)
+
+    proc, log = start_server(server, os.path.join(fresh, "setup2.log"), senv)
+    try:
+        print("setup: the reboot")
+        check(req("GET", "/_wata/v1/admin/mode")[1].get("setup") is False,
+              "a server that reads the written file is not in setup mode")
+        check(login("parent", "parentpw1") is not None, "the claimed account survives a reboot")
+        check(req("POST", "/_wata/v1/admin/setup",
+                  {"user": "intruder", "password": "x"})[0] == 409,
+              "setup stays closed across a reboot")
+    finally:
+        stop_server(proc, log)
+
+
 def first_boot(users):
     print("plaintext rewrite")
     raw = open(users).read()
@@ -269,6 +348,12 @@ def gate(atok, btok):
           "an unknown token is 401")
     check(req("GET", "/_wata/v1/admin/status", None, atok)[0] == 200,
           "an admin token is 200")
+    # the two ungated routes, on a server that HAS accounts.
+    status, body, _ = req("GET", "/_wata/v1/admin/mode")
+    check(status == 200 and body.get("setup") is False,
+          f"the mode route is unauthenticated and reports no setup (saw {status} {body})")
+    check(req("POST", "/_wata/v1/admin/setup", {"user": "x", "password": "y"})[0] == 409,
+          "the setup route is closed once accounts exist")
 
 
 def page():
@@ -443,7 +528,9 @@ def after_reboot(users):
 
 
 def builtin_defaults():
-    print("built-in accounts (no users.json)")
+    print("built-in accounts (WATA_USERS unset)")
+    check(req("GET", "/_wata/v1/admin/mode")[1].get("setup") is False,
+          "an unset WATA_USERS is harness mode, never setup mode")
     atok = login("alice", "testpass123")
     btok = login("bob", "testpass123")
     check(atok is not None and btok is not None, "the built-in pair logs in")

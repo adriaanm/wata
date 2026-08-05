@@ -20,11 +20,24 @@ import sgo.{Mutex, mutex}
  *
  *  `displayname` is optional and defaults to the localpart; `admin` defaults
  *  to false and gates the `/_wata/v1/admin/…` surface; an entry with no `user`
- *  is skipped. An unset, unreadable, unparseable, or empty `WATA_USERS` falls
- *  back to the built-in alice/bob pair (alice admin), so every harness and
- *  script in this repo runs unchanged with no file present. A bad file is a
- *  fallback rather than a hard failure because the alternative — a homeserver
- *  that refuses to boot — is worse for a device that has to come up on its own.
+ *  is skipped.
+ *
+ *  **Two boots with no usable accounts, and they are not the same boot.**
+ *
+ *   - `WATA_USERS` UNSET — the harness case. The built-in alice/bob pair
+ *     (alice admin) applies, so every harness and script in this repo runs
+ *     unchanged with no file present. A real install always sets the variable,
+ *     so a real install never has a baked-in credential.
+ *   - `WATA_USERS` SET but missing, unreadable, unparseable, or holding zero
+ *     accounts — a FRESH INSTALL. The server enters **setup mode**: it has no
+ *     accounts at all, `/admin` serves the create-the-first-admin screen, and
+ *     `POST /_wata/v1/admin/setup` (adminapi.scala) is the one endpoint that
+ *     answers. `claimSetup` closes that window with the first write, under this
+ *     module's lock, so on a LAN where two browsers race exactly one wins.
+ *     Booting into setup rather than refusing to boot is deliberate: a
+ *     homeserver a device depends on has to come up on its own and say what it
+ *     needs, and an unparseable file is not a licence to overwrite it (nothing
+ *     is written until someone claims setup).
  *
  *  **No plaintext at rest.** A password is stored as the
  *  `pbkdf2-sha256$<iter>$<salt>$<dk>` string `Pwhash` mints (pwhash.scala). A
@@ -46,6 +59,10 @@ class ConfigState:
   /** the `WATA_USERS` path, "" when the built-in pair is in force (nothing is
    *  ever written then — there is no file to own). */
   var path: String = ""
+  /** first-run setup: a `WATA_USERS` path with no accounts behind it. True
+   *  only while `users` is empty; `claimSetup` clears it in the same locked
+   *  step that writes the first account. */
+  var setup: Boolean = false
 
 /** what one parse of a users file yielded: the entries, and whether any of
  *  them carried a plaintext `password` (which makes the boot rewrite the
@@ -65,7 +82,17 @@ object Config:
 
   def loadFrom(p: String): Unit =
     val parsed = parseUsers(readAll(p))
-    if isEmptyU(parsed.users) then useDefaults() else installFile(p, parsed)
+    if isEmptyU(parsed.users) then enterSetup(p) else installFile(p, parsed)
+
+  /** a configured accounts file with nothing usable in it: no accounts, no
+   *  built-in pair, and nothing written — the install is waiting for its first
+   *  admin (`claimSetup`). */
+  def enterSetup(p: String): Unit =
+    cell.withLock { st =>
+      st.path = p
+      st.users = Nil
+      st.setup = true
+    }
 
   /** a parsed file becomes the live accounts; a plaintext `password` anywhere
    *  in it triggers the one-time rewrite that replaces it with a hash. A file
@@ -75,6 +102,7 @@ object Config:
     cell.withLock { st =>
       st.path = p
       st.users = parsed.users
+      st.setup = false
       if parsed.plaintext then writeFile(p, parsed.users) else ()
     }
 
@@ -127,8 +155,10 @@ object Config:
     if d == "" then u else d
 
   /** the compiled-in pair every harness in this repo logs in as; alice is the
-   *  admin, so a fresh server has a usable admin with no file. No path is
-   *  set, so nothing is written. */
+   *  admin, so a harness has a usable admin with no file. Reached ONLY when
+   *  `WATA_USERS` is unset — a deployment that names a file gets setup mode
+   *  instead, never a baked-in credential. No path is set, so nothing is
+   *  written. */
   def useDefaults(): Unit =
     var us: List[UserCfg] = Nil
     us = UserCfg("bob", Pwhash.hash("testpass123"), "Bob", false) :: us
@@ -136,7 +166,10 @@ object Config:
     install(us)
 
   def install(us: List[UserCfg]): Unit =
-    cell.withLock(st => st.users = us)
+    cell.withLock { st =>
+      st.users = us
+      st.setup = false
+    }
 
   // ---- reads ----------------------------------------------------------------
 
@@ -162,6 +195,9 @@ object Config:
   /** the file the accounts came from, "" for the built-in pair. */
   def usersPath(): String = cell.withLock(st => st.path)
 
+  /** is this boot waiting for its first admin account? */
+  def setupMode(): Boolean = cell.withLock(st => st.setup)
+
   def isEmptyU(us: List[UserCfg]): Boolean = us match
     case _ :: _ => false
     case Nil  => true
@@ -186,6 +222,26 @@ object Config:
     var r: List[UserCfg] = ListOps.reverse(us)
     r = u :: r
     ListOps.reverse(r)
+
+  /** claim first-run setup: the account becomes the install's first admin and
+   *  the setup window closes in the SAME locked step that writes the file.
+   *  False when someone else already claimed it — the check, the flag clear,
+   *  and the write are one transaction, so two racing setups on the family
+   *  LAN cannot both succeed and the loser sees "already claimed" rather than
+   *  a half-created account. The PBKDF2 hash is minted BEFORE the lock (it is
+   *  deliberately slow); a loser has simply wasted that work. */
+  def claimSetup(lp: String, password: String, display: String): Boolean =
+    val u = UserCfg(lp, Pwhash.hash(password), display, true)
+    cell.withLock(st => claimLocked(st, u))
+
+  def claimLocked(st: ConfigState, u: UserCfg): Boolean =
+    if !st.setup then false else claimLocked2(st, u)
+
+  def claimLocked2(st: ConfigState, u: UserCfg): Boolean =
+    st.setup = false
+    var us: List[UserCfg] = Nil
+    us = u :: us
+    commit(st, us)
 
   /** replace a password. False when the localpart names nobody. */
   def setPassword(lp: String, password: String): Boolean =

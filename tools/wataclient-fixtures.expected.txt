@@ -17,9 +17,9 @@ ev room_updated !q_xb3ZSFxlVB:localhost
 next_batch s11
 room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:localhost,@bob:localhost joined=1
   member @alice:localhost "Alice" join
-  member @bob:localhost "@bob:localhost" invite
+  member @bob:localhost "bob" invite
 snapshot self="Alice"
-contact @bob:localhost "@bob:localhost"
+contact @bob:localhost "bob"
 conv "!q_xb3ZSFxlVB:localhost" dm contact="@bob:localhost" unplayed=0
 == fixture wataclient/test-fixtures/alice__02-incr.json
 ev membership_changed !q_xb3ZSFxlVB:localhost @bob:localhost join

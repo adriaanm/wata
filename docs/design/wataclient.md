@@ -239,7 +239,17 @@ the family roster.
    server's DM endpoint, which is what fills the room in (see
    `Runtime.resolveDmRoom`).
 4. **Self display name** (`resolveSelfDisplay`): the first room where self
-   has a non-empty display name different from the raw user id.
+   has a display name that is more than the fallback below.
+
+**Names.** A display name belongs to the ACCOUNT — an admin sets it on the
+server (plan 0021) and it reaches a live client through the profile fan-out
+onto `m.room.member`, so a rename lands on a syncing device with no restart
+(integ scenario `admin-rename`). A member with no display name falls back to
+the **localpart** of their mxid (`Names.displayOr`/`Names.localpart`,
+domain.scala) — never the raw `@kid:example.org`, whose server half is noise
+on a 26-column screen and means nothing to a family. The same fallback is
+used everywhere a person is named: the member table the sync engine builds,
+DM contacts, message senders, self, and the tui's `display()`.
 
 `is_played` on a `VoiceMessage` (`isPlayed`, `syncengine.scala:756`) is
 computed as "self's user id appears in that event's receipt user-id list"
@@ -280,7 +290,7 @@ throughout this module (see also `oracle.scala`).
 
 ## The domain model
 
-`domain.scala` (115 lines) defines the plain data types the engine and
+`domain.scala` (142 lines) defines the plain data types the engine and
 snapshot are built from:
 
 - `ConnectionState` (sealed, 6 nullary cases: `Disconnected`,
@@ -458,7 +468,7 @@ checked against a separately pinned expected-output file in CI.
 |---|---|---|
 | `audiocmd.scala` | 44 | Audio-thread command/event protocol types (`AudioCmd`, `AudioEvt`). |
 | `capabilities.scala` | 45 | The two injected capability traits: `HttpDo`, `Clock`, plus header-list helpers. |
-| `domain.scala` | 115 | Core domain types: connection state, conversation type, users/contacts/messages, room/engine working state, sync events. |
+| `domain.scala` | 142 | Core domain types: connection state, conversation type, users/contacts/messages, room/engine working state, sync events, and `Names` (the display-name/localpart fallback). |
 | `matrix.scala` | 105 | Matrix C-S API request-body shaping and response parsing (pure, no transport). |
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |

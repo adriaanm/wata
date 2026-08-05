@@ -1,6 +1,7 @@
 # 0021 — the admin web interface
 
-Status: accepted (A, B landed; C added by owner ruling 2026-08-05)
+Status: done (A, B, C and the names ruling landed; the empty-install
+acceptance is the owner's to run)
 
 ## Problem
 

@@ -72,9 +72,7 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
  *  msgs (messages in the conversation the wata applet is pointing at), played
  *  (of those, how many are marked played), favs (of those, how many carry the
- *  server's favorite marker), nameset (1 once the self user's
- *  display name equals the settings applet's currently picked preset),
- *  screenoff (1 while the screensaver has the panel blanked), sendfail /
+ *  server's favorite marker), screenoff (1 while the screensaver has the panel blanked), sendfail /
  *  playfail (the session's failed-send / failed-play tallies — what a script
  *  waits on after provoking a failure with `failnext`), connerr (the
  *  session's `ConnError` transitions), conntag (the connection the frames
@@ -450,7 +448,6 @@ object UiScript:
     else if name == "msgs" then WataLogic.msgCount(Ui.frameSnap, curConvIdx())
     else if name == "played" then playedCount(Ui.frameSnap, curConvIdx())
     else if name == "favs" then favCount(Ui.frameSnap, curConvIdx())
-    else if name == "nameset" then nameSetProbe()
     else if name == "screenoff" then boolProbe(Ui.screenOff)
     else if name == "sendfail" then Ui.sendFails
     else if name == "playfail" then Ui.playFails
@@ -464,16 +461,6 @@ object UiScript:
   def boolProbe(b: Boolean): scala.Int =
     var out = 0
     if b then out = 1
-    out
-
-  /** 1 once the self user's display name in the snapshot equals the preset the
-   *  settings applet is currently pointing at — the round trip of `OK` on the
-   *  name item, which has no count to wait on. */
-  def nameSetProbe(): scala.Int =
-    val snap = Ui.frameSnap
-    val want = SettingsLogic.displayName(Shell.settingsState(Ui.shellState).nameIdx)
-    var out = 0
-    if snap.hasSelfUser && snap.selfUser.displayName == want then out = 1
     out
 
   def syncingProbe(): scala.Int =

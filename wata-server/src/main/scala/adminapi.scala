@@ -12,6 +12,20 @@ import sgo.{Mutex, mutex}
  *  ordinary password login, so the browser page and a handset use the same
  *  endpoint.
  *
+ *  **First-run setup.** Two routes are OUTSIDE the gate, and only those two:
+ *  {{{
+ *  GET    /_wata/v1/admin/mode                          {setup}
+ *  POST   /_wata/v1/admin/setup                         {user, password, displayname}
+ *  }}}
+ *  `mode` is the whole surface the page needs to decide which screen to draw —
+ *  one boolean, no accounts, nothing an anonymous caller could not infer from
+ *  a login attempt anyway. `setup` answers only while the server is in setup
+ *  mode (`Config.setupMode`, config.scala): it creates the first account with
+ *  the admin flag and closes the window in ONE locked transaction, so on a LAN
+ *  where two people race, exactly one wins and the other gets 409. Once an
+ *  account exists it is 409 forever after; while setup is open, every OTHER
+ *  admin route is 503 rather than 401, since nothing can be authenticated yet.
+ *
  *  **The routes.**
  *  {{{
  *  GET    /_wata/v1/admin/status
@@ -65,9 +79,47 @@ object Admin:
    *  unmatched shape here can only be a pattern the mux does not serve, which
    *  the catch-all already 404s. */
   def route(r: go.net.http.Request, m: String, body: String): Either[MErr, Json] =
+    val path = r.uRL.path
+    val n = Router.segCount(path)
+    if n == 4 && Router.seg(path, 3) == "mode" then Right(mode())
+    else if n == 4 && Router.seg(path, 3) == "setup" then setup(body)
+    else if Config.setupMode() then Left(MErr(503, M_NOT_READY(), "Server setup is not complete"))
+    else gated(r, m, body)
+
+  def gated(r: go.net.http.Request, m: String, body: String): Either[MErr, Json] =
     requireAdmin(r) match
       case l: Left[MErr, Auth]   => Left(l.left)
       case rr: Right[MErr, Auth] => dispatch(rr.right, r, m, body)
+
+  // ---- first-run setup ---------------------------------------------------------
+
+  /** `GET /_wata/v1/admin/mode` — unauthenticated, so the page can pick its
+   *  screen before anyone can log in. */
+  def mode(): Json = obj1("setup", JBool(Config.setupMode()))
+
+  /** `POST /_wata/v1/admin/setup` — unauthenticated, and refused with 409 the
+   *  moment an account exists. Validation is the create path's, so a name the
+   *  admin surface would refuse cannot arrive through the front door either. */
+  def setup(body: String): Either[MErr, Json] =
+    if !Config.setupMode() then Left(MErr(409, M_FORBIDDEN(), "Setup is already complete"))
+    else setupBody(body)
+
+  def setupBody(body: String): Either[MErr, Json] = Json.tryParse(body) match
+    case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
+    case Right(j) => setup2(j)
+
+  def setup2(j: Json): Either[MErr, Json] =
+    val lp = strField(j, "user", "")
+    val pw = strField(j, "password", "")
+    if !validLocalpart(lp) then Left(MErr(400, M_BAD_JSON(), "Invalid user name"))
+    else if pw == "" then Left(MErr(400, M_BAD_JSON(), "A password is required"))
+    else setup3(lp, pw, displayOr(strField(j, "displayname", ""), lp))
+
+  /** the claim itself: `Config.claimSetup` is the atomic step — whoever loses
+   *  the race gets the same 409 a late caller gets. */
+  def setup3(lp: String, pw: String, display: String): Either[MErr, Json] =
+    if !Config.claimSetup(lp, pw, display) then Left(MErr(409, M_FORBIDDEN(), "Setup is already complete"))
+    else created(lp, display)
 
   /** authenticated (401) AND an admin account (403). */
   def requireAdmin(r: go.net.http.Request): Either[MErr, Auth] = Router.requireAuth(r) match

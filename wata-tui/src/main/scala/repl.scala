@@ -100,8 +100,11 @@ object Repl:
     case _: ConnError    => "error"
     case _: ConnAuthRejected => "rejected"
 
-  /** "" display names print as `-` so every line has the same field count. */
-  def display(u: User): String = if u.displayName == "" then "-" else u.displayName
+  /** the name a person reads: the display name, or the LOCALPART of the mxid
+   *  when the account has none (`Names.displayOr`, the same fallback the
+   *  device client uses) — never a blank field and never the raw mxid, which
+   *  the line already prints in full next to it. */
+  def display(u: User): String = Names.displayOr(u.displayName, u.id)
 
   def printContacts(cs: List[Contact]): Unit =
     var cur = cs

@@ -13,7 +13,7 @@ lines:
 | file | lines | role |
 |---|---|---|
 | `model.scala` | 138 | domain ADTs: errors, auth, users/devices, rooms/events/media/receipts, DM pairs |
-| `config.scala` | 278 | the accounts: read at boot from `$WATA_USERS`, hashed at rest, rewritten by admin mutations; `serverName` |
+| `config.scala` | 334 | the accounts: read at boot from `$WATA_USERS`, hashed at rest, rewritten by admin mutations, first-run setup mode; `serverName` |
 | `membership.scala` | 86 | the room-membership state machine (join/invite/leave/ban transitions) |
 | `power.scala` | 80 | the `m.room.power_levels` authorization table |
 | `jsonnav.scala` | 204 | JSON object/field helpers over the `json` module's `Json` type |
@@ -28,11 +28,11 @@ lines:
 | `rooms.scala` | 721 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
 | `sync.scala` | 510 | `/sync` (initial + incremental + leave) and the long-poll wait |
 | `testhooks.scala` | 65 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
-| `server.scala` | 505 | HTTP boot, mux registration, request edge, the `/admin` page edge, `SelfCheck` |
+| `server.scala` | 517 | HTTP boot, mux registration, request edge, the `/admin` page edge, `SelfCheck` |
 | `iolimit.scala` | 11 | app-owned facade: `io.LimitReader` (the request-body cap) |
 | `subtle.scala` | 12 | app-owned facade: `crypto/subtle` constant-time compare |
 | `pwhash.scala` | 222 | PBKDF2-HMAC-SHA256: the derivation, the stored-hash format, verification |
-| `adminapi.scala` | 265 | the admin surface: the admin gate, `/_wata/v1/admin/…` status + accounts CRUD + enrolment routing |
+| `adminapi.scala` | 321 | the admin surface: the admin gate, the ungated first-run `mode`/`setup` pair, `/_wata/v1/admin/…` status + accounts CRUD + enrolment routing |
 | `enroll.scala` | 296 | device enrolment: the unauthenticated announce, the bounded pending set, approve (allowlist file + live listener) / deny |
 | `osfile.scala` | 44 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove`/`Rename`/`Stat`, plus `io/fs.FileInfo` |
 | `gocrypto.scala` | 54 | app-owned facades: `hash.Hash`, `crypto/sha256`, `crypto/hmac`, base64 `StdEncoding` |
@@ -97,12 +97,60 @@ WATA_USERS=/etc/wata/users.json wata-server :8008
 
 `displayname` is optional and defaults to the localpart; `admin` defaults to
 false and is what gates the `/_wata/v1/admin/` surface (see "The admin
-surface"); an entry with no `user` is skipped. An unset, unreadable,
-unparseable, or empty `WATA_USERS` falls back to a built-in alice/bob pair
-with password `testpass123` — **alice carries the admin flag** — which is what
-every harness and script in this repo logs in as, so they run unchanged with
-no file present. A bad file falls back rather than refusing to boot: a
-homeserver on a device has to come up on its own.
+surface"); an entry with no `user` is skipped.
+
+A **username** is the login identity and never changes — it is the mxid's
+localpart, and everything that names a user on the wire uses it. A **display
+name** is what people read, is set by an admin, and can change at any time;
+the two are shown as separate columns on the admin page and are never
+conflated. A client with no display name for a member falls back to the
+localpart, never the raw mxid (see wataclient.md).
+
+Two boots have no usable accounts, and they are not the same boot:
+
+- **`WATA_USERS` unset** — harness mode. The built-in alice/bob pair with
+  password `testpass123` applies (**alice carries the admin flag**), which is
+  what every harness and script in this repo logs in as, so they run unchanged
+  with no file present.
+- **`WATA_USERS` set, but the file is missing, unreadable, unparseable, or
+  holds zero accounts** — a fresh install, which boots into **setup mode**
+  (below). A real deployment always sets the variable, so a real deployment
+  never has a baked-in credential.
+
+Either way the server boots rather than refusing to: a homeserver on a device
+has to come up on its own and say what it needs.
+
+### First-run setup
+
+A server in setup mode has no accounts at all. `GET /admin` serves a
+create-the-first-account screen instead of the login form, and exactly two
+routes answer:
+
+| route | what it does |
+|---|---|
+| `GET /_wata/v1/admin/mode` | `{"setup": …}`, a single boolean — unauthenticated, the whole surface the page needs to pick its screen. Always answers, in either mode |
+| `POST /_wata/v1/admin/setup` | `{user, password, displayname}` — unauthenticated, and valid ONLY in setup mode: creates that account with the admin flag, writes `users.json` (hashed, atomic, 0600), and ends setup mode |
+
+Every *other* `/_wata/v1/admin/…` route answers `503 M_NOT_READY` while setup
+is open — nothing half-works without an account. Ordinary client routes are
+left exactly as they are: with zero accounts nobody can log in anyway, so
+there is nothing to gate.
+
+**The window closes with the first write, and it is one transaction.**
+`Config.claimSetup` takes the config lock and, under it, checks the setup
+flag, clears it, seats the new account, and writes the file; a second claim
+finds the flag already clear and is refused. So two browsers racing on the
+family LAN produce exactly one account — first comer claims the install,
+router-style — and the loser gets `409` (as does anyone who tries later). The
+PBKDF2 hash is minted *before* the lock, since it is deliberately slow; a
+loser has only wasted that work. Nothing is written before a claim, so an
+unparseable hand-written file is never overwritten by the setup path.
+
+`tools/server-service.py` installs no accounts file, so a fresh install boots
+into setup mode and the first thing an owner does is browse `/admin`;
+`server-selftest` runs that round trip (setup mode reported, other routes 503,
+the claim, a second claim 409, the file hashed and 0600, login, restart, the
+account still there).
 
 `Config.load` is called from `Store.init`, so the server and `SelfCheck` see
 the same accounts; `Store.init` then seeds each user's default profile. The
@@ -134,7 +182,8 @@ boot. An entry carrying both fields keeps its `hash`. An entry with neither is
 an account nothing can log in as, which is the deliberate outcome for a
 malformed line rather than an open door. A file that did not *parse* is left
 untouched (the boot fell back to the built-in pair): rewriting it would
-destroy whatever the human meant to write.
+destroy whatever the human meant to write (that boot is in setup mode, and
+setup writes nothing until someone claims it).
 
 **The server owns the file.** Admin mutations (below) reseat the in-memory
 list and rewrite `users.json` in the same `Config` transaction, so a created
@@ -158,6 +207,8 @@ dispatches), so a new admin route cannot be added ungated by accident.
 
 | route | what it does |
 |---|---|
+| `GET /_wata/v1/admin/mode` | ungated: is this server still in first-run setup (see "First-run setup") |
+| `POST /_wata/v1/admin/setup` | ungated, setup mode only: create the first admin account and close the window; `409` once any account exists |
 | `GET /_wata/v1/admin/status` | version, uptime, transport, the accounts file and journal paths + journal size, retention setting, room count, media count/bytes, and a per-account row: display name, admin flag, live device count, and how long ago that user last synced |
 | `GET /_wata/v1/admin/users` | the account rows on their own |
 | `POST /_wata/v1/admin/users` | create `{user, password, displayname, admin}` — `400 M_USER_IN_USE` if taken, `400 M_BAD_JSON` for an invalid localpart or a missing password |
@@ -171,8 +222,10 @@ dispatches), so a new admin route cannot be added ungated by accident.
 
 Two of them are more than a file edit. A **rename** also runs the store's
 profile fan-out (`Store.setDisplayName`), which rewrites the user's
-`m.room.member` event in every joined room, so clients see the new name
-without a restart; a **create** seeds the new account's profile the same way
+`m.room.member` event in every room they have JOINED — an invite keeps the
+name it was sent with, as in Matrix at large — so a client that is syncing
+sees the new name on its next sync round, with no restart. The integ
+scenario `admin-rename` (wataclient.md) is that property's live oracle; a **create** seeds the new account's profile the same way
 a boot seeds a configured one. A **removal** revokes the account's live
 sessions in one store transaction (`Store.dropUserDevices`): its devices and
 tokens are dropped and its long-poll waiters are woken inside the same block,
@@ -815,7 +868,9 @@ touches the journal:
   current -> releases/<version>      the running release (rollback = re-point)
   bin/wata-server-run                stable wrapper the daemon execs
   etc/wata.env                       config as env lines (sourced by the wrapper)
-  etc/users.json                     provisioned accounts (WATA_USERS)
+  etc/users.json                     accounts (WATA_USERS) — NOT installed;
+                                     written by the server when the first
+                                     admin is created at /admin
   data/                              WATA_DATA: journal.jsonl, media/, FORMAT
   log/wata-server.log                daemon stdout+stderr
 /Library/LaunchDaemons/net.wata.server.plist
@@ -868,13 +923,14 @@ sudo just server-uninstall                    # bootout, remove plist + newsyslo
 sudo just server-uninstall --purge --yes      # also delete /usr/local/wata (data included)
 ```
 
-Editing `etc/wata.env` or `etc/users.json` and running `server-restart` is
-the whole config-change workflow — no plist regen, no reinstall. Accounts are
-usually not edited by hand at all any more: `http://<host>:8008/admin` is the
-same job with a browser (see "The admin surface"), and the server rewrites
-`etc/users.json` itself. The installed template writes plaintext `password`
-fields, which the first boot hashes and rewrites in place, and marks `alice`
-the admin.
+Editing `etc/wata.env` and running `server-restart` is the whole
+config-change workflow — no plist regen, no reinstall. **An install writes no
+accounts file at all**: `WATA_USERS` names `etc/users.json`, which does not
+exist yet, so a fresh install boots into setup mode and the first thing its
+owner does is browse `http://<host>:8008/admin` and create the admin account
+there (see "First-run setup"). A shipped placeholder account would be a
+shipped credential. From then on accounts are managed on that page and the
+server owns the file; hand-editing it and restarting still works.
 `tools/server-service.py prune` deletes every release except the one
 `current` points at, when old builds pile up. A real-root `install`
 deliberately does **not** build: it consumes the newest staged release from
@@ -888,10 +944,15 @@ and `/etc/newsyslog.d` under `<dir>` — with `--root`, `launchctl` and
 (`tools/server-service.py selftest`) is the no-sudo gate: it packages a
 plain (non-iroh) build, installs into a fresh `mkdtemp` root, `plutil -lint`s
 the generated plist, runs the wrapper in the foreground against a free
-localhost port, polls `GET /_matrix/client/versions` until it answers, logs
-in as `alice` (proving `etc/users.json` — the default alice/bob pair from
-"Accounts" above — is actually read), asserts `data/journal.jsonl` exists
-and is non-empty, then `SIGTERM`s the process and confirms it exits. It
+localhost port, polls `GET /_matrix/client/versions` until it answers, then
+runs the **first-run setup round trip** an owner would do by hand: the fresh
+install reports setup mode and 503s every other admin route, `POST
+/_wata/v1/admin/setup` creates the first admin, a second one is refused 409,
+`etc/users.json` appears holding exactly that account — hashed, no plaintext,
+mode 0600 — and the account logs in. It asserts `data/journal.jsonl` exists
+and is non-empty, `SIGTERM`s the process and confirms it exits, then boots a
+second process against the same root to prove the account survives a restart
+(no longer in setup mode, still the admin). It
 prints a `SRV-PACKAGE SELFTEST PASS`/`FAIL` line and a non-zero exit on
 failure.
 
@@ -902,9 +963,9 @@ acceptance check for that run.
 ## File-by-file map
 
 - **`model.scala`** — every domain ADT: `ErrCode`/`MErr` (errors as values), `Auth`, `UserCfg`, `Device`, `Profile`, `AcctData`, `Event`, `Room`, `MediaItem`, `Receipt`, `Waiter`, and the canonical-DM values (`DmPair`, `DmPeer`, `DmRoom`, `StateSeed`).
-- **`config.scala`** — `Config`: the accounts — read at boot from `WATA_USERS` (built-in alice/bob otherwise), hashed at rest, and rewritten atomically by the admin mutations — plus `serverName`.
+- **`config.scala`** — `Config`: the accounts — read at boot from `WATA_USERS` (built-in alice/bob when it is UNSET; setup mode when it is set with nothing behind it), hashed at rest, and rewritten atomically by the admin mutations and by `claimSetup` — plus `serverName`.
 - **`pwhash.scala`** — `Pwhash`: PBKDF2-HMAC-SHA256 derivation, the `pbkdf2-sha256$…` stored form, constant-time verification, and the hex rendering `SelfCheck` oracles.
-- **`adminapi.scala`** — `Admin`: the admin gate, the status panel, the accounts CRUD, and the boot clock uptime is measured from.
+- **`adminapi.scala`** — `Admin`: the admin gate, the two ungated first-run routes (`mode`, `setup`), the status panel, the accounts CRUD, and the boot clock uptime is measured from.
 - **`gocrypto.scala`** — `go.hashpkg`/`go.sha256`/`go.hmac`/`go.b64std`: the app-owned facades the hasher needs (`hash.Hash` as a trait — Go interfaces are traits here; `sha256.New` bound parenless so it lands as the function *value* `hmac.New` takes).
 - **`webembed.scala`** — `go.webembed`: the `@go.bind` facade for `wata-server/adminui`, the `go:embed`ed admin page.
 - **`membership.scala`** — the membership sealed types and the join/invite/leave/ban transition table; every row is reachable from an HTTP route.

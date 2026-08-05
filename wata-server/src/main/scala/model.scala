@@ -30,6 +30,10 @@ case class M_BAD_JSON() extends ErrCode
 case class M_TOO_LARGE() extends ErrCode
 case class M_UNKNOWN() extends ErrCode
 case class M_USER_IN_USE() extends ErrCode
+/** the server has no accounts yet and is in first-run setup (config.scala):
+ *  everything but the setup endpoints answers 503 with this. Not a Matrix
+ *  code — the wata dialect's own, like the admin surface it guards. */
+case class M_NOT_READY() extends ErrCode
 
 /** A Matrix-level failure as a VALUE (not a thrown exception): the handler
  *  pipeline returns `Either[MErr, Json]` and the edge serializes a `Left` to the

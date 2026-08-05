@@ -435,7 +435,7 @@ object SyncEngine:
 
   def stateMemberContent(roomId: String, uid: String, content: Json, evs0: List[SyncEvent]): List[SyncEvent] =
     val membership = WJson.strField(content, "membership", "leave")
-    val display = WJson.strField(content, "displayname", uid)
+    val display = Names.displayOr(WJson.strField(content, "displayname", ""), uid)
     val r = roomOr(roomId, emptyRoom(roomId))
     val newMembers = upsertMember(r.members, MemberInfo(uid, display, membership))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, newMembers,
@@ -698,8 +698,7 @@ object SyncEngine:
     if sawSelf then other else ""
 
   def dmDisplay(r: RoomState, peerId: String): String =
-    val dn = displayInRoom(r, peerId)
-    if dn != "" then dn else peerId
+    Names.displayOr(displayInRoom(r, peerId), peerId)
 
   /** everyone on the family roster is a contact, whether or not a DM room for
    *  them exists yet. */
@@ -750,8 +749,7 @@ object SyncEngine:
     ListOps.reverse(acc)
 
   def buildMessage(r: RoomState, vm: VoiceMessageRaw): VoiceMessage =
-    val dn = displayInRoom(r, vm.sender)
-    val senderName = if dn != "" then dn else vm.sender
+    val senderName = Names.displayOr(displayInRoom(r, vm.sender), vm.sender)
     VoiceMessage(vm.eventId, User(vm.sender, senderName), vm.mxcUrl,
       vm.durationMs, vm.timestamp, isPlayed(r, vm.eventId),
       strListContains(r.favorites, vm.eventId))
@@ -857,9 +855,11 @@ object SyncEngine:
 
   // ---- self display name ------------------------------------------------------------
 
-  /** first room where self has a non-empty display name != the raw id. */
+  /** first room where self has a display name that is more than the fallback
+   *  (`Names.localpart`, which is what a member with no profile name carries). */
   def resolveSelfDisplay(): String =
-    var result = selfUserId
+    val fallback = Names.localpart(selfUserId)
+    var result = fallback
     if selfUserId != "" then
       var found = false
       var cur = rooms
@@ -869,7 +869,7 @@ object SyncEngine:
           case c: ::[RoomState] =>
             if !found then
               val dn = displayInRoom(c.head, selfUserId)
-              if dn != "" && dn != selfUserId then { result = dn; found = true }
+              if dn != "" && dn != fallback then { result = dn; found = true }
             cur = c.tail
           case Nil => going = false
     result

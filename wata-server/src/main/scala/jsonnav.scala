@@ -24,6 +24,7 @@ object JsonNav:
     case _: M_TOO_LARGE     => "M_TOO_LARGE"
     case _: M_UNKNOWN       => "M_UNKNOWN"
     case _: M_USER_IN_USE   => "M_USER_IN_USE"
+    case _: M_NOT_READY     => "M_NOT_READY"
 
   def boolStr(b: Boolean): String = if b then "true" else "false"
 

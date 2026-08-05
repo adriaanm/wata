@@ -16,6 +16,11 @@ blocks + git log; each entry cites where it was recorded.*
   lever") — profiled, recorded, unscheduled.
 - **The actor-store refactor** — recorded M7 verdict: no evidence
   demands it; keep as a non-goal unless load says otherwise.
+- Conformance flake note (2026-08-05): stress-tests "concurrent sends
+  from both users (50)" failed once under a heavily loaded machine
+  (full ci + subagent gates in parallel; 158s run) and passed 84/84
+  immediately after on a quiet box (41s). Load-sensitivity, not a
+  regression — rerun alone before treating it as red.
 - Behavior pin worth remembering: wata-server does NOT auto-create
   users. Accounts come from `$WATA_USERS`; with it unset the built-in
   alice/bob pair applies, which is what all harnesses log in as.
@@ -103,10 +108,12 @@ blocks + git log; each entry cites where it was recorded.*
   IdList/MediaList wrappers gone (folds go straight to `List[T]`).
   RESIDUAL filed: WATA-FOLD-RETURN-POS — the recovered adapter cast
   misses RETURN position, so fold results are val-bound then returned
-  (store.scala, commented). Also open upstream: IF-EXPR-DOUBLE-BOXES
-  (primitive if-expression in argument position boxes; var-out idiom
-  as workaround, netstatus/ui), WATA-SKIP-FRESH-CHECKOUT (sgo driver;
-  build in the original checkout).
+  (store.scala, commented); fix dispatching upstream. IF-EXPR-DOUBLE-
+  BOXES **fixed at `4834bec`** (repin queued — unwind the var-out at
+  ui.scala's tickQuitArm as the standing proof; walls of that class
+  are also POSITIONED now, no more file-level banners). Still open:
+  WATA-SKIP-FRESH-CHECKOUT (sgo driver; build in the original
+  checkout).
 - FYI from upstream 2026-08-05 (`4cbea19..d30adec`): several
   template-body construction lifts landed, plus GEN-7 — a new registry
   row RESTRICTING four construction shapes inside generic bodies

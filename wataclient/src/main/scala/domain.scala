@@ -36,6 +36,31 @@ case class FamilyConv() extends ConversationType
 case class User(id: String, displayName: String)
 case class Contact(user: User)
 
+/** How a user id becomes something a person reads.
+ *
+ *  Display names are the server's (an admin sets them, plan 0021), and a
+ *  member may simply not have one yet — a fresh account, or a room state the
+ *  fan-out has not reached. The fallback is then the LOCALPART, never the raw
+ *  `@kid:example.org`: the mxid's server half is noise on a 26-column screen
+ *  and means nothing to the family, and it is the localpart the same person
+ *  types to log in. */
+object Names:
+  /** `@kid:example.org` -> `kid`. A string that is not an mxid comes back
+   *  unchanged, so this is safe on any id-shaped value. */
+  def localpart(userId: String): String =
+    var s = userId
+    if s.startsWith("@") then s = s.substring(1, s.length)
+    val colon = s.indexOf(":")
+    var out = s
+    if colon >= 0 then out = s.substring(0, colon)
+    out
+
+  /** a member's name: their display name if they have one, else the localpart. */
+  def displayOr(displayName: String, userId: String): String =
+    var out = displayName
+    if displayName == "" then out = localpart(userId)
+    out
+
 // ---- a voice message in the snapshot ------------------------------------------
 case class VoiceMessage(
   id: String,          // event_id

@@ -26,7 +26,7 @@ ONLY="${1:-}"
 SCENARIOS=(login-syncing both-sync voice-to-bob receipt-accepted receipt-roundtrip
            multiturn-order redaction download-bytes family-room session-resume
            dm-idempotent dm-stock-create backfill-paged backfill-cap
-           offline-retry auth-rejected)
+           offline-retry auth-rejected admin-rename)
 
 # ---- build -------------------------------------------------------------------
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "integ: wata-server build failed"; exit 1; }

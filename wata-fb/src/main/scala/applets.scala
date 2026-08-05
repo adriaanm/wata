@@ -751,7 +751,6 @@ case class SettingsState(
   selected: scala.Int,
   brightness: scala.Int,
   echo: EchoState,
-  nameIdx: scala.Int,
   screenTimeoutIdx: scala.Int,
   connected: Boolean,
   armed: Boolean,
@@ -776,25 +775,28 @@ final class SettingsApplet(val state: SettingsState) extends Applet:
     SettingsLogic.render(state, px, ctx)
 
 object SettingsLogic:
-  // menu items: 0 echo, 1 brightness, 2 screen_off, 3 display_name,
-  // 4 disconnect, 5 info, then the diagnostics absorbed from system-menu
-  // (plan 0003, phase 5): 6 ip and 7 cell data (info), 8 net test,
-  // 9 wifi and 10 cellular-data toggles, 11-13 the power actions.
-  val N_ITEMS = 14
+  // menu items: 0 echo, 1 brightness, 2 screen_off, 3 disconnect, 4 info,
+  // then the diagnostics absorbed from system-menu (plan 0003, phase 5):
+  // 5 ip and 6 cell data (info), 7 net test, 8 wifi and 9 cellular-data
+  // toggles, 10-12 the power actions.
+  //
+  // There is deliberately NO display-name row: a person's name is the
+  // account's, set by whoever administers the server (the admin interface,
+  // plan 0021), not something a handset picks from a list of presets.
+  val N_ITEMS = 13
   val ECHO = 0
   val BRIGHTNESS = 1
   val SCREEN_OFF = 2
-  val DISPLAY_NAME = 3
-  val DISCONNECT = 4
-  val INFO = 5
-  val IP_ADDR = 6
-  val CELL_DATA = 7
-  val NET_TEST = 8
-  val WIFI_TOGGLE = 9
-  val DATA_TOGGLE = 10
-  val POWER_OFF = 11
-  val REBOOT_BL = 12
-  val REBOOT_EDL = 13
+  val DISCONNECT = 3
+  val INFO = 4
+  val IP_ADDR = 5
+  val CELL_DATA = 6
+  val NET_TEST = 7
+  val WIFI_TOGGLE = 8
+  val DATA_TOGGLE = 9
+  val POWER_OFF = 10
+  val REBOOT_BL = 11
+  val REBOOT_EDL = 12
 
   /** menu rows visible at once — the menu is a scrolling window now that the
    *  item count outgrew the grid (six two-row items + the two detail rows).
@@ -814,22 +816,18 @@ object SettingsLogic:
     if i == 0 then "30s" else if i == 1 then "1m" else if i == 2 then "2m" else if i == 3 then "5m" else "Never"
   val N_TIMEOUTS = 5
 
-  def displayName(i: scala.Int): String =
-    if i == 0 then "Alice" else if i == 1 then "Bob" else if i == 2 then "Charlie" else "Device"
-  val N_NAMES = 4
-
   /** the menu occupies grid rows 2..12 (six items at two-row spacing), which
    *  leaves rows 13 and 14 — the last two of the 15-row landscape grid — for
    *  the selected item's detail text. Two lines is what there is room for. */
   val DETAIL_ROW = 13
 
   def initial(): SettingsState =
-    SettingsState(0, 40, EchoIdle(), 0, 1, true, false, "", "", "", "", "", "", 0)
+    SettingsState(0, 40, EchoIdle(), 1, true, false, "", "", "", "", "", "", 0)
 
   /** the boot state: preferences come back from the config store, so a device
    *  keeps the backlight and timeout its owner set. */
   def restored(p: FbPrefs): SettingsState =
-    SettingsState(0, p.brightness, EchoIdle(), p.nameIdx, p.timeoutIdx, true, false,
+    SettingsState(0, p.brightness, EchoIdle(), p.timeoutIdx, true, false,
       "", "", "", "", "", "", 0)
 
   def getScreenTimeout(s: SettingsState): scala.Int = timeoutSecs(s.screenTimeoutIdx)
@@ -837,34 +835,31 @@ object SettingsLogic:
 
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
-    SettingsState(sel, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+    SettingsState(sel, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
       s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
-    SettingsState(s.selected, b, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+    SettingsState(s.selected, b, s.echo, s.screenTimeoutIdx, s.connected,
       s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
-    SettingsState(s.selected, s.brightness, e, s.nameIdx, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
-  def withNameIdx(s: SettingsState, i: scala.Int): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, i, s.screenTimeoutIdx, s.connected,
+    SettingsState(s.selected, s.brightness, e, s.screenTimeoutIdx, s.connected,
       s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, i, s.connected,
+    SettingsState(s.selected, s.brightness, s.echo, i, s.connected,
       s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, c,
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, c,
       s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
   def withArmed(s: SettingsState, a: Boolean): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
       a, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
   def withDiag(s: SettingsState, ip: String, cell: String, wifi: String, left: scala.Int): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
       s.armed, ip, cell, wifi, s.netLine1, s.netLine2, s.actionMsg, left)
   def withNetTest(s: SettingsState, l1: String, l2: String): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
       s.armed, s.ipText, s.cellText, s.wifiText, l1, l2, s.actionMsg, s.diagLeft)
   def withActionMsg(s: SettingsState, m: String): SettingsState =
-    SettingsState(s.selected, s.brightness, s.echo, s.nameIdx, s.screenTimeoutIdx, s.connected,
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
       s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, m, s.diagLeft)
 
   // ---- input (press-only) ------------------------------------------------------
@@ -896,12 +891,11 @@ object SettingsLogic:
 
   def persisted(before: SettingsState, after: SettingsState): SettingsState =
     if prefsChanged(before, after) then
-      FbConfig.savePrefs(FbPrefs(after.brightness, after.screenTimeoutIdx, after.nameIdx))
+      FbConfig.savePrefs(FbPrefs(after.brightness, after.screenTimeoutIdx))
     after
 
   def prefsChanged(a: SettingsState, b: SettingsState): Boolean =
-    a.brightness != b.brightness || a.screenTimeoutIdx != b.screenTimeoutIdx ||
-      a.nameIdx != b.nameIdx
+    a.brightness != b.brightness || a.screenTimeoutIdx != b.screenTimeoutIdx
 
   def moveUp(s: SettingsState): SettingsState =
     var out = s
@@ -915,7 +909,6 @@ object SettingsLogic:
 
   def onEnter(s: SettingsState, ctx: FrameCtx): SettingsState =
     if s.selected == ECHO then startEcho(s, ctx)
-    else if s.selected == DISPLAY_NAME then pushName(s, ctx)
     else if s.selected == DISCONNECT then doDisconnect(s, ctx)
     else if s.selected == NET_TEST then runNetTest(s)
     else if isActionRow(s.selected) then armOrRun(s)
@@ -993,10 +986,6 @@ object SettingsLogic:
     case _: EchoErr  => true
     case _             => false
 
-  def pushName(s: SettingsState, ctx: FrameCtx): SettingsState =
-    Runtime.sendAction(ctx.client, ActSetName(displayName(s.nameIdx)))
-    s
-
   /** disconnect network only: stop sync loop + close actions. Reconnect
    *  requires an app restart (the runtime's threads don't respawn). */
   def doDisconnect(s: SettingsState, ctx: FrameCtx): SettingsState =
@@ -1008,13 +997,11 @@ object SettingsLogic:
 
   def onLeft(s: SettingsState): SettingsState =
     if s.selected == BRIGHTNESS then brightnessDown(s)
-    else if s.selected == DISPLAY_NAME then withNameIdx(s, decMod(s.nameIdx, N_NAMES))
     else if s.selected == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
     else s
 
   def onRight(s: SettingsState): SettingsState =
     if s.selected == BRIGHTNESS then brightnessUp(s)
-    else if s.selected == DISPLAY_NAME then withNameIdx(s, (s.nameIdx + 1) % N_NAMES)
     else if s.selected == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
     else s
 
@@ -1107,9 +1094,6 @@ object SettingsLogic:
     else if i == SCREEN_OFF then
       Font.drawText(px, "Screen off", 0, row, fg, false, 0)
       Font.drawText(px, timeoutLabel(s.screenTimeoutIdx), 12, row, fg, false, 0)
-    else if i == DISPLAY_NAME then
-      Font.drawText(px, "Name", 0, row, fg, false, 0)
-      Font.drawText(px, displayName(s.nameIdx), 7, row, Color.yellow, false, 0)
     else if i == DISCONNECT then
       Font.drawText(px, "Network", 0, row, fg, false, 0)
       var netTxt = "OFF"
@@ -1151,9 +1135,6 @@ object SettingsLogic:
     else if s.selected == ECHO then
       Font.drawText(px, "Records 2s, plays", 0, row, Color.midGray, false, 0)
       Font.drawText(px, "back thru speaker", 0, row + 1, Color.midGray, false, 0)
-    else if s.selected == DISPLAY_NAME then
-      Font.drawText(px, "</> pick  OK set", 0, row, Color.midGray, false, 0)
-      renderCurrentName(px, ctx, row + 1)
     else if s.selected == DISCONNECT then
       if s.connected then Font.drawText(px, "OK to disconnect", 0, row, Color.midGray, false, 0)
       else Font.drawText(px, "Restart to reconn", 0, row, Color.midGray, false, 0)
@@ -1227,11 +1208,6 @@ object SettingsLogic:
     var line = "Up:" + Diag.uptime()
     if pct >= 0 then line = "Bat:" + pct + "% " + line
     Font.drawText(px, line, 0, row, Color.midGray, false, 0)
-
-  def renderCurrentName(px: go.Bytes, ctx: FrameCtx, row: scala.Int): Unit =
-    if ctx.snap.hasSelfUser then
-      Font.drawText(px, "Now:", 0, row, Color.midGray, false, 0)
-      Font.drawText(px, WataLogic.clip(ctx.snap.selfUser.displayName, 12), 5, row, Color.green, false, 0)
 
   /** the net-test row's own value: what OK does, or that it has run (the
    *  verdicts themselves need the detail block's width). */

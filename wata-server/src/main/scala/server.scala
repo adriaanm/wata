@@ -208,6 +208,10 @@ object Server:
     // drives. Every /_wata/v1/admin/… route is admin-gated; /admin itself is
     // inert markup and is not.
     mux.handle("GET /admin", h)
+    // first-run setup (plan 0021 C): the only two admin routes outside the
+    // gate — the page asks which screen to draw, and claims the install.
+    mux.handle("GET /_wata/v1/admin/mode", h)
+    mux.handle("POST /_wata/v1/admin/setup", h)
     mux.handle("GET /_wata/v1/admin/status", h)
     mux.handle("GET /_wata/v1/admin/users", h)
     mux.handle("POST /_wata/v1/admin/users", h)

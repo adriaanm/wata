@@ -50,6 +50,7 @@ object Integ:
       else if name == "backfill-cap" then ok = s14()
       else if name == "offline-retry" then ok = s15()
       else if name == "auth-rejected" then ok = s16()
+      else if name == "admin-rename" then ok = s17()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -725,6 +726,54 @@ object Integ:
       val before = Runtime.loginAttempts
       Runtime.retryNow(c)
       waitLogins(c, before + 1, 5000L)
+
+  // ---- the admin rename reaches a LIVE client -----------------------------------
+
+  /** An admin renames someone while a client is syncing, and that client sees
+   *  the new name with no restart (plan 0021's names ruling: display names are
+   *  the account's, set through the admin interface — so the propagation path
+   *  has to be the running one).
+   *
+   *  The path under test is the server's profile fan-out: `setDisplayName`
+   *  rewrites the user's `m.room.member` event in every joined room, and that
+   *  state event rides the observer's next incremental sync. alice is the
+   *  built-in admin here (no `WATA_USERS` — harness mode), and she is also the
+   *  observer; bob is renamed.
+   *
+   *  Bob's phase runs first and only to auto-join the DM his side: the
+   *  fan-out rewrites JOINED memberships only (an invite still carries the
+   *  name it was sent with, as in Matrix at large), so an invite-only member
+   *  would prove nothing. */
+  def s17(): Boolean =
+    val atok = directToken("alice")
+    if atok == "" then false
+    else if dmRoomId(atok, "@bob:localhost") == "" then false
+    else if !phase("bob")(c => grabSelf(c) &&
+      Runtime.waitForSnapshot(c, s => contactNamed(s, "@alice:localhost", "Alice"), 20000L)) then false
+    else phase("alice")(c => renameSeen(c, atok))
+
+  def renameSeen(c: MatrixClient, atok: String): Boolean =
+    if !grabSelf(c) then false
+    else if !Runtime.waitForSnapshot(c, s => contactNamed(s, "@bob:localhost", "Bob"), 20000L) then false
+    else if !adminRename(atok, "bob", "Bobby") then false
+    else Runtime.waitForSnapshot(c, s => contactNamed(s, "@bob:localhost", "Bobby"), 20000L)
+
+  /** POST /_wata/v1/admin/users/{user}/displayname as an admin. */
+  def adminRename(token: String, user: String, name: String): Boolean =
+    val resp = MatrixHttp.request(directHs(token), "POST",
+      "/_wata/v1/admin/users/" + user + "/displayname",
+      "application/json", "{\"displayname\":\"" + name + "\"}")
+    resp.status == 200
+
+  def contactNamed(s: StateSnapshot, userId: String, name: String): Boolean =
+    nameOfContact(s.contacts, userId) == name
+
+  def nameOfContact(cs: List[Contact], userId: String): String = cs match
+    case h :: t => nameOfContactStep(h, t, userId)
+    case Nil  => ""
+
+  def nameOfContactStep(h: Contact, t: List[Contact], userId: String): String =
+    if h.user.id == userId then h.user.displayName else nameOfContact(t, userId)
 
   /** pump `n` voice events by direct HTTP (each ~1ms on loopback — a client
    *  phase would long-poll between sends). Message i gets duration i; the mxc
