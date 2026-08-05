@@ -249,6 +249,14 @@ def do_install(layout: Layout, iroh: bool):
     write_if_absent(layout.etc / "users.json", USERS_JSON.encode())
     write_if_absent(layout.data / "FORMAT", b"1\n")
 
+    # The daemon runs as the INSTALLING USER (plist UserName), but a sudo
+    # install creates everything root-owned — which leaves launchd unable to
+    # even open the StandardOutPath log as that user, so the job never comes
+    # up. Hand the whole layout to the user; root keeps the plist and the
+    # newsyslog conf (system files, and newsyslog rotates as root anyway).
+    if layout.real:
+        chown_layout(layout.prefix, installing_user())
+
     print(f"server-service: installed {version} at {layout.prefix} (current -> {release_dir})")
 
     if layout.real:
@@ -260,6 +268,16 @@ def do_install(layout: Layout, iroh: bool):
         print(f"server-service: {LABEL} bootstrapped")
     else:
         print("server-service: --root install — launchctl/newsyslog left untouched")
+
+
+def chown_layout(prefix: Path, user: str):
+    import pwd
+    pw = pwd.getpwnam(user)
+    os.chown(prefix, pw.pw_uid, pw.pw_gid, follow_symlinks=False)
+    for root, dirs, files in os.walk(prefix):
+        for name in dirs + files:
+            os.chown(os.path.join(root, name), pw.pw_uid, pw.pw_gid,
+                     follow_symlinks=False)
 
 
 def cmd_install(args):
