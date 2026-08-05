@@ -48,7 +48,7 @@ A consumer interacts with `wataclient` mainly through `runtime.scala`'s
 | `ClientConfig` | `runtime.scala:63` | Login parameters (homeserver/username/password/sync timeout) plus a `Session` to try resuming from. |
 | `MatrixClient` | `runtime.scala:73` | The client handle: config, the two capability instances, and five channels (`actions` in, `events` out, `snaps` out, `stop`, `auth`) plus the audio-command channel. |
 | `Runtime` | `runtime.scala:92` | Construction (`make`/`makeWithAudio`), lifecycle (`start`/`stopClient`), and polling helpers (`pollEvent`, `pollSnap`, `waitForConnection`, `waitForSnapshot`). |
-| `Action` / `UiEvent` | `runtime.scala:36-59` | The command and notification vocabulary between app and client. |
+| `Action` / `UiEvent` | `runtime.scala:36-59` | The command and notification vocabulary between app and client. `ActReceipt`, `ActSendVoice`, `ActPlay`, `ActSetName`, `ActRedact`, `ActFavorite` (the plan-0019 favorite toggle, fire-and-forget — its result arrives as room state on the next sync), `ActQuit`. |
 | `StateSnapshot` | `domain.scala:95` | The immutable UI-facing view of everything the client knows: connection state, self user, contacts, conversations, family. |
 
 The consumer's shape is: build a `MatrixClient` with `Runtime.make` (or
@@ -96,8 +96,9 @@ THREE atomic cells hold everything:
   insertion order. `RoomState` carries `name`, `hasAlias`/`alias`,
   `members` (`List[MemberInfo]`), `timelineEventIds` (a dedup set),
   `voiceMessages` (accumulated `VoiceMessageRaw`s in timeline order),
-  `receipts`, `prevBatch` (pagination token), and `dmMembers` — the
-  `net.wata.dm` pair, empty when the room is not a DM.
+  `receipts`, `prevBatch` (pagination token), `dmMembers` — the
+  `net.wata.dm` pair, empty when the room is not a DM — and `favorites`,
+  the event ids that currently carry a `net.wata.favorite` marker.
 - `selfUserId: String` — set once after login via `setSelfUser`.
 - `batch: String` — the `next_batch` token to send on the next `/sync`
   call.
@@ -124,6 +125,8 @@ is the entry point. It always:
 2. Walks `rooms.join`, once per room: state events, then timeline events
    (dedup against `timelineEventIds`, then dispatch by type: `m.room.name`
    updates the room name, `net.wata.dm` records the room's DM pair,
+   `net.wata.favorite` adds (non-empty content) or removes (empty content)
+   its `state_key` from the room's `favorites`,
    `m.room.member` upserts a `MemberInfo` and emits `MembershipChanged`,
    `m.room.message` with `msgtype: m.audio` extracts a `VoiceMessageRaw`,
    `m.room.redaction` removes any voice message it redacts), then
@@ -190,12 +193,20 @@ the family roster.
 computed as "self's user id appears in that event's receipt user-id list"
 — read receipts, not a separate read-marker.
 
+`isFavorite` is the room's `favorites` membership for that event id — the
+server's `net.wata.favorite` marker (plan 0019), which keeps the message
+past media retention. It is NOT per-user: retention is server-global, so
+anyone's favorite marks the message for everyone, and clearing it is an
+empty-content rewrite of the same state slot. The client never guesses at
+it — `ActFavorite` posts the toggle and the resulting state arrives on the
+next sync round, so a starred row means the server has recorded it.
+
 ### `syncoracle.scala` / `syncdescribe.scala` — the test machinery
 
 These are not part of the engine's runtime behavior; they exist purely to
 pin the engine's behavior deterministically in CI.
 
-- **`syncoracle.scala`** (`SyncOracle`) is a self-contained set of 15
+- **`syncoracle.scala`** (`SyncOracle`) is a self-contained set of 16
   scripted scenarios (hand-built JSON sync responses covering empty syncs,
   joins, voice messages, DM classification, family rooms, dedup,
   redactions, read receipts, etc.), each driving `SyncEngine.process` /
@@ -254,7 +265,7 @@ bytes over a socket":
 - **`mhttp.scala`** (225 lines, `Hs` + object `MatrixHttp`) is the actual
   Matrix Client-Server API surface: one function per endpoint (`login`,
   `sync`, `setDisplayName`, `redactEvent`, `sendReadReceipt`,
-  `uploadMedia`, `downloadMedia`, `joinRoom`, `dmRoom`,
+  `uploadMedia`, `downloadMedia`, `joinRoom`, `dmRoom`, `setFavorite`,
   `createRoomWithAlias`, `createRoomStockDm`, `getMessages`,
   `sendVoiceMessage`), all going through
   a single `request`/`send1` chokepoint that adds the bearer token and
@@ -389,7 +400,7 @@ checked against a separately pinned expected-output file in CI.
 | `session.scala` | 41 | `Session` record (stored login credentials) and its JSON (de)serialization. |
 | `syncdescribe.scala` | 306 | Renders engine state/events/snapshot as deterministic text, driven by real captured fixtures. |
 | `syncengine.scala` | 932 | The sync engine: `process()` (ingest) and `buildSnapshot()` (derive UI view). The core of the module. |
-| `syncoracle.scala` | 408 | 15 hand-scripted sync scenarios rendered as a deterministic text report, for CI pinning. |
+| `syncoracle.scala` | 430 | 16 hand-scripted sync scenarios rendered as a deterministic text report, for CI pinning. |
 | `wjson.scala` | 61 | Defaulting JSON field-read helpers used everywhere a sync/response body is parsed. |
 
 ## Backfill: the `limited` timeline gap

@@ -174,6 +174,9 @@ object Server:
     mux.handle("PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}", h)
     // the wata dialect: canonical DMs (dm.scala).
     mux.handle("POST /_wata/v1/dm/{userId}", h)
+    // the wata dialect: favorites (favorite.scala) — the joined-member rule a
+    // raw state PUT cannot express.
+    mux.handle("POST /_wata/v1/favorite/{roomId}/{eventId}", h)
     // the fail-on-demand test hook (testhooks.scala): REGISTERED only under
     // WATA_TEST_HOOKS=1 — without the env var the path 404s like any other
     // unknown path, so the production surface is unchanged.

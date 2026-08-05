@@ -1,4 +1,4 @@
-/** the sync-engine UNIT ORACLE: 15 scripted scenarios rendered as a
+/** the sync-engine UNIT ORACLE: 16 scripted scenarios rendered as a
  *  deterministic report. Each block resets the engine, drives it through
  *  `process()` with a hand-built sync response, and prints the resulting
  *  events/state/snapshot values. `tools/wataclient-sync.expected.txt` pins
@@ -6,8 +6,10 @@
  *
  *  Scenario 15 ("state persists across processes") probes that engine state
  *  survives across an intervening empty sync round, i.e. that a later,
- *  unrelated sync doesn't clobber earlier state. PORTABLE — zero `go` facade
- *  use (Json.tryParse only). */
+ *  unrelated sync doesn't clobber earlier state. Scenario 16 ("favorite")
+ *  probes both directions of the `net.wata.favorite` marker: a non-empty
+ *  content marks exactly its own message, an empty one clears it.
+ *  PORTABLE — zero `go` facade use (Json.tryParse only). */
 object SyncOracle:
 
   def parse(s: String): Json = Json.tryParse(s) match
@@ -97,7 +99,17 @@ object SyncOracle:
   def firstMessage(c: Conversation): VoiceMessage =
     c.messages match
       case m :: _ => m
-      case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false)
+      case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false, false)
+
+  /** the i-th message of a conversation (a zero-value message when short). */
+  def nthMessage(c: Conversation, i: Int): VoiceMessage = nthMsgIn(c.messages, i)
+
+  def nthMsgIn(ms: List[VoiceMessage], i: Int): VoiceMessage = ms match
+    case h :: t => nthMsgStep(h, t, i)
+    case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false, false)
+
+  def nthMsgStep(h: VoiceMessage, t: List[VoiceMessage], i: Int): VoiceMessage =
+    if i <= 0 then h else nthMsgIn(t, i - 1)
 
   def msgCount(c: Conversation): Int =
     var n = 0
@@ -409,5 +421,25 @@ object SyncOracle:
     b.append("t15 persist: batch "); b.append(SyncEngine.nextBatch)
     b.append(" name "); b.append(room15.name)
     b.append(" bob "); b.append(bob15.displayName); b.append('\n')
+
+    // -- 16. net.wata.favorite marks a message; EMPTY content clears it ------------------
+    SyncEngine.reset()
+    SyncEngine.setSelfUser("@alice:test")
+    SyncEngine.process(parse(js13))               // two voice messages, $msg1/$msg2
+    val js16 = "{\"next_batch\":\"b16\",\"rooms\":{\"join\":{\"!dm1:test\":{" +
+      "\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.favorite\",\"state_key\":\"$msg1\"," +
+      "\"content\":{\"by\":\"@alice:test\"}}]}}}}}"
+    SyncEngine.process(parse(js16))
+    val conv16 = nthConv(SyncEngine.buildSnapshot(), 0)
+    b.append("t16 favorite: m0 "); b.append(boolStr(firstMessage(conv16).isFavorite))
+    b.append(" m1 "); b.append(boolStr(nthMessage(conv16, 1).isFavorite))
+    val js16b = "{\"next_batch\":\"b16b\",\"rooms\":{\"join\":{\"!dm1:test\":{" +
+      "\"timeline\":{\"events\":[" +
+      "{\"type\":\"net.wata.favorite\",\"event_id\":\"$fav2\",\"state_key\":\"$msg1\"," +
+      "\"sender\":\"@alice:test\",\"content\":{}}]}}}}}"
+    SyncEngine.process(parse(js16b))
+    val conv16b = nthConv(SyncEngine.buildSnapshot(), 0)
+    b.append(" cleared "); b.append(boolStr(!firstMessage(conv16b).isFavorite)); b.append('\n')
 
     b.toString

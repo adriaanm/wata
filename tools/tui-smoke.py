@@ -4,7 +4,7 @@
     tools/tui-smoke.py          # run it
     TUI_SMOKE_KEEP=1 …          # keep the scratch dir on success
 
-Bob sends a canned Ogg to alice; alice then walks the REPL — snap, msgs, play,
+Bob sends a canned Ogg to alice; alice then walks the REPL — snap, msgs, play, fav,
 raw, snap again — and every assertion is made on the printed lines, which is
 what the line-oriented REPL exists for (docs/plans/0016-tui-port.md).
 
@@ -49,6 +49,8 @@ ALICE_SCRIPT = """wait 3000
 snap
 msgs 1
 play 1 1
+fav 1 1
+fav 1 1
 wait 4000
 snap
 raw GET /_matrix/client/v3/account/whoami
@@ -210,6 +212,11 @@ def run(tmp):
              f"alice: play downloaded {field(plays[0], 'bytes')} bytes, want {want}")
     c.line(alice, lambda l: l == "player ok", "alice: player did not exit zero")
     c.line(alice, lambda l: l.startswith("marked $"), "alice: no `marked` line")
+
+    # fav: the toggle answers with the state it left behind, both ways.
+    favs = [l for l in alice if l.startswith("fav ")]
+    c.ok([l.rsplit(" ", 1)[-1] for l in favs] == ["true", "false"],
+         f"alice: fav toggle wants true then false, got {favs!r}")
 
     # the player stub saw the file, and it is the Ogg bob sent, byte for byte.
     argv = os.path.join(tmp, "argv.txt")

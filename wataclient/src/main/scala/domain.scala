@@ -38,7 +38,11 @@ case class VoiceMessage(
   mxcUrl: String,      // mxc:// URL (audio_url derives from it, app-side)
   durationMs: Long,
   timestamp: Long,     // origin_server_ts (epoch ms)
-  isPlayed: Boolean
+  isPlayed: Boolean,
+  // the server's `net.wata.favorite` marker for this event id: a favorited
+  // message is kept past the media-retention window (plan 0019). Anyone's
+  // favorite counts — retention is server-global — so this is not per-user.
+  isFavorite: Boolean
 )
 
 /** a DM or family conversation. `hasContact == false` for the family thread;
@@ -80,7 +84,8 @@ case class RoomState(
   voiceMessages: List[VoiceMessageRaw], // timeline order
   receipts: List[ReceiptEntry],
   prevBatch: String,
-  dmMembers: List[String]               // the `net.wata.dm` pair; empty = not a DM
+  dmMembers: List[String],              // the `net.wata.dm` pair; empty = not a DM
+  favorites: List[String]               // event ids with a live `net.wata.favorite` slot
 )
 
 /** the immutable UI view, built by the engine. Optional `User`/`Family`

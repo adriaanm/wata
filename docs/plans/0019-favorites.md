@@ -1,6 +1,6 @@
 # 0019 — favorites: keeping a voice message
 
-Status: accepted
+Status: done
 
 ## Problem
 
@@ -78,3 +78,39 @@ stops forgetting starred rows.
 - Storage quotas for favorites (plan 0012's media bounds already cap
   upload size; a pathological number of favorites is a family-scale
   non-problem until it isn't).
+
+## What landed, and what it taught
+
+Built as specified. Notes worth keeping:
+
+- **The endpoint's error shapes** (favorite.scala, gated in this order):
+  unknown room `404 M_NOT_FOUND`, caller not joined `403 M_FORBIDDEN`,
+  target not an event of that room `404 M_NOT_FOUND`, target not an
+  `m.room.message` or already redacted `400 M_BAD_JSON`. `M_BAD_JSON` is
+  the 400 this errcode family has (there is no `M_INVALID_PARAM`), which
+  is what `handlers.scala` already uses for a well-formed-but-wrong body.
+- **The sweep reads the room, not a list.** `Retain.expired` now takes the
+  `Room` the walk already holds and asks `Favorite.isFavorited`, so there
+  is no global favorites index to keep coherent.
+  `Retain.exemptEventIds` stayed as a second, list-shaped seam.
+- **Favoriting a message and then redacting it** leaves a stale marker in
+  room state. Harmless — a redacted event has empty content and is
+  invisible to the sweep either way — and cleaning it up would mean the
+  redaction path knowing about favorites.
+- **OK became a hold key**, so a conversation-view OK now plays on the
+  RELEASE rather than the press, and `conversationInput` lost its `KEnter`
+  arm entirely (the gesture is routed before the press-only dispatch, like
+  red's). Every scripted `tap enter` still plays; only the frame it lands
+  on moved.
+- **The footer had to say so**: `OK play  hold red del` became
+  `OK play hold=fav red=del` (24 of the 26 columns). That re-pinned 14
+  goldens on the footer row alone; bob's two conversation goldens also
+  gained alice's star, which is the cross-client propagation the scenario
+  now proves.
+- **The star is a hand-drawn glyph at 0x8D** next to 0x8C's mast, drawn
+  through `Font.drawChar` (a >0x7F code inside a `drawText` string would
+  UTF-8 encode into two wrong glyphs) and right-aligned so marking a
+  message never shifts the row's text.
+- No sgola defect was hit implementing this — every restriction already in
+  `WATA-TODO.md` (while-over-`var cur` walks, no varargs into facades,
+  val-bound throwing calls) was simply respected.

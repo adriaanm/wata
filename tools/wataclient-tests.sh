@@ -5,7 +5,7 @@
 #      references. The core is portable by construction: it reaches hardware,
 #      the network, and the clock only through the HttpDo/Clock
 #      capability traits its consumer implements.
-#   2. SYNC-ENGINE UNIT ORACLE: `wata-fb synctest` runs the 15 sync-engine
+#   2. SYNC-ENGINE UNIT ORACLE: `wata-fb synctest` runs the 16 sync-engine
 #      scenarios; byte-diffed against tools/wataclient-sync.expected.txt.
 #   3. SYNC-ENGINE FIXTURE ORACLE: `wata-fb syncfix` replays the checked-in
 #      /sync fixtures (captured from a live wata-server by
@@ -51,7 +51,7 @@ if ! diff <("$FB" synctest) tools/wataclient-sync.expected.txt; then
   echo "wataclient-tests FAIL: sync-engine unit oracle diverged from expected"
   exit 1
 fi
-echo "   ok — 15 sync-engine scenarios byte-match the pinned expectations"
+echo "   ok — 16 sync-engine scenarios byte-match the pinned expectations"
 
 echo "== wataclient-tests: 3/5 sync-engine fixture oracle (wata-fb syncfix) =="
 # FIX stays repo-RELATIVE: the fixture paths echo into the oracle transcript

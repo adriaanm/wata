@@ -37,13 +37,14 @@ Startup prints one line: `ready <userId>`, or `login failed`.
 | `send <conv#\|user> <file.ogg>` | upload the file and send it as `m.audio`; a non-numeric target is a user id whose DM room the server resolves |
 | `play <conv#> <msg#>` | download the Ogg, write it under `$WATA_TUI_TMPDIR` (default `/tmp`), hand it to the player, then send the read receipt |
 | `mark <conv#> <msg#>` | the read receipt only |
+| `fav <conv#> <msg#>` | TOGGLE the server's `net.wata.favorite` marker on that message (plan 0019), so the media retention sweep spares it; prints `fav <eventId> <true\|false>` — the state the toggle left behind — or `fav failed: <status> <body>` |
 | `raw <METHOD> <path> [json]` | an authenticated request straight at the server; prints `raw <status> <length>` then the body |
 | `wait <ms>` | poll snapshots for that long, printing `change convs=<n> unplayed=<n>` whenever the summary moves, then `waited <ms>` |
 | `quit` | wind the client down and exit (`bye`) |
 
 Every rejection is prefixed `?`. Numbered references index the **last
 `snap`**: `snap` stashes the conversation list it printed, and
-`msgs`/`play`/`mark` index into that list and into a conversation's own
+`msgs`/`play`/`mark`/`fav` index into that list and into a conversation's own
 message order — which is exactly the order `msgs` prints. So a script's
 numbers are stable against whatever arrives mid-run, and `play` does not
 depend on `msgs` having been run first. Ids are printed alongside for

@@ -33,6 +33,7 @@ object Router:
     else if path == "/_matrix/client/v3/account/whoami" then whoami(r)
     else if path == "/_matrix/client/v3/sync" then Sync.handle(r)
     else if isDmPath(path, n) then Dm.route(r)
+    else if isFavoritePath(path, n) then Favorite.route(r)
     else if TestHooks.enabled && isTestFailPath(path) then TestHooks.route(body)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)
@@ -90,6 +91,10 @@ object Router:
   /** `/_wata/v1/dm/{userId}` */
   def isDmPath(path: String, n: scala.Int): Boolean =
     n == 4 && seg(path, 0) == "_wata" && seg(path, 1) == "v1" && seg(path, 2) == "dm"
+
+  /** `/_wata/v1/favorite/{roomId}/{eventId}` */
+  def isFavoritePath(path: String, n: scala.Int): Boolean =
+    n == 5 && seg(path, 0) == "_wata" && seg(path, 1) == "v1" && seg(path, 2) == "favorite"
 
   /** `/_wata/v1/test/fail` — dispatched only when `TestHooks.enabled`,
    *  mirroring its conditional registration (server.scala). */

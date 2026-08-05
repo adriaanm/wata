@@ -16,6 +16,9 @@ import language.experimental.saferExceptions
  *    play <conv#> <msg#>      download the Ogg, hand it to the external
  *                             player, then mark it played
  *    mark <conv#> <msg#>      the read receipt only
+    fav <conv#> <msg#>       TOGGLE the server's favorite marker on that
+                             message (plan 0019): a favorited voice message is
+                             kept past the media-retention window
  *    raw <METHOD> <path> [json]   an authenticated request straight at the
  *                             server; prints status, length, and the body
  *    wait <ms>                poll snapshots for that long, printing each
@@ -59,6 +62,7 @@ object Repl:
     else if cmd == "send" then send(c, Str.nth(ts, 1), Str.nth(ts, 2))
     else if cmd == "play" then play(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
     else if cmd == "mark" then mark(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
+    else if cmd == "fav" then fav(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
     else if cmd == "raw" then raw(c, Str.nth(ts, 1), Str.nth(ts, 2), Str.restLine(line, 3))
     else if cmd == "wait" then waitMs(c, Str.num(Str.nth(ts, 1), 1000))
     else if cmd == "quit" then
@@ -256,6 +260,24 @@ object Repl:
   def markMsg(c: MatrixClient, cv: Conversation, m: VoiceMessage): Unit =
     Runtime.sendAction(c, ActReceipt(cv.roomId, m.id))
     println("marked " + m.id)
+
+  // ---- fav ------------------------------------------------------------------------
+
+  /** the favorite TOGGLE, called synchronously (not through the action queue)
+   *  so the admin sees the resulting state rather than a fire-and-forget. The
+   *  star the device draws comes from the same state event, via sync. */
+  def fav(c: MatrixClient, ci: scala.Int, mi: scala.Int): Unit = convAt(ci) match
+    case cv: Some[Conversation] => favIn(c, cv.value, mi)
+    case None                   => println("? no conversation " + ci)
+
+  def favIn(c: MatrixClient, cv: Conversation, mi: scala.Int): Unit = msgAt(cv, mi) match
+    case m: Some[VoiceMessage] => favMsg(c, cv, m.value)
+    case None                  => println("? no message " + mi)
+
+  def favMsg(c: MatrixClient, cv: Conversation, m: VoiceMessage): Unit =
+    val resp = MatrixHttp.setFavorite(hsOf(c), cv.roomId, m.id)
+    if resp.status != 200 then println("fav failed: " + resp.status + " " + resp.body)
+    else println("fav " + m.id + " " + Str.boolStr(MatrixHttp.parseFavorite(resp.body)))
 
   // ---- raw ----------------------------------------------------------------------
 

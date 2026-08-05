@@ -99,7 +99,7 @@ object SyncEngine:
 
   def emptyRoom(roomId: String): RoomState =
     RoomState(roomId, "", false, "", Nil, Nil,
-      Nil, Nil, "", Nil)
+      Nil, Nil, "", Nil, Nil)
 
   /** getOrCreateRoom: append a fresh RoomState if absent (insertion order). */
   def ensureRoom(roomId: String): Unit =
@@ -219,7 +219,7 @@ object SyncEngine:
     val r0 = roomOr(roomId, emptyRoom(roomId))
     if hasEid && !strListContains(r0.timelineEventIds, eid) then
       updateRoom(RoomState(r0.roomId, r0.name, r0.hasAlias, r0.alias, r0.members,
-        appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers))
+        appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers, r0.favorites))
       if WJson.strField(ev, "type", "") == "m.room.message" then extractVoiceBackfill(roomId, ev)
 
   // ---- json array helpers -----------------------------------------------------
@@ -346,6 +346,7 @@ object SyncEngine:
     if etype == "m.room.name" then { stateName(roomId, ev); evs0 }
     else if etype == "m.room.canonical_alias" then { stateAlias(roomId, ev); evs0 }
     else if etype == "net.wata.dm" then { stateDm(roomId, ev); evs0 }
+    else if etype == "net.wata.favorite" then { stateFavorite(roomId, ev); evs0 }
     else if etype == "m.room.member" then stateMember(roomId, ev, evs0)
     else evs0
 
@@ -360,14 +361,53 @@ object SyncEngine:
   def setDmMembers(roomId: String, members: List[String]): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, members))
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, members, r.favorites))
+
+  /** the server's favorite marker (plan 0019): `state_key` is the favorited
+   *  event's id, a non-empty content (`{"by": …}`) sets it and an EMPTY one
+   *  clears it — the state-resolution idiom for clearing a slot, which is why
+   *  presence of the state event is not the test. Arrives as ordinary room
+   *  state, live and in the initial sync alike, so nothing here is sticky. */
+  def stateFavorite(roomId: String, ev: Json): Unit =
+    if hasField(ev, "state_key") then
+      stateFavoriteKeyed(roomId, WJson.strField(ev, "state_key", ""), WJson.objField(ev, "content"))
+
+  def stateFavoriteKeyed(roomId: String, eventId: String, content: Json): Unit =
+    if eventId != "" then setFavorite(roomId, eventId, !emptyObjJ(content))
+
+  def emptyObjJ(j: Json): Boolean = j match
+    case o: JObj => noFields(o.fields)
+    case _       => true
+
+  def noFields(fs: List[(String, Json)]): Boolean = fs match
+    case _ :: _ => false
+    case Nil  => true
+
+  def setFavorite(roomId: String, eventId: String, on: Boolean): Unit =
+    val r = roomOr(roomId, emptyRoom(roomId))
+    updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers,
+      withFav(r.favorites, eventId, on)))
+
+  def withFav(fs: List[String], eventId: String, on: Boolean): List[String] =
+    if on then addFav(fs, eventId) else dropStr(fs, eventId, Nil)
+
+  def addFav(fs: List[String], eventId: String): List[String] =
+    if strListContains(fs, eventId) then fs else appendStr(fs, eventId)
+
+  def dropStr(xs: List[String], s: String, acc: List[String]): List[String] = xs match
+    case h :: t => dropStrStep(h, t, s, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def dropStrStep(h: String, t: List[String], s: String, acc: List[String]): List[String] =
+    if h == s then dropStr(t, s, acc) else dropStr(t, s, h :: acc)
 
   def stateName(roomId: String, ev: Json): Unit =
     val content = WJson.objField(ev, "content")
     if WJson.hasStr(content, "name") then
       val r = roomOr(roomId, emptyRoom(roomId))
       updateRoom(RoomState(r.roomId, WJson.strField(content, "name", ""), r.hasAlias, r.alias,
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
 
   /** canonical_alias: an alias string sets it; a PRESENT content without one
    *  CLEARS it; an absent content changes nothing. */
@@ -379,10 +419,10 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     if WJson.hasStr(content, "alias") then
       updateRoom(RoomState(r.roomId, r.name, true, WJson.strField(content, "alias", ""),
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
     else
       updateRoom(RoomState(r.roomId, r.name, false, "",
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
 
   def stateMember(roomId: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
     if !hasField(ev, "state_key") then evs0                 // no state_key: not a state event
@@ -399,7 +439,7 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     val newMembers = upsertMember(r.members, MemberInfo(uid, display, membership))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, newMembers,
-      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers))
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
     MembershipChanged(roomId, uid, membership) :: evs0
 
   // ---- timeline -------------------------------------------------------------------
@@ -407,7 +447,7 @@ object SyncEngine:
   def setPrevBatch(roomId: String, pb: String): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, r.receipts, pb, r.dmMembers))
+      r.timelineEventIds, r.voiceMessages, r.receipts, pb, r.dmMembers, r.favorites))
 
   def timelineLoop(roomId: String, events: List[Json], evs0: List[SyncEvent]): List[SyncEvent] =
     var evs = evs0
@@ -429,7 +469,7 @@ object SyncEngine:
     else
       if hasEid then
         updateRoom(RoomState(r0.roomId, r0.name, r0.hasAlias, r0.alias, r0.members,
-          appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers))
+          appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers, r0.favorites))
       var evs = evs0
       if hasField(ev, "state_key") then evs = stateEvent(roomId, ev, evs)
       val etype = WJson.strField(ev, "type", "")
@@ -468,7 +508,7 @@ object SyncEngine:
       val vs = if backfill then insertVoiceByTs(r.voiceMessages, vm)
                else appendVoice(r.voiceMessages, vm)
       updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-        r.timelineEventIds, vs, r.receipts, r.prevBatch, r.dmMembers))
+        r.timelineEventIds, vs, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
 
   def appendVoice(vs: List[VoiceMessageRaw], v: VoiceMessageRaw): List[VoiceMessageRaw] =
     ListOps.reverse(v :: ListOps.reverse(vs))
@@ -505,7 +545,7 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
       r.timelineEventIds, dropVoice(r.voiceMessages, targetId, Nil),
-      r.receipts, r.prevBatch, r.dmMembers))
+      r.receipts, r.prevBatch, r.dmMembers, r.favorites))
 
   def dropVoice(vs: List[VoiceMessageRaw], targetId: String, acc: List[VoiceMessageRaw]): List[VoiceMessageRaw] = vs match
     case h :: t => dropVoiceStep(h, t, targetId, acc)
@@ -566,7 +606,7 @@ object SyncEngine:
       case None => ReceiptEntry(eventId, Nil)
     val updated = ReceiptEntry(eventId, appendUserKeys(existing.userIds, users))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.dmMembers))
+      r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.dmMembers, r.favorites))
     ReceiptUpdated(roomId, eventId) :: evs0
 
   /** append every user key (no dedup — duplicates are appended as-is). */
@@ -713,7 +753,8 @@ object SyncEngine:
     val dn = displayInRoom(r, vm.sender)
     val senderName = if dn != "" then dn else vm.sender
     VoiceMessage(vm.eventId, User(vm.sender, senderName), vm.mxcUrl,
-      vm.durationMs, vm.timestamp, isPlayed(r, vm.eventId))
+      vm.durationMs, vm.timestamp, isPlayed(r, vm.eventId),
+      strListContains(r.favorites, vm.eventId))
 
   /** is_played: the SELF user's id appears in the event's receipt list. */
   def isPlayed(r: RoomState, eventId: String): Boolean =

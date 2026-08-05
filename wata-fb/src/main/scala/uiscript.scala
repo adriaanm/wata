@@ -71,7 +71,8 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
  *  msgs (messages in the conversation the wata applet is pointing at), played
- *  (of those, how many are marked played), nameset (1 once the self user's
+ *  (of those, how many are marked played), favs (of those, how many carry the
+ *  server's favorite marker), nameset (1 once the self user's
  *  display name equals the settings applet's currently picked preset),
  *  screenoff (1 while the screensaver has the panel blanked), sendfail /
  *  playfail (the session's failed-send / failed-play tallies — what a script
@@ -441,6 +442,7 @@ object UiScript:
     else if name == "convs" then WataLogic.convCount(Ui.frameSnap)
     else if name == "msgs" then WataLogic.msgCount(Ui.frameSnap, curConvIdx())
     else if name == "played" then playedCount(Ui.frameSnap, curConvIdx())
+    else if name == "favs" then favCount(Ui.frameSnap, curConvIdx())
     else if name == "nameset" then nameSetProbe()
     else if name == "screenoff" then boolProbe(Ui.screenOff)
     else if name == "sendfail" then Ui.sendFails
@@ -475,6 +477,26 @@ object UiScript:
     WataLogic.convAt(snap, idx) match
       case c: Some[Conversation] => playedIn(c.value.messages)
       case None => 0
+
+  /** favorited messages in the conversation the applet points at — what a
+   *  script waits on after the hold-OK gesture, since the star only appears
+   *  once the server's `net.wata.favorite` state has come back through sync. */
+  def favCount(snap: StateSnapshot, idx: scala.Int): scala.Int =
+    WataLogic.convAt(snap, idx) match
+      case c: Some[Conversation] => favIn(c.value.messages)
+      case None => 0
+
+  def favIn(ms: List[VoiceMessage]): scala.Int =
+    var n = 0
+    var cur = ms
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          if h.isFavorite then n = n + 1
+          cur = t
+        case Nil => going = false
+    n
 
   def playedIn(ms: List[VoiceMessage]): scala.Int =
     var n = 0

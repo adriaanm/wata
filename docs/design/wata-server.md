@@ -7,7 +7,7 @@ compiles to Go source — see the repo root for the toolchain) and built as an
 `wata-server/go.mod`). There is no JVM at runtime: `sgo build` emits Go, which
 is compiled and run like any other Go program.
 
-The source lives entirely in `wata-server/src/main/scala/` — 19 files, ~4700
+The source lives entirely in `wata-server/src/main/scala/` — 20 files, ~4800
 lines:
 
 | file | lines | role |
@@ -20,7 +20,8 @@ lines:
 | `store.scala` | 1061 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping, media reclaim |
 | `persist.scala` | 315 | append-only JSONL journal + boot-time replay + old-journal media migration |
 | `mediafiles.scala` | 89 | the file-backed media blob store under `<dataDir>/media/` |
-| `retain.scala` | 120 | the media retention sweep (boot + daily) |
+| `retain.scala` | 128 | the media retention sweep (boot + daily), favorites exempted |
+| `favorite.scala` | 100 | the favorite toggle endpoint + the `net.wata.favorite` marker |
 | `handlers.scala` | 344 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
 | `keys.scala` | 83 | the E2EE device-key routes, as no-op stubs |
 | `dm.scala` | 308 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
@@ -386,9 +387,34 @@ text messages are untouched, already-redacted events have empty content and
 fall through, and unreferenced blobs (e.g. a migrated orphan) are never
 swept. Age is judged by the event's `origin_server_ts`, which survives replay
 verbatim (a blob file's mtime would reset on migration). The sweep runs once
-at boot, before listening, and then daily on a spawned goroutine. The
-exempt-set seam (`Retain.exemptEventIds`, empty today) is where a future
-"favorite a message" marker slots in to keep a message.
+at boot, before listening, and then daily on a spawned goroutine.
+
+**Favorites are the exception** (`Favorite`, favorite.scala; plan 0019). A
+favorite is ROOM STATE the server writes: `net.wata.favorite`, `state_key` =
+the favorited event's id, content `{"by": userId}`; unfavoriting rewrites the
+slot with `{}` (the state-resolution idiom for clearing one). One
+representation buys three things — it journals and replays as the existing
+`event` op, it reaches every client through ordinary `/sync` state (the star a
+device draws needs no new transport), and the sweep reads it out of the room
+record it already walks: an event whose room state carries a *non-empty*
+`net.wata.favorite` slot under its id is skipped. `Retain.exemptEventIds`
+survives as an additional list-shaped seam, empty in production.
+
+The write path is a DIALECT ENDPOINT, `POST
+/_wata/v1/favorite/{roomId}/{eventId}` → `{"favorite": true|false}`, auth
+required, TOGGLING. It is an endpoint rather than a raw `PUT /state` because
+the rule it applies — *any joined member* may favorite — is one power levels
+cannot express: `state_default` is 50 and members sit at 0, and lowering the
+level for one event type in every existing room is a migration this does not
+need. Gates, in order: unknown room → `404 M_NOT_FOUND`, caller not joined →
+`403 M_FORBIDDEN`, target not an event of that room → `404 M_NOT_FOUND`,
+target not an `m.room.message` or already redacted → `400 M_BAD_JSON`.
+Favoriting a *text* message is allowed and simply has no retention meaning
+today. Favorites are GLOBAL in effect: retention is server-global, so anyone's
+favorite keeps the message for everyone — `by` records who, for the UI and for
+a possible per-user view later. The persist smoke covers the whole loop:
+favorite → age → reboot-sweep leaves event and blob, unfavorite → the next
+sweep reclaims both, and each survives a `kill -9` replay.
 
 **Long-poll waiters.** `Waiter` (`model.scala:109`) pairs a monotonic `id`
 with an *unbuffered* `Chan[Boolean]` that is used purely as a
@@ -688,10 +714,11 @@ acceptance check for that run.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
 - **`osfile.scala`** — `go.osfile`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove`) the blob store needs; perms passed as literals, errors dropped (best-effort).
-- **`retain.scala`** — `Retain`: the media retention sweep — `WATA_MEDIA_RETAIN_DAYS`, the boot + daily passes, the server-side redaction of expired voice messages, and the favorites exempt-set seam.
+- **`retain.scala`** — `Retain`: the media retention sweep — `WATA_MEDIA_RETAIN_DAYS`, the boot + daily passes, the server-side redaction of expired voice messages, and the favorite/exempt checks that spare one.
 - **`handlers.scala`** — `Router`: the top-level route dispatch, `requireAuth`, `/versions`, login/logout/whoami, profile, and account-data handlers.
 - **`keys.scala`** — `Keys`: the three E2EE device-key routes as authenticated no-op stubs; `/keys/upload` tallies the one-time-key counts back per algorithm, which matrix-dart-sdk requires, and discards the keys.
 - **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
+- **`favorite.scala`** — `Favorite`: the `POST /_wata/v1/favorite/{roomId}/{eventId}` toggle, the joined-member rule, and the `net.wata.favorite` marker's read side (`isFavorited`, which the sweep calls).
 - **`dm.scala`** — `Dm`: canonical DMs. The `POST /_wata/v1/dm/{userId}` endpoint, the `net.wata.dm`/alias identity, the boot migration, and the one-way `m.direct` compat projection.
 - **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental, account data through `Dm.project`) and the long-poll orchestration.
 - **`testhooks.scala`** — `TestHooks`: the `WATA_TEST_HOOKS=1`-only fail-on-demand counter and its `POST /_wata/v1/test/fail` route (see "Test hooks").

@@ -30,7 +30,9 @@ case class VConversation() extends WataView
  *  params). `pttHeld`/`pttHoldTime` drive the record overlay; send/play
  *  status flash for `statusTimer` seconds then clears; `backHeld`/
  *  `backHoldTime` track the red key in a conversation (tap = back on
- *  release, hold past `BACK_HOLD_DELETE` = delete the selected message). */
+ *  release, hold past `BACK_HOLD_DELETE` = delete the selected message), and
+ *  `okHeld`/`okHoldTime` do the same for OK (tap = play on release, hold past
+ *  `OK_HOLD_FAVORITE` = toggle the selected message's favorite). */
 case class WataState(
   view: WataView,
   selected: scala.Int,
@@ -46,7 +48,9 @@ case class WataState(
   playError: Boolean,
   statusTimer: scala.Double,
   backHeld: Boolean,
-  backHoldTime: scala.Double
+  backHoldTime: scala.Double,
+  okHeld: Boolean,
+  okHoldTime: scala.Double
 )
 
 object WataLogic:
@@ -54,7 +58,8 @@ object WataLogic:
   val FOOTER_ROW = Font.ROWS - 1
 
   def initial(): WataState =
-    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, false, false, false, 0.0, false, 0.0)
+    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, false, false, false, 0.0,
+      false, 0.0, false, 0.0)
 
   /** visible list rows between header and footer (bitmap grid). */
   def visibleRows(): scala.Int = FOOTER_ROW - FONT_ROWS_HEADER
@@ -63,48 +68,56 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
+      held, hold, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withPlaying(s: WataState, playing: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime)
+      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   /** the full status-flash tuple (hold + timer + the three flash flags). */
   def withFlash(s: WataState, hold: scala.Double, timer: scala.Double,
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, hold, s.playing, sendErr, sendOk, playErr, timer, s.backHeld, s.backHoldTime)
+      s.pttHeld, hold, s.playing, sendErr, sendOk, playErr, timer, s.backHeld, s.backHoldTime,
+      s.okHeld, s.okHoldTime)
 
   def withPlayErr(s: WataState, playing: Boolean, playErr: Boolean, timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, timer, s.backHeld, s.backHoldTime)
+      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, timer, s.backHeld, s.backHoldTime,
+      s.okHeld, s.okHoldTime)
+
+  def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
+    WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer,
+      s.backHeld, s.backHoldTime, held, hold)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer,
-      held, hold)
+      held, hold, s.okHeld, s.okHoldTime)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
   /** full input with per-frame context (snapshot + queues). Returns new state. */
   def handleInput(s: WataState, k: Key, ks: KeyState, ctx: FrameCtx): WataState =
     if isPtt(k) then pttInput(s, ks, ctx)
     else if isBack(k) && isConvView(s) then backInput(s, ks)
+    else if isEnter(k) && isConvView(s) then okInput(s, ks, ctx)
     else if !Shell.isPressed(ks) then s
     else s.view match
       case _: VContacts     => contactsInput(s, k, ctx)
@@ -118,6 +131,10 @@ object WataLogic:
     case KBack() => true
     case _       => false
 
+  def isEnter(k: Key): Boolean = k match
+    case KEnter() => true
+    case _        => false
+
   def isConvView(s: WataState): Boolean = s.view match
     case _: VConversation => true
     case _                => false
@@ -129,6 +146,20 @@ object WataLogic:
     case Pressed()  => withBack(s, true, 0.0)
     case Released() => if s.backHeld then withBack(withView(s, VContacts()), false, 0.0) else s
     case _          => s
+
+  /** OK in a conversation, the same hold grammar the red key uses: a TAP plays
+   *  the selected message (on release), a HOLD past `OK_HOLD_FAVORITE` toggles
+   *  its favorite — `tickTimers` fires that and drops the held flag, so the
+   *  eventual release does nothing. */
+  def okInput(s: WataState, ks: KeyState, ctx: FrameCtx): WataState = ks match
+    case Pressed()  => withOk(s, true, 0.0)
+    case Released() => okRelease(s, ctx)
+    case _          => s
+
+  def okRelease(s: WataState, ctx: FrameCtx): WataState =
+    var out = s
+    if s.okHeld then out = playSelected(withOk(s, false, 0.0), ctx)
+    out
 
   /** PTT: press starts recording, release stops + (via the audio thread) sends.
    *  The effect (trySend) runs in statement position; the result rides a
@@ -177,10 +208,11 @@ object WataLogic:
     sendReceiptForConversation(ctx, s.selected)
     enterConv(s, s.selected)
 
+  /** OK is absent here on purpose: in the conversation view it is a HOLD
+   *  gesture (`okInput`), routed before the press-only dispatch. */
   def conversationInput(s: WataState, k: Key, ctx: FrameCtx): WataState = k match
     case _: KDown  => downMsg(s, ctx)
     case _: KUp    => upMsg(s)
-    case _: KEnter => playSelected(s, ctx)
     case _: KF2    => deleteSelected(s, ctx)   // sim/script delete; no F2 key on the case
     case _           => s
 
@@ -213,6 +245,16 @@ object WataLogic:
     selectedMsg(ctx.snap, s.convContactIdx, s.msgSelected) match
       case m: Some[VoiceMessage] =>
         Runtime.sendAction(ctx.client, ActRedact(roomIdAt(ctx.snap, s.convContactIdx), m.value.id))
+        s
+      case None => s
+
+  /** hold-OK: toggle the server's favorite marker on the selected message. The
+   *  star it draws arrives through `/sync` as room state, so the row updates
+   *  when the server has actually recorded it — nothing is optimistic here. */
+  def favoriteSelected(s: WataState, ctx: FrameCtx): WataState =
+    selectedMsg(ctx.snap, s.convContactIdx, s.msgSelected) match
+      case m: Some[VoiceMessage] =>
+        Runtime.sendAction(ctx.client, ActFavorite(roomIdAt(ctx.snap, s.convContactIdx), m.value.id))
         s
       case None => s
 
@@ -273,6 +315,9 @@ object WataLogic:
     out
 
   val BACK_HOLD_DELETE: scala.Double = 0.8
+  /** seconds of OK before the gesture becomes "favorite" instead of "play" —
+   *  the same hold budget the red key's delete uses. */
+  val OK_HOLD_FAVORITE: scala.Double = 0.8
 
   def tickTimers(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
     val hold = if s.pttHeld then s.pttHoldTime + dt else s.pttHoldTime
@@ -285,6 +330,10 @@ object WataLogic:
       val bt = out.backHoldTime + dt
       if bt >= BACK_HOLD_DELETE then out = withBack(deleteSelected(out, ctx), false, 0.0)
       else out = withBack(out, true, bt)
+    if out.okHeld then
+      val ot = out.okHoldTime + dt
+      if ot >= OK_HOLD_FAVORITE then out = withOk(favoriteSelected(out, ctx), false, 0.0)
+      else out = withOk(out, true, ot)
     out
 
   /** one audio event, routed here by `Shell.routeAudio`: a finished recording
@@ -379,7 +428,7 @@ object WataLogic:
       Font.drawText(px, "ESC back", 0, FOOTER_ROW, Color.midGray, false, 0)
     else
       renderMsgRows(s, px, conv, n)
-      Font.drawText(px, "OK play  hold red del", 0, FOOTER_ROW, Color.midGray, false, 0)
+      Font.drawText(px, "OK play hold=fav red=del", 0, FOOTER_ROW, Color.midGray, false, 0)
 
   def renderMsgRows(s: WataState, px: go.Bytes, conv: Conversation, n: scala.Int): Unit =
     val vis = visibleRows()
@@ -396,6 +445,10 @@ object WataLogic:
         case None => ()
       i += 1
 
+  /** the row: an optional played check in column 0, duration, sender — and a
+   *  favorited row's STAR in the last column, right-aligned so marking a
+   *  message never shifts the text. The star is a custom glyph (> 0x7F), so it
+   *  goes through `drawChar` rather than inside a `drawText` string. */
   def renderMsgRow(px: go.Bytes, m: VoiceMessage, row: scala.Int, fg: scala.Int): Unit =
     if m.isPlayed then Font.drawChar(px, Font.ICON_CHECK, 0, 1 + row * Font.GLYPH_H, fg, false, 0)
     val dur = durStr(m.durationMs)
@@ -403,6 +456,9 @@ object WataLogic:
     Font.drawText(px, dur, col, row, fg, false, 0)
     val sender = clip(m.sender.displayName, 8)
     Font.drawText(px, sender, col + dur.length + 1, row, fg, false, 0)
+    if m.isFavorite then
+      Font.drawChar(px, Font.ICON_STAR, (Font.COLS - 1) * Font.GLYPH_W, 1 + row * Font.GLYPH_H,
+        fg, false, 0)
 
   def renderStatusFlash(s: WataState, px: go.Bytes): Unit =
     if s.statusTimer > 0.0 then

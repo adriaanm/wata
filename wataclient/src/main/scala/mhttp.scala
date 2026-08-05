@@ -112,6 +112,18 @@ object MatrixHttp:
   def dmRoom(hs: Hs, contactUserId: String): HttpResponse =
     request(hs, "POST", "/_wata/v1/dm/" + contactUserId, JSON, "{}")
 
+  /** POST /_wata/v1/favorite/{roomId}/{eventId} — the wata dialect's favorite
+   *  TOGGLE: the server writes (or clears) the `net.wata.favorite` state event
+   *  that keeps the message past media retention, and answers
+   *  `{"favorite": true|false}` with the resulting state. Any joined member of
+   *  the room may call it; the marker is global, not per-user. */
+  def setFavorite(hs: Hs, roomId: String, eventId: String): HttpResponse =
+    request(hs, "POST", "/_wata/v1/favorite/" + roomId + "/" + eventId, JSON, "{}")
+
+  /** the favorite endpoint's answer -> the resulting state (false when absent). */
+  def parseFavorite(body: String): Boolean =
+    WJson.boolField(parseOrNull(body), "favorite")
+
   /** POST /createRoom in the DM shape a STOCK Matrix client sends (`is_direct`
    *  + one invitee). The client core never calls this — `dmRoom` is its path —
    *  but the live oracle does, to hold the server to answering a stock client

@@ -38,6 +38,9 @@ case class ActSendVoice(roomId: String, contactId: String, ogg: Bytes, durationM
 case class ActPlay(mxcUrl: String) extends Action
 case class ActSetName(name: String) extends Action
 case class ActRedact(roomId: String, eventId: String) extends Action
+/** toggle the server's favorite marker on one message (plan 0019): keeps it
+ *  past the media-retention window until it is toggled back. */
+case class ActFavorite(roomId: String, eventId: String) extends Action
 /** the shutdown poison pill. */
 case class ActQuit() extends Action
 
@@ -370,6 +373,7 @@ object Runtime:
     case d: ActPlay     => execPlay(c, hs, d)
     case n: ActSetName  => execSetName(hs, selfUid, n)
     case x: ActRedact   => execRedact(hs, x)
+    case f: ActFavorite => execFavorite(hs, f)
 
   def execReceipt(hs: Hs, r: ActReceipt): Boolean =
     drop(MatrixHttp.sendReadReceipt(hs, r.roomId, r.eventId)) // best-effort, failure ignored
@@ -419,6 +423,14 @@ object Runtime:
 
   def execRedact(hs: Hs, x: ActRedact): Boolean =
     drop(MatrixHttp.redactEvent(hs, x.roomId, x.eventId, txnCounterC.add(1)))
+    true
+
+  /** the favorite toggle: fire-and-forget, like the receipt. The resulting
+   *  state comes back through `/sync` as room state (the server writes a
+   *  `net.wata.favorite` event), so nothing here has to thread the answer into
+   *  the snapshot — the next round carries it. */
+  def execFavorite(hs: Hs, f: ActFavorite): Boolean =
+    drop(MatrixHttp.setFavorite(hs, f.roomId, f.eventId))
     true
 
   /** discard a response in statement position (a bare non-call value statement

@@ -17,3 +17,4 @@ t12 played: convs 1 msgs 1 is_played true unplayed 0
 t13 unplayed: n 2 m0 false
 t14 redact: msgs 1 first $msg2
 t15 persist: batch batch_after name Survived bob Bob
+t16 favorite: m0 true m1 false cleared true

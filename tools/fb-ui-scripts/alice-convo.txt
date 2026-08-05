@@ -112,3 +112,14 @@ key back release
 waitmax msgs 12 1500
 advance 5
 checkpoint conv-deleted
+
+# hold OK past OK_HOLD_FAVORITE (0.8s = 25 frames of 33ms) favorites the
+# selected message: the row's star only appears once the server's
+# net.wata.favorite state has come back through sync, which is what `favs`
+# waits on (a short OK tap would play instead).
+key enter press
+advance 30
+key enter release
+wait favs 1 1500
+advance 5
+checkpoint conv-favorited

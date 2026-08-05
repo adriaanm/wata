@@ -16,6 +16,10 @@
 #     MIGRATED on boot: the blob is written out to the media dir and serves
 #   - a media op whose blob file is MISSING replays as log-and-skip (404 on
 #     fetch, boot not aborted)
+#   - FAVORITES exempt a message from the sweep (plan 0019): a favorited voice
+#     message survives the aggressive-retention reboot with its blob intact,
+#     and once unfavorited the next sweep reclaims it — both across kill -9
+#     replays, since the marker is an ordinary journaled state event.
 #   - the RETENTION SWEEP (WATA_MEDIA_RETAIN_DAYS) reclaims an aged voice
 #     message at boot: blob file deleted, the event server-side-redacted, and
 #     the sweep's redaction journaled like any other, so a further reboot
@@ -103,6 +107,14 @@ CU2=$(curl -s -X POST "${A[@]}" -H "Content-Type: audio/ogg" --data-binary @"$TM
 MID2="${CU2##*/}"
 DAEV=$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.audio","body":"doomed","url":"'"$CU2"'"}' "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx5" | jget event_id)
 curl -s -X PUT "${A[@]}" -d '{"reason":"reclaim"}' "$BASE/_matrix/client/v3/rooms/$ROOM/redact/$DAEV/tx6" >/dev/null
+# a THIRD blob + message, FAVORITED: the retention sweep must spare it while
+# the marker stands (plan 0019). The marker is an ordinary state event, so it
+# rides the journal like everything else here.
+printf 'OggS\x00\x02KEEPVOICE' > "$TMP/voice3.ogg"
+CU3=$(curl -s -X POST "${A[@]}" -H "Content-Type: audio/ogg" --data-binary @"$TMP/voice3.ogg" "$BASE/_matrix/media/v3/upload" | jget content_uri)
+MID3="${CU3##*/}"
+FEV=$(curl -s -X PUT "${A[@]}" -d '{"msgtype":"m.audio","body":"keep","url":"'"$CU3"'"}' "$BASE/_matrix/client/v3/rooms/$ROOM/send/m.room.message/tx7" | jget event_id)
+FAVSET=$(curl -s -X POST "${A[@]}" "$BASE/_wata/v1/favorite/$ROOM/$FEV" | jget favorite)
 # the generic state route and a membership eviction: both are ordinary
 # m.room.member / state events in the journal, so this is what proves it.
 curl -s -X PUT "${A[@]}" -d '{"topic":"family channel"}' "$BASE/_matrix/client/v3/rooms/$ROOM/state/m.room.topic/" >/dev/null
@@ -179,12 +191,19 @@ check "dm-stock-create-survives" "$(curl -s -X POST "${A[@]}" -d '{"is_direct":t
                                     "$BASE/_matrix/client/v3/createRoom" | jget room_id)"                                "$DM"
 check "dm-alias-survives"       "$(curl -s "${A[@]}" "$BASE/_matrix/client/v1/directory/room/%23dm.alice.bob:localhost" | jget room_id)" "$DM"
 
+check "favorite-set"            "$FAVSET"                                                                                  "True"
+check "favorite-survives"       "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
+                                    | python3 -c 'import json,sys
+st=json.load(sys.stdin)["rooms"]["join"]["'"$ROOM"'"]["state"]["events"]
+print([e["content"].get("by") for e in st if e["type"]=="net.wata.favorite" and e["state_key"]=="'"$FEV"'"]==["@alice:localhost"])')" "True"
+
 # ---- retention sweep: an aged voice message is reclaimed at boot -------------
 kill_server
 # fake age: rewrite the voice message's origin_server_ts to 2 days ago.
-python3 - "$LOG" "$AEV" <<'EOF'
+python3 - "$LOG" "$AEV" "$FEV" <<'EOF'
 import json, sys, time
-path, aev = sys.argv[1], sys.argv[2]
+path = sys.argv[1]
+aged_ids = set(sys.argv[2:])
 aged = int(time.time() * 1000) - 2 * 86400000
 out = []
 for line in open(path):
@@ -192,7 +211,7 @@ for line in open(path):
     if not line:
         continue
     o = json.loads(line)
-    if o.get("op") == "event" and o.get("event_id") == aev:
+    if o.get("op") == "event" and o.get("event_id") in aged_ids:
         o["ts"] = aged
         line = json.dumps(o, separators=(",", ":"))
     out.append(line)
@@ -212,6 +231,30 @@ print(bool(sw) and sw[0].get("content")=={})')" "True"
 check "sweep-logged"            "$(grep -c "retention swept $AEV" "$TMP/server.log" | tr -d ' ')"                          "1"
 # the unreferenced (migrated) blob is NOT swept — only event-referenced media is
 check "sweep-spares-unreferenced" "$([ -e "$TMP/media/legacymid1" ] && echo true)"                                        "true"
+# the FAVORITED message is the same age and was NOT swept: blob intact, event
+# not redacted. The marker replayed out of the journal before the boot sweep ran.
+check "sweep-spares-favorite"   "$([ -e "$TMP/media/$MID3" ] && echo true)"                                               "true"
+check "favorite-download-200"   "$(curl -s -o /dev/null -w '%{http_code}' "${A[@]}" "$BASE/_matrix/media/v3/download/localhost/$MID3")" "200"
+check "favorite-event-intact"   "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/messages?dir=b&limit=30" \
+                                    | python3 -c 'import json,sys
+c=json.load(sys.stdin)["chunk"]
+kept=[e for e in c if e.get("event_id")=="'"$FEV"'"]
+print(bool(kept) and kept[0].get("content",{}).get("body")=="keep")')" "True"
+
+# ---- unfavorite: the NEXT sweep reclaims it ---------------------------------
+FAVCLR=$(curl -s -X POST "${A[@]}" "$BASE/_wata/v1/favorite/$ROOM/$FEV" | jget favorite)
+check "unfavorite-toggles-off"  "$FAVCLR"                                                                                 "False"
+kill_server
+echo "persist-smoke: unfavorited the kept message; rebooting with WATA_MEDIA_RETAIN_DAYS=1…"
+WATA_MEDIA_RETAIN_DAYS=1 boot || exit 1
+echo "--- unfavorited sweep assertions ---"
+check "unfav-sweep-file-gone"   "$([ ! -e "$TMP/media/$MID3" ] && echo true)"                                             "true"
+check "unfav-sweep-redacted"    "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/messages?dir=b&limit=30" \
+                                    | python3 -c 'import json,sys
+c=json.load(sys.stdin)["chunk"]
+sw=[e for e in c if e.get("event_id")=="'"$FEV"'"]
+print(bool(sw) and sw[0].get("content")=={})')" "True"
+check "unfav-sweep-logged"      "$(grep -c "retention swept $FEV" "$TMP/server.log" | tr -d ' ')"                          "1"
 
 # the sweep journaled an ordinary redaction: a reboot WITHOUT the aggressive
 # retention setting replays to the same state.
@@ -225,6 +268,12 @@ c=json.load(sys.stdin)["chunk"]
 sw=[e for e in c if e.get("event_id")=="'"$AEV"'"]
 print(bool(sw) and sw[0].get("content")=={})')" "True"
 check "sweep-file-stays-gone"   "$([ ! -e "$TMP/media/$MID" ] && echo true)"                                              "true"
+check "unfav-sweep-replays"     "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/rooms/$ROOM/messages?dir=b&limit=30" \
+                                    | python3 -c 'import json,sys
+c=json.load(sys.stdin)["chunk"]
+sw=[e for e in c if e.get("event_id")=="'"$FEV"'"]
+print(bool(sw) and sw[0].get("content")=={})')" "True"
+check "unfav-file-stays-gone"   "$([ ! -e "$TMP/media/$MID3" ] && echo true)"                                             "true"
 
 [ "$fail" -eq 0 ] || { echo "persist-smoke: FAILED"; exit 1; }
 echo "persist-smoke: state survived kill+reboot from the JSONL log — PASS"

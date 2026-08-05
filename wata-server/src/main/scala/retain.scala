@@ -17,10 +17,18 @@ import JsonNav.*
  *  daily on a spawned goroutine. Only `m.room.message` events whose `url`
  *  names a STORED media id are candidates: text messages are out of scope,
  *  already-redacted events have empty content (no `url`) and fall through,
- *  and a foreign/dangling mxc never matches the store. */
+ *  and a foreign/dangling mxc never matches the store.
+ *
+ *  FAVORITES are the exception (plan 0019): an event whose room state carries a
+ *  non-empty `net.wata.favorite` slot under its id is skipped, so a marked
+ *  message keeps its blob for as long as the marker stands. The check reads the
+ *  room's own state (favorite.scala `isFavorited`) during the per-room walk
+ *  rather than materializing one global id list — the sweep already holds the
+ *  room. `exemptEventIds` stays as an additional, list-shaped seam for tests.
+ */
 object Retain:
-  /** the exempt-set seam: event ids the sweep never touches. Empty today; a
-   *  future "favorite a message" marker slots its ids in here. */
+  /** the exempt-set seam: extra event ids the sweep never touches, on top of
+   *  the room's favorites. Empty in production. */
   def exemptEventIds: List[String] = Nil
 
   def isExempt(eventId: String): Boolean = inList(exemptEventIds, eventId)
@@ -80,20 +88,22 @@ object Retain:
     case Nil  => ()
 
   def sweepRoomsStep(h: Room, t: List[Room], cutoff: scala.Long): Unit =
-    sweepEvents(h.roomId, h.timeline, cutoff)
+    sweepEvents(h, h.timeline, cutoff)
     sweepRooms(t, cutoff)
 
-  def sweepEvents(roomId: String, evs: List[Event], cutoff: scala.Long): Unit = evs match
-    case h :: t => sweepEventsStep(roomId, h, t, cutoff)
+  def sweepEvents(room: Room, evs: List[Event], cutoff: scala.Long): Unit = evs match
+    case h :: t => sweepEventsStep(room, h, t, cutoff)
     case Nil  => ()
 
-  def sweepEventsStep(roomId: String, h: Event, t: List[Event], cutoff: scala.Long): Unit =
-    if expired(h, cutoff) then sweepOne(roomId, h) else ()
-    sweepEvents(roomId, t, cutoff)
+  def sweepEventsStep(room: Room, h: Event, t: List[Event], cutoff: scala.Long): Unit =
+    if expired(room, h, cutoff) then sweepOne(room.roomId, h) else ()
+    sweepEvents(room, t, cutoff)
 
-  def expired(ev: Event, cutoff: scala.Long): Boolean =
+  /** the snapshot the sweep walks is the room record itself, so the favorite
+   *  check is a state lookup on the room already in hand. */
+  def expired(room: Room, ev: Event, cutoff: scala.Long): Boolean =
     ev.etype == "m.room.message" && ev.ts < cutoff && !isExempt(ev.eventId)
-      && refersStoredMedia(ev)
+      && !Favorite.isFavorited(room, ev.eventId) && refersStoredMedia(ev)
 
   def refersStoredMedia(ev: Event): Boolean =
     mediaKnownOf(Store.mediaIdOfMxc(strField(ev.content, "url", "")))

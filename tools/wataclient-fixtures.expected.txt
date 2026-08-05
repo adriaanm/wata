@@ -36,7 +36,7 @@ room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:l
 snapshot self="Alice"
 contact @bob:localhost "Bob"
 conv "!q_xb3ZSFxlVB:localhost" dm contact="@bob:localhost" unplayed=1
-  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=false
+  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=false fav=false
 == fixture wataclient/test-fixtures/alice__03-incr.json
 ev receipt_updated !q_xb3ZSFxlVB:localhost $wXltfU6A_Bbb:localhost
 ev room_updated !q_xb3ZSFxlVB:localhost
@@ -49,7 +49,7 @@ room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:l
 snapshot self="Alice"
 contact @bob:localhost "Bob"
 conv "!q_xb3ZSFxlVB:localhost" dm contact="@bob:localhost" unplayed=1
-  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=false
+  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=false fav=false
 ==== user @bob:localhost
 == fixture wataclient/test-fixtures/bob__01-initial.json
 ev membership_changed !q_xb3ZSFxlVB:localhost @alice:localhost join
@@ -80,4 +80,4 @@ room !q_xb3ZSFxlVB:localhost name="" alias="#dm.alice.bob:localhost" dm=@alice:l
 snapshot self="Bob"
 contact @alice:localhost "Alice"
 conv "!q_xb3ZSFxlVB:localhost" dm contact="@alice:localhost" unplayed=0
-  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=true
+  msg $wXltfU6A_Bbb:localhost from "Alice" durMs 2640 played=true fav=false
