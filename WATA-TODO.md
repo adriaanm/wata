@@ -59,8 +59,16 @@ blocks + git log; each entry cites where it was recorded.*
   re-POST every sync round with no backoff; failed favorite/delete
   looks like the button did nothing (not optimistic, error discarded);
   `setupMixer` failure is silent (no audio at all, no error,
-  `go-pkgs/audio/audio_linux.go:260`); PLAY FAILED conflates network
-  failure with audio-unavailable.
+  `go-pkgs/audio/audio_linux.go:260`).
+- **Transaction ids restart at 1 with the session** (noticed 2026-08-05,
+  plan 0022): `Runtime.txnCounterC` starts at 0 in every process, while a
+  RESUMED session keeps the server-side device the previous run's txn ids
+  were recorded against. The server deduplicates by (device, txn), so the
+  first sends after a restart can be answered with an old event id instead
+  of being stored. Long-standing (the Zig client has the same shape); the
+  outbox's entries reuse their own persisted txn deliberately, which is
+  correct for them and does not widen this. The fix is to persist the
+  counter, or to seed it from something per-run.
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
@@ -97,6 +105,13 @@ blocks + git log; each entry cites where it was recorded.*
   by the house `var out = …; if … then out = …` idiom, which is why this
   had not been hit before; drop nothing when it lands, but the
   diagnostic half is the part that cost time.
+- A cross-MODULE read of a module `val` emits `self.<Obj>.<VAL>`, which is
+  not valid Go (`undefined: self`): `wata-fb` reading `Outbox.CAP` out of
+  `wataclient`. Binding it to a local first makes no difference, so it is
+  the read; a cross-module `def` call on the same object is fine, as are
+  cross-unit val reads inside one module (filed 2026-08-05,
+  `CROSS-MODULE-VAL-READ`; plan 0022). Worked around with
+  `Outbox.cap()`; inline `Outbox.CAP` again when it lands.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —

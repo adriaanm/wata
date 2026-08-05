@@ -39,6 +39,20 @@ import language.experimental.saferExceptions
  *  person is stored here. */
 case class FbPrefs(brightness: scala.Int, timeoutIdx: scala.Int)
 
+/** the device's `OutboxStore` (outbox.scala): one small file per queued voice
+ *  message under `<config dir>/outbox/`, so a message recorded during an
+ *  outage is still there after a reboot. `writable` is decided once, by
+ *  probing the directory — a read-only rootfs then degrades to a memory queue
+ *  for the session instead of pretending to persist. */
+final class FbOutbox(val dir: String, val writable: Boolean) extends OutboxStore:
+  def read(slot: scala.Int): String = FbConfig.readSlot(dir, slot)
+  def write(slot: scala.Int, data: String): Boolean =
+    var ok = false
+    if writable then ok = FbConfig.writeSlot(dir, slot, data)
+    ok
+  def clear(slot: scala.Int): Unit = FbConfig.clearSlot(dir, slot)
+  def persistent(): Boolean = writable
+
 object FbConfig:
 
   /** the env var that overrides the config path. */
@@ -141,6 +155,73 @@ object FbConfig:
     var out = ""
     if cut > 0 then out = p.substring(0, cut)
     out
+
+  // ---- the outbox store ----------------------------------------------------------
+
+  /** the env var that overrides the outbox directory. */
+  val ENV_OUTBOX = "WATA_FB_OUTBOX"
+
+  /** where queued sends live: a directory beside the config file, so one
+   *  `$WATA_FB_CONFIG` names one device's whole persistent state and two
+   *  scripted runs cannot see each other's queue. */
+  def outboxDir(): String =
+    var d = go.sys.getenv(ENV_OUTBOX)
+    if d == "" then d = parentDir(path()) + "/outbox"
+    d
+
+  /** the outbox store this run uses. Creating the directory is best-effort
+   *  like every other write here, and the PROBE is what decides: a directory
+   *  we cannot write is reported non-persistent, which makes the queue
+   *  memory-only for the session and prints once (outbox.scala) rather than
+   *  silently losing messages at the next reboot. */
+  def outbox(): FbOutbox = outboxAt(outboxDir())
+
+  /** the same store over a named directory — what a driver that has to point
+   *  two clients at ONE queue uses. */
+  def outboxAt(d: String): FbOutbox =
+    mkdirParent(d)
+    go.syscall.mkdir(d, 493)   // literal: `perm` must land as an untyped constant
+    FbOutbox(d, probeWritable(d))
+
+  def probeWritable(dir: String): Boolean =
+    var ok = false
+    try
+      val fd = go.syscall.open(dir + "/.probe",
+        go.syscall.O_WRONLY | go.syscall.O_CREAT | go.syscall.O_TRUNC, 384)
+      go.syscall.close(fd)
+      go.syscall.unlink(dir + "/.probe")
+      ok = true
+    catch case e: sgo.GoError => ok = false
+    ok
+
+  /** one slot's file. Numbered, not named: the subset has no directory
+   *  listing, so the loader scans a fixed slot range (outbox.scala). */
+  def slotPath(dir: String, slot: scala.Int): String = dir + "/e" + slot + ".msg"
+
+  def readSlot(dir: String, slot: scala.Int): String =
+    var out = ""
+    try
+      val raw = go.sys.readFile(slotPath(dir, slot))
+      out = go.string(raw)
+    catch case e: sgo.GoError => out = ""
+    out
+
+  def writeSlot(dir: String, slot: scala.Int, data: String): Boolean =
+    var ok = false
+    try
+      val fd = go.syscall.open(slotPath(dir, slot),
+        go.syscall.O_WRONLY | go.syscall.O_CREAT | go.syscall.O_TRUNC, 384)
+      go.syscall.write(fd, go.bytes(data))
+      go.syscall.close(fd)
+      ok = true
+    catch case e: sgo.GoError => ok = false
+    ok
+
+  /** TRUNCATE then unlink: an unlink that fails must still not leave a
+   *  delivered message readable, or the next boot would send it again. */
+  def clearSlot(dir: String, slot: scala.Int): Unit =
+    val ok = writeSlot(dir, slot, "")
+    go.syscall.unlink(slotPath(dir, slot))
 
   // ---- the run's client config -------------------------------------------------
 

@@ -1,0 +1,21 @@
+# outbox-restart, phase 2: a DIFFERENT PROCESS, resuming from the config
+# store (`-` in every credential slot) and therefore reading the same outbox
+# directory beside it. The queued message is pending before this client has
+# synced anything — it came off disk — and once the server stops refusing
+# uploads the next sync round delivers it and the mark clears.
+
+wait unsent 1 900
+wait syncing 1 900
+
+# stop refusing: the counter is still armed from phase 1
+failnext 0
+
+waitmax unsent 0 1200
+advance 30
+checkpoint outbox-delivered
+
+# and it really is in the conversation, not merely off the queue
+tap enter
+wait msgs 1 1500
+advance 30
+checkpoint outbox-delivered-conv

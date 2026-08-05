@@ -97,6 +97,13 @@ object Ui:
   // single stray red key on the contact list must not black the screen out —
   // the first press arms and says so, a second one within the window quits.
   private val quitArmC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
+  // the outbox markers (plan 0022), refreshed from `EvOutbox` on the ordinary
+  // event drain: the conversation keys with a send still queued, and the ones
+  // that lost a message for good. Cells rather than a snapshot field because
+  // an offline device publishes no snapshots — and the queue is exactly what
+  // an offline device accumulates.
+  private val unsentC: sgo.Atomic[List[String]] = sgo.atomic(Nil)
+  private val undelivC: sgo.Atomic[List[String]] = sgo.atomic(Nil)
   private def stateV: ShellState = stateC.get()
   private def connV: ConnectionState = connOf(connForceC.get(), connC.get())
   private def idleTime: scala.Double = idleC.get()
@@ -106,6 +113,11 @@ object Ui:
   def shellState: ShellState = stateC.get()
   /** the snapshot this frame drew from. */
   def frameSnap: StateSnapshot = snapC.get()
+  /** conversations with a send still queued (what the row marker draws). */
+  def unsentKeys: List[String] = unsentC.get()
+  /** conversations that lost a message for good. */
+  def undeliveredKeys: List[String] = undelivC.get()
+
   /** is the screensaver holding the panel blanked? */
   def screenOff: Boolean = offC.get()
   /** the connection the status line and the LEDs are mirroring (the override
@@ -176,7 +188,7 @@ object Ui:
 
   def loopWithDevice(cfg: ClientConfig, fd: scala.Int, mem: go.Bytes): Unit =
     val clock = FbCaps.clock()
-    val c = Runtime.makeWithAudio(cfg, FbCaps.httpDo(), clock)
+    val c = Runtime.makeWithAudioStored(cfg, FbCaps.httpDo(), clock, FbConfig.outbox())
     resetCells()
     val fds = Evdev.open()
     println("ui: input devices open: " + Evdev.count(fds))
@@ -225,6 +237,8 @@ object Ui:
     frameC.set(0)
     connForceC.set(-1)
     quitArmC.set(0.0)
+    unsentC.set(Nil)
+    undelivC.set(Nil)
     NetStatus.reset()
 
   /** seed the frame clock — every driver calls this once before its first
@@ -266,7 +280,8 @@ object Ui:
     val net = NetStatus.poll(conn)
 
     // build this frame's context: ONE unified FrameCtx shared by every applet
-    val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts, quitArmed)
+    val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts,
+      unsentC.get(), undelivC.get(), quitArmed)
 
     // poll input; a CONFIRMED quit edge (back twice in contacts) ends the loop
     val keyEvents = dev.pollInput()
@@ -378,9 +393,12 @@ object Ui:
     case _: EvSendFailed   =>
       tally(sendFailC)
       stateC.set(Shell.notifyWataSend(stateV, true))
-    case _: EvPlaybackError =>
+    case pe: EvPlaybackError =>
       tally(playFailC)
-      stateC.set(Shell.notifyWataPlayError(stateV))
+      stateC.set(Shell.notifyWataPlayError(stateV, pe.fetchFailed))
+    case ob: EvOutbox      =>
+      unsentC.set(ob.unsent)
+      undelivC.set(ob.undelivered)
     case _: EvSnapshot     => () // snapshot is picked up via pollSnap
 
   /** bump a tally cell, discarding `add`'s returned new value (a bare value

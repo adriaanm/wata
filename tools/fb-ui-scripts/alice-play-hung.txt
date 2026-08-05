@@ -1,0 +1,39 @@
+# playing-hung: the playback indicator, and what a hung download does to it
+# (plan 0022). The scenario's server is SIGSTOPped part way in — it accepts
+# and never answers, which no connection refusal reproduces — and the phase
+# runs with a short WATA_HTTP_TIMEOUT_MS, so the request deadline fires
+# inside the test.
+#
+# The play mark is drawn the instant OK is RELEASED, before any byte has
+# moved: that is the whole point of it, and it makes this checkpoint exact —
+# the frame it dumps is the frame the key was released in.
+
+family @bob:localhost
+
+wait syncing 1 900
+wait convs 1 900
+
+# one message to play
+key ptt press
+advance 20
+key ptt release
+wait msgs 1 1500
+advance 120
+
+# open the conversation (which receipts the message)
+tap enter
+wait played 1 1500
+advance 30
+
+# the server is stopped mid-phase; the round hangs until the deadline
+wait connerr 1 1200
+
+# OK on the selected row: the download will hang, the mark shows at once
+key enter press
+key enter release
+checkpoint play-hung
+
+# the deadline turns the hang into the failure flash and clears the mark
+wait playfail 1 1200
+advance 3
+checkpoint play-hung-failed

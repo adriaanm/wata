@@ -1,0 +1,25 @@
+# outbox-restart, phase 1: a message spoken while the server refuses the
+# upload is QUEUED, not lost (plan 0022). The scenario's server runs with
+# WATA_TEST_HOOKS=1; `failnext` arms a big count so every upload — the first
+# one and every retry this phase makes — answers 500, which is the
+# RETRY-class failure the outbox exists for.
+#
+# What the checkpoint shows: the SEND FAILED flash has aged out and the
+# family row carries the UNSENT mark. The flash is the moment; the mark is
+# the durable trace, and it is what the next phase inherits.
+
+family @bob:localhost
+
+wait syncing 1 900
+wait convs 1 900
+
+failnext 200
+key ptt press
+advance 20
+key ptt release
+wait sendfail 1 1500
+wait unsent 1 600
+
+# the 2s flash ages out; the mark does not
+advance 90
+checkpoint outbox-unsent

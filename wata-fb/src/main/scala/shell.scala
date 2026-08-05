@@ -107,8 +107,8 @@ object Shell:
    *  active one. */
   def notifyWataSend(s: ShellState, isError: Boolean): ShellState =
     withApplet(s, WATA, WataApplet(WataLogic.notifySend(wataState(s), isError)))
-  def notifyWataPlayError(s: ShellState): ShellState =
-    withApplet(s, WATA, WataApplet(WataLogic.notifyPlayError(wataState(s))))
+  def notifyWataPlayError(s: ShellState, fetchFailed: Boolean): ShellState =
+    withApplet(s, WATA, WataApplet(WataLogic.notifyPlayError(wataState(s), fetchFailed)))
 
   // ---- input routing ----------------------------------------------------------
   /** applet switching on dot1/dot2 (press only); PTT always -> wata; else

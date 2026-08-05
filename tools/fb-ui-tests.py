@@ -122,6 +122,22 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "outbox-restart",
+        "hooks": True,
+        "phases": [
+            ("alice", "alice-outbox-queue.txt"),
+            ("-", "alice-outbox-deliver.txt"),
+        ],
+    },
+    {
+        "name": "playing-hung",
+        "stop_server_after": 6.0,
+        "http_timeout_ms": 1500,
+        "phases": [
+            ("alice", "alice-play-hung.txt"),
+        ],
+    },
+    {
         "name": "early-boot",
         "phases": [
             ("alice", "alice-boot.txt"),

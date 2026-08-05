@@ -51,6 +51,7 @@ object Integ:
       else if name == "offline-retry" then ok = s15()
       else if name == "auth-rejected" then ok = s16()
       else if name == "admin-rename" then ok = s17()
+      else if name == "outbox-restart" then ok = s18()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -64,6 +65,18 @@ object Integ:
    *  down. The scope join is equivalent to joining the client's threads. */
   def phase(user: String)(body: MatrixClient => Boolean): Boolean =
     phaseCfg(cfg(user))(body)
+
+  /** a phase whose client keeps its outbox on disk, in `dir` — two phases
+   *  pointed at one directory are two clients over one queue, which is what a
+   *  restart mid-outage is. */
+  def phaseStored(config: ClientConfig, dir: String)(body: MatrixClient => Boolean): Boolean =
+    val c = Runtime.makeStored(config, FbCaps.httpDo(), FbCaps.clock(), FbConfig.outboxAt(dir))
+    sgo.supervised {
+      Runtime.start(c)
+      var ok = body(c)
+      Runtime.stopClient(c)
+      ok
+    }
 
   def phaseCfg(config: ClientConfig)(body: MatrixClient => Boolean): Boolean =
     val c = Runtime.make(config, FbCaps.httpDo(), FbCaps.clock())
@@ -829,3 +842,107 @@ object Integ:
   def stockDmRoomId(token: String, peer: String): String =
     val resp = MatrixHttp.createRoomStockDm(directHs(token), peer)
     if resp.status != 200 then "" else MatrixHttp.parseRoomId(resp.body)
+
+  // ---- the outbox: sends survive an outage and a restart (plan 0022) ---------
+
+  /** A message recorded while the server is unreachable is QUEUED, persisted,
+   *  and delivered by a LATER client — in the order it was spoken — as soon as
+   *  a sync round proves the server reachable. Three entries go in against a
+   *  dead base:
+   *
+   *    1. one addressed to a room alice is not in — the POISONED head. On
+   *       recovery the server answers 404, which is the UNDELIVERABLE class:
+   *       it is dropped (loudly — the conversation is marked) and the queue
+   *       KEEPS GOING rather than retrying it forever behind everything else.
+   *    2, 3. two for bob's DM, which does not exist yet — queued against the
+   *       CONTACT id, so the retry has to resolve the DM room itself.
+   *
+   *  The second phase is a different client over the SAME outbox directory,
+   *  which is what a restart mid-outage is: nothing but the directory carries
+   *  between them. */
+  def s18(): Boolean =
+    val dir = tmpDir() + "/wata-outbox-integ-" + FbCaps.clock().nowUnixMillis()
+    if !phaseStored(downCfg(), dir)(c => queueWhileDown(c)) then false
+    else if !phaseStored(cfg("alice"), dir)(c => outboxDrains(c)) then false
+    else phaseStored(downCfg(), capDir())(c => queueOverflows(c))
+
+  def downCfg(): ClientConfig =
+    ClientConfig(DEAD_BASE, "alice", PASS, 1000, Session("", "", "", "", ""))
+
+  def capDir(): String = tmpDir() + "/wata-outbox-cap-" + FbCaps.clock().nowUnixMillis()
+
+  /** the harness runs hermetically; `TMPDIR` is where a mac puts one. */
+  def tmpDir(): String =
+    var d = go.sys.getenv("TMPDIR")
+    if d == "" then d = "/tmp"
+    d
+
+  /** three failed sends -> three queue entries, and each one on disk. */
+  def queueWhileDown(c: MatrixClient): Boolean =
+    if !Runtime.waitForConnection(c, ConnError(), 10000L) then false
+    else
+      Runtime.sendAction(c, ActSendVoice("!nope:localhost", "", fakeOgg(), 400L))
+      if waitSendResult(c, 20000L) then false            // it must FAIL, not send
+      else
+        Runtime.sendAction(c, ActSendVoice("", "@bob:localhost", fakeOgg(), 500L))
+        if waitSendResult(c, 20000L) then false
+        else
+          Runtime.sendAction(c, ActSendVoice("", "@bob:localhost", fakeOgg(), 600L))
+          if waitSendResult(c, 20000L) then false
+          else waitPending(c, 3, 5000L) && persistedOnDisk(c, 3)
+
+  /** the entries are readable back out of the store itself — the queue is on
+   *  disk, not merely in the process that made it. */
+  def persistedOnDisk(c: MatrixClient, want: Int): Boolean =
+    var n = 0
+    val cap = Outbox.cap()
+    var i = 0
+    while i < cap do
+      if c.outbox.read(i) != "" then n = n + 1
+      i = i + 1
+    n == want
+
+  def waitPending(c: MatrixClient, want: Int, timeoutMs: Long): Boolean =
+    val deadline = c.clock.nowUnixMillis() + timeoutMs
+    var ok = false
+    var run = true
+    while run do
+      if Outbox.pending() == want then
+        ok = true
+        run = false
+      else if c.clock.nowUnixMillis() >= deadline then run = false
+      else c.clock.sleepMs(20L)
+    ok
+
+  /** the restarted client: the queue came back from disk, the poisoned head is
+   *  dropped with its conversation marked, and the two real messages land in
+   *  bob's DM in the order they were spoken. */
+  def outboxDrains(c: MatrixClient): Boolean =
+    if Outbox.pending() != 3 then false
+    else if !grabSelf(c) then false
+    else if !Runtime.waitForSnapshot(c,
+      s => lastDursMatch(s, "@bob:localhost", 500L :: 600L :: Nil), 30000L) then false
+    else if !waitPending(c, 0, 20000L) then false
+    else hasDropped("!nope:localhost")
+
+  /** THE CAP: the queue holds `Outbox.cap()` messages and no more. Past it the
+   *  OLDEST is dropped — data loss, so it is marked exactly like a message the
+   *  server refused. */
+  def queueOverflows(c: MatrixClient): Boolean =
+    if !Runtime.waitForConnection(c, ConnError(), 10000L) then false
+    else
+      spamSends(c, Outbox.cap() + 4)
+      waitPending(c, Outbox.cap(), 30000L) && hasDropped("@bob:localhost")
+
+  def spamSends(c: MatrixClient, n: Int): Unit =
+    var i = 0
+    while i < n do
+      Runtime.sendAction(c, ActSendVoice("", "@bob:localhost", fakeOgg(), 100L))
+      val done = waitSendResult(c, 20000L)
+      i += 1
+
+  def hasDropped(key: String): Boolean = keyIn(Outbox.droppedKeys(), key)
+
+  def keyIn(xs: List[String], k: String): Boolean = xs match
+    case h :: t => if h == k then true else keyIn(t, k)
+    case Nil    => false

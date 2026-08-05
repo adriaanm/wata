@@ -46,6 +46,9 @@ case class WataState(
   sendError: Boolean,
   sendOk: Boolean,
   playError: Boolean,
+  // was the play failure "there is nothing to play it through" rather than
+  // "it could not be fetched"? Two causes, two sentences on screen.
+  noAudio: Boolean,
   statusTimer: scala.Double,
   backHeld: Boolean,
   backHoldTime: scala.Double,
@@ -58,7 +61,7 @@ object WataLogic:
   val FOOTER_ROW = Font.ROWS - 1
 
   def initial(): WataState =
-    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, false, false, false, 0.0,
+    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, false, false, false, false, 0.0,
       false, 0.0, false, 0.0)
 
   /** visible list rows between header and footer (bitmap grid). */
@@ -68,48 +71,52 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      held, hold, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withPlaying(s: WataState, playing: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, s.playError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
-  /** the full status-flash tuple (hold + timer + the three flash flags). */
+  /** the full status-flash tuple (hold + timer + the three flash flags); the
+   *  play-failure CAUSE rides along unchanged. */
   def withFlash(s: WataState, hold: scala.Double, timer: scala.Double,
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, hold, s.playing, sendErr, sendOk, playErr, timer, s.backHeld, s.backHoldTime,
+      s.pttHeld, hold, s.playing, sendErr, sendOk, playErr, s.noAudio, timer, s.backHeld, s.backHoldTime,
       s.okHeld, s.okHoldTime)
 
-  def withPlayErr(s: WataState, playing: Boolean, playErr: Boolean, timer: scala.Double): WataState =
+  /** a play that failed: the flash, its cause, and `playing` dropped — a
+   *  playback indicator that outlives the playback is a lie. */
+  def withPlayErr(s: WataState, playing: Boolean, playErr: Boolean, noAudio: Boolean,
+                  timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, timer, s.backHeld, s.backHoldTime,
-      s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, noAudio, timer,
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer,
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
       s.backHeld, s.backHoldTime, held, hold)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.statusTimer,
+      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
       held, hold, s.okHeld, s.okHoldTime)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
@@ -211,10 +218,25 @@ object WataLogic:
     val off = if sel < s.scrollOffset then sel else s.scrollOffset
     withSel(s, sel, off)
 
-  /** open the selected conversation + send a read receipt for its latest msg. */
+  /** open the selected conversation + send a read receipt for its latest msg,
+   *  and clear its undelivered marker: the mark exists to tell the user a
+   *  message of theirs never arrived, and opening the conversation is where
+   *  they find that out. */
   def enterConversation(s: WataState, ctx: FrameCtx): WataState =
     sendReceiptForConversation(ctx, s.selected)
+    ackOutbox(ctx, s.selected)
     enterConv(s, s.selected)
+
+  def ackOutbox(ctx: FrameCtx, idx: scala.Int): Unit =
+    convAt(ctx.snap, idx) match
+      case c: Some[Conversation] => ackKeys(ctx, c.value)
+      case None => ()
+
+  /** both spellings of the conversation's key — a queued send made before the
+   *  DM room existed is filed under the contact. */
+  def ackKeys(ctx: FrameCtx, conv: Conversation): Unit =
+    if conv.roomId != "" then Runtime.sendAction(ctx.client, ActAckOutbox(conv.roomId))
+    if conv.hasContact then Runtime.sendAction(ctx.client, ActAckOutbox(conv.contact.user.id))
 
   /** OK is absent here on purpose: in the conversation view it is a HOLD
    *  gesture (`okInput`), routed before the press-only dispatch. */
@@ -353,7 +375,9 @@ object WataLogic:
       s
     case _: AeRecordingError => withFlash(s, s.pttHoldTime, 2.0, true, s.sendOk, s.playError)
     case _: AePlaybackDone   => withPlaying(s, false)
-    case _: AePlaybackError  => withPlayErr(s, false, true, 2.0)
+    // the audio thread failing is the "nothing to play it through" cause by
+    // construction: the bytes were already in hand.
+    case _: AePlaybackError  => withPlayErr(s, false, true, true, 2.0)
     case _                   => s // echo events -> settings applet (unreachable)
 
   /** upload+send the recorded voice message to the current/selected
@@ -377,7 +401,10 @@ object WataLogic:
     if isError then out = withFlash(s, s.pttHoldTime, 2.0, true, false, s.playError)
     out
 
-  def notifyPlayError(s: WataState): WataState = withFlash(s, s.pttHoldTime, 2.0, s.sendError, s.sendOk, true)
+  /** the runtime's play failure: flash the cause and stop showing the play
+   *  mark (a hung download resolves here through the request deadline). */
+  def notifyPlayError(s: WataState, fetchFailed: Boolean): WataState =
+    withPlayErr(s, false, true, !fetchFailed, 2.0)
 
   // ---- render (bitmap-font only) -----------------------------------------------
   def render(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
@@ -423,10 +450,53 @@ object WataLogic:
         val name = convName(ctx.snap, c.value)
         val nameColor = if isFamily(c.value.convType) && !selected then Color.cyan else fg
         Font.drawText(px, clip(name, 18), 0, row, nameColor, false, 0)
+        val mark = outboxMark(ctx, c.value)
+        renderOutboxMark(px, mark, row)
         if c.value.unplayedCount > 0 then
           val badge = "" + c.value.unplayedCount
-          Font.drawText(px, badge, Font.COLS - badge.length, row, Color.yellow, false, 0)
+          val shift = if mark == 0 then 0 else 2
+          Font.drawText(px, badge, Font.COLS - badge.length - shift, row, Color.yellow, false, 0)
       case None => ()
+
+  /** 0 = nothing pending, 1 = something of ours is still queued, 2 = something
+   *  of ours will never arrive. The louder one wins: a lost message is worth
+   *  more of the row than a waiting one. */
+  def outboxMark(ctx: FrameCtx, conv: Conversation): scala.Int =
+    var out = 0
+    if convKeyed(ctx.unsent, conv) then out = 1
+    if convKeyed(ctx.undelivered, conv) then out = 2
+    out
+
+  /** does one of the keys name this conversation — by room, or by contact for
+   *  a DM room that did not exist when the send was queued? */
+  def convKeyed(keys: List[String], conv: Conversation): Boolean =
+    var out = false
+    if conv.roomId != "" && hasKey(keys, conv.roomId) then out = true
+    if conv.hasContact && hasKey(keys, conv.contact.user.id) then out = true
+    out
+
+  def hasKey(keys: List[String], k: String): Boolean =
+    var cur = keys
+    var out = false
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          if h == k then
+            out = true
+            going = false
+          else cur = t
+        case Nil => going = false
+    out
+
+  /** the mark sits in the last column, right-aligned like the favorite star,
+   *  so a message going out never reflows the name. Custom glyphs (> 0x7F)
+   *  can only be drawn with `drawChar`. */
+  def renderOutboxMark(px: go.Bytes, mark: scala.Int, row: scala.Int): Unit =
+    if mark > 0 then
+      val g = if mark == 2 then Font.ICON_UNDELIV else Font.ICON_UNSENT
+      val fg = if mark == 2 then Color.red else Color.yellow
+      Font.drawChar(px, g, (Font.COLS - 1) * Font.GLYPH_W, 1 + row * Font.GLYPH_H, fg, false, 0)
 
   def renderConversation(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
     convAt(ctx.snap, s.convContactIdx) match
@@ -455,18 +525,23 @@ object WataLogic:
         case m: Some[VoiceMessage] =>
           if selected then Draw.fillRect(px, 0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)
           val fg = if selected then Color.black else (if m.value.isPlayed then Color.midGray else Color.green)
-          renderMsgRow(px, m.value, row, fg)
+          renderMsgRow(px, m.value, row, fg, selected && s.playing)
         case None => ()
       i += 1
 
-  /** the row: an optional played check in column 0, duration, sender — and a
-   *  favorited row's STAR in the last column, right-aligned so marking a
-   *  message never shifts the text. The star is a custom glyph (> 0x7F), so it
-   *  goes through `drawChar` rather than inside a `drawText` string. */
-  def renderMsgRow(px: go.Bytes, m: VoiceMessage, row: scala.Int, fg: scala.Int): Unit =
-    if m.isPlayed then Font.drawChar(px, Font.ICON_CHECK, 0, 1 + row * Font.GLYPH_H, fg, false, 0)
+  /** the row: a mark in column 0 — the PLAY triangle while this row is the one
+   *  being fetched and played, else the played check — then duration, sender,
+   *  and a favorited row's STAR in the last column, right-aligned so marking a
+   *  message never shifts the text. The play mark appears the instant OK is
+   *  released, before the download has even started: pressing a key must show
+   *  something, and a slow fetch is exactly when it matters. Both are custom
+   *  glyphs (> 0x7F), so they go through `drawChar` rather than inside a
+   *  `drawText` string. */
+  def renderMsgRow(px: go.Bytes, m: VoiceMessage, row: scala.Int, fg: scala.Int, playing: Boolean): Unit =
+    if playing then Font.drawChar(px, Font.ICON_PLAY, 0, 1 + row * Font.GLYPH_H, fg, false, 0)
+    else if m.isPlayed then Font.drawChar(px, Font.ICON_CHECK, 0, 1 + row * Font.GLYPH_H, fg, false, 0)
     val dur = durStr(m.durationMs)
-    val col = if m.isPlayed then 1 else 0
+    val col = if m.isPlayed || playing then 1 else 0
     Font.drawText(px, dur, col, row, fg, false, 0)
     val sender = clip(m.sender.displayName, 8)
     Font.drawText(px, sender, col + dur.length + 1, row, fg, false, 0)
@@ -477,8 +552,13 @@ object WataLogic:
   def renderStatusFlash(s: WataState, px: go.Bytes): Unit =
     if s.statusTimer > 0.0 then
       if s.sendError then Font.drawText(px, "SEND FAILED", 3, 9, Color.red, false, 0)
-      else if s.playError then Font.drawText(px, "PLAY FAILED", 3, 9, Color.red, false, 0)
+      else if s.playError then Font.drawText(px, playErrMsg(s), 3, 9, Color.red, false, 0)
       else if s.sendOk then Font.drawText(px, "SENT", 8, 9, Color.green, false, 0)
+
+  /** the two play failures the user can act on differently: the network could
+   *  not give us the message, or this device cannot play one. */
+  def playErrMsg(s: WataState): String =
+    if s.noAudio then "NO AUDIO" else "PLAY FAILED"
 
   def renderRecordingOverlay(s: WataState, px: go.Bytes): Unit =
     val barY = Display.H - 24
@@ -697,6 +777,13 @@ case class FrameCtx(
   client: MatrixClient,
   audioCmds: sgo.Chan[AudioCmd],
   audioEvts: sgo.Chan[AudioEvt],
+  // the outbox markers this frame draws (plan 0022): the conversation keys —
+  // a room id, or a contact id for a DM room that does not exist yet — with a
+  // send still queued, and the ones that lost a message for good. They arrive
+  // as `EvOutbox` on the ordinary event path and are carried here like the
+  // snapshot; the render path never reads the outbox itself.
+  unsent: List[String],
+  undelivered: List[String],
   // is the two-step quit armed (ui.scala owns the window)? The boot screen is
   // where the confirmation has to be legible — it is the screen a stuck user
   // is pressing keys on.

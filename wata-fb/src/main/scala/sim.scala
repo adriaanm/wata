@@ -215,7 +215,7 @@ object Sim:
 
   def loop(cfg: ClientConfig, once: Boolean): Unit =
     val clock = FbCaps.clock()
-    val c = Runtime.makeWithAudio(cfg, FbCaps.httpDo(), clock)
+    val c = Runtime.makeWithAudioStored(cfg, FbCaps.httpDo(), clock, FbConfig.outbox())
     Ui.resetCells()
     resetCells()
     val dev = SimDevice(Draw.newBuffer())

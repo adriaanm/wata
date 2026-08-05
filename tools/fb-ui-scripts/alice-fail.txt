@@ -12,8 +12,9 @@ wait convs 1 900
 
 # ---- SEND FAILED -------------------------------------------------------------
 # arm one failure: the PTT send's upload answers 500 -> EvSendFailed -> the
-# 2s SEND FAILED flash. The session's sendfail tally is the deterministic
-# wait; the flash outlasts the few frames to the dump by a wide margin.
+# 2s SEND FAILED flash, over a family row that now carries the unsent mark.
+# The session's sendfail tally is the deterministic wait; the flash outlasts
+# the few frames to the dump by a wide margin.
 failnext 1
 key ptt press
 advance 20
@@ -22,13 +23,13 @@ wait sendfail 1 1500
 advance 3
 checkpoint fail-send
 
-# the flash runs 2s of frame time; let it clear, then resend — the counter
-# disarmed itself, so this send lands
-advance 70
-key ptt press
-advance 20
-key ptt release
+# the failed send was QUEUED, not lost (plan 0022): the family row now
+# carries the unsent mark, and the next sync round retries the message
+# itself — the counter disarmed itself as it was consumed, so that retry
+# lands, the message appears, and the mark clears with the queue.
+wait unsent 1 600
 wait msgs 1 1500
+waitmax unsent 0 600
 advance 120
 checkpoint fail-send-recovered
 

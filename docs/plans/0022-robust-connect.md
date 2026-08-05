@@ -1,6 +1,6 @@
 # 0022 — the device app off the happy path
 
-Status: accepted
+Status: done (A landed c09d81c, B landed with this commit)
 
 ## Problem
 

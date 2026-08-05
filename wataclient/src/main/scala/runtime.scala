@@ -19,6 +19,13 @@
  *  network"). A mid-session 401/403 on `/sync` ends the session and relogs
  *  in rather than backing off against a token that will never work again.
  *
+ *  SENDS SURVIVE (plan 0022): a voice send that fails for a transport-ish
+ *  reason is not lost — it goes into the bounded, on-disk OUTBOX
+ *  (outbox.scala), which the action loop drains, in order, whenever a
+ *  successful sync round proves the server reachable. All of its state changes
+ *  and all of its IO are the action loop's; the UI learns of them through
+ *  `EvOutbox`.
+ *
  *  SHUTDOWN (a close-signalled pattern — no separate cancellation mechanism):
  *  `stop` is a channel that is only ever CLOSED; the sync loop polls it
  *  non-blockingly between rounds AND inside every backoff sleep (which runs in
@@ -63,6 +70,11 @@ case class ActRedact(roomId: String, eventId: String) extends Action
 /** toggle the server's favorite marker on one message (plan 0019): keeps it
  *  past the media-retention window until it is toggled back. */
 case class ActFavorite(roomId: String, eventId: String) extends Action
+/** drain the outbox (outbox.scala): the sync loop's end-of-round poke, so the
+ *  retry's HTTP and disk IO run on the action loop like every other send. */
+case class ActRetryOutbox() extends Action
+/** the user opened `key`'s conversation and has seen its undelivered marker. */
+case class ActAckOutbox(key: String) extends Action
 /** the shutdown poison pill. */
 case class ActQuit() extends Action
 
@@ -72,9 +84,16 @@ case class EvConn(state: ConnectionState) extends UiEvent
 case class EvSnapshot() extends UiEvent
 case class EvSendComplete(txnId: Int) extends UiEvent
 case class EvSendFailed(txnId: Int) extends UiEvent
-/** audio can be DECOUPLED (no audio thread wired up): a download-and-play
- *  still downloads, then surfaces this instead of playing. */
-case class EvPlaybackError() extends UiEvent
+/** a playback that did not happen, and WHY — the two causes need different
+ *  words on screen. `fetchFailed` = the media could not be downloaded (a
+ *  network answer); false = the bytes were fine but there is nothing to play
+ *  them through (no audio thread wired up, or the device's audio is broken). */
+case class EvPlaybackError(fetchFailed: Boolean) extends UiEvent
+/** the outbox changed: the conversation keys with something still queued, and
+ *  the ones that lost a message for good. The UI's marker state — pushed as an
+ *  event because a device that cannot reach the server publishes no snapshots,
+ *  and an offline send has to leave a trace on screen immediately. */
+case class EvOutbox(unsent: List[String], undelivered: List[String]) extends UiEvent
 
 /** one room's deferred backfill walk: the token to page from next and how
  *  many pages this trigger has already fetched (`Runtime.maxBackfillPages`
@@ -114,7 +133,11 @@ case class MatrixClient(
   stop: sgo.Chan[Boolean],
   retry: sgo.Chan[Boolean],
   audioEnabled: Boolean,
-  audioCmds: sgo.Chan[AudioCmd]
+  audioCmds: sgo.Chan[AudioCmd],
+  /** where a failed send is kept (outbox.scala). Another capability trait, so
+   *  the core stays filesystem-free: the app hands in a store over its config
+   *  directory, or `MemOutbox` when it has nowhere to write. */
+  outbox: OutboxStore
 ) extends Shareable
 // `MatrixClient` is the client handle that crosses into the sync + action
 // goroutines (`fork(syncLoop(c))`), so it derives `Shareable` — that then
@@ -127,16 +150,26 @@ object Runtime:
 
   // ---- construction / lifecycle ----------------------------------------------
 
-  /** headless client (audio disabled). */
+  /** headless client (audio disabled), queueing failed sends in memory. */
   def make(cfg: ClientConfig, http: HttpDo, clock: Clock): MatrixClient =
-    mk(cfg, http, clock, false)
+    mk(cfg, http, clock, false, MemOutbox())
 
   /** audio-wired client: `audioCmds` is consumed by the app-layer audio thread
    *  (`AudioThread.mainLoop` reads the SAME chan this handle carries). */
   def makeWithAudio(cfg: ClientConfig, http: HttpDo, clock: Clock): MatrixClient =
-    mk(cfg, http, clock, true)
+    mk(cfg, http, clock, true, MemOutbox())
 
-  def mk(cfg: ClientConfig, http: HttpDo, clock: Clock, audioEnabled: Boolean): MatrixClient =
+  /** headless, with a persistent outbox (what a driver that has to survive a
+   *  restart wants). */
+  def makeStored(cfg: ClientConfig, http: HttpDo, clock: Clock, ob: OutboxStore): MatrixClient =
+    mk(cfg, http, clock, false, ob)
+
+  /** the device shape: audio wired AND the outbox on disk. */
+  def makeWithAudioStored(cfg: ClientConfig, http: HttpDo, clock: Clock, ob: OutboxStore): MatrixClient =
+    mk(cfg, http, clock, true, ob)
+
+  def mk(cfg: ClientConfig, http: HttpDo, clock: Clock, audioEnabled: Boolean,
+         ob: OutboxStore): MatrixClient =
     // chans BOUND TO LOCALS first: makeChan's element-type recording is the
     // local-val path (a makeChan in ARGUMENT position has no symbol to record).
     val actions = sgo.makeChan[Action](ACTION_QUEUE)
@@ -146,7 +179,15 @@ object Runtime:
     val retry = sgo.makeChan[Boolean](1)          // the retry-now poke
     val audioCmds = sgo.makeChan[AudioCmd](16)
     resetSession()
-    MatrixClient(cfg, http, clock, actions, events, snaps, stop, retry, audioEnabled, audioCmds)
+    // the queue is loaded HERE, before either loop exists: an entry that
+    // outlived the last process is already pending when the first sync round
+    // proves the server reachable. A MEMORY store is emptied first — it has no
+    // device behind it, so its slots are this client's alone (the host drivers
+    // run several sequential clients in one process).
+    if !ob.persistent() then MemSlots.reset()
+    Outbox.reset(ob)
+    MatrixClient(cfg, http, clock, actions, events, snaps, stop, retry, audioEnabled,
+      audioCmds, ob)
 
   /** the action queue's capacity — also the bound on how many queued actions
    *  the shutdown poke may discard to make room for the poison pill. */
@@ -170,6 +211,8 @@ object Runtime:
     // Shareable by construction; no hatch needed.
     sgo.fork(syncLoop(c))
     sgo.fork(actionLoop(c))
+    // whatever survived the last process is on screen from the first frame
+    Outbox.publish(c)
     ()
 
   /** signal both loops to wind down (minus the joins — the enclosing
@@ -214,8 +257,10 @@ object Runtime:
     val ok = c.events.trySend(EvSendFailed(txnCounterC.add(1)))
     ()
 
+  /** a play the queue could not even accept: nothing was fetched, so it is the
+   *  fetch half that failed as far as the user is concerned. */
   def playFailEvent(c: MatrixClient): Unit =
-    val ok = c.events.trySend(EvPlaybackError())
+    val ok = c.events.trySend(EvPlaybackError(true))
     ()
 
   /** poke the login/backoff sleep: it ends its current sleep slice, the caller
@@ -389,6 +434,9 @@ object Runtime:
     queueBackfills(WJson.objField(WJson.objField(j, "rooms"), "join"))
     drainBackfill(hs)
     publishSnapshot(c)
+    // this round PROVED the server reachable — the one moment worth retrying
+    // a queued send. The work itself happens on the action loop.
+    Outbox.kick(c)
 
   /** trusted family environment — accept ALL invites. */
   def autoJoin(hs: Hs, inviteMap: Json): Unit =
@@ -542,47 +590,50 @@ object Runtime:
     case n: ActSetName  => execSetName(hs, selfUid, n)
     case x: ActRedact   => execRedact(hs, x)
     case f: ActFavorite => execFavorite(hs, f)
+    case _: ActRetryOutbox => execRetryOutbox(c, hs)
+    case k: ActAckOutbox   => execAckOutbox(c, k)
 
   def execReceipt(hs: Hs, r: ActReceipt): Boolean =
     drop(MatrixHttp.sendReadReceipt(hs, r.roomId, r.eventId)) // best-effort, failure ignored
     true
 
+  /** a live send is one classified attempt (outbox.scala owns the policy).
+   *  What fails for a transport-ish reason is QUEUED rather than lost — the
+   *  flash still fires, because the user pressed the key just now and deserves
+   *  to know it did not go out, but the bytes stay and the next proven-good
+   *  sync round retries them. What the server REFUSES is dropped, with the
+   *  conversation left marked. */
   def execSendVoice(c: MatrixClient, hs: Hs, m: ActSendVoice): Boolean =
     val txn = txnCounterC.add(1)
-    var roomId = m.roomId
-    if roomId == "" then roomId = resolveDmRoom(hs, m.contactId)
-    if roomId == "" then c.events.send(EvSendFailed(txn))
+    val cls = Outbox.sendOnce(hs, m.roomId, m.contactId, m.ogg, m.durationMs, txn)
+    if cls == Outbox.DELIVERED then c.events.send(EvSendComplete(txn))
     else
-      val up = MatrixHttp.uploadMedia(hs, m.ogg)
-      val mxc = MatrixHttp.parseMxcUrl(up.body)
-      if up.status != 200 then c.events.send(EvSendFailed(txn))
-      else if mxc == "" then c.events.send(EvSendFailed(txn))
-      else
-        val sv = MatrixHttp.sendVoiceMessage(hs, roomId, mxc, m.durationMs, m.ogg.size, txn)
-        if sv.status == 200 then c.events.send(EvSendComplete(txn))
-        else c.events.send(EvSendFailed(txn))
+      c.events.send(EvSendFailed(txn))
+      if cls == Outbox.RETRY then
+        Outbox.enqueue(c, m.roomId, m.contactId, m.ogg, m.durationMs, txn)
+      else Outbox.markDropped(c, Outbox.keyOf(m.roomId, m.contactId))
     true
 
-  /** DM-room resolution: ONE call to the server's DM endpoint, which owns DM
-   *  identity. There is nothing to reconcile here — the server answers with THE
-   *  room for the pair, idempotently, having joined us to it. */
-  def resolveDmRoom(hs: Hs, contactId: String): String =
-    if contactId == "" then ""
-    else
-      val resp = MatrixHttp.dmRoom(hs, contactId)
-      if resp.status == 200 then MatrixHttp.parseRoomId(resp.body) else ""
+  def execRetryOutbox(c: MatrixClient, hs: Hs): Boolean =
+    Outbox.deliver(c, hs)
+    true
 
-  /** the download-play action: download; on failure -> `EvPlaybackError`; on
-   *  success -> route the Ogg bytes to the audio thread (drop-on-full
-   *  `trySend`) when audio is wired, else surface `EvPlaybackError` (the
-   *  headless-client behavior). */
+  def execAckOutbox(c: MatrixClient, a: ActAckOutbox): Boolean =
+    Outbox.ack(c, a.key)
+    true
+
+  /** the download-play action: download; on failure -> `EvPlaybackError` with
+   *  the FETCH cause; on success -> route the Ogg bytes to the audio thread
+   *  (drop-on-full `trySend`) when audio is wired, else the same event with
+   *  the AUDIO cause (the headless-client behavior) — two different sentences
+   *  on screen, because they need two different reactions. */
   def execPlay(c: MatrixClient, hs: Hs, d: ActPlay): Boolean =
     val resp = MatrixHttp.downloadMedia(hs, d.mxcUrl)
-    if resp.status != 200 then c.events.send(EvPlaybackError())
+    if resp.status != 200 then c.events.send(EvPlaybackError(true))
     else if c.audioEnabled then
       c.audioCmds.trySend(AcPlay(Bytes.fromRawString(resp.body)))
       ()
-    else c.events.send(EvPlaybackError())
+    else c.events.send(EvPlaybackError(false))
     true
 
   def execSetName(hs: Hs, selfUid: String, n: ActSetName): Boolean =

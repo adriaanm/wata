@@ -54,3 +54,8 @@ object syscall:
    *  exists" is the common and desired outcome at the one call site, the
    *  config store's parent directory). */
   @go.name("Mkdir") def mkdir(path: String, mode: scala.Int): Unit = ???
+  /** `syscall.Unlink(path)` — error dropped (best-effort: the one call site is
+   *  the outbox freeing a delivered message's slot, which TRUNCATES the file
+   *  before unlinking it, so a failed unlink still leaves the slot empty
+   *  rather than redelivering the message next boot). */
+  @go.name("Unlink") def unlink(path: String): Unit = ???

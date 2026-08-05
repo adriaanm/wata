@@ -46,9 +46,10 @@ A consumer interacts with `wataclient` mainly through `runtime.scala`'s
 |---|---|---|
 | `Session` | `session.scala` | Stored login credentials (`homeserver`, `username`, `accessToken`, `userId`, `deviceId`), the thing persisted to and loaded from a device-local config file. |
 | `ClientConfig` | `runtime.scala:63` | Login parameters (homeserver/username/password/sync timeout) plus a `Session` to try resuming from. |
-| `MatrixClient` | `runtime.scala:73` | The client handle: config, the two capability instances, and five channels (`actions` in, `events` out, `snaps` out, `stop`, `retry`) plus the audio-command channel. |
-| `Runtime` | `runtime.scala:92` | Construction (`make`/`makeWithAudio`), lifecycle (`start`/`stopClient`), and polling helpers (`pollEvent`, `pollSnap`, `waitForConnection`, `waitForSnapshot`). |
-| `Action` / `UiEvent` | `runtime.scala:36-59` | The command and notification vocabulary between app and client. `ActReceipt`, `ActSendVoice`, `ActPlay`, `ActSetName`, `ActRedact`, `ActFavorite` (the plan-0019 favorite toggle, fire-and-forget — its result arrives as room state on the next sync), `ActQuit`. |
+| `MatrixClient` | `runtime.scala:73` | The client handle: config, the three capability instances, and five channels (`actions` in, `events` out, `snaps` out, `stop`, `retry`) plus the audio-command channel. |
+| `Runtime` | `runtime.scala:92` | Construction (`make`/`makeWithAudio`, and the `…Stored` pair that takes an `OutboxStore`), lifecycle (`start`/`stopClient`), and polling helpers (`pollEvent`, `pollSnap`, `waitForConnection`, `waitForSnapshot`). |
+| `Action` / `UiEvent` | `runtime.scala:36-59` | The command and notification vocabulary between app and client. `ActReceipt`, `ActSendVoice`, `ActPlay`, `ActSetName`, `ActRedact`, `ActFavorite` (the plan-0019 favorite toggle, fire-and-forget — its result arrives as room state on the next sync), `ActRetryOutbox`/`ActAckOutbox` (the outbox, below), `ActQuit`. |
+| `OutboxStore` | `outbox.scala` | The third capability: `CAP` numbered slots of opaque text the app maps onto files. `MemOutbox` is the fallback for a consumer with nowhere to write. |
 | `StateSnapshot` | `domain.scala:95` | The immutable UI-facing view of everything the client knows: connection state, self user, contacts, conversations, family. |
 
 The consumer's shape is: build a `MatrixClient` with `Runtime.make` (or
@@ -68,6 +69,51 @@ a send/play surfaces its ordinary failure event. This is a hard rule
 rather than a tuning choice: the caller is typically a UI thread, and the
 action loop can legitimately sit inside a request for the length of the
 HTTP deadline, so a blocking enqueue is a frozen screen.
+
+## The outbox: a failed send is kept, not lost
+
+A recording exists exactly once — someone pressed the key and spoke — so a
+send that fails on the network becomes a queue entry rather than a flash
+and a hole in the conversation (`outbox.scala`, plan 0022).
+
+- **Bounded and persistent.** `CAP` = 16 entries, one per slot of the
+  injected `OutboxStore`; `wata-fb` writes them as
+  `<config dir>/outbox/eN.msg`. Slots rather than names because the subset
+  has no directory listing: a fixed slot scan at construction
+  (`Runtime.mk` -> `Outbox.reset`) is the whole load protocol, and the
+  order comes from the sequence number inside each entry. At the cap the
+  OLDEST entry is dropped, as loudly as an undeliverable one.
+- **The entry** is `seq`, the target (room id, or a CONTACT id when the DM
+  room does not exist yet — the retry re-resolves it), duration, the
+  transaction id every attempt reuses (so a send the server accepted but
+  never answered is deduplicated rather than delivered twice), and the Ogg
+  bytes VERBATIM. Nothing is re-encoded on retry.
+- **The classified failure policy** (`Outbox.classify`, the owner's ruling
+  of 2026-08-05) is the whole design:
+
+  | class | statuses | what happens |
+  |---|---|---|
+  | delivered | 200 | entry gone; the unsent marker clears when the queue empties |
+  | undeliverable | 4xx except 401/429 | entry DROPPED, the conversation marked — a poisoned head must not block the queue behind it |
+  | retry | transport (status 0), 5xx, 401, 429 | entry stays in place; a long outage never loses a message |
+
+  401 and 429 are deliberately not in the "refused" class: they describe
+  our token and our rate, not the message.
+- **When it retries.** Every successful sync round ends in `Outbox.kick`,
+  which pokes the action loop (one poke in flight at a time). The action
+  loop then drains the queue oldest-first and stops at the first
+  retry-class failure, so nothing overtakes the message before it. All
+  outbox state changes and all its disk IO are the ACTION loop's; the sync
+  loop only reads `pending`.
+- **The UI is told, not asked.** `EvOutbox(unsent, undelivered)` carries
+  the conversation keys on every change, including once at `Runtime.start`
+  for what came off disk. It is an event rather than a snapshot field
+  because a device that cannot reach the server publishes no snapshots —
+  and that is exactly the device with a queue. `ActAckOutbox(key)` clears
+  an undelivered mark when the user opens that conversation.
+- **Degradation is announced.** A store that reports `persistent() ==
+  false` (a host build, or a device whose config directory will not take a
+  write) still queues for the session and prints one line saying so.
 
 ## The connect lifecycle
 
@@ -398,7 +444,10 @@ bytes over a socket":
 
 - **`capabilities.scala`** is the capability seam: `HttpDo`
   (`send(req) -> resp`) and `Clock` (`nowUnixMillis`, `sleepMs`) are
-  Go-interface-shaped traits the app supplies implementations of. There
+  Go-interface-shaped traits the app supplies implementations of. (The
+  third capability, `OutboxStore`, is declared next to the queue that
+  consumes it, `outbox.scala`, and is the same shape: slot IO the app
+  performs, no filesystem in the core.) There
   is deliberately no randomness capability: transaction ids are generated
   from an `Atomic[Int]` counter (`Runtime.txnCounterC`) — deterministic
   and sufficient for a single-client process — and nothing else in the
@@ -467,13 +516,14 @@ checked against a separately pinned expected-output file in CI.
 | File | Lines | Contents |
 |---|---|---|
 | `audiocmd.scala` | 44 | Audio-thread command/event protocol types (`AudioCmd`, `AudioEvt`). |
-| `capabilities.scala` | 45 | The two injected capability traits: `HttpDo`, `Clock`, plus header-list helpers. |
+| `capabilities.scala` | 45 | Two of the three injected capability traits: `HttpDo`, `Clock`, plus header-list helpers (the third, `OutboxStore`, lives with its queue in `outbox.scala`). |
 | `domain.scala` | 142 | Core domain types: connection state, conversation type, users/contacts/messages, room/engine working state, sync events, and `Names` (the display-name/localpart fallback). |
 | `matrix.scala` | 105 | Matrix C-S API request-body shaping and response parsing (pure, no transport). |
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |
+| `outbox.scala` | 465 | The bounded, persistent outbox: the `OutboxStore` capability, `MemOutbox`, the classified send/retry policy, and the entry format. |
 | `oracle.scala` | 398 | Portable byte-level self-test report (CRC, Ogg round trip, `Bytes`/`IArray` conformance) plus a foreign-container fixture walker. |
-| `runtime.scala` | 620 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |
+| `runtime.scala` | 755 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |
 | `session.scala` | 41 | `Session` record (stored login credentials) and its JSON (de)serialization. |
 | `syncdescribe.scala` | 306 | Renders engine state/events/snapshot as deterministic text, driven by real captured fixtures. |
 | `syncengine.scala` | 932 | The sync engine: `process()` (ingest) and `buildSnapshot()` (derive UI view). The core of the module. |

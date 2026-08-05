@@ -79,8 +79,9 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  report, `Runtime.connTag` — 4 = error, 5 = auth rejected), logins (the
  *  client's login/resume attempts, which is how a script sees the retry loop
  *  turning and a retry-now poke landing), quitarm (1 while the two-step quit
- *  is armed), frames (the session's frame counter — what a script watches to
- *  prove the frame loop is not blocked). */
+ *  is armed), unsent / undeliv (conversations carrying an outbox marker: a
+ *  send still queued, or one the server refused), frames (the session's frame
+ *  counter — what a script watches to prove the frame loop is not blocked). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -160,7 +161,7 @@ object UiScript:
       Ui.resetCells()
       val lines = splitLines(body)
       val clock = ScriptClock()
-      val c = Runtime.makeWithAudio(cfg, FbCaps.httpDo(), FbCaps.clock())
+      val c = Runtime.makeWithAudioStored(cfg, FbCaps.httpDo(), FbCaps.clock(), FbConfig.outbox())
       val dev = ScriptDevice()
       val px = Draw.newBuffer()
       // the error string rides OUT of the scope as supervised's value (the same
@@ -455,8 +456,23 @@ object UiScript:
     else if name == "conntag" then Runtime.connTag(Ui.connection)
     else if name == "logins" then Runtime.loginAttempts
     else if name == "quitarm" then boolProbe(Ui.quitArmed)
+    else if name == "unsent" then countKeys(Ui.unsentKeys)
+    else if name == "undeliv" then countKeys(Ui.undeliveredKeys)
     else if name == "frames" then Ui.frames
     else -1
+
+  /** how many conversations carry one of the outbox markers. */
+  def countKeys(xs: List[String]): scala.Int =
+    var n = 0
+    var cur = xs
+    var going = true
+    while going do
+      cur match
+        case _ :: t =>
+          n = n + 1
+          cur = t
+        case Nil => going = false
+    n
 
   def boolProbe(b: Boolean): scala.Int =
     var out = 0
