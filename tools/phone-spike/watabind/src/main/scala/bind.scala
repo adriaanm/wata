@@ -1,34 +1,108 @@
 import language.experimental.saferExceptions
 
-/** The BIND SURFACE of the phone spike (plan 0023 M1): the whole client core
- *  reduced to one blocking call that takes strings and returns a string.
+/** The BIND SURFACE of the phone spike (plan 0023 M1, rewired on plan 0025's
+ *  client handle): the whole client core behind a handful of calls that take
+ *  and return strings, plus the handle value itself.
  *
- *  Deliberately synchronous. `Runtime.start` forks the sync and action loops
- *  into an `sgo.supervised` scope, and the scope IS the join point — so a
- *  surface that returned while the loops ran would have to hand the scope's
- *  lifetime to the caller. gomobile's bound calls arrive on whatever thread
- *  the host picks, so the spike keeps the scope entirely inside one call: log
- *  in, wait for the first snapshot, render it, wind down. A real phone client
- *  gets a handle type and an event pump; this answers the toolchain question.
+ *  ASYNCHRONOUS, because the handle is. `start` returns as soon as the client
+ *  has its own goroutine; the HOST then owns the loop — it pumps
+ *  `events()` (a bounded channel of dirty flags), reads `connection()` and
+ *  `snapshot()` when a flag says something moved, and calls `stop` when it is
+ *  done. That is the shape a UIKit app needs and the shape `watamobile`'s Go
+ *  shim implements: a goroutine draining `events()` into an `EventSink` the
+ *  host implements. Nothing here parks a thread or sleeps to fake a lifetime.
  *
  *  The rendered report is line-oriented and deterministic apart from the ids
  *  the server mints, which is what makes it checkable from a shell. */
 object Bind:
 
-  /** log in, run sync until the first self-bearing snapshot, render it. */
-  def probe(homeserver: String, user: String, pass: String, timeoutMs: Long): String =
+  /** start the client on its own goroutine — returns immediately. */
+  def start(homeserver: String, user: String, pass: String): Handle =
     val cfg = ClientConfig(homeserver, user, pass, 1000, Session("", "", "", "", ""))
-    val c = Runtime.make(cfg, SpikeCaps.httpDo(), SpikeCaps.clock())
-    sgo.supervised {
-      Runtime.start(c)
-      var out = "error unreachable-or-rejected"
-      if Runtime.waitForConnection(c, Syncing(), timeoutMs) then
-        if Runtime.waitForSnapshot(c, (s: StateSnapshot) => s.hasSelfUser, timeoutMs) then
-          out = report(Runtime.lastSnap)
-        else out = "error no-snapshot"
-      Runtime.stopClient(c)
-      out
-    }
+    ClientHandle.start(cfg, SpikeCaps.httpDo(), SpikeCaps.clock(), SpikeCaps.spawner())
+
+  /** the dirty-topic channel the host's pump goroutine receives on. */
+  def events(h: Handle): sgo.Chan[Event] = h.events()
+
+  /** the next topic's NAME within the deadline, "" if none came. Reads the
+   *  same channel `events` hands the host, which is also what keeps `events`
+   *  in the emitted package: the app-mode link prunes to what `main` reaches,
+   *  so a bind-surface function no Sgola code calls is not emitted at all. */
+  def nextTopic(h: Handle, timeoutMs: Long): String =
+    val ch = events(h)
+    val deadline = SpikeCaps.clock().nowUnixMillis() + timeoutMs
+    var out = ""
+    var run = true
+    while run do
+      ch.tryReceive() match
+        case e: Some[Event] =>
+          out = ClientHandle.topicName(e.value)
+          run = false
+        case None =>
+          if SpikeCaps.clock().nowUnixMillis() >= deadline then run = false
+          else SpikeCaps.sleepMs(20L)
+    out
+
+  /** is the client connected/syncing right now? */
+  def live(h: Handle): Boolean = isLive(h.connection())
+
+  def isLive(s: ConnectionState): Boolean = s match
+    case _: Connected => true
+    case _: Syncing   => true
+    case _            => false
+
+  /** does the current snapshot know who we are? (the first round that carries
+   *  the account is the one worth reporting). */
+  def hasSelf(h: Handle): Boolean = h.snapshot().hasSelfUser
+
+  /** the current snapshot, rendered. */
+  def reportOf(h: Handle): String = report(h.snapshot())
+
+  /** wind the client down and wait for its goroutine (the host calls this from
+   *  wherever its lifecycle ends). */
+  def stop(h: Handle): Unit =
+    val gone = ClientHandle.stopAndJoin(h, 10000L)
+    ()
+
+  /** the same session, driven from Sgola instead of from the host — what
+   *  `watabind <hs> <user> <pass>` runs, so a pure-Go run of identical code
+   *  can be diffed against the Swift shell's output. */
+  def probe(homeserver: String, user: String, pass: String, timeoutMs: Long): String =
+    val h = start(homeserver, user, pass)
+    var out = "error unreachable-or-rejected"
+    if waitLive(h, timeoutMs) then
+      if waitSelf(h, timeoutMs) then out = reportOf(h)
+      else out = "error no-snapshot"
+    stop(h)
+    out
+
+  /** pump events until the client reads live, or the deadline passes. The
+   *  flags say "look again"; the state is the answer. */
+  def waitLive(h: Handle, timeoutMs: Long): Boolean =
+    val deadline = SpikeCaps.clock().nowUnixMillis() + timeoutMs
+    var ok = false
+    var run = true
+    while run do
+      if live(h) then
+        ok = true
+        run = false
+      else if SpikeCaps.clock().nowUnixMillis() >= deadline then run = false
+      else drop1(nextTopic(h, 200L))
+    ok
+
+  def waitSelf(h: Handle, timeoutMs: Long): Boolean =
+    val deadline = SpikeCaps.clock().nowUnixMillis() + timeoutMs
+    var ok = false
+    var run = true
+    while run do
+      if hasSelf(h) then
+        ok = true
+        run = false
+      else if SpikeCaps.clock().nowUnixMillis() >= deadline then run = false
+      else drop1(nextTopic(h, 200L))
+    ok
+
+  def drop1(topic: String): Unit = ()
 
   /** a build-identity line, so a bound framework can be shown to be OURS
    *  without a server anywhere near it. */

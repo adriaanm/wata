@@ -86,14 +86,28 @@ serialized bytes. Notably, gobind does not choke on the un-bindable types; it
 only looks at the named package's exported signatures, so binding the shim
 never touched the emitted package's API.
 
-**4. The bound call is blocking and thread-agnostic.** `Runtime.start` forks
-into an `sgo.supervised` scope whose join is the scope exit, so a surface that
-returned while the loops ran would have to hand the scope's lifetime to the
-host. The spike keeps the whole scope inside one call. Go's runtime creates
-its own threads under gomobile and the call arrived on whatever thread Swift
-used, with no main-thread requirement and no init-order surprise — but M2/M3
-need a real answer here: a handle type, an explicit `start`/`stop`, and an
-event pump the host polls or a callback interface gobind synthesizes.
+**4. The bound call was blocking and thread-agnostic — ANSWERED by plan
+0025.** `Runtime.start` forks into an `sgo.supervised` scope whose join is the
+scope exit, so the first cut of this spike kept the whole scope inside one
+call. Go's runtime creates its own threads under gomobile and the call arrived
+on whatever thread Swift used, with no main-thread requirement and no
+init-order surprise — but that shape hands the host no lifetime. wataclient
+now has `ClientHandle` (`wataclient/src/main/scala/handle.scala`): `start`
+returns a `Handle` whose supervised scope lives on a goroutine it owns, and
+the outside gets `sendAction` / `snapshot` / `connection` / `events` / `stop`
++ join. The shim was rewired onto it and that rewire IS the sufficiency
+proof — `watamobile` now exposes `Start`/`Watch(EventSink)`/`Live`/`HasSelf`/
+`Report`/`Stop`, a goroutine drains the handle's bounded dirty-flag channel
+into the sink, and `Probe` is written the way a Swift view controller would be
+(start, observe, read, stop) rather than as one blocking call. Nothing parks a
+thread and nothing sleeps. The printed report is unchanged, which is the
+point: the same client, driven from outside.
+
+A friction the rewire surfaced: **the app-mode link prunes the emitted package
+to what `main` reaches**, so a bind-surface function no Sgola code calls is not
+emitted at all (`Bind_events` vanished until `Bind.nextTopic` used it). Any
+"emitted Go as a library" story needs an export marker; it is one more face of
+`NO-LIB-EMIT-FOR-RUNTIME-LIBS` and is noted on that ticket.
 
 **5. The macOS framework's name has a hyphen.** `gomobile bind -target=macos
 -o Watamobile.xcframework` produces `Watamobile-Macos.framework`; a clang

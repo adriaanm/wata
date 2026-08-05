@@ -26,7 +26,7 @@ for it. It is not in `just ci` — it needs Xcode and a several-minute bind.
 |------|------------|
 | `watabind/` | a Sgola module linking `wataclient` whole-program; its `Bind` object is the surface the phone reaches |
 | `watabind/sgo.deps` | names `wataclient` by explicit relative path (`wataclient ../../../wataclient`) — the nested-module form `sgo.deps` grew for exactly this layout |
-| `watamobile/` | the hand-written Go shim that gobind actually binds: strings in, strings out |
+| `watamobile/` | the hand-written Go shim that gobind actually binds: `Start`/`Watch(EventSink)`/`Report`/`Stop` over plan 0025's client handle — strings in, strings out |
 | `swift/` | the Swift shell (+ its bridging header) that drives the bound macOS framework |
 | `spike.py` | the four stages, end to end |
 | `out/` | build products (gitignored): the two xcframeworks, `watashell`, `server.log` |
@@ -44,6 +44,11 @@ re-exports two functions in types gobind can carry. `gomobile bind` turns
 `macos`. `swiftc` builds a CLI against the macOS one, and the smoke boots a
 `wata-server`, seeds a family room, and checks the lines the Swift process
 prints — which are rendered inside Sgola, from a live `StateSnapshot`.
+
+The shim drives the client through `ClientHandle` (plan 0025): it starts it,
+pumps the handle's dirty-flag channel into an `EventSink` on a goroutine, reads
+the snapshot when a flag says something moved, and stops it. The host owns the
+loop, which is what a UIKit app needs.
 
 ## Rerunning after a source change
 
