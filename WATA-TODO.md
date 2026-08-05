@@ -108,10 +108,10 @@ blocks + git log; each entry cites where it was recorded.*
   IdList/MediaList wrappers gone (folds go straight to `List[T]`).
   RESIDUAL filed: WATA-FOLD-RETURN-POS — the recovered adapter cast
   misses RETURN position, so fold results are val-bound then returned
-  (store.scala, commented); fix dispatching upstream. IF-EXPR-DOUBLE-
-  BOXES **fixed at `4834bec`** (repin queued — unwind the var-out at
-  ui.scala's tickQuitArm as the standing proof; walls of that class
-  are also POSITIONED now, no more file-level banners). Still open:
+  (store.scala, commented); fix dispatching upstream. ~~IF-EXPR-DOUBLE-
+  BOXES~~ FIXED and verified downstream: pin `4834bec` full-gate green
+  with tickQuitArm's direct if-expression restored (standing proof);
+  walls of that class are POSITIONED now. Still open:
   WATA-SKIP-FRESH-CHECKOUT (sgo driver; build in the original
   checkout).
 - FYI from upstream 2026-08-05 (`4cbea19..d30adec`): several

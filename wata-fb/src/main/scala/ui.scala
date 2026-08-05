@@ -321,9 +321,10 @@ object Ui:
   def tickQuitArm(dt: scala.Double): Unit =
     val cur = quitArmC.get()
     if cur > 0.0 then
-      var left = cur - dt
-      if left < 0.0 then left = 0.0
-      quitArmC.set(left)
+      val left = cur - dt
+      // if-expression at a primitive argument type: the standing proof of
+      // the IF-EXPR-DOUBLE-BOXES fix (pin 4834bec).
+      quitArmC.set(if left < 0.0 then 0.0 else left)
 
   def isQuitEdge(ev: KeyEvent): Boolean =
     Shell.isPressed(ev.state) && isBack(ev.key) &&
