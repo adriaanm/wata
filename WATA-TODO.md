@@ -112,6 +112,23 @@ blocks + git log; each entry cites where it was recorded.*
   cross-unit val reads inside one module (filed 2026-08-05,
   `CROSS-MODULE-VAL-READ`; plan 0022). Worked around with
   `Outbox.cap()`; inline `Outbox.CAP` again when it lands.
+- Comparing an `sgo.Atomic[String].get()` against a String literal IN
+  PLACE emits a call to `equalsObject(Object, Object)` — a function the
+  emitter writes but whose `Object` type it never declares, so the Go
+  build fails with `undefined: Object` (filed 2026-08-05,
+  `ATOMIC-STR-EQ`; plan 0014). Reading the same cell through a `def`
+  that returns `String` compares natively, so it is the inline
+  `.get() == <literal>` position. Worked around in `Enrol.nonce` by
+  binding to a typed local first — the same trick `wjson.scala` already
+  carries a comment for; inline it again when it lands.
+- `sgo`'s go.mod stage writes only require+replace per `godep` — no
+  go.sum, and no line for a godep module's OWN requirements — so the
+  first external Go dependency (`rsc.io/qr`, plan 0014) fails the build
+  with `missing go.sum entry` (filed 2026-08-05,
+  `GOMOD-TRANSITIVE-SUM`). Worked around with `GOFLAGS=-mod=mod` in
+  `tools/sgo-env.sh` + `tools/toolchain.py`, which lets the go build
+  stage patch the GENERATED module; drop that export when the go.mod
+  stage propagates its godeps' requirements.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —
@@ -126,9 +143,11 @@ blocks + git log; each entry cites where it was recorded.*
   (def-result and withLock-lambda-tail, kept as standing proofs).
   ~~IF-EXPR-DOUBLE-BOXES~~ FIXED and verified downstream: pin
   `4834bec`, tickQuitArm's direct if-expression restored (standing
-  proof); walls of that class are POSITIONED now. **Every ticket
-  wata has filed to date — compiler and driver — is landed and
-  downstream-verified.** ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
+  proof); walls of that class are POSITIONED now. CROSS-MODULE-VAL-READ (filed with the outbox work) **fixed upstream
+  at `f0bce9e`** — repin queued behind the in-flight IROH-ONBOARD
+  agent (SGOLA-REPIN-XMODVAL): drop `Outbox.cap()`, restore the
+  direct val read as the standing proof. Every earlier ticket —
+  compiler and driver — is landed and downstream-verified. ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
   `94ce542`, verified by the original repro: a fresh worktree with the
   shared toolchain home rebuilds the liblink dep (RUN) and the
   cross-build succeeds; isolated-worktree deploy builds work directly
