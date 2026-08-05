@@ -506,6 +506,7 @@ def enrolment(atok, btok, iroh):
 
     fragment_announce(atok, iroh)
     typed_code(atok)
+    already_enrolled(atok, one)
 
 
 def fragment_announce(atok, iroh):
@@ -561,6 +562,49 @@ def typed_code(atok):
     check(set(pending(atok)) == {node},
           "none of the rejected forms left a row behind")
     req("POST", f"/_wata/v1/admin/enroll/{node}/deny", None, atok)
+
+
+def already_enrolled(atok, enrolled_id):
+    """ALREADY ENROLLED IS AN ANSWER ([ADMIN-ENROLL-ALREADY-DONE]). An enrolled
+    handset has no pending row, and neither does one whose announce expired —
+    the page could not tell the two apart and reported the expiry over both,
+    including immediately after a SUCCESSFUL approve (the fragment re-run finds
+    the row cleared, re-announces, gets no row back). So the server marks it:
+    the announce answers `allowlisted`, and the admin listing carries the ids
+    the allowlist holds beside the pending rows.
+
+    What is asserted here is the endpoint sequence the page performs — a
+    reload of the fragment, and the refresh that follows an approve — plus the
+    typed-code half, which has only a prefix to match and therefore needs those
+    ids listed."""
+    print("enrolment: an already-enrolled device reads as done, not as an expiry")
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    check(enrolled_id in (listing.get("allowlisted") or []),
+          "the admin listing reports the allowlist's ids beside the pending rows")
+    check(enrolled_id not in {p["node_id"] for p in listing["pending"]},
+          "the enrolled device has no pending row — which is why the marker is needed")
+
+    status, body, _ = req("POST", "/_wata/v1/enroll", {"nodeId": enrolled_id, "nonce": "QR09"})
+    check(status == 200 and body.get("allowlisted") is True and body.get("pending") is False,
+          f"the page's re-announce answers 'already enrolled' (saw {status} {body})")
+    check(enrolled_id not in pending(atok),
+          "and records nothing — a pending row asks for a decision that is already made")
+
+    fresh = node_id(0x5150)
+    status, body, _ = req("POST", "/_wata/v1/enroll", {"nodeId": fresh, "nonce": "QR10"})
+    check(body.get("allowlisted") is False and body.get("pending") is True,
+          f"an id nobody approved still answers pending, not enrolled (saw {body})")
+    req("POST", f"/_wata/v1/admin/enroll/{fresh}/deny", None, atok)
+
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    allowed = listing.get("allowlisted") or []
+    prefix = enrolled_id[:8]
+    check(any(i.startswith(prefix) for i in allowed),
+          "a TYPED code's prefix finds the enrolled device in that list — 'already enrolled'")
+    # (the harness's node ids are seeds padded with zeros, so they share every
+    # prefix — the negative is asserted on membership, which is what the page's
+    # fragment path matches on.)
+    check(fresh not in allowed, "a device nobody approved is not in that list")
 
 
 def bounded():

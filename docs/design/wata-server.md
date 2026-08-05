@@ -216,7 +216,7 @@ dispatches), so a new admin route cannot be added ungated by accident.
 | `POST /_wata/v1/admin/users/{user}/displayname` | rename |
 | `POST /_wata/v1/admin/users/{user}/admin` | grant/revoke the flag |
 | `DELETE /_wata/v1/admin/users/{user}` | remove the account |
-| `GET /_wata/v1/admin/enroll` | the devices waiting to be approved (see "Device enrolment") |
+| `GET /_wata/v1/admin/enroll` | the devices waiting to be approved, plus the ids already allowlisted (see "Device enrolment") |
 | `POST /_wata/v1/admin/enroll/{nodeId}/approve` | allowlist that node id |
 | `POST /_wata/v1/admin/enroll/{nodeId}/deny` | drop the pending row |
 
@@ -315,6 +315,30 @@ transport — still leaves a successful approval: the response carries
 removes the row and writes nothing; a denied device may announce again, which
 is what makes deny the safe answer to "I don't recognize this".
 
+**"Already enrolled" is an answer, not an absence.** An enrolled handset has
+no pending row — and neither does one whose announce expired. The page could
+not tell the two apart, so it reported the expiry over both, including
+immediately after a *successful* approve: the fragment re-runs, finds the row
+cleared, re-announces, gets no row back, and says "the announce may have
+expired" over a device that had just been admitted. The server therefore marks
+it, in the two places a page can be holding an id:
+
+- the announce answers `{"node_id":…, "pending": false, "allowlisted": true}`
+  and records **nothing** — a pending row asks for a decision that is made
+  (an ordinary announce answers `"pending": true, "allowlisted": false`);
+- `GET /_wata/v1/admin/enroll` carries `"allowlisted": [<id>, …]` — the ids the
+  allowlist file holds — beside `"pending"`.
+
+The file is the source of truth and `approve` writes it before it answers, so
+the refresh that follows an approval sees the id there. A `"*"` entry admits
+every peer and answers for any id. The page reads the marker in three places: a
+scanned fragment whose id is allowlisted says "already enrolled — this handset
+is done" (calm, not an error, and it never re-announces); the same line covers
+the post-approve refresh, except when a warning is already up (an approval that
+did not apply live outranks it); and the typed code, which carries only a
+prefix, matches that prefix against the listed ids to answer "that device is
+already enrolled" instead of "no waiting device matches".
+
 **The QR contract.** The handset displays
 `<adminUrl>/admin#enroll/<nodeId>/<nonce>`, so a stock camera app lands the
 parent on the admin page with that row highlighted. The nonce is a
@@ -362,10 +386,14 @@ its preservation of the rest of the config, the deny path, the endpoint
 sequence the page performs for a fragment nobody announced (page JS cannot run
 in the smoke, so the sequence is what is asserted), and the prefix negative —
 a prefix is refused as an announce, as a 63-character near-miss, and as an
-approve target, leaving no row behind.
+approve target, leaving no row behind. It also pins the already-enrolled
+answer: the listing carries the allowlisted ids, a re-announce of one of them
+answers the marker and leaves no row, and an id nobody approved still answers
+pending.
 `tools/tunnel-smoke.py` runs the loop end to end over real iroh — the node the
 server just refused announces itself, an admin approves it, and the **same
-key** is accepted by the **same process**, no restart.
+key** is accepted by the **same server process** and by the **same client
+process**, which is left running across the approval and redials its way in.
 
 Not built: a revoke endpoint. The FFI half exists and is covered by the
 irohnet Go tests (`Listener.Disallow` closes live connections), but removing a

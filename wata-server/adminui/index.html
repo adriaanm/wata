@@ -100,10 +100,15 @@ const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem("wata_admin_token") || "";
 let me = localStorage.getItem("wata_admin_user") || "";
 
+// msgIsError is what lets a lower-priority note (the "already enrolled" line a
+// refresh produces) leave a WARNING alone: a message that reported something
+// going wrong stays up until the next action replaces it.
+let msgIsError = false;
 function say(text, isErr) {
   const el = $("msg");
   el.textContent = text || "";
   el.className = isErr ? "err" : "";
+  msgIsError = !!(text && isErr);
 }
 
 async function api(method, path, body) {
@@ -261,7 +266,7 @@ async function announceTarget(target) {
 // told to allowlist a node nobody ever saw, so the prefix is only ever matched
 // against ids the DEVICE announced. The cost is the honest one — the typed path
 // needs a device that could reach this server, i.e. the family LAN.
-function matchCode(pending, text) {
+function matchCode(pending, allowed, text) {
   const m = /^\s*([0-9A-Za-z_-]{1,64}?)[-\s]+([0-9a-fA-F]{4,64})\s*$/.exec(text || "");
   if (!m) return { error: "That does not look like a code. Type it as it appears: QR01-797d477b." };
   const nonce = m[1].toUpperCase(), prefix = m[2].toLowerCase();
@@ -269,6 +274,12 @@ function matchCode(pending, text) {
     p.node_id.toLowerCase().startsWith(prefix));
   if (hits.length === 1) return { hit: hits[0] };
   if (hits.length > 1) return { error: "That code matches more than one waiting device. Use the QR." };
+  // An enrolled device has no pending row either, and "no waiting device" over
+  // a handset that is already done reads as a failure. The allowlisted ids come
+  // back with the pending list for exactly this: matched on the prefix alone,
+  // since the nonce belongs to a row that is gone.
+  if (allowed.some((id) => id.toLowerCase().startsWith(prefix)))
+    return { done: "That device is already enrolled — nothing left to do." };
   return { error: "No waiting device matches that code. The handset has to reach this server " +
     "to announce itself — put it on the family wifi, or scan its QR instead." };
 }
@@ -278,9 +289,17 @@ function short(id) {
 }
 
 let lastPending = [];
+let lastAllowed = [];
 
-function renderEnroll(pending) {
+// Is this id already in the server's allowlist? A `"*"` entry admits every
+// peer, so it answers for any id — the same rule the server applies.
+function isEnrolled(id) {
+  return lastAllowed.includes("*") || lastAllowed.includes((id || "").toLowerCase());
+}
+
+function renderEnroll(pending, allowed) {
   lastPending = pending;
+  lastAllowed = (allowed || []).map((s) => String(s).toLowerCase());
   const table = $("enroll");
   const tb = table.querySelector("tbody");
   const target = enrollTarget();
@@ -314,6 +333,15 @@ function renderEnroll(pending) {
     found.scrollIntoView({ block: "center" });
   } else if (target && !validNodeId(target.nodeId)) {
     say("That enrolment link does not carry a valid node id.", true);
+  } else if (target && isEnrolled(target.nodeId)) {
+    // The done case, and the one that used to read as a failure: no pending
+    // row because this handset is IN the allowlist. It covers a reload of the
+    // fragment AND the refresh that follows a successful approve (the row is
+    // gone, the id is allowlisted, and re-announcing would answer no row) — so
+    // it is a calm statement of success, not an error. A warning already on
+    // screen (an approval that did not apply live) outranks it.
+    if (!msgIsError)
+      say(short(target.nodeId) + " is already enrolled — this handset is done.");
   } else if (target && !announced.has(target.nodeId)) {
     // the page-side announce: post it, then come straight back through refresh
     // so the row this parent just created is the one highlighted.
@@ -331,7 +359,7 @@ async function refresh() {
   renderStatus(s);
   renderUsers(s.users);
   const e = await api("GET", "/_wata/v1/admin/enroll");
-  renderEnroll(e.pending || []);
+  renderEnroll(e.pending || [], e.allowlisted || []);
 }
 
 // Exactly one of the three screens is up: first-run setup, the login form, or
@@ -390,8 +418,9 @@ $("signout-form").addEventListener("submit", (e) => { e.preventDefault(); signOu
 
 $("code-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  const r = matchCode(lastPending, $("code-input").value);
+  const r = matchCode(lastPending, lastAllowed, $("code-input").value);
   if (r.error) { say(r.error, true); return; }
+  if (r.done) { say(r.done); $("code-input").value = ""; return; }
   // reuse the QR's own path: point the fragment at the row we matched and
   // re-render, so a typed code and a scanned one land on the same highlight.
   location.hash = "#enroll/" + r.hit.node_id + "/" + r.hit.nonce;

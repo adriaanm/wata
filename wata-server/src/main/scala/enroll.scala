@@ -41,6 +41,13 @@ import sgo.{Mutex, mutex}
  *  listener, e.g. a plain-TCP deployment — the approval still stands and the
  *  response says `"live": false`, since the file is what the next boot reads.
  *
+ *  **"Already enrolled" is an answer, not an absence.** An announce of an id
+ *  the allowlist already holds is 200 with `"allowlisted": true` and no pending
+ *  row, and the admin listing carries the allowlisted ids beside the pending
+ *  ones. A page that finds no row can therefore say which of the two things
+ *  happened — this handset is done, or the announce expired — instead of
+ *  reporting an expiry over a successful approval.
+ *
  *  The QR contract (the device's side, plan 0014): the handset shows
  *  `http://<server>/admin#enroll/<nodeId>/<nonce>`, so a stock camera app
  *  lands the parent on the page with that row highlighted. The nonce is a
@@ -98,12 +105,39 @@ object Enroll:
     val nonce = strField(j, "nonce", "")
     if !validNodeId(nodeId) then Left(MErr(400, M_BAD_JSON(), "Invalid node id"))
     else if !validNonce(nonce) then Left(MErr(400, M_BAD_JSON(), "Invalid nonce"))
+    else if allowlisted(nodeId) then enrolled(nodeId)
     else recorded(nodeId, nonce)
 
   def recorded(nodeId: String, nonce: String): Either[MErr, Json] =
     val now = Store.nowMs()
     cell.withLock(st => st.pending = capped(append(fresh(st.pending, now), Pending(nodeId, nonce, now), nodeId)))
-    Right(obj2("node_id", JStr(nodeId), "pending", JBool(true)))
+    Right(obj3("node_id", JStr(nodeId), "pending", JBool(true), "allowlisted", JBool(false)))
+
+  /** the announce of an id the allowlist ALREADY holds: 200, no row, and
+   *  `allowlisted` says why there is none. Without that marker the caller sees
+   *  the same empty pending list an EXPIRED announce leaves and has to guess —
+   *  which is how the admin page came to report "the announce may have expired"
+   *  over a device that had just been approved successfully. Nothing is
+   *  recorded: a pending row is a request for a decision, and this decision is
+   *  made. */
+  def enrolled(nodeId: String): Either[MErr, Json] =
+    Right(obj3("node_id", JStr(nodeId), "pending", JBool(false), "allowlisted", JBool(true)))
+
+  /** is this id in the DURABLE allowlist — enrolled, with nothing left to
+   *  approve? The file is the source of truth and `approve` writes it before it
+   *  answers, so a page that re-checks straight after an approval sees it here.
+   *  A `"*"` entry admits every peer, so it answers for any id. */
+  def allowlisted(nodeId: String): Boolean =
+    val p = allowlistPath()
+    if p == "" then false else allowedIn(fileIds(p), nodeId)
+
+  def allowedIn(xs: List[Json], nodeId: String): Boolean =
+    hasStr(xs, nodeId) || hasStr(xs, "*")
+
+  /** the allowlist file's entries, or Nil when there is no readable file. */
+  def fileIds(p: String): List[Json] = Json.tryParse(Config.readAll(p)) match
+    case Left(_)  => Nil
+    case Right(j) => allowIds(j)
 
   /** the entries still inside the expiry window. */
   def fresh(xs: List[Pending], now: scala.Long): List[Pending] = xs match
@@ -186,11 +220,24 @@ object Enroll:
 
   /** `GET /_wata/v1/admin/enroll` — the pending rows, oldest first, expired
    *  ones pruned as they are read (there is no timer; the list is only ever
-   *  observed through here and through `approve`). */
+   *  observed through here and through `approve`), plus `allowlisted`: the ids
+   *  the durable allowlist already holds.
+   *
+   *  The second field is what makes "there is no row for this handset"
+   *  answerable. A page holding a node id (a scanned fragment, or the row it
+   *  just approved) finds it here and says "already enrolled" instead of
+   *  reporting an expiry; a TYPED code, which carries only a prefix, is matched
+   *  against these ids the same way it is matched against pending rows. They
+   *  are public keys behind the admin gate, so listing them tells an admin
+   *  nothing they could not read out of the config file. */
   def list(): Json =
     val now = Store.nowMs()
     val xs = cell.withLock(st => pruneLocked(st, now))
-    obj1("pending", JArr(rows(xs, now, Nil)))
+    obj2("pending", JArr(rows(xs, now, Nil)), "allowlisted", JArr(allowlistIds()))
+
+  def allowlistIds(): List[Json] =
+    val p = allowlistPath()
+    if p == "" then Nil else fileIds(p)
 
   def pruneLocked(st: EnrollState, now: scala.Long): List[Pending] =
     st.pending = fresh(st.pending, now)
