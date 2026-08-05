@@ -1,0 +1,9 @@
+# sgo.build (schema: see the sgola tree's core/sgo.build). wataui is the
+# DECLARATIVE UI layer: a liblink library over core ALONE — no json, no
+# wataclient, no `go.*` facade — because every backend that will ever render
+# these views (the framebuffer painter today, UIKit later) has to be able to
+# link it. A default package, no @goexport: its whole surface is consumed from
+# Sgola, whole-program, as a source sibling in this repo.
+mode liblink
+emitname wataui
+optreport

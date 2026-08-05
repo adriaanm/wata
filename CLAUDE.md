@@ -83,6 +83,7 @@ serve the compiler's own gate does not belong here.
 | `wata-fb/`         | app — the device client (framebuffer display, input, audio, LEDs)        |
 | `wata-tui/`        | app — the terminal client and admin REPL (host-side, no device layer)    |
 | `wataclient/`      | library — the portable Matrix client core, linked by `wata-fb`            |
+| `wataui/`          | library — the declarative view algebra and differ, backend-free           |
 | `go-pkgs/audio/`   | plain Go cgo module — opus + tinyalsa, `wata-fb`'s device audio           |
 | `tools/`           | build, test, and deploy scripts                                          |
 | `docs/`            | design and plan docs (index below)                                       |
@@ -240,6 +241,7 @@ justfile just gives it a name.
 |-----|----------------|
 | [docs/design/wata-server.md](docs/design/wata-server.md) | homeserver: routing, store, sync, persistence |
 | [docs/design/wataclient.md](docs/design/wataclient.md) | client core: sync engine, domain model, transport, audio |
+| [docs/design/wataui.md](docs/design/wataui.md) | UI layer: the view algebra, the purity rule, the differ |
 | [docs/design/wata-fb.md](docs/design/wata-fb.md) | device client: display, input, audio, cross-build, deploy |
 | [docs/design/wata-tui.md](docs/design/wata-tui.md) | terminal client: the command REPL, the admin surface, its smoke |
 | [docs/design/bindgen.md](docs/design/bindgen.md) | Apple bindings: the generator, the allowlist, refusals, how they are verified |

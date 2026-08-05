@@ -29,12 +29,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from toolchain import build_env, prepare, sgo_bin  # noqa: E402
 
 WATA = Path(__file__).resolve().parent.parent
-MODULES = ["wataclient", "wata-server", "wata-fb"]
+MODULES = ["wataui", "wataclient", "wata-server", "wata-fb"]
 
 # in-link dep -> the dir whose target/ the build actually writes
 DEP_SOURCES = {
     "json": lambda home: home / "scenarios" / "json",
     "wataclient": lambda home: WATA / "wataclient",
+    "wataui": lambda home: WATA / "wataui",
 }
 
 

@@ -36,6 +36,12 @@ object Main:
     // is go-pkgs/audio's linux/arm Go test).
     else if args.length > 1 && args(0) == "oggforeign" then
       OggForeign.run(args)
+    // the wataui differ oracle (tools/wataui-tests.sh): the apply-o-diff round
+    // trip plus the pinned edit scripts, byte-diffed against
+    // tools/wataui-diff.expected.txt. The differ is portable and the fb
+    // painter does not use it, so wata-fb is only its driver.
+    else if args.length > 0 && args(0) == "difftest" then
+      printReport(DiffOracle.report())
     // the framebuffer golden-frame oracle + smoke.
     //   wata-fb fbdump      draw the deterministic test pattern, encode PNG, and
     //                       write the raw PNG bytes to stdout (fd 1) — the host

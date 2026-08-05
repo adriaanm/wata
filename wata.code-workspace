@@ -8,6 +8,7 @@
 {
   "folders": [
     { "name": "wata (root)", "path": "." },
+    { "path": "wataui" },
     { "path": "wataclient" },
     { "path": "wata-server" },
     { "path": "wata-fb" },
@@ -18,6 +19,7 @@
     // the module dirs only inside the root folder (where they'd otherwise show
     // up twice — once nested, once as their own root).
     "files.exclude": {
+      "wataui/**": true,
       "wataclient/**": true,
       "wata-server/**": true,
       "wata-fb/**": true,

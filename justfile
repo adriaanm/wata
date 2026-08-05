@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke fb-smoke client-tests integ golden fb-ui-tests bindgen-tests amd64-smoke tunnel-smoke
+ci: smoke persist admin-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests amd64-smoke tunnel-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -92,6 +92,10 @@ fb-ui-tests *ARGS:
 # device UI: the real frame loop in this terminal, against a live server
 fb-sim *ARGS:
     bash tools/fb-sim.sh {{ARGS}}
+
+# UI layer: portability/dependency tripwires, the differ's round-trip oracle
+wataui-tests:
+    bash tools/wataui-tests.sh
 
 # client core: portability tripwire, sync/fixture/ogg byte oracles
 client-tests:

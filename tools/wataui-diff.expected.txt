@@ -1,0 +1,58 @@
+roundtrip identical patches=0 ok=true
+roundtrip leaf-text patches=1 ok=true
+  set [2] text(0,14,"BACK again to exit",25388)
+roundtrip leaf-nested patches=1 ok=true
+  set [1.1] text(0,3,"TWO",1)
+roundtrip ctor-change patches=1 ok=true
+  set [0] rect(0,40,160,8,2)
+roundtrip ctor-root patches=1 ok=true
+  set [] rect(0,0,4,4,1)
+roundtrip ctor-root-group patches=1 ok=true
+  set [] text(0,0,"x",1)
+roundtrip keyed-delete patches=1 ok=true
+  delete [] 1
+roundtrip keyed-insert patches=1 ok=true
+  insert [] 1 b2:text(0,0,"Bea",1)
+roundtrip keyed-reorder patches=4 ok=true
+  delete [] 0
+  delete [] 0
+  insert [] 1 a:text(0,0,"Ann",1)
+  insert [] 2 b:text(0,0,"Bob",1)
+roundtrip keyed-move-edit patches=4 ok=true
+  delete [] 0
+  set [0] text(0,0,"Bobby",1)
+  insert [] 1 a:text(0,0,"Ann",1)
+  delete [] 2
+roundtrip keyed-replace-all patches=5 ok=true
+  insert [] 0 x:text(0,0,"Xen",1)
+  insert [] 1 y:text(0,0,"Yin",1)
+  delete [] 2
+  delete [] 2
+  delete [] 2
+roundtrip keyed-empty-to-list patches=3 ok=true
+  insert [] 0 a:text(0,0,"Ann",1)
+  insert [] 1 b:text(0,0,"Bob",1)
+  insert [] 2 c:text(0,0,"Cal",1)
+roundtrip keyed-list-to-empty patches=3 ok=true
+  delete [] 0
+  delete [] 0
+  delete [] 0
+roundtrip positional-edit patches=1 ok=true
+  set [1] text(0,1,"TWO",1)
+roundtrip positional-shrink patches=1 ok=true
+  delete [] 2
+roundtrip mixed-keys patches=1 ok=true
+  delete [] 1
+roundtrip glyph-edit patches=1 ok=true
+  set [] glyph(10,1,140,4)
+roundtrip rect-edit patches=1 ok=true
+  set [] rect(0,40,160,24,3)
+roundtrip rect-same patches=0 ok=true
+roundtrip image-same patches=0 ok=true
+roundtrip image-bytes patches=1 ok=true
+  set [] image(0,0,2,2,bytes=8,sum=72)
+roundtrip boot-states patches=3 ok=true
+  set [1] glyph(150,1,132,63488)
+  set [2] text(6,6,"can't reach server",63488)
+  insert [] 3 sub:text(7,8,"retrying...",25388)
+wataui diff oracle: done
