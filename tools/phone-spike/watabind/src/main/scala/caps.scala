@@ -8,9 +8,7 @@ import language.experimental.saferExceptions
  *
  *  Transport failure policy: a thrown `GoError` becomes `HttpResponse(0, "")`,
  *  so the portable core never sees a Go error.
- *
- *  The third capability the handle needs is `Spawner` (plan 0025): the
- *  goroutine `ClientHandle` runs its supervised scope on. */
+ */
 
 class SpikeClock extends Clock:
   def nowUnixMillis(): Long = go.time.nowUnixMilli()
@@ -23,18 +21,11 @@ class SpikeHttp(client: go.net.http.Client) extends HttpDo:
 
 /** the goroutine capability: one line of `go.spawn` over the core's own scope
  *  body. */
-class SpikeSpawner extends Spawner:
-  // lambda inline in the class method: the standing proof of the class-method
-  // lambda fix (this exact shape once emitted undefined: runDetached__anonfun_1)
-  def runDetached(h: Handle): Unit = go.spawn(() => ClientHandle.runScope(h))
-
 object SpikeCaps:
 
   def clock(): Clock = SpikeClock()
 
   def httpDo(): HttpDo = SpikeHttp(go.net.http.DefaultClient)
-
-  def spawner(): Spawner = SpikeSpawner()
 
   /** the spawn lives on the OBJECT: a lambda inside a CLASS method is lifted
    *  to a method but called as a top-level function, which does not compile

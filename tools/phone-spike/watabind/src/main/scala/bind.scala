@@ -19,7 +19,7 @@ object Bind:
   /** start the client on its own goroutine — returns immediately. */
   def start(homeserver: String, user: String, pass: String): Handle =
     val cfg = ClientConfig(homeserver, user, pass, 1000, Session("", "", "", "", ""))
-    ClientHandle.start(cfg, SpikeCaps.httpDo(), SpikeCaps.clock(), SpikeCaps.spawner())
+    ClientHandle.start(cfg, SpikeCaps.httpDo(), SpikeCaps.clock())
 
   /** the dirty-topic channel the host's pump goroutine receives on. */
   def events(h: Handle): sgo.Chan[Event] = h.events()

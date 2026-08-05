@@ -50,7 +50,6 @@ A consumer interacts with `wataclient` mainly through `runtime.scala`'s
 | `Runtime` | `runtime.scala:92` | Construction (`make`/`makeWithAudio`, and the `…Stored` pair that takes an `OutboxStore`), lifecycle (`start`/`stopClient`), and polling helpers (`pollEvent`, `pollSnap`, `waitForConnection`, `waitForSnapshot`). |
 | `Action` / `UiEvent` | `runtime.scala:36-59` | The command and notification vocabulary between app and client. `ActReceipt`, `ActSendVoice`, `ActPlay`, `ActSetName`, `ActRedact`, `ActFavorite` (the plan-0019 favorite toggle, fire-and-forget — its result arrives as room state on the next sync), `ActRetryOutbox`/`ActAckOutbox` (the outbox, below), `ActQuit`. |
 | `Handle` / `ClientHandle` | `handle.scala` | The other way to run the client (below): a non-blocking `start`, the same surfaces as methods, a pushed dirty-flag channel, and `stop` + `join`. |
-| `Spawner` | `handle.scala` | The third capability, needed only by the handle: the goroutine its supervised scope runs on. |
 | `OutboxStore` | `outbox.scala` | The third capability: `CAP` numbered slots of opaque text the app maps onto files. `MemOutbox` is the fallback for a consumer with nowhere to write. |
 | `StateSnapshot` | `domain.scala:95` | The immutable UI-facing view of everything the client knows: connection state, self user, contacts, conversations, family. |
 
@@ -123,13 +122,11 @@ the queue if it must — is the last event it ever gets, so the pump ends
 without the channel ever being closed under it. Callers that want a
 deadline instead use `waitEvent`/`pollEvent`.
 
-**Why `Spawner` exists.** The only unstructured spawn sgola has lives in
-the `go` facade, and this module may not name it (the portability
-tripwire, and the reason the core runs identically on a handset and a
-laptop). So the goroutine is injected like `HttpDo` and `Clock`: an app's
-impl is one line of the facade spawn over `ClientHandle.runScope`
-(`FbCaps.spawnScope`, `SpikeCaps.spawnScope`). It disappears when sgola
-grows an `sgo`-side spelling (ticket `SGO-DETACHED-SPAWN`).
+**The goroutine is the core's own.** `startClient` spawns its scope with
+`sgo.spawn` — the portable spelling of a detached spawn, added for
+exactly this shape (`SGO-DETACHED-SPAWN`, ruled A upstream) — so no
+app-side capability is involved and a handle needs only `HttpDo` and
+`Clock` from its host.
 
 The handle's first consumer is the phone spike (`tools/phone-spike`),
 whose Go shim drains `events()` into an `EventSink` the Swift/Kotlin host
@@ -583,7 +580,7 @@ checked against a separately pinned expected-output file in CI.
 | `audiocmd.scala` | 44 | Audio-thread command/event protocol types (`AudioCmd`, `AudioEvt`). |
 | `capabilities.scala` | 45 | Two of the three injected capability traits: `HttpDo`, `Clock`, plus header-list helpers (the third, `OutboxStore`, lives with its queue in `outbox.scala`). |
 | `domain.scala` | 142 | Core domain types: connection state, conversation type, users/contacts/messages, room/engine working state, sync events, and `Names` (the display-name/localpart fallback). |
-| `handle.scala` | 224 | `ClientHandle`/`Handle`: the non-blocking start, the dirty-topic `Event`s, and the `Spawner` capability — the client for a consumer that owns its own loop. |
+| `handle.scala` | 224 | `ClientHandle`/`Handle`: the non-blocking start (its scope on `sgo.spawn`) and the dirty-topic `Event`s — the client for a consumer that owns its own loop. |
 | `matrix.scala` | 105 | Matrix C-S API request-body shaping and response parsing (pure, no transport). |
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |

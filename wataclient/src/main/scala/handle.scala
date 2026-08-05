@@ -48,20 +48,6 @@ case class EvOutboxDirty() extends Event
 /** the client's goroutine is gone: the last event any pump receives. */
 case class EvStopped() extends Event
 
-// ---- the goroutine capability ----------------------------------------------------
-
-/** the capability that gives the handle its goroutine. The portable core may
- *  not name the `go` facade — and the facade's unstructured spawner is the
- *  only detached goroutine sgola has (there is no `sgo` spelling for one:
- *  sgola ticket `SGO-DETACHED-SPAWN`). So the app supplies it, exactly like
- *  `HttpDo` and `Clock`; an impl is one line of the facade spawn over
- *  `ClientHandle.runScope` (see `wata-fb`'s `FbSpawner`).
- *
- *  The body it runs is `ClientHandle.runScope`, so the scope's shape stays
- *  here and the app cannot get it wrong. */
-trait Spawner extends Shareable:
-  def runDetached(h: Handle): Unit
-
 // ---- the handle -------------------------------------------------------------------
 
 /** the outside view of a running client: the client record its goroutine
@@ -111,19 +97,21 @@ object ClientHandle:
 
   /** START the client on its own goroutine — never blocks. Headless (no audio
    *  thread), queueing failed sends in memory: the shape a shell that has not
-   *  wired audio yet wants. */
-  def start(cfg: ClientConfig, http: HttpDo, clock: Clock, spawner: Spawner): Handle =
-    startClient(Runtime.make(cfg, http, clock), spawner)
+   *  wired audio yet wants. The goroutine is `sgo.spawn` — the portable
+   *  spelling of a detached spawn, so the core owns its own scope and no
+   *  app-side capability is involved. */
+  def start(cfg: ClientConfig, http: HttpDo, clock: Clock): Handle =
+    startClient(Runtime.make(cfg, http, clock))
 
   /** the same, over a client the caller built itself (`makeWithAudio`,
    *  `makeStored`, …) — the runtime's four constructors stay the way an app
    *  chooses audio and outbox storage. */
-  def startClient(c: MatrixClient, spawner: Spawner): Handle =
+  def startClient(c: MatrixClient): Handle =
     // bound to a local first: `makeChan`'s element-type recording is the
     // local-val path (see `Runtime.mk`).
     val done = sgo.makeChan[Boolean]()
     val h = Handle(c, done)
-    spawner.runDetached(h)
+    sgo.spawn(() => ClientHandle.runScope(h))
     h
 
   /** WHAT THE GOROUTINE RUNS. The supervised scope is unchanged — it is just

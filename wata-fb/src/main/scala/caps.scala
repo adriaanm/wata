@@ -33,20 +33,9 @@ class FbClock extends Clock:
 class FbHttp(client: go.net.http.Client) extends HttpDo:
   def send(req: HttpRequest): HttpResponse = FbCaps.send(req, client)
 
-/** the app-edge `Spawner` impl (plan 0025): the goroutine a `ClientHandle`
- *  runs its supervised scope on. `go.spawn` is the only unstructured spawn
- *  sgola has and the portable core may not name the `go` facade, so the app
- *  supplies it — one line, and the body is the core's own `runScope`. */
-class FbSpawner extends Spawner:
-  // the lambda lives INSIDE the class method deliberately — the shape that
-  // failed before the class-method lambda fix, kept inline as its standing proof
-  def runDetached(h: Handle): Unit = go.spawn(() => ClientHandle.runScope(h))
-
 object FbCaps:
 
   def clock(): Clock = FbClock()
-
-  def spawner(): Spawner = FbSpawner()
 
   /** sleep via the timeout-channel facade (`time.After` + recv; there is no
    *  bare sleep bind — the `timeout` combinator's own recipe). */

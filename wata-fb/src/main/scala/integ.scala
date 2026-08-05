@@ -970,15 +970,13 @@ object Integ:
     val btok = directToken("bob")
     if btok == "" then false
     else
-      val h = ClientHandle.start(cfg("alice"), FbCaps.httpDo(), FbCaps.clock(),
-        FbCaps.spawner())
+      val h = ClientHandle.start(cfg("alice"), FbCaps.httpDo(), FbCaps.clock())
       val ok = handleSession(h, btok)
       val gone = ClientHandle.stopAndJoin(h, 20000L)
       if !(ok && gone) then false
       else
         // the restart: nothing of the first client is left running
-        val h2 = ClientHandle.start(cfg("alice"), FbCaps.httpDo(), FbCaps.clock(),
-          FbCaps.spawner())
+        val h2 = ClientHandle.start(cfg("alice"), FbCaps.httpDo(), FbCaps.clock())
         val live = waitLive(h2, 20000L)
         val gone2 = ClientHandle.stopAndJoin(h2, 20000L)
         live && gone2

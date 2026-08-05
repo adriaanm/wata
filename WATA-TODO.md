@@ -120,13 +120,6 @@ blocks + git log; each entry cites where it was recorded.*
   cross-unit val reads inside one module (filed 2026-08-05,
   `CROSS-MODULE-VAL-READ`; plan 0022). Worked around with
   `Outbox.cap()`; inline `Outbox.CAP` again when it lands.
-- No `sgo` spelling for an unstructured goroutine: `go.spawn` is the only one,
-  and `wataclient` may not name the `go` facade (its portability tripwire), so
-  a library cannot put its own `supervised` scope on a goroutine (filed
-  2026-08-05, `SGO-DETACHED-SPAWN`; plan 0025). Worked around with the
-  `Spawner` capability trait, injected like `HttpDo`/`Clock`. Ruled A
-  upstream (an `sgo.spawn` portable spelling; `go.spawn` stays), fix
-  dispatching — delete `Spawner` and every app-side impl on that repin.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —
@@ -157,10 +150,14 @@ blocks + git log; each entry cites where it was recorded.*
   naming `wataclient ../../../wataclient` explicitly (standing proof;
   spike emit + full gate green). ~~CLASS-METHOD-LAMBDA-LIFT-MISMATCH~~
   FIXED and verified downstream: pin `3057fb8`, both repro shapes
-  inlined again as standing proofs — `FbSpawner.runDetached` /
-  `SpikeSpawner.runDetached` carry the `go.spawn` lambda in the class
-  method, `Handle.stopped` carries the `selectValue` lambda; full ci +
-  full phone-spike green. ~~NO-LIB-EMIT-FOR-RUNTIME-LIBS~~ FIXED
+  inlined again as standing proofs (the spawner-class shapes have since
+  been deleted outright — see SGO-DETACHED-SPAWN — and `Handle.stopped`
+  still carries the `selectValue` lambda); full ci + full phone-spike
+  green. ~~SGO-DETACHED-SPAWN~~ FIXED and verified downstream: pin
+  `e449105`, the `Spawner` trait and both app impls DELETED —
+  `ClientHandle.startClient` owns its goroutine via `sgo.spawn` (standing
+  proof), `start` lost its capability parameter; full ci + full
+  phone-spike green through the gomobile-bound emission. ~~NO-LIB-EMIT-FOR-RUNTIME-LIBS~~ FIXED
   and verified downstream: pin `a5e3d27`, `emitpackage watacore` in the
   spike's sgo.build, aslib.py DELETED, gomobile binding the emitted
   `.sgo/watacore-pkg` dir directly — full spike (emit/bind/shell/smoke)
