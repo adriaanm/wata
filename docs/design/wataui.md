@@ -126,7 +126,19 @@ Adoption is applet by applet, each step its own commit so a golden drift
 bisects to one screen. The boot screen (`WataLogic.bodyBoot`) is the
 first; the connectivity element (`WataLogic.netView`) came with it,
 since three screens share it and two implementations of one indicator
-would eventually disagree.
+would eventually disagree. The conversation screen
+(`WataLogic.bodyConversation`) follows.
+
+**A selected row is a group whose first child is its highlight.** The
+immediate-mode painter filled the highlight rectangle and then drew the
+row's text over it; as data that ordering is the child list's, since
+children paint in list order. So a row is
+`VGroup(hl? :: mark? :: dur :: sender :: star?)` — the `VRect` before
+everything it sits behind — and not a highlight layer drawn beside the
+rows. Keeping the highlight inside the row it belongs to is also what
+lets the row carry ONE key: rows key on the thing they show (a message's
+event id, a conversation's room-or-contact id), and the highlight moves
+with its row for free.
 
 ## The oracle
 

@@ -103,6 +103,10 @@ anything required.
    `WataLogic.netView`: three screens draw it, and one view definition
    beats two painters of the same indicator. All 18 uitest scenarios
    and the fb golden stayed byte-identical; nothing was regenerated.
+   **The conversation screen is done** — `WataLogic.bodyConversation(s,
+   snap)`: rows are a `VGroup` keyed on the message's event id, and a
+   row's selection highlight is a `VRect` first in that row's child
+   list, the list-order painting rule's first real exercise.
 3. After each applet: `just fb-ui-tests` — every golden byte-identical.
    A golden that moves means the port is wrong; goldens are not
    regenerated during adoption.

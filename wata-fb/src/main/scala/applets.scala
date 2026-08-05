@@ -499,56 +499,74 @@ object WataLogic:
       val fg = if mark == 2 then Color.red else Color.yellow
       Font.drawChar(px, g, (Font.COLS - 1) * Font.GLYPH_W, 1 + row * Font.GLYPH_H, fg, false, 0)
 
+  /** the conversation screen is a `wataui` BODY (plan 0024): a pure function of
+   *  the applet state and the frame's snapshot, painted by the framebuffer
+   *  interpreter. Nothing here reads an atomic, a clock or the network. */
   def renderConversation(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
-    convAt(ctx.snap, s.convContactIdx) match
-      case c: Some[Conversation] => renderConvBody(s, px, c.value)
-      case None => Font.drawText(px, "No conversation", 3, 6, Color.midGray, false, 0)
+    FbPaint.draw(px, bodyConversation(s, ctx.snap))
 
-  def renderConvBody(s: WataState, px: go.Bytes, conv: Conversation): Unit =
+  def bodyConversation(s: WataState, snap: StateSnapshot): View =
+    convAt(snap, s.convContactIdx) match
+      case c: Some[Conversation] => convBodyView(s, c.value)
+      case None                  => VText(3, 6, "No conversation", Color.midGray)
+
+  def convBodyView(s: WataState, conv: Conversation): View =
     val header = if conv.hasContact then conv.contact.user.displayName else "Chat"
-    Font.drawText(px, clip(header, 20), 0, 0, Color.cyan, false, 0)
     val n = msgCountList(conv.messages)
+    var kids: List[Keyed] = Nil
     if n == 0 then
-      Font.drawText(px, "No messages", 3, 6, Color.midGray, false, 0)
-      Font.drawText(px, "ESC back", 0, FOOTER_ROW, Color.midGray, false, 0)
+      kids = Keyed("empty", VText(3, 6, "No messages", Color.midGray)) ::
+        (Keyed("footer", VText(0, FOOTER_ROW, "ESC back", Color.midGray)) :: Nil)
     else
-      renderMsgRows(s, px, conv, n)
-      Font.drawText(px, "OK play hold=fav red=del", 0, FOOTER_ROW, Color.midGray, false, 0)
+      kids = Keyed("rows", msgRowsView(s, conv, n)) ::
+        (Keyed("footer", VText(0, FOOTER_ROW, "OK play hold=fav red=del", Color.midGray)) :: Nil)
+    VGroup(Keyed("header", VText(0, 0, clip(header, 20), Color.cyan)) :: kids)
 
-  def renderMsgRows(s: WataState, px: go.Bytes, conv: Conversation, n: scala.Int): Unit =
+  /** the visible window of message rows, KEYED ON THE EVENT ID — the message's
+   *  own identity, so a retained backend recognizes a row that scrolled rather
+   *  than rewriting every row below it. A row index the list cannot answer for
+   *  contributes nothing, highlight included. */
+  def msgRowsView(s: WataState, conv: Conversation, n: scala.Int): View =
     val vis = visibleRows()
     val end = if n < s.msgScroll + vis then n else s.msgScroll + vis
+    var acc: List[Keyed] = Nil
     var i = s.msgScroll
     while i < end do
       val row = FONT_ROWS_HEADER + (i - s.msgScroll)
       val selected = i == s.msgSelected
       msgAt(conv.messages, i) match
         case m: Some[VoiceMessage] =>
-          if selected then Draw.fillRect(px, 0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)
-          val fg = if selected then Color.black else (if m.value.isPlayed then Color.midGray else Color.green)
-          renderMsgRow(px, m.value, row, fg, selected && s.playing)
+          val fg =
+            if selected then Color.black
+            else (if m.value.isPlayed then Color.midGray else Color.green)
+          acc = Keyed(m.value.id, msgRowView(m.value, row, fg, selected, selected && s.playing)) :: acc
         case None => ()
       i += 1
+    VGroup(ListOps.reverse(acc))
 
-  /** the row: a mark in column 0 — the PLAY triangle while this row is the one
-   *  being fetched and played, else the played check — then duration, sender,
-   *  and a favorited row's STAR in the last column, right-aligned so marking a
-   *  message never shifts the text. The play mark appears the instant OK is
-   *  released, before the download has even started: pressing a key must show
-   *  something, and a slow fetch is exactly when it matters. Both are custom
-   *  glyphs (> 0x7F), so they go through `drawChar` rather than inside a
-   *  `drawText` string. */
-  def renderMsgRow(px: go.Bytes, m: VoiceMessage, row: scala.Int, fg: scala.Int, playing: Boolean): Unit =
-    if playing then Font.drawChar(px, Font.ICON_PLAY, 0, 1 + row * Font.GLYPH_H, fg, false, 0)
-    else if m.isPlayed then Font.drawChar(px, Font.ICON_CHECK, 0, 1 + row * Font.GLYPH_H, fg, false, 0)
+  /** the row: the selection highlight FIRST — children paint in list order, so
+   *  the filled rectangle has to precede the text it sits behind — then a mark
+   *  in column 0 (the PLAY triangle while this row is the one being fetched and
+   *  played, else the played check), duration, sender, and a favorited row's
+   *  STAR in the last column, right-aligned so marking a message never shifts
+   *  the text. The play mark appears the instant OK is released, before the
+   *  download has even started: pressing a key must show something, and a slow
+   *  fetch is exactly when it matters. Both marks are custom glyphs (> 0x7F),
+   *  so they are `VGlyph`s rather than characters inside a `VText`. */
+  def msgRowView(m: VoiceMessage, row: scala.Int, fg: scala.Int, selected: Boolean,
+      playing: Boolean): View =
+    val y = 1 + row * Font.GLYPH_H
+    var kids: List[Keyed] = Nil
+    if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
+    if playing then kids = Keyed("mark", VGlyph(0, y, Font.ICON_PLAY, fg)) :: kids
+    else if m.isPlayed then kids = Keyed("mark", VGlyph(0, y, Font.ICON_CHECK, fg)) :: kids
     val dur = durStr(m.durationMs)
     val col = if m.isPlayed || playing then 1 else 0
-    Font.drawText(px, dur, col, row, fg, false, 0)
-    val sender = clip(m.sender.displayName, 8)
-    Font.drawText(px, sender, col + dur.length + 1, row, fg, false, 0)
+    kids = Keyed("dur", VText(col, row, dur, fg)) :: kids
+    kids = Keyed("sender", VText(col + dur.length + 1, row, clip(m.sender.displayName, 8), fg)) :: kids
     if m.isFavorite then
-      Font.drawChar(px, Font.ICON_STAR, (Font.COLS - 1) * Font.GLYPH_W, 1 + row * Font.GLYPH_H,
-        fg, false, 0)
+      kids = Keyed("star", VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, Font.ICON_STAR, fg)) :: kids
+    VGroup(ListOps.reverse(kids))
 
   def renderStatusFlash(s: WataState, px: go.Bytes): Unit =
     if s.statusTimer > 0.0 then

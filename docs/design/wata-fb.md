@@ -855,8 +855,8 @@ scope for this repo area (read-only). `wata-fb` supplies:
 Received messages become UI state purely through the snapshot: the
 sync loop (inside `wataclient`) updates server state and publishes a
 new `StateSnapshot`; the UI loop picks it up next frame and the
-applet render functions (`WataLogic.renderContactRows`,
-`renderMsgRows`, `applets.scala:293-353`) draw from it directly —
+applet bodies (`WataLogic.renderContactRows`,
+`bodyConversation`'s `msgRowsView`) build their views from it directly —
 there is no separate "apply message" step in this module. Playing a
 received clip is a full round-trip: `ActPlay(mxcUrl)` goes to
 `wataclient`, which downloads and hands PCM/Ogg bytes back through the
