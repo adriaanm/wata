@@ -127,7 +127,17 @@ bisects to one screen. The boot screen (`WataLogic.bodyBoot`) is the
 first; the connectivity element (`WataLogic.netView`) came with it,
 since three screens share it and two implementations of one indicator
 would eventually disagree. The conversation screen
-(`WataLogic.bodyConversation`) follows.
+(`WataLogic.bodyConversation`) and the contact list
+(`WataLogic.bodyContacts`) follow.
+
+**A screen's alternative states belong inside its body, not around it.**
+The contact list is three screens — the boot screen until the link has
+been live once, a connection line while the sync has produced nothing
+yet, then the list — and the body owns that choice, calling `bodyBoot`
+for the first rather than being picked between by the caller. What the
+caller keeps is the one branch that is not a view at all: the enrolment
+screen announces the device to the server on the frame it appears, and
+an effect cannot live inside a pure function of the state.
 
 **A selected row is a group whose first child is its highlight.** The
 immediate-mode painter filled the highlight rectangle and then drew the

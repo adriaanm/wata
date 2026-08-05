@@ -414,58 +414,103 @@ object WataLogic:
     renderStatusFlash(s, px)
     if s.pttHeld then renderRecordingOverlay(s, px)
 
+  /** the contact list is a `wataui` BODY (plan 0024). Everything it needs is
+   *  read HERE, at the call site: the session latch `NetStatus.everLive` and
+   *  the app-edge `FbCaps.transportUnavailable` are ambient reads, and a body
+   *  reads its arguments and nothing else.
+   *
+   *  The enrolment boot screen stays outside the body: it announces this
+   *  device to the server on the frame it first appears, and an effect cannot
+   *  live inside a pure function of the state. It becomes a body when the
+   *  enrolment screen itself is ported. */
   def renderContacts(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
-    if !NetStatus.everLive() && Enrol.required() then renderEnrolBoot(px, ctx)
-    else if !NetStatus.everLive() then renderBoot(px, ctx)
-    else if !ctx.snap.hasSelfUser && convCount(ctx.snap) == 0 then renderConnecting(px, ctx.connection)
+    val everLive = NetStatus.everLive()
+    if !everLive && Enrol.required() then renderEnrolBoot(px, ctx)
     else
-      Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
-      renderNet(px, ctx.net)
-      val count = convCount(ctx.snap)
-      if count == 0 then
-        Font.drawText(px, "No contacts", 3, 4, Color.midGray, false, 0)
-        Font.drawText(px, "Waiting sync", 3, 5, Color.midGray, false, 0)
-      else renderContactRows(s, px, ctx, count)
+      FbPaint.draw(px, bodyContacts(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
+        ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable()))
+
+  /** three screens in one, in the order the session passes through them: the
+   *  boot screen until the link has been live once (`bodyBoot` — ONE
+   *  definition, not a second copy of it), the connection line while the sync
+   *  has not yet produced a self user or a conversation, then the list. */
+  def bodyContacts(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
+      quitArmed: Boolean, unsent: List[String], undelivered: List[String],
+      everLive: Boolean, unavail: Boolean): View =
+    if !everLive then bodyBoot(net, c, quitArmed, unavail)
+    else if !snap.hasSelfUser && convCount(snap) == 0 then
+      VText(1, 2, connectingMsg(c), Color.midGray)
+    else
+      val count = convCount(snap)
       // the footer is the key legend, except while Back is armed: the quit
       // confirmation is the only thing the next press does, so it takes the row
-      Font.drawText(px, contactsFooter(ctx), 0, FOOTER_ROW, Color.midGray, false, 0)
+      var kids: List[Keyed] =
+        Keyed("footer", VText(0, FOOTER_ROW, contactsFooter(quitArmed), Color.midGray)) :: Nil
+      if count == 0 then
+        kids = Keyed("empty", Views.group(
+          VText(3, 4, "No contacts", Color.midGray) ::
+            (VText(3, 5, "Waiting sync", Color.midGray) :: Nil))) :: kids
+      else kids = Keyed("rows", contactRowsView(s, snap, unsent, undelivered, count)) :: kids
+      VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) :: (Keyed("net", netView(net)) :: kids))
 
-  def contactsFooter(ctx: FrameCtx): String =
-    if ctx.quitArmed then "BACK again to exit" else "UP/DN sel OK open"
+  def contactsFooter(quitArmed: Boolean): String =
+    if quitArmed then "BACK again to exit" else "UP/DN sel OK open"
 
-  def renderContactRows(s: WataState, px: go.Bytes, ctx: FrameCtx, count: scala.Int): Unit =
+  /** the visible window of contact rows, keyed on the conversation's identity —
+   *  the same room-or-contact key the outbox marks are matched by. */
+  def contactRowsView(s: WataState, snap: StateSnapshot, unsent: List[String],
+      undelivered: List[String], count: scala.Int): View =
     val vis = visibleRows()
     val end = if count < s.scrollOffset + vis then count else s.scrollOffset + vis
+    var acc: List[Keyed] = Nil
     var i = s.scrollOffset
     while i < end do
       val row = FONT_ROWS_HEADER + (i - s.scrollOffset)
       val selected = i == s.selected
-      if selected then Draw.fillRect(px, 0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)
-      val fg = if selected then Color.black else Color.green
-      renderContactRow(px, ctx, i, row, fg, selected)
+      convAt(snap, i) match
+        case c: Some[Conversation] =>
+          val mark = outboxMark(unsent, undelivered, c.value)
+          acc = Keyed(convKey(c.value), contactRowView(snap, c.value, mark, row, selected)) :: acc
+        case None => ()
       i += 1
+    VGroup(ListOps.reverse(acc))
 
-  def renderContactRow(px: go.Bytes, ctx: FrameCtx, i: scala.Int, row: scala.Int, fg: scala.Int, selected: Boolean): Unit =
-    convAt(ctx.snap, i) match
-      case c: Some[Conversation] =>
-        val name = convName(ctx.snap, c.value)
-        val nameColor = if isFamily(c.value.convType) && !selected then Color.cyan else fg
-        Font.drawText(px, clip(name, 18), 0, row, nameColor, false, 0)
-        val mark = outboxMark(ctx, c.value)
-        renderOutboxMark(px, mark, row)
-        if c.value.unplayedCount > 0 then
-          val badge = "" + c.value.unplayedCount
-          val shift = if mark == 0 then 0 else 2
-          Font.drawText(px, badge, Font.COLS - badge.length - shift, row, Color.yellow, false, 0)
-      case None => ()
+  /** the row: the selection highlight first (children paint in list order), the
+   *  name — cyan for the family thread unless this row is the selected one,
+   *  whose black-on-green has to stay legible — then the outbox mark in the
+   *  last column and the unplayed badge, which slides two columns left to clear
+   *  the mark when there is one. */
+  def contactRowView(snap: StateSnapshot, conv: Conversation, mark: scala.Int,
+      row: scala.Int, selected: Boolean): View =
+    val y = 1 + row * Font.GLYPH_H
+    val fg = if selected then Color.black else Color.green
+    var kids: List[Keyed] = Nil
+    if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
+    val nameColor = if isFamily(conv.convType) && !selected then Color.cyan else fg
+    kids = Keyed("name", VText(0, row, clip(convName(snap, conv), 18), nameColor)) :: kids
+    if mark > 0 then kids = Keyed("mark", outboxMarkView(mark, y)) :: kids
+    if conv.unplayedCount > 0 then
+      val badge = "" + conv.unplayedCount
+      val shift = if mark == 0 then 0 else 2
+      kids = Keyed("badge", VText(Font.COLS - badge.length - shift, row, badge, Color.yellow)) :: kids
+    VGroup(ListOps.reverse(kids))
 
   /** 0 = nothing pending, 1 = something of ours is still queued, 2 = something
    *  of ours will never arrive. The louder one wins: a lost message is worth
    *  more of the row than a waiting one. */
-  def outboxMark(ctx: FrameCtx, conv: Conversation): scala.Int =
+  def outboxMark(unsent: List[String], undelivered: List[String], conv: Conversation): scala.Int =
     var out = 0
-    if convKeyed(ctx.unsent, conv) then out = 1
-    if convKeyed(ctx.undelivered, conv) then out = 2
+    if convKeyed(unsent, conv) then out = 1
+    if convKeyed(undelivered, conv) then out = 2
+    out
+
+  /** a conversation's identity: its room, or its contact for a DM room that
+   *  does not exist yet — the same pairing `convKeyed` matches outbox keys by,
+   *  so a row and the marks meant for it always name the same thing. */
+  def convKey(conv: Conversation): String =
+    var out = ""
+    if conv.hasContact then out = conv.contact.user.id
+    if conv.roomId != "" then out = conv.roomId
     out
 
   /** does one of the keys name this conversation — by room, or by contact for
@@ -491,13 +536,12 @@ object WataLogic:
     out
 
   /** the mark sits in the last column, right-aligned like the favorite star,
-   *  so a message going out never reflows the name. Custom glyphs (> 0x7F)
-   *  can only be drawn with `drawChar`. */
-  def renderOutboxMark(px: go.Bytes, mark: scala.Int, row: scala.Int): Unit =
-    if mark > 0 then
-      val g = if mark == 2 then Font.ICON_UNDELIV else Font.ICON_UNSENT
-      val fg = if mark == 2 then Color.red else Color.yellow
-      Font.drawChar(px, g, (Font.COLS - 1) * Font.GLYPH_W, 1 + row * Font.GLYPH_H, fg, false, 0)
+   *  so a message going out never reflows the name. Custom glyphs (> 0x7F) are
+   *  `VGlyph`s: inside a string they would UTF-8 encode into two wrong ones. */
+  def outboxMarkView(mark: scala.Int, y: scala.Int): View =
+    val g = if mark == 2 then Font.ICON_UNDELIV else Font.ICON_UNSENT
+    val fg = if mark == 2 then Color.red else Color.yellow
+    VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, g, fg)
 
   /** the conversation screen is a `wataui` BODY (plan 0024): a pure function of
    *  the applet state and the frame's snapshot, painted by the framebuffer
@@ -613,13 +657,10 @@ object WataLogic:
    *  have to ride `NetState.blink`, whose phase resets on a health change —
    *  the discipline that keeps a scripted frame reproducible.) */
   /** The boot screen is the first applet to be a `wataui` BODY (plan 0024): a
-   *  pure function to a view tree, painted by the framebuffer interpreter.
-   *  `FbCaps.transportUnavailable()` is an app-edge read, so it is hoisted to
-   *  HERE, the call site, and passed in — a body reads its arguments and
-   *  nothing else. */
-  def renderBoot(px: go.Bytes, ctx: FrameCtx): Unit =
-    FbPaint.draw(px, bodyBoot(ctx.net, ctx.connection, ctx.quitArmed, FbCaps.transportUnavailable()))
-
+   *  pure function to a view tree, painted by the framebuffer interpreter. It
+   *  is reached through `bodyContacts`, which is where the ambient reads it
+   *  needs (`NetStatus.everLive`, `FbCaps.transportUnavailable`) are hoisted
+   *  to — a body reads its arguments and nothing else. */
   def bodyBoot(net: NetState, c: ConnectionState, quitArmed: Boolean, unavail: Boolean): View =
     val sub = bootSubMsg(net, c, unavail)
     // one calm line sits centered; a failure's two lines straddle that row
@@ -691,9 +732,6 @@ object WataLogic:
   def enrolBootHint(ctx: FrameCtx): String =
     if ctx.quitArmed then "BACK again to exit" else "scan to add this device"
 
-  def renderConnecting(px: go.Bytes, c: ConnectionState): Unit =
-    Font.drawText(px, connectingMsg(c), 1, 2, Color.midGray, false, 0)
-
   /** the CONNECTIVITY element, right-aligned in the header — the slot the old
    *  `ok`/`..`/`ERR`/`off` indicator held, replacing it rather than sitting
    *  beside it (two indicators would have to agree). One pipe mark (the wifi
@@ -703,11 +741,10 @@ object WataLogic:
    *  and the dots blink in a fixed slot to its left — the blink must never
    *  reflow the mark (a mark that shuffles with the phase reads as glitch).
    *  The 1px status line derives from the same `NetState`
-   *  (`ShellStatus.fromNet`), so the two always agree. */
-  def renderNet(px: go.Bytes, net: NetState): Unit = FbPaint.draw(px, netView(net))
-
-  /** the connectivity element as a view: the header's right-aligned mark, plus
-   *  the `..` that alternates while the link is reconnecting. It is ONE
+   *  (`ShellStatus.fromNet`), so the two always agree.
+   *
+   *  As a view: the mark, plus the `..` that alternates while the link is
+   *  reconnecting. It is ONE
    *  definition because the boot screen, the contact list and the enrolment
    *  screen all show it — two implementations would eventually make
    *  disagreeing claims about the same connection. */

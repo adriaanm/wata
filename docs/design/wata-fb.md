@@ -425,23 +425,23 @@ separate "has not connected yet" from "connected and dropped" — both
 are `NetDown`/`NetReconnecting` — and the latch is the whole of that
 distinction.
 
-While the latch is unset, `WataLogic.renderContacts` draws
-`renderBoot` instead of the contact list or the connection line: the
+While the latch is unset, `WataLogic.bodyContacts` yields
+`bodyBoot` instead of the contact list or the connection line: the
 `WATA` title, the ordinary connectivity element (the header is
 unchanged — the same `NetState` the rest of the frame draws from), a
 centered headline in the conversation area, an optional second line
 saying what to do about it, and a footer naming the two live keys.
 
 This is the first screen built as a `wataui` BODY (plan 0024):
-`renderBoot` is one `FbPaint.draw` over `WataLogic.bodyBoot`, a pure
-function of `(NetState, ConnectionState, quitArmed, transportUnavailable)`
-to a view tree. The app-edge read — `FbCaps.transportUnavailable()` —
-is hoisted to the CALL SITE and passed in, because a body reads its
-arguments and nothing else ([wataui.md](wataui.md)). Centering is the
-body's arithmetic (`FbPaint.centerCol`), so the interpreter only ever
-sees a positioned `VText`. The connectivity element is
-`WataLogic.netView`, one view definition that `renderNet` paints for
-every screen that shows it.
+`WataLogic.bodyBoot` is a pure function of
+`(NetState, ConnectionState, quitArmed, transportUnavailable)` to a view
+tree. The app-edge read — `FbCaps.transportUnavailable()` — is hoisted
+to `renderContacts`, the call site that paints the whole applet, because
+a body reads its arguments and nothing else ([wataui.md](wataui.md)).
+Centering is the body's arithmetic (`FbPaint.centerCol`), so the
+interpreter only ever sees a positioned `VText`. The connectivity
+element is `WataLogic.netView`, one view definition every screen that
+shows it embeds.
 
 The copy is `WataLogic.bootMsg`/`bootSubMsg`, in priority order:
 
@@ -547,7 +547,7 @@ network), is in `docs/design/wata-server.md` under Device enrolment.
 **Two ways in:**
 
 - **the boot state.** `WataLogic.renderContacts` draws `renderEnrolBoot`
-  instead of `renderBoot` when `Enrol.required()` — iroh is configured *and*
+  instead of the body's boot screen when `Enrol.required()` — iroh is configured *and*
   the transport has refused this node id outright. That refusal is
   `irohnet.LastRefusal()` containing `not allowlisted`, the loud reason the
   Rust layer formats and `Dialer.logDialError` records; it is a transport-level
@@ -855,7 +855,7 @@ scope for this repo area (read-only). `wata-fb` supplies:
 Received messages become UI state purely through the snapshot: the
 sync loop (inside `wataclient`) updates server state and publishes a
 new `StateSnapshot`; the UI loop picks it up next frame and the
-applet bodies (`WataLogic.renderContactRows`,
+applet bodies (`WataLogic.bodyContacts`'s `contactRowsView`,
 `bodyConversation`'s `msgRowsView`) build their views from it directly —
 there is no separate "apply message" step in this module. Playing a
 received clip is a full round-trip: `ActPlay(mxcUrl)` goes to

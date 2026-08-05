@@ -107,6 +107,13 @@ anything required.
    snap)`: rows are a `VGroup` keyed on the message's event id, and a
    row's selection highlight is a `VRect` first in that row's child
    list, the list-order painting rule's first real exercise.
+   **The contact list is done** — `WataLogic.bodyContacts(...)`, which
+   owns all three of that screen's states (boot via `bodyBoot`, the
+   connection line, the list) and takes `NetStatus.everLive()` and
+   `FbCaps.transportUnavailable()` as arguments, hoisted to
+   `renderContacts`. The enrolment boot screen stayed at the call site:
+   it announces the device on the frame it appears, and an effect
+   cannot sit inside a body.
 3. After each applet: `just fb-ui-tests` — every golden byte-identical.
    A golden that moves means the port is wrong; goldens are not
    regenerated during adoption.
