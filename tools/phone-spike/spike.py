@@ -16,10 +16,14 @@ Stages (each runnable alone with --only):
           bob), run the Swift shell against it, and check the report it prints
           against the expected lines.
 
-  ios-runtime   OPTIONAL, off by default (--with-ios-runtime): download the iOS
-          simulator runtime and add it to simctl, so a simulator run becomes
-          possible. Several GB; the download artifact goes to --runtime-dir
-          (an external volume) because the internal disk is tight.
+Two more, opt-in, for the iOS-simulator leg:
+
+  --with-ios-runtime  download + install the iOS simulator runtime. Several GB;
+          the download artifact goes to --runtime-dir (an external volume)
+          because the internal disk is tight. The INSTALL still lands on the
+          internal disk.
+  --only sim          build the shell for the simulator and run it there
+          against a live server. See REPORT.md for what blocks it here.
 
 Requires: the pinned sgola toolchain (`just sync`), Xcode, and gomobile +
 gobind on PATH or under $GOBIN/~/go/bin:
@@ -59,6 +63,8 @@ EXPECTED = [
 ]
 
 STAGES = ["emit", "bind", "shell", "smoke"]
+# `sim` is opt-in only (--only sim): it needs the iOS simulator runtime.
+OPTIONAL_STAGES = ["sim"]
 
 
 def run(cmd, **kw):
@@ -207,6 +213,63 @@ def stage_smoke():
           "through a gomobile-bound framework")
 
 
+def stage_sim():
+    """OPTIONAL (not in the default run): build the shell for the iOS simulator
+    and run it there against a live server. Needs the iOS simulator runtime
+    (--with-ios-runtime) AND a device store CoreSimulatorService can write —
+    on a machine whose ~/Library/Developer lives on an external volume, that
+    is a TCC grant no script can make. See REPORT.md."""
+    xc = OUT / "Watamobile.xcframework"
+    fw = xc / "ios-arm64_x86_64-simulator"
+    if not fw.is_dir():
+        sys.exit(f"spike: no simulator slice in {xc} — run the bind stage")
+    sdk = subprocess.run(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    run(["xcrun", "--sdk", "iphonesimulator", "swiftc",
+         "-target", "arm64-apple-ios26.0-simulator", "-sdk", sdk,
+         "-import-objc-header", str(HERE / "swift" / "bridge-ios.h"),
+         "-F", str(fw),
+         "-Xlinker", "-rpath", "-Xlinker", str(fw),
+         "-framework", "Watamobile",
+         "-o", str(OUT / "watashell-sim"),
+         str(HERE / "swift" / "main.swift")])
+
+    runtimes = subprocess.run(["xcrun", "simctl", "list", "runtimes", "-j"],
+                              capture_output=True, text=True, check=True).stdout
+    ios = [r for r in json.loads(runtimes)["runtimes"]
+           if r.get("isAvailable") and r["identifier"].startswith(
+               "com.apple.CoreSimulator.SimRuntime.iOS-")]
+    if not ios:
+        sys.exit("spike: no iOS simulator runtime — rerun with --with-ios-runtime")
+    dev = subprocess.run(
+        ["xcrun", "simctl", "create", "wata-spike",
+         "com.apple.CoreSimulator.SimDeviceType.iPhone-17", ios[-1]["identifier"]],
+        capture_output=True, text=True)
+    if dev.returncode != 0:
+        sys.exit("spike: simctl create failed — see ~/Library/Logs/CoreSimulator/"
+                 "CoreSimulator.log; a device store on an external volume needs a "
+                 "TCC grant for CoreSimulatorService (REPORT.md)\n" + dev.stderr)
+    udid = dev.stdout.strip()
+    try:
+        run(["xcrun", "simctl", "bootstatus", udid, "-b"])
+        run([str(WATA / "tools" / "sgo"), "build"], cwd=WATA / "wata-server")
+        server = WATA / "wata-server" / ".sgo" / "wata-server" / "wata-server"
+        port = free_port()
+        base = f"http://127.0.0.1:{port}"
+        proc = subprocess.Popen([str(server), f":{port}"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(2)
+            seed(base)
+            run(["xcrun", "simctl", "spawn", udid, str(OUT / "watashell-sim"),
+                 base, "alice", "testpass123", "30000"])
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+    finally:
+        subprocess.run(["xcrun", "simctl", "delete", udid])
+
+
 def stage_ios_runtime(runtime_dir):
     """OPTIONAL. Downloads the iOS simulator runtime (multi-GB). The download
     artifact lands in runtime_dir (pass an external volume); the INSTALLED
@@ -223,8 +286,8 @@ def stage_ios_runtime(runtime_dir):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", choices=STAGES, action="append",
-                    help="run just these stages (default: all four, in order)")
+    ap.add_argument("--only", choices=STAGES + OPTIONAL_STAGES, action="append",
+                    help="run just these stages (default: all four, in order; `sim` is opt-in)")
     ap.add_argument("--with-ios-runtime", action="store_true",
                     help="also download+install the iOS simulator runtime (GBs)")
     ap.add_argument("--runtime-dir", default="/Volumes/MoorsExt/xcode-runtimes",

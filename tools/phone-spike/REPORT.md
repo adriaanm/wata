@@ -138,12 +138,32 @@ accordingly if a macOS build ever ships.
 - Contacts are built from family-room MEMBERSHIP: an *invited* user is not a
   contact. A fixture that only invites produces an empty contact list.
 
-## The simulator leg
+## The simulator leg — attempted, blocked outside the spike
 
-See the end of this file for the outcome; `spike.py --with-ios-runtime` does
-the install (downloading to `--runtime-dir`, default
-`/Volumes/MoorsExt/xcode-runtimes`), and it is deliberately off by default: it
-is several GB of download plus ~8 GB installed on the internal disk, and it
-adds nothing to the question this spike asks — the macOS framework runs the
-same Go, compiled by the same toolchain, through the same gobind-generated
+The iOS simulator runtime was installed as a bonus leg and the shell was built
+for it, but **no iOS process ever ran**. Where it got to:
+
+- `xcodebuild -downloadPlatform iOS -exportPath /Volumes/MoorsExt/xcode-runtimes`
+  succeeded. Note it BOTH exports the dmg (8.4 GB, on the external volume) and
+  installs the runtime — no `simctl runtime add` needed. `iOS 26.3.1
+  (23D8133)` is Ready. The install is not on the external volume: internal free
+  space went 15 GiB -> 4.5 GiB.
+- `swiftc -target arm64-apple-ios26.0-simulator` builds the same `main.swift`
+  against the xcframework's `ios-arm64_x86_64-simulator` slice with no source
+  change — only a second bridging header, because the iOS framework keeps the
+  plain name `Watamobile`. So the simulator slice links, which is one more
+  notch of proof than the bind alone.
+- `simctl create` fails: this machine's `~/Library/Developer` is a symlink to
+  `/Volumes/MoorsExt/Developer`, and `CoreSimulatorService` cannot write
+  `.../CoreSimulator/Devices` there — `NSCocoaErrorDomain 513 / EPERM`, macOS
+  TCC refusing a daemon access to a removable volume. That is a one-time
+  interactive grant (Privacy & Security -> Files and Folders, or Full Disk
+  Access, for `CoreSimulatorService`), not something a script can do, and
+  moving device storage back to the internal disk is not an option at 4.5 GiB
+  free.
+
+`spike.py --only sim` builds the simulator binary and then tries to create,
+boot, and `simctl spawn` a device against a live server; it will work as soon
+as that grant exists. Until then the macOS leg is the functional proof, and it
+is the same Go compiled by the same toolchain through the same gobind-generated
 ObjC surface.
