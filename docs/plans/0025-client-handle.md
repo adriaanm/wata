@@ -1,6 +1,6 @@
 # 0025 — the client handle: wataclient under a shell that owns the loop
 
-Status: proposed
+Status: done
 
 ## Problem
 
@@ -82,6 +82,32 @@ shell must not poll at 30 Hz to notice a message; it needs a push.
   converges to the true snapshot on next read.
 - `just phone-spike` still green after the shim rewire.
 - Full `just ci`.
+
+## What landed, where it differed
+
+- `wataclient/src/main/scala/handle.scala` — `ClientHandle`/`Handle` as
+  specced, plus three things the sketch did not have: a `Spawner`
+  capability (the only unstructured spawn sgola has is in the `go`
+  facade, which this module may not name — sgola ticket
+  `SGO-DETACHED-SPAWN`), `join`/`stopAndJoin` (the leak edge the
+  verification needed, and what a second `start` waits on), and an
+  `EvStopped` topic so a blocking pump ends without the channel being
+  closed under it. Topic names are `EvSnapshotDirty`/`EvConnDirty`/
+  `EvOutboxDirty` — `EvSnapshot`/`EvConn` were already taken by the
+  polling `UiEvent`s.
+- Publication rides `Runtime.emitConn` (one call now writes the queued
+  `EvConn`, the new health cell `connection()` reads, and the dirty
+  flag), `publishSnapshot`, and `Outbox.publish`.
+- Verification is the `client-handle` scenario in `just integ` (a live
+  scratch server is what the plan asked for, and that is the live-server
+  harness; `just client-tests` holds the offline byte oracles).
+- Dialect friction: no lambda may appear in a CLASS method — the lifted
+  closure becomes a method but is called as a top-level func (sgola
+  ticket `CLASS-METHOD-LAMBDA-LIFT-MISMATCH`), so `Handle`'s methods are
+  one-line delegations to `ClientHandle`. And the app-mode link prunes
+  the emitted package to what `main` reaches, so the spike's
+  `Bind.events` only appears in the bound package because Sgola code
+  calls it (noted on `NO-LIB-EMIT-FOR-RUNTIME-LIBS`).
 
 ## Out of scope
 

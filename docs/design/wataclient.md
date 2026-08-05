@@ -49,6 +49,8 @@ A consumer interacts with `wataclient` mainly through `runtime.scala`'s
 | `MatrixClient` | `runtime.scala:73` | The client handle: config, the three capability instances, and five channels (`actions` in, `events` out, `snaps` out, `stop`, `retry`) plus the audio-command channel. |
 | `Runtime` | `runtime.scala:92` | Construction (`make`/`makeWithAudio`, and the `…Stored` pair that takes an `OutboxStore`), lifecycle (`start`/`stopClient`), and polling helpers (`pollEvent`, `pollSnap`, `waitForConnection`, `waitForSnapshot`). |
 | `Action` / `UiEvent` | `runtime.scala:36-59` | The command and notification vocabulary between app and client. `ActReceipt`, `ActSendVoice`, `ActPlay`, `ActSetName`, `ActRedact`, `ActFavorite` (the plan-0019 favorite toggle, fire-and-forget — its result arrives as room state on the next sync), `ActRetryOutbox`/`ActAckOutbox` (the outbox, below), `ActQuit`. |
+| `Handle` / `ClientHandle` | `handle.scala` | The other way to run the client (below): a non-blocking `start`, the same surfaces as methods, a pushed dirty-flag channel, and `stop` + `join`. |
+| `Spawner` | `handle.scala` | The third capability, needed only by the handle: the goroutine its supervised scope runs on. |
 | `OutboxStore` | `outbox.scala` | The third capability: `CAP` numbered slots of opaque text the app maps onto files. `MemOutbox` is the fallback for a consumer with nowhere to write. |
 | `StateSnapshot` | `domain.scala:95` | The immutable UI-facing view of everything the client knows: connection state, self user, contacts, conversations, family. |
 
@@ -69,6 +71,69 @@ a send/play surfaces its ordinary failure event. This is a hard rule
 rather than a tuning choice: the caller is typically a UI thread, and the
 action loop can legitimately sit inside a request for the length of the
 HTTP deadline, so a blocking enqueue is a frozen screen.
+
+## Two ways to run the client: the scope, or the handle
+
+Everything above is the **scope** shape: the consumer opens
+`sgo.supervised`, calls `Runtime.start` inside it, drives, and calls
+`Runtime.stopClient`; the scope's exit is the join. `wata-fb` is built
+that way — its frame loop and the client share a process lifetime, and
+every frame it POLLS the cells (`pollEvent`, `pollSnap`) on its way to
+drawing. Nothing about that changes, and nothing forces it to change.
+
+`handle.scala` is the same runtime for a consumer that cannot lend its
+call stack: a phone toolkit owns the main loop and the app starts,
+observes, pokes and stops the client from callbacks. `ClientHandle.start`
+returns immediately — the supervised scope moves onto a goroutine the
+handle owns — and the `Handle` is the outside view:
+
+```scala
+ClientHandle.start(cfg, http, clock, spawner): Handle
+  h.sendAction(a): Boolean     // trySend, as Runtime.sendAction
+  h.snapshot(): StateSnapshot  // the newest published one, else the last seen
+  h.connection(): ConnectionState
+  h.events(): sgo.Chan[Event]  // the dirty-flag pump
+  h.stop(): Unit               // idempotent — the same closed cell
+  h.join(timeoutMs): Boolean   // the goroutine is gone
+```
+
+Every method is a packaging of a surface `Runtime` already has; the loops,
+the channels and the module cells are literally the same ones. One client
+per process still holds, so a second `start` waits for the first handle's
+`join` (`ClientHandle.stopAndJoin` is the pair).
+
+**The event pump is dirty flags, not data.** `events()` is a bounded
+(`Runtime.TOPIC_QUEUE` = 16) channel of `EvSnapshotDirty` / `EvConnDirty`
+/ `EvOutboxDirty` / `EvStopped` — a topic and nothing else. The runtime
+publishes with `trySend` ONLY, at the points that already write the
+fb-visible state: the end of a sync round, every connection-state
+transition (`Runtime.emitConn`, which also fills the health cell
+`connection()` reads), and `Outbox.publish`. So a slow or absent consumer
+can neither block a loop nor grow a queue — `wata-fb` never reads this
+channel at all and simply lets it stay full. Dropping is sound because the
+consumer answers a flag by READING the current state: what matters is that
+one later event of a topic survives, and for a live consumer it always
+does. A pump that sleeps through ten rounds converges on its next read
+(the `client-handle` integ scenario proves exactly this, overflow
+included).
+
+A shell's pump is a blocking `events().recv()` loop; `EvStopped` — which
+`ClientHandle.runScope` delivers after the loops are gone, making room in
+the queue if it must — is the last event it ever gets, so the pump ends
+without the channel ever being closed under it. Callers that want a
+deadline instead use `waitEvent`/`pollEvent`.
+
+**Why `Spawner` exists.** The only unstructured spawn sgola has lives in
+the `go` facade, and this module may not name it (the portability
+tripwire, and the reason the core runs identically on a handset and a
+laptop). So the goroutine is injected like `HttpDo` and `Clock`: an app's
+impl is one line of the facade spawn over `ClientHandle.runScope`
+(`FbCaps.spawnScope`, `SpikeCaps.spawnScope`). It disappears when sgola
+grows an `sgo`-side spelling (ticket `SGO-DETACHED-SPAWN`).
+
+The handle's first consumer is the phone spike (`tools/phone-spike`),
+whose Go shim drains `events()` into an `EventSink` the Swift/Kotlin host
+implements — the gobind-shaped mapping of the same channel.
 
 ## The outbox: a failed send is kept, not lost
 
@@ -518,12 +583,13 @@ checked against a separately pinned expected-output file in CI.
 | `audiocmd.scala` | 44 | Audio-thread command/event protocol types (`AudioCmd`, `AudioEvt`). |
 | `capabilities.scala` | 45 | Two of the three injected capability traits: `HttpDo`, `Clock`, plus header-list helpers (the third, `OutboxStore`, lives with its queue in `outbox.scala`). |
 | `domain.scala` | 142 | Core domain types: connection state, conversation type, users/contacts/messages, room/engine working state, sync events, and `Names` (the display-name/localpart fallback). |
+| `handle.scala` | 224 | `ClientHandle`/`Handle`: the non-blocking start, the dirty-topic `Event`s, and the `Spawner` capability — the client for a consumer that owns its own loop. |
 | `matrix.scala` | 105 | Matrix C-S API request-body shaping and response parsing (pure, no transport). |
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |
 | `outbox.scala` | 465 | The bounded, persistent outbox: the `OutboxStore` capability, `MemOutbox`, the classified send/retry policy, and the entry format. |
 | `oracle.scala` | 398 | Portable byte-level self-test report (CRC, Ogg round trip, `Bytes`/`IArray` conformance) plus a foreign-container fixture walker. |
-| `runtime.scala` | 755 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |
+| `runtime.scala` | 796 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |
 | `session.scala` | 41 | `Session` record (stored login credentials) and its JSON (de)serialization. |
 | `syncdescribe.scala` | 306 | Renders engine state/events/snapshot as deterministic text, driven by real captured fixtures. |
 | `syncengine.scala` | 932 | The sync engine: `process()` (ingest) and `buildSnapshot()` (derive UI view). The core of the module. |
