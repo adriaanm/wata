@@ -96,11 +96,11 @@ it in sequence, since `wataclient`'s runtime is one client per process:
 
 1. **bob** sends `go-pkgs/audio/testdata/tui-foreign.ogg` to
    `@alice:localhost` and quits.
-2. **alice** runs `wait / snap / msgs 1 / play 1 1 / wait / snap / raw GET
+2. **alice** runs `wait / snap / msgs 2 / play 2 1 / wait / snap / raw GET
    whoami / quit`.
 
-It asserts on the printed lines: the first `snap` shows bob's DM with
-`msgs=1 unplayed=1`, `msgs` lists one unplayed message from bob with an
+It asserts on the printed lines: the first `snap` shows the server-minted
+family room at index 1 and bob's DM at index 2 with `msgs=1 unplayed=1`, `msgs` lists one unplayed message from bob with an
 mxc url, `play` reports the fixture's exact byte count, and the second
 `snap` shows `unplayed=0` — the receipt `play` sent, round-tripped through
 the server. `$WATA_TUI_PLAYER` points at a stub that records its argv and

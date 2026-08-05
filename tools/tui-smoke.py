@@ -48,10 +48,10 @@ quit
 ALICE_SCRIPT = """send 9 /nonexistent-tui-smoke.ogg
 wait 3000
 snap
-msgs 1
-play 1 1
-fav 1 1
-fav 1 1
+msgs 2
+play 2 1
+fav 2 1
+fav 2 1
 wait 4000
 snap
 raw GET /_matrix/client/v3/account/whoami
@@ -182,13 +182,16 @@ def run(tmp):
 
     c.line(alice, lambda l: l == "ready @alice:localhost", "alice: no `ready` line")
 
-    # snap #1: the DM with bob, one message, one unplayed.
+    # snap #1: the server-minted family room at index 1 (plan 0018), then the
+    # DM with bob — one message, one unplayed — at index 2.
     convs = [l for l in alice if l.startswith("conv ")]
-    c.ok(len(convs) == 2, f"alice: want 2 conv lines (one per snap), got {len(convs)}")
-    if len(convs) == 2:
-        first, second = convs
-        c.ok(first.startswith("conv 1 dm @bob:localhost !"),
-             f"alice: first snap's conversation is not bob's DM: {first!r}")
+    c.ok(len(convs) == 4, f"alice: want 4 conv lines (two per snap), got {len(convs)}")
+    if len(convs) == 4:
+        fam1, first, fam2, second = convs
+        c.ok(fam1.startswith("conv 1 family "),
+             f"alice: first snap's conv 1 is not the family room: {fam1!r}")
+        c.ok(first.startswith("conv 2 dm @bob:localhost !"),
+             f"alice: first snap's conv 2 is not bob's DM: {first!r}")
         c.ok(field(first, "msgs") == "1" and field(first, "unplayed") == "1",
              f"alice: first snap wants msgs=1 unplayed=1: {first!r}")
         # snap #2, after play: the receipt landed, nothing unplayed.
