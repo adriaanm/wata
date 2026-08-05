@@ -895,7 +895,9 @@ object Integ:
    *  disk, not merely in the process that made it. */
   def persistedOnDisk(c: MatrixClient, want: Int): Boolean =
     var n = 0
-    val cap = Outbox.cap()
+    // direct cross-module val read: the standing proof of the
+    // CROSS-MODULE-VAL-READ fix (pin f0bce9e).
+    val cap = Outbox.CAP
     var i = 0
     while i < cap do
       if c.outbox.read(i) != "" then n = n + 1
@@ -925,14 +927,14 @@ object Integ:
     else if !waitPending(c, 0, 20000L) then false
     else hasDropped("!nope:localhost")
 
-  /** THE CAP: the queue holds `Outbox.cap()` messages and no more. Past it the
+  /** THE CAP: the queue holds `Outbox.CAP` messages and no more. Past it the
    *  OLDEST is dropped — data loss, so it is marked exactly like a message the
    *  server refused. */
   def queueOverflows(c: MatrixClient): Boolean =
     if !Runtime.waitForConnection(c, ConnError(), 10000L) then false
     else
-      spamSends(c, Outbox.cap() + 4)
-      waitPending(c, Outbox.cap(), 30000L) && hasDropped("@bob:localhost")
+      spamSends(c, Outbox.CAP + 4)
+      waitPending(c, Outbox.CAP, 30000L) && hasDropped("@bob:localhost")
 
   def spamSends(c: MatrixClient, n: Int): Unit =
     var i = 0

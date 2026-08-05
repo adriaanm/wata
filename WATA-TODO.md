@@ -149,11 +149,13 @@ blocks + git log; each entry cites where it was recorded.*
   (def-result and withLock-lambda-tail, kept as standing proofs).
   ~~IF-EXPR-DOUBLE-BOXES~~ FIXED and verified downstream: pin
   `4834bec`, tickQuitArm's direct if-expression restored (standing
-  proof); walls of that class are POSITIONED now. CROSS-MODULE-VAL-READ (filed with the outbox work) **fixed upstream
-  at `f0bce9e`** — repin queued behind the in-flight IROH-ONBOARD
-  agent (SGOLA-REPIN-XMODVAL): drop `Outbox.cap()`, restore the
-  direct val read as the standing proof. Every earlier ticket —
-  compiler and driver — is landed and downstream-verified. ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
+  proof); walls of that class are POSITIONED now. ~~CROSS-MODULE-VAL-READ~~ FIXED and verified downstream: pin
+  `f0bce9e` full-gate green with `Outbox.cap()` deleted and the
+  direct cross-module `Outbox.CAP` reads restored in integ.scala
+  (standing proof). Open upstream: GOMOD-TRANSITIVE-SUM (generated
+  app go.mod lacks transitive requires/sums; GOFLAGS=-mod=mod in
+  sgo-env until then), ATOMIC-STR-EQ (inline Atomic[String] equality
+  emits undeclared Object; typed-local workaround, fix dispatching). ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
   `94ce542`, verified by the original repro: a fresh worktree with the
   shared toolchain home rebuilds the liblink dep (RUN) and the
   cross-build succeeds; isolated-worktree deploy builds work directly

@@ -113,11 +113,6 @@ object Outbox:
    *  and that drop is as loud as an undeliverable one, because it is one. */
   val CAP: scala.Int = 16
 
-  /** `CAP` as a CALL. A cross-module read of a module VAL emits invalid Go
-   *  (`self.Outbox.CAP`) under toolchain pin 94ce542, so the one consumer
-   *  outside this module (wata-fb's integ driver) asks through a def. */
-  def cap(): scala.Int = CAP
-
   /** oldest first — the delivery order. Touched by the action loop only
    *  (the sync loop reads `pending`; the UI is told through `EvOutbox`). */
   private val entriesC: sgo.Atomic[List[OutboxEntry]] = sgo.atomic(Nil)
