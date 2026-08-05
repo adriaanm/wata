@@ -54,28 +54,25 @@ object Group:
     case None => Nil
 
   /** every listed member must resolve to an account here BEFORE anything is
-   *  created or joined.
-   *
-   *  The result crosses as a named flat record, NOT an `Either[String,
-   *  List[String]]`: reading a List back out of an Either's slot emits a cast
-   *  to the erased `List` instead of its instantiation (undefined Go
-   *  identifier) — sgola ticket WATA-EITHER-LIST-PAYLOAD. */
+   *  created or joined. */
   def handleMembers(caller: String, name: String, raw: List[String]): Either[MErr, Json] =
-    val rs = resolveAll(raw, Nil)
-    if !rs.ok then Left(MErr(404, M_NOT_FOUND(), "Unknown user: " + rs.bad))
-    else Right(obj1("room_id", JStr(getOrExtend(caller, name, rs.ids))))
+    resolveAll(raw, Nil) match
+      case l: Left[String, List[String]] =>
+        Left(MErr(404, M_NOT_FOUND(), "Unknown user: " + l.left))
+      case rr: Right[String, List[String]] =>
+        Right(obj1("room_id", JStr(getOrExtend(caller, name, rr.right))))
 
   /** resolve each entry (bare localpart or full MXID, `Dm.normalize`);
-   *  `ok=false` + the offending entry on the first that names nobody here. */
-  def resolveAll(raw: List[String], acc: List[String]): ResolvedMembers = raw match
+   *  Left is the first entry that names nobody here. */
+  def resolveAll(raw: List[String], acc: List[String]): Either[String, List[String]] = raw match
     case h :: t => resolveStep(h, t, acc)
-    case Nil  => ResolvedMembers(true, "", ListOps.reverse(acc))
+    case Nil  => Right(ListOps.reverse(acc))
 
-  def resolveStep(h: String, t: List[String], acc: List[String]): ResolvedMembers =
+  def resolveStep(h: String, t: List[String], acc: List[String]): Either[String, List[String]] =
     val id = Dm.normalize(h)
-    if id == "" then ResolvedMembers(false, h, Nil) else resolveNext(id, t, acc)
+    if id == "" then Left(h) else resolveNext(id, t, acc)
 
-  def resolveNext(id: String, t: List[String], acc: List[String]): ResolvedMembers =
+  def resolveNext(id: String, t: List[String], acc: List[String]): Either[String, List[String]] =
     var acc2: List[String] = acc
     acc2 = id :: acc2
     resolveAll(t, acc2)

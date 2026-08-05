@@ -66,12 +66,13 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
-- **`WATA-EITHER-LIST-PAYLOAD`** (filed 2026-08-06): an
-  `Either[String, List[String]]` whose Right is read back emits a Go type
-  assertion on the erased `List` instead of its instantiation (`List__S`) —
-  `undefined: List` at the go build stage. Worked around in
-  `wata-server/src/main/scala/group.scala` (`ResolvedMembers`, a flat case
-  class); remove the workaround when the fix lands.
+- ~~`WATA-EITHER-LIST-PAYLOAD`~~ FIXED (upstream `860e6d4`) and verified
+  downstream: pin `860e6d4` full-gate green with `Group.resolveAll`
+  returned to `Either[String, List[String]]` (the flat `ResolvedMembers`
+  workaround deleted — the Either shape stands as the proof). The same
+  shape inside a monomorphized generic method body has a separate upstream
+  residue (`TEMPLATE-EITHER-PAYLOAD-ANY`, queued there); ground code is
+  unaffected.
 
 - ~~Thicket backend crash~~ FIXED and verified downstream: pin `2083ef6`
   full-gate green with `Repl.printConvs` returned to the exact recursive

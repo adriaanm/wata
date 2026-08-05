@@ -125,11 +125,6 @@ case class DmRoom(roomId: String, created: Boolean)
  *  it). Sender is the room's creator for all of them. */
 case class StateSeed(etype: String, sk: String, content: Json)
 
-/** the group endpoint's member-resolution result (group.scala): a flat
- *  record rather than `Either[String, List[String]]` — see the workaround
- *  note at `Group.handleMembers`. */
-case class ResolvedMembers(ok: Boolean, bad: String, ids: List[String])
-
 /** A registered long-poll waiter. ONE flat `List[Waiter]` in the store.
  *  `id` is a monotonic tag so removal never needs channel equality; `ch` is
  *  an UNBUFFERED `Chan[Boolean]` used purely as a close-signalled wake
