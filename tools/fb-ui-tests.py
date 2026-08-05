@@ -108,6 +108,12 @@ SCENARIOS = [
         ],
     },
     {
+        "name": "early-boot",
+        "phases": [
+            ("alice", "alice-boot.txt"),
+        ],
+    },
+    {
         "name": "conn-status",
         "phases": [
             ("alice", "alice-conn-status.txt"),

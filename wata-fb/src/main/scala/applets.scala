@@ -380,7 +380,8 @@ object WataLogic:
     if s.pttHeld then renderRecordingOverlay(s, px)
 
   def renderContacts(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
-    if !ctx.snap.hasSelfUser && convCount(ctx.snap) == 0 then renderConnecting(px, ctx.connection)
+    if !NetStatus.everLive() then renderBoot(px, ctx.net)
+    else if !ctx.snap.hasSelfUser && convCount(ctx.snap) == 0 then renderConnecting(px, ctx.connection)
     else
       Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
       renderNet(px, ctx.net)
@@ -473,6 +474,33 @@ object WataLogic:
     val tenths = (s.pttHoldTime * 10.0).toInt % 10
     val txt = "REC " + secs + "." + tenths + "s"
     Font.drawTextCentered(px, txt, (barY + 8) / Font.GLYPH_H, Color.white, false, 0)
+
+  /** THE BOOT SCREEN — what the applet shows from session start until the link
+   *  has been live once (`NetStatus.everLive`). The device boots into wata
+   *  before the network and the modem are up, so the first seconds of every
+   *  power-on are a state the client cannot distinguish from a failure; naming
+   *  it an error there would teach a kid that the radio is broken every morning.
+   *  So the body says what is actually happening, in one calm centered line,
+   *  and the header keeps the ordinary connectivity element — the boot state
+   *  changes the conversation area only.
+   *
+   *  Static on purpose: the header's `..` is already the one moving thing on
+   *  the screen while the client is reconnecting, and a second animation under
+   *  it would be noise rather than information. (Were this to animate, it would
+   *  have to ride `NetState.blink`, whose phase resets on a health change —
+   *  the discipline that keeps a scripted frame reproducible.) */
+  def renderBoot(px: go.Bytes, net: NetState): Unit =
+    Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
+    renderNet(px, net)
+    Font.drawTextCentered(px, bootMsg(net), 7, Color.midGray, false, 0)
+
+  /** "starting up" until there is BOTH an interface and a client trying to use
+   *  it; "waiting for network" once the pipe is there and the sync loop is
+   *  connecting or backing off. Live never reaches here — the first live frame
+   *  latches `everLive` and the ordinary UI takes over for the session. */
+  def bootMsg(net: NetState): String =
+    if NetStatus.hasInterface(net.pipe) && !NetStatus.isDown(net.health) then "waiting for network"
+    else "starting up..."
 
   def renderConnecting(px: go.Bytes, c: ConnectionState): Unit =
     Font.drawText(px, connectingMsg(c), 1, 2, Color.midGray, false, 0)

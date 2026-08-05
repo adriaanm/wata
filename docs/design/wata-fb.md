@@ -334,6 +334,48 @@ republishes `Syncing` on every snapshot, so writing the live cell would
 not survive a frame — and `netpipe` forces the pipe. Both are inert in
 every real run (`Ui.resetCells` clears them per session).
 
+### The boot presentation
+
+The device boots into wata before the network and the modem are up, so
+the first seconds of every power-on are a state the client cannot
+distinguish from a failure — and the applet used to render exactly that
+failure, `renderConnecting`'s `Disconnected` / `Connection error` line,
+as the first thing a kid saw each morning. So the wata applet has a
+BOOT state, held by one session-scoped latch: `NetStatus.everLive` is
+false from session start and set by `NetStatus.poll` on the first frame
+whose health is `NetLive` (cleared with the other session cells in
+`NetStatus.reset`, which `Ui.resetCells` calls). Health alone cannot
+separate "has not connected yet" from "connected and dropped" — both
+are `NetDown`/`NetReconnecting` — and the latch is the whole of that
+distinction.
+
+While the latch is unset, `WataLogic.renderContacts` draws
+`renderBoot` instead of the contact list or the connection line: the
+`WATA` title, the ordinary connectivity element (the header is
+unchanged — the same `NetState` the rest of the frame draws from), and
+ONE centered line in the conversation area, `WataLogic.bootMsg` of that
+same pipe-and-health record:
+
+| pipe | health | line |
+|---|---|---|
+| none / unknown | any | `starting up...` |
+| wifi / cellular | down | `starting up...` |
+| wifi / cellular | reconnecting | `waiting for network` |
+
+i.e. "starting up" until there is BOTH an interface and a client trying
+to use it. The line is STATIC: the header's `..` is already the one
+moving thing on the screen while the client is reconnecting, and a
+second animation under it would be noise rather than information (were
+it to animate it would ride `NetState.blink`, whose phase resets on a
+health change — the discipline that keeps a scripted frame
+reproducible).
+
+Once the latch is set it stays set for the session, so a later drop
+shows the ordinary presentation — the contact list the snapshot still
+holds, under a yellow header — and never the boot screen again. The
+`early-boot` uitest scenario (`alice-boot.txt`) pins all four frames,
+the last of them being precisely that non-return.
+
 ## Input
 
 `Evdev` (`input.scala`) opens exactly `/dev/input/event0`,
@@ -703,7 +745,7 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Ten scripted scenarios, each a fresh server and a sequence of
+Eleven scripted scenarios, each a fresh server and a sequence of
 one-user phases:
 
 | scenario | what it pins |
@@ -714,6 +756,7 @@ one-user phases:
 | `family-three` | a third account (per-scenario `$WATA_USERS`): all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
 | `badges-across-restart` | unplayed counts across a restart: bob sees family=1 / DM=2, resumes with no credentials, and the badge frame is byte-identical; playing out the DM clears only its own badge. |
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED`, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm. |
+| `early-boot` | the applet's boot presentation and its session latch: the earliest cold-boot frame (`starting up...`, no interface), the frame after an interface appears and the client starts trying (`waiting for network`), the ordinary contact list once the link has been live once, and — after a scripted health drop — that the boot screen does NOT come back. Forced with `conn`/`netpipe` from the first frame the script steps, so no frame is ever polled live before the boot frames are taken. |
 | `conn-status` | the header's connectivity element and the status line it shares its computed state with: connected (`NET` off-device), reconnecting on both phases of the `..` alternation, disconnected, and — through the `netpipe` override — the device-only wifi and cellular glyphs and the `OFF` state, whose red status line the client's own belief that it is syncing does not override. |
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Twenty checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |

@@ -63,6 +63,12 @@ object NetStatus:
   // renderings this way rather than by faking interfaces underneath `Diag`,
   // which would make the goldens depend on the host's network.
   private val forcedC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
+  // has the health been `NetLive` at any point THIS SESSION? Latched by `poll`
+  // and never cleared except by `reset`: it is what separates a device that has
+  // not connected yet (the wata applet's calm boot presentation) from one that
+  // connected and dropped (the ordinary reconnect presentation). Health alone
+  // cannot tell those apart — both are `NetDown`/`NetReconnecting`.
+  private val everLiveC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
   /** a fresh session: re-read the interfaces on the next frame and start the
    *  reconnecting animation from its first phase (the host drivers run several
@@ -73,14 +79,21 @@ object NetStatus:
     phaseC.set(0)
     lastHealthC.set(-1)
     forcedC.set(-1)
+    everLiveC.set(false)
 
   /** the uitest-only pipe override (-1 = read the interfaces). */
   def forcePipe(tag: scala.Int): Unit = forcedC.set(tag)
 
+  /** has this session ever had a live link? False from session start until the
+   *  first frame whose health is `NetLive`, true for the rest of the session. */
+  def everLive(): Boolean = everLiveC.get()
+
   /** ONE frame's connectivity. Called exactly once per frame by `Ui.frameStep`
-   *  — it advances the refresh countdown and the blink phase. */
+   *  — it advances the refresh countdown and the blink phase, and latches
+   *  `everLive` the first frame the link is up. */
   def poll(c: ConnectionState): NetState =
     val h = healthTag(c)
+    if h == 0 then everLiveC.set(true)
     NetState(pipeOf(pipeTag()), healthOf(h), blinkPhase(h))
 
   // ---- the pipe (cached; re-read every REFRESH_FRAMES frames) ---------------
@@ -165,6 +178,18 @@ object NetStatus:
   def isNoPipe(p: NetPipe): Boolean = p match
     case _: PipeNone => true
     case _           => false
+
+  /** is an interface actually carrying traffic? `PipeUnknown` counts as no
+   *  interface: it is the answer of a host (and of a device early in boot)
+   *  where there is nothing to ask yet. */
+  def hasInterface(p: NetPipe): Boolean = p match
+    case _: PipeWifi => true
+    case _: PipeCell => true
+    case _           => false
+
+  def isDown(h: NetHealth): Boolean = h match
+    case _: NetDown => true
+    case _          => false
 
   /** green while it is working, yellow while it is coming back, red when it
    *  is down or there is no pipe at all. */

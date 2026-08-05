@@ -199,6 +199,16 @@ FB-CONN-STATUS element computes (plan 0013 M4's design), instead of the
 error surface; after first connect, ordinary reconnect presentation
 takes over.
 
+Outcome: wata's half LANDED — `NetStatus.everLive` latches on the first
+`NetLive` frame of a session, and until it does the wata applet draws a
+centered `starting up...` / `waiting for network` under the unchanged
+header instead of `renderConnecting`'s error line; a later drop shows
+the ordinary reconnect presentation, never the boot screen again. Pinned
+by the `early-boot` uitest scenario (four goldens, the last of them the
+non-return), described in `docs/design/wata-fb.md` ("The boot
+presentation"). The alpine tty1 flip remains gated on the on-device
+settings power-action pass.
+
 **Phase 6 — Family deployment.** Raspberry Pi target (arm64 build +
 service unit, extending `amd64-smoke`), journal-on by default with
 compaction, provisioning the actual family accounts, invite security

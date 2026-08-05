@@ -1,0 +1,49 @@
+# early-boot: the wata applet's BOOT presentation — what the device shows from
+# power-on until the link has been live once, and the proof that it does not
+# come back afterwards (plan 0003, `[FB-EARLY-BOOT]`).
+#
+# The device boots into wata before the network and the modem are up, so the
+# frames pinned here are the first seconds of every power-on. They are forced
+# rather than provoked: `conn` fixes the health the frames report (the sync
+# loop would otherwise reach `Syncing` at a moment the harness does not pick)
+# and `netpipe` fixes the interface, which off-device is honestly `n/a`. The
+# very first frame this script runs is the one `conn off` steps, so no frame is
+# ever polled with a live link before the boot frames are taken — which is what
+# keeps the `everLive` latch (netstatus.scala) unset until this script says so.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
+# directive vocabulary.
+
+# out-of-band room setup (HTTP only, no frames), so the post-connect frames
+# have a conversation to render.
+family @bob:localhost
+
+# no interface, nothing connected: the earliest frame of a cold boot.
+conn off
+netpipe none
+advance 2
+checkpoint boot-starting-up
+
+# wifi came up and the client is trying: the message moves on, and the header
+# element is the ordinary reconnecting one (glyph yellow, `..` on the first
+# phase — the health change reset the blink phase).
+netpipe wifi
+conn connecting
+advance 2
+checkpoint boot-waiting-network
+
+# hand the connection back to the client: the first live frame latches, and the
+# ordinary contact list takes over.
+netpipe auto
+conn live
+wait syncing 1 900
+wait convs 1 900
+advance 30
+checkpoint boot-live
+
+# the link drops again. This is the whole point of the latch: a session that
+# has connected once shows the ordinary reconnect presentation — the contact
+# list under a yellow header — and NEVER returns to the boot screen.
+conn error
+advance 2
+checkpoint boot-reconnect-not-boot
