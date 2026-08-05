@@ -152,12 +152,10 @@ any Go project. The offline-no-proxy build was a self-imposed invariant
 and is **no longer absolute**; a cold build may reach the network.
 
 Because `sgo.build`'s `godep` names a local directory, an upstream package
-rides in through a local `go-pkgs/` module that requires it. `sgo`'s go.mod
-stage writes only require+replace for those godeps — no go.sum, and no line
-for a godep's own upstream requirements — so `tools/sgo-env.sh` and
-`tools/toolchain.py` set `GOFLAGS=-mod=mod`, which lets the go build stage
-add both to the GENERATED module. That is a workaround (sgola ticket
-`GOMOD-TRANSITIVE-SUM`), not the destination.
+rides in through a local `go-pkgs/` module that requires it. The `go-pkgs/`
+module's committed `go.sum` is authoritative: `sgo`'s go.mod stage
+propagates each godep's direct requires and go.sum into the emitted app
+module, and errors loudly on a require without a committed go.sum.
 
 ## How we work here
 

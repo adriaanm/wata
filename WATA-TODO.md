@@ -133,14 +133,6 @@ blocks + git log; each entry cites where it was recorded.*
   committed symlink `tools/phone-spike/wataclient -> ../../wataclient`;
   drop it when the search walks up to the repo root or `sgo.deps` accepts
   a relative path.
-- `sgo`'s go.mod stage writes only require+replace per `godep` — no
-  go.sum, and no line for a godep module's OWN requirements — so the
-  first external Go dependency (`rsc.io/qr`, plan 0014) fails the build
-  with `missing go.sum entry` (filed 2026-08-05,
-  `GOMOD-TRANSITIVE-SUM`). Worked around with `GOFLAGS=-mod=mod` in
-  `tools/sgo-env.sh` + `tools/toolchain.py`, which lets the go build
-  stage patch the GENERATED module; drop that export when the go.mod
-  stage propagates its godeps' requirements.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —
@@ -161,9 +153,11 @@ blocks + git log; each entry cites where it was recorded.*
   (standing proof). ~~ATOMIC-STR-EQ~~ FIXED and verified downstream:
   pin `effbfcb` full-gate green with both typed-local binds inlined
   again (`Enrol.nonce`'s `.get() == ""` and jsonnav's tuple-accessor
-  compare, kept as standing proofs). Open upstream:
-  GOMOD-TRANSITIVE-SUM (generated app go.mod lacks transitive
-  requires/sums; GOFLAGS=-mod=mod in sgo-env until then),
+  compare, kept as standing proofs). ~~GOMOD-TRANSITIVE-SUM~~ FIXED
+  and verified downstream: pin `b38f999` full-gate green (incl. the
+  armv7 cross-cgo leg) with the `GOFLAGS=-mod=mod` export deleted from
+  sgo-env.sh and toolchain.py — the rsc.io/qr build now rides the
+  propagated go.sum alone (standing proof). Open upstream:
   NO-LIB-EMIT-FOR-RUNTIME-LIBS + INLINK-DEP-SEARCH-PARENT-ONLY
   (plan 0023 M1, workarounds above). ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
   `94ce542`, verified by the original repro: a fresh worktree with the
