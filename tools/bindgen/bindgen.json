@@ -1,0 +1,77 @@
+{
+  "xcode": "26.2",
+  "targets": [
+    {
+      "package": "appleptt",
+      "out": "go-pkgs/appleptt",
+      "sdk": "iphonesimulator",
+      "triple": "arm64-apple-ios26.2-simulator",
+      "imports": [
+        "Foundation/Foundation.h",
+        "UIKit/UIKit.h",
+        "AVFAudio/AVFAudio.h",
+        "PushToTalk/PushToTalk.h"
+      ],
+      "classes": [
+        "PTChannelManager",
+        "PTChannelDescriptor",
+        "PTPushResult",
+        "PTParticipant",
+        "NSUUID"
+      ],
+      "protocols": [
+        "PTChannelManagerDelegate",
+        "PTChannelRestorationDelegate"
+      ],
+      "enums": [
+        "PTServiceStatus",
+        "PTTransmissionMode",
+        "PTChannelJoinReason",
+        "PTChannelLeaveReason",
+        "PTChannelTransmitRequestSource",
+        "PTInstantiationError",
+        "PTChannelError"
+      ],
+      "opaque": [
+        "NSData",
+        "NSDictionary",
+        "UIImage",
+        "AVAudioSession"
+      ]
+    },
+    {
+      "package": "foundation",
+      "out": "go-pkgs/appleptt/foundation",
+      "sdk": "macosx",
+      "triple": "arm64-apple-macos26.0",
+      "imports": [
+        "Foundation/Foundation.h"
+      ],
+      "classes": [
+        "NSProcessInfo",
+        "NSNotification",
+        "NSNotificationCenter",
+        "NSXMLParser",
+        "NSUUID",
+        "NSData"
+      ],
+      "protocols": [
+        "NSXMLParserDelegate"
+      ],
+      "enums": [
+        "NSXMLParserError",
+        "NSDataReadingOptions",
+        "NSDataWritingOptions"
+      ],
+      "opaque": [
+        "NSArray",
+        "NSDictionary",
+        "NSOperationQueue",
+        "NSURL",
+        "NSInputStream",
+        "NSSet",
+        "NSError"
+      ]
+    }
+  ]
+}

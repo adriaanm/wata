@@ -1,0 +1,62 @@
+{
+  "package": "fixture",
+  "enums": [
+    {
+      "kind": "EnumDecl",
+      "name": "WFServiceStatus",
+      "wataDoc": "NS_ENUM: implicit values, one after another.",
+      "fixedUnderlyingType": {"desugaredQualType": "long", "qualType": "NSInteger"},
+      "inner": [
+        {"kind": "EnumConstantDecl", "name": "WFServiceStatusReady", "wataDoc": "Ready for use."},
+        {"kind": "EnumConstantDecl", "name": "WFServiceStatusConnecting"},
+        {
+          "kind": "EnumConstantDecl",
+          "name": "WFServiceStatusFailed",
+          "inner": [
+            {
+              "kind": "ConstantExpr",
+              "value": "17",
+              "inner": [{"kind": "IntegerLiteral", "value": "17"}]
+            }
+          ]
+        },
+        {"kind": "EnumConstantDecl", "name": "WFServiceStatusGone"}
+      ]
+    },
+    {
+      "kind": "EnumDecl",
+      "name": "WFChannelOptions",
+      "wataDoc": "NS_OPTIONS: an unsigned bitmask written as shifts.",
+      "fixedUnderlyingType": {"desugaredQualType": "unsigned long", "qualType": "NSUInteger"},
+      "inner": [
+        {
+          "kind": "EnumConstantDecl",
+          "name": "WFChannelOptionNone",
+          "inner": [{"kind": "ConstantExpr", "value": "0"}]
+        },
+        {
+          "kind": "EnumConstantDecl",
+          "name": "WFChannelOptionDuplex",
+          "inner": [
+            {
+              "kind": "ConstantExpr",
+              "value": "1",
+              "inner": [{"kind": "BinaryOperator", "opcode": "<<"}]
+            }
+          ]
+        },
+        {
+          "kind": "EnumConstantDecl",
+          "name": "WFChannelOptionListenOnly",
+          "inner": [
+            {
+              "kind": "ConstantExpr",
+              "value": "2",
+              "inner": [{"kind": "BinaryOperator", "opcode": "<<"}]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

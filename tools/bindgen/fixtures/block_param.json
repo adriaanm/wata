@@ -1,0 +1,63 @@
+{
+  "package": "fixture",
+  "classes": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "WFSession",
+      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"},
+      "inner": [
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "sessionWithHandler:",
+          "wataDoc": "The completion handler is called once the session exists.",
+          "returnType": {"qualType": "void"},
+          "instance": false,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "completionHandler",
+              "type": {
+                "desugaredQualType": "void (^)(WFSession * _Nullable, NSError * _Nullable)",
+                "qualType": "void (^ _Nonnull)(WFSession * _Nullable, NSError * _Nullable)"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "eachName:",
+          "wataDoc": "A block that returns a value, and takes a bridged NSString.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "body",
+              "type": {
+                "desugaredQualType": "BOOL (^)(NSString * _Nonnull, NSInteger)",
+                "qualType": "BOOL (^ _Nonnull)(NSString * _Nonnull, NSInteger)"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "runNested:",
+          "wataDoc": "A block taking a block is refused.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "body",
+              "type": {
+                "desugaredQualType": "void (^)(void (^)(void))",
+                "qualType": "void (^ _Nonnull)(void (^ _Nonnull)(void))"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "package": "fixture",
+  "classes": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "WFBlob",
+      "wataDoc": "A class whose API is spread over categories, the way Foundation's is.",
+      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"},
+      "inner": [
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "length",
+          "mangledName": "-[WFBlob length]",
+          "returnType": {"desugaredQualType": "unsigned long", "qualType": "NSUInteger"},
+          "instance": true
+        }
+      ]
+    },
+    {
+      "kind": "ObjCCategoryDecl",
+      "name": "WFBlobCreation",
+      "interface": {"kind": "ObjCInterfaceDecl", "name": "WFBlob"},
+      "inner": [
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "blobWithName:",
+          "wataDoc": "A category's class method.",
+          "mangledName": "+[WFBlob blobWithName:]",
+          "returnType": {"desugaredQualType": "id", "qualType": "instancetype _Nonnull"},
+          "instance": false,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "name",
+              "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"}
+            }
+          ]
+        },
+        {
+          "kind": "ObjCPropertyDecl",
+          "name": "label",
+          "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"},
+          "readonly": true
+        }
+      ]
+    },
+    {
+      "kind": "ObjCMethodDecl",
+      "name": "describeBlob",
+      "wataDoc": "A loose node: its category did not match the dump filter, so clang printed the method on its own. mangledName is what attributes it.",
+      "mangledName": "-[WFBlob describeBlob]",
+      "returnType": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"},
+      "instance": true
+    },
+    {
+      "kind": "ObjCMethodDecl",
+      "name": "length",
+      "wataDoc": "A redeclaration of a method already collected: dropped, not duplicated.",
+      "mangledName": "-[WFBlob length]",
+      "returnType": {"desugaredQualType": "unsigned long", "qualType": "NSUInteger"},
+      "instance": true
+    },
+    {
+      "kind": "ObjCMethodDecl",
+      "name": "oldBlobWithName:",
+      "wataDoc": "Deprecated declarations are not bound.",
+      "mangledName": "+[WFBlob oldBlobWithName:]",
+      "returnType": {"desugaredQualType": "id", "qualType": "instancetype _Nonnull"},
+      "instance": false,
+      "inner": [
+        {
+          "kind": "ParmVarDecl",
+          "name": "name",
+          "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"}
+        },
+        {"kind": "DeprecatedAttr"}
+      ]
+    },
+    {
+      "kind": "ObjCMethodDecl",
+      "name": "somethingElse",
+      "mangledName": "-[WFOther somethingElse]",
+      "returnType": {"qualType": "void"},
+      "instance": true
+    }
+  ]
+}

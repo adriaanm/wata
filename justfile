@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke fb-smoke client-tests integ golden fb-ui-tests amd64-smoke tunnel-smoke
+ci: smoke persist admin-smoke fb-smoke client-tests integ golden fb-ui-tests bindgen-tests amd64-smoke tunnel-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -100,6 +100,22 @@ client-tests:
 # client core: 14 live client-server scenarios, fresh server each
 integ:
     bash tools/wataclient-integ.sh
+
+# Apple bindings (plan 0026): the generator's unit tests, over the committed
+# clang-AST fixtures. No Xcode, no SDK, no device.
+bindgen-tests:
+    tools/bindgen/test_bindgen.py
+
+# Apple bindings: regenerate go-pkgs/appleptt from the SDK headers, then gofmt,
+# go vet and build it for ios/arm64. Needs Xcode; not in ci.
+bindgen *FLAGS:
+    tools/bindgen/regen.sh {{FLAGS}}
+
+# Apple bindings: the runtime leg — the generated Foundation wrappers driven
+# against this Mac's ObjC runtime (dispatch, blocks, NSError**, and a
+# synthesized delegate class Foundation itself calls). Needs macOS; not in ci.
+bindgen-runtime:
+    cd go-pkgs/appleptt && GOWORK=off go test -tags objcruntime ./...
 
 # terminal client: two scripted REPL sessions against a fresh server (bob
 # sends a canned Ogg, alice snaps/plays/pokes). ~10s, so standalone, not in ci.

@@ -1,0 +1,89 @@
+{
+  "package": "fixture",
+  "classes": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "WFThing",
+      "wataDoc": "A thing, for testing object-returning methods.",
+      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"},
+      "inner": [
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "thing",
+          "returnType": {"desugaredQualType": "WFThing *", "qualType": "WFThing * _Nonnull"},
+          "instance": false
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "init",
+          "returnType": {"desugaredQualType": "id", "qualType": "instancetype _Nonnull"},
+          "instance": true
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "initWithName:count:",
+          "wataDoc": "Names the thing.",
+          "returnType": {"desugaredQualType": "id", "qualType": "instancetype _Nonnull"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "name",
+              "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "count",
+              "type": {"desugaredQualType": "long", "qualType": "NSInteger"}
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "describe",
+          "returnType": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nullable"},
+          "instance": true
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "isReady",
+          "returnType": {"qualType": "BOOL"},
+          "instance": true
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "payload",
+          "returnType": {"desugaredQualType": "NSData *", "qualType": "NSData * _Nonnull"},
+          "instance": true
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "new",
+          "returnType": {"desugaredQualType": "id", "qualType": "instancetype _Nonnull"},
+          "instance": false,
+          "inner": [{"kind": "UnavailableAttr"}]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "compare:",
+          "returnType": {"qualType": "NSComparisonResult"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "other",
+              "type": {"desugaredQualType": "WFThing *", "qualType": "WFThing * _Nonnull"}
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "opaque": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "NSData",
+      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"}
+    }
+  ]
+}

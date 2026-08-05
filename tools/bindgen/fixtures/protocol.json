@@ -1,0 +1,111 @@
+{
+  "package": "fixture",
+  "protocols": [
+    {
+      "kind": "ObjCProtocolDecl",
+      "name": "WFSessionDelegate",
+      "wataDoc": "What a session tells its owner.",
+      "inner": [
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "session:didJoin:reason:",
+          "wataDoc": "The session joined.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "session",
+              "type": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "name",
+              "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "reason",
+              "type": {
+                "desugaredQualType": "enum WFJoinReason",
+                "qualType": "WFJoinReason"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "session:failedWithError:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "session",
+              "type": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "error",
+              "type": {"desugaredQualType": "NSError *", "qualType": "NSError * _Nullable"}
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "replacementForSession:",
+          "wataDoc": "A callback with a return value.",
+          "returnType": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "session",
+              "type": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"}
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "session:handle:",
+          "wataDoc": "A callback taking a block is refused: the block would outlive the call.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "session",
+              "type": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "done",
+              "type": {
+                "desugaredQualType": "void (^)(void)",
+                "qualType": "void (^ _Nonnull)(void)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "WFSession",
+      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"}
+    }
+  ],
+  "enums": [
+    {
+      "kind": "EnumDecl",
+      "name": "WFJoinReason",
+      "fixedUnderlyingType": {"desugaredQualType": "long", "qualType": "NSInteger"},
+      "inner": [
+        {"kind": "EnumConstantDecl", "name": "WFJoinReasonRequested"},
+        {"kind": "EnumConstantDecl", "name": "WFJoinReasonRestored"}
+      ]
+    }
+  ]
+}

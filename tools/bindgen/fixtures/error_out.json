@@ -1,0 +1,107 @@
+{
+  "package": "fixture",
+  "classes": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "WFStore",
+      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"},
+      "inner": [
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "writeToPath:error:",
+          "wataDoc": "Writes, or reports why it could not.",
+          "returnType": {"qualType": "BOOL"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "path",
+              "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "error",
+              "type": {
+                "desugaredQualType": "NSError **",
+                "qualType": "NSError * _Nullable * _Nullable"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "loadFromPath:error:",
+          "returnType": {"desugaredQualType": "WFStore *", "qualType": "WFStore * _Nullable"},
+          "instance": false,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "path",
+              "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "error",
+              "type": {
+                "desugaredQualType": "NSError **",
+                "qualType": "NSError * _Nullable * _Nullable"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "syncWithError:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "error",
+              "type": {
+                "desugaredQualType": "NSError **",
+                "qualType": "NSError * _Nullable * _Nullable"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "reportError:",
+          "wataDoc": "An NSError * parameter is an ordinary Go error, not an out-parameter.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "error",
+              "type": {"desugaredQualType": "NSError *", "qualType": "NSError * _Nullable"}
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "recoverFromError:path:",
+          "wataDoc": "An NSError ** that is not the trailing parameter is refused.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "error",
+              "type": {
+                "desugaredQualType": "NSError **",
+                "qualType": "NSError * _Nullable * _Nullable"
+              }
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "path",
+              "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"}
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
