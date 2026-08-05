@@ -1,6 +1,6 @@
 # 0027 — Account provisioning via enrolment
 
-Status: proposed
+Status: accepted
 
 ## Problem
 
@@ -51,15 +51,15 @@ over it adds no security a bound node id doesn't already have, and a
 password typed on a 160×128 keypad adds only friction. Passwords remain a
 human-at-the-admin-page (and later phone-client) concern.
 
-### Account selection at approve: pick-only
+### Account selection at approve: pick or create inline
 
-The approve dialog offers the existing roster to pick from, plus a
-"create + bind" shortcut that walks through the normal account-creation
-form before binding. It does **not** offer a bare inline name field:
-the roster is the family (plan 0018 makes membership mean something
-everywhere), so creating a member stays a deliberate act.
-**Owner ruling pending** — inline creation is the alternative if the
-two-step feels heavier in practice.
+**Owner ruling 2026-08-06**: streamline it. The approve dialog offers the
+existing roster to pick from *and* a bare inline name field that creates
+the account on the spot and binds it — one step, no detour through a
+separate account form. The stakes are low, so the friction should be too;
+a casually minted name is renameable, an interrupted onboarding is not.
+(The deliberate-roster alternative — create accounts first, approve only
+binds — was considered and rejected as heavier than the risk warrants.)
 
 ## What changes (file-level)
 
