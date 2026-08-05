@@ -178,6 +178,13 @@ iroh-lan-smoke:
 # (BQ268_SERIAL) besides everything iroh-lan-smoke needs; not in ci.
 iroh-roam-smoke:
     tools/iroh-roam-smoke.py
+
+# the phone spike (plan 0023 M1): sgola-emitted wataclient through `gomobile
+# bind` into iOS + macOS xcframeworks, then a Swift shell logs in and syncs
+# against a scratch wata-server. Needs Xcode + gomobile/gobind; not in ci.
+#   just phone-spike --only bind      # one stage
+phone-spike *FLAGS:
+    tools/phone-spike/spike.py {{FLAGS}}
 # --- iroh-tunnel (connectivity spike; see docs/planning/connectivity-iroh.md) ---
 
 # Server side: run next to the homeserver. Prints a stable NodeID to provision

@@ -127,6 +127,21 @@ blocks + git log; each entry cites where it was recorded.*
   `.get() == <literal>` position. Worked around in `Enrol.nonce` by
   binding to a typed local first — the same trick `wjson.scala` already
   carries a comment for; inline it again when it lands.
+- No emission shape is an importable Go PACKAGE that carries the sgola
+  runtime: `mode app` emits `package main` (un-importable) and `mode
+  library` is the runtime-free `@goexport` facade, which a core-dependent
+  in-link library like `wataclient` cannot ride (filed 2026-08-05,
+  `NO-LIB-EMIT-FOR-RUNTIME-LIBS`; plan 0023 M1). Worked around with
+  `tools/phone-spike/aslib.py`, which rewrites the emitted `package main`
+  into `package watacore` after every `sgo build`; delete that file when
+  an `emitpackage` marker (or an equivalent third mode) lands.
+- In-link dep resolution searches only the declaring module's PARENT dir
+  and the toolchain home, so a module nested in this repo cannot name a
+  library at the repo root (filed 2026-08-05,
+  `INLINK-DEP-SEARCH-PARENT-ONLY`; plan 0023 M1). Worked around with a
+  committed symlink `tools/phone-spike/wataclient -> ../../wataclient`;
+  drop it when the search walks up to the repo root or `sgo.deps` accepts
+  a relative path.
 - `sgo`'s go.mod stage writes only require+replace per `godep` — no
   go.sum, and no line for a godep module's OWN requirements — so the
   first external Go dependency (`rsc.io/qr`, plan 0014) fails the build

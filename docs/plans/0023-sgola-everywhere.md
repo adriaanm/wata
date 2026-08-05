@@ -26,7 +26,10 @@ drives login + sync in the iOS simulator against the Mac server over
 TCP. Kills the central risk (does sgola-emitted Go survive gomobile's
 toolchain and type constraints at the bind surface?) in an afternoon.
 Friction is a deliverable: anything the emitted Go trips over becomes
-a sgola inbox ticket, like the rsc.io/qr dep proof before it.
+a sgola inbox ticket, like the rsc.io/qr dep proof before it. It lives in
+`tools/phone-spike/` (`just phone-spike`); its README says how to rerun it
+and REPORT.md is the answer — the binds hold, and the two tickets are
+`NO-LIB-EMIT-FOR-RUNTIME-LIBS` and `INLINK-DEP-SEARCH-PARENT-ONLY`.
 
 **M2 — the blit shell: the phone is a bigger BQ268.** A Gio app that
 runs the real `wata-fb` frame loop (via the `UiDevice` seam) and

@@ -106,3 +106,6 @@ __pycache__/
 
 # cross-repo ticket drop (drained into TODO.jsonl, never committed)
 inbox/
+
+# phone spike build products (xcframeworks, the Swift shell, server logs)
+tools/phone-spike/out/
