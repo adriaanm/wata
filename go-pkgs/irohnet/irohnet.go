@@ -31,6 +31,15 @@
 //   - GAP: DialContext honors ctx as a timeout only; mid-dial cancellation
 //     does not interrupt the in-flight C call (it is abandoned server-side
 //     at the QUIC layer instead).
+//   - A dial refused by the peer (e.g. the server's allowlist gate closing
+//     with 401 "not allowlisted") is loud, not a GAP: the Rust layer
+//     (irohnet_client_dial) matches iroh's ConnectionError::ApplicationClosed
+//     on both the cached-connection and fresh-connect paths and formats
+//     "server refused: <code> <reason>"; Dialer.DialContext logs that once
+//     per distinct reason (irohnet_cgo.go, logDialError) before the error
+//     reaches the HttpDo capability, which still folds it into
+//     HttpResponse(0, "") — the portable core never sees a Go error, but the
+//     reason is on stdout/stderr for whoever runs the process.
 package irohnet
 
 import (

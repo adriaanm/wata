@@ -347,7 +347,20 @@ bytes over a socket":
   the plain records that cross the boundary; network failure is
   represented as a non-2xx (or, per `mhttp.scala:97`, status `0` for a
   malformed mxc URL) status rather than a Go error — the portable core
-  never observes a Go `error` value.
+  never observes a Go `error` value. This holds even for an iroh dial
+  refused by the peer (e.g. the server's allowlist gate): `HttpDo`'s
+  Go-side impl (`wata-fb`/`wata-tui` `caps.scala`, `FbCaps.send` /
+  `TuiCaps.send`) still catches the thrown `sgo.GoError` and folds it into
+  `HttpResponse(0, "")` — but the refusal is not silent, it just does not
+  cross this boundary. `go-pkgs/irohnet`'s `Dialer` logs the refusal
+  reason once per distinct reason string (`irohnet_cgo.go`,
+  `logDialError`) before the error ever reaches this trait, so both
+  server-side client use and wata-fb/wata-tui get the log line for free —
+  see `go-pkgs/irohnet/irohnet.go`'s package doc for the exact contract
+  and `go-pkgs/irohnet/rust/src/lib.rs` (`irohnet_client_dial`,
+  `format_application_close`) for where the reason
+  (`"server refused: <code> <reason>"`) is recovered from iroh's
+  `ConnectionError::ApplicationClosed`. [IROH-REFUSAL-LOUD], plan 0013 M5.
 - **`oracle.scala`** (398 lines, `OggOracle`) is a second, independent
   self-test report, orthogonal to the sync-engine oracles: it exercises
   CRC-32 golden vectors, an Ogg write/read round trip (verifying page CRC

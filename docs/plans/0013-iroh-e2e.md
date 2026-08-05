@@ -137,6 +137,55 @@ sound). It rides this config format but must not gate the tunnel.
      0014) — until a device *can* enrol, a dedicated screen for "not
      enrolled" has no action to offer beyond the log line.
 
+   [IROH-REFUSAL-LOUD] outcome (2026-08-05): landed. The reading above
+   undersold the gap — the close reason is lost at *two* independent
+   points, not one, because opening a bidirectional stream is local-only
+   (bounded by the peer's already-negotiated stream limit), so it
+   routinely succeeds against a connection the peer is already closing;
+   the refusal then only surfaces on the first stream read/write, not on
+   `open_bi` itself. So `irohnet_client_dial` matches
+   `ConnectionError::ApplicationClosed` on the cached-connection branch,
+   the fresh `connect()` (`ConnectError::Connection { source }`), *and*
+   the fresh `open_bi()` — three sites, not two — formatting each as
+   `"server refused: <code> <reason-utf8>"`
+   (`format_application_close`). A fourth site had no reason-carrying
+   error at all: `irohnet_stream_read`/`irohnet_stream_write`'s
+   `Err(_) => RET_ERR` collapse was, and stays, protocol-only (no
+   `err_out` parameter) — so a client-side `StreamState` now carries an
+   `Option<Arc<ClientState>>` back-reference, and a read/write that
+   unwraps to `ReadError`/`WriteError::ConnectionLost(ApplicationClosed)`
+   records the reason on `ClientState.last_refusal`
+   (`record_stream_refusal_read`/`_write`) instead of losing it. A new
+   FFI call, `irohnet_client_last_refusal`, lets the Go `Conn` recover
+   that reason when a stream op returns `RET_ERR`
+   (`Conn.errForRet`, `irohnet_cgo.go`) — this is also what "remember the
+   last refusal on the client handle" turned out to buy operationally:
+   once a connection has been refused, its handle is *kept* (not cleared
+   to force a redial) so every later dial call fails fast, locally, on
+   the same dead connection instead of repeating a doomed handshake.
+   `Dialer.logDialError` (`irohnet_cgo.go`) prints the reason once per
+   distinct string — both the dial path and the stream-I/O path funnel
+   through it, so server-side client use and wata-fb/wata-tui share the
+   one log line for free. `tools/tunnel-smoke.py`'s allowlist-negative
+   leg now asserts `"not allowlisted" in (stdout+stderr)` and `fail()`s
+   the gate outright if a refusal is ever loud=False again (previously it
+   only printed the marker). Verified: `just tunnel-smoke` and `just ci`
+   both green, `refusal loud: True`. The intruder sees exactly
+   `irohnet: dial <peer>: server refused: 401 not allowlisted` at the
+   `net.Conn`/HttpDo boundary — the portable core still never observes
+   it (folded into `HttpResponse(0, "")` as before), only the process's
+   stdout does, via `logDialError`. No UI change; deferred to enrolment
+   (plan 0014) as ruled.
+
+   Review amendment (same day): the keep-the-dead-connection fast-fail is
+   bounded by a 30s `REFUSAL_COOLDOWN` (`ClientState.refused_at`) —
+   cached-forever would have locked a refused client out until process
+   restart, which breaks plan 0014's approve-while-the-device-retries
+   enrolment loop. Within the cooldown a dial answers fast and locally
+   from the dead connection; past it, one fresh handshake is allowed, so
+   an approved device connects on its next backoff round. Every refusal
+   sighting (dial or stream I/O) re-stamps the cooldown.
+
 **Milestone 1 outcome**: done (merged) — `go-pkgs/irohnet` proves out on
 darwin; `just tunnel-smoke` joins `just ci`.
 

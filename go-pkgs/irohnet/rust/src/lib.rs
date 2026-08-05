@@ -28,9 +28,12 @@ use std::os::raw::c_char;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use iroh::endpoint::{presets, Connection, RecvStream, SendStream, VarInt};
+use iroh::endpoint::{
+    presets, ApplicationClose, ConnectError, Connection, ConnectionError, ReadError, RecvStream,
+    SendStream, VarInt, WriteError,
+};
 use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey, TransportAddr};
 use tokio::sync::{mpsc, watch};
 
@@ -70,7 +73,24 @@ struct ClientState {
     endpoint: Endpoint,
     peer: EndpointAddr,
     conn: tokio::sync::Mutex<Option<Connection>>,
+    /// The last peer-initiated close seen on this client, so callers (and the
+    /// Go log-once-per-reason layer) can see a stable reason even once the
+    /// dead connection is behind a fast local failure rather than a fresh
+    /// dial.
+    last_refusal: Mutex<Option<String>>,
+    /// When the cached connection was last seen refused. The dead connection
+    /// answers dials fast-and-locally only for REFUSAL_COOLDOWN after this;
+    /// past that, one fresh handshake is allowed — which is what lets a
+    /// client recover the moment its enrolment is approved (plan 0014's
+    /// approve-while-the-device-retries loop), instead of staying locked out
+    /// until process restart.
+    refused_at: Mutex<Option<Instant>>,
 }
+
+/// How long a refusal answers dials from the cached dead connection before a
+/// fresh handshake is attempted. The sync loop's backoff paces dials anyway;
+/// this only bounds handshake work under a tight retry loop.
+const REFUSAL_COOLDOWN: Duration = Duration::from_secs(30);
 
 struct StreamState {
     send: tokio::sync::Mutex<SendStream>,
@@ -80,6 +100,15 @@ struct StreamState {
     closed: AtomicBool,
     /// bumped on close and on any deadline change; blocked ops re-evaluate.
     epoch: watch::Sender<()>,
+    /// The client that opened this stream, client-side streams only.
+    /// Opening a bidirectional stream is a local QUIC operation (bounded by
+    /// the peer's already-negotiated stream-limit transport parameter), so
+    /// it can succeed even against a connection the peer is already closing
+    /// — the allowlist gate's `conn.close(401, ...)` (irohnet_server_new)
+    /// often isn't visible until the first read/write on the stream. Reading
+    /// the refusal there (irohnet_stream_read/write) needs a way back to the
+    /// owning client's `last_refusal`, which is what this is for.
+    client: Option<Arc<ClientState>>,
 }
 
 enum Obj {
@@ -153,7 +182,7 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn register_stream(send: SendStream, recv: RecvStream) -> u64 {
+fn register_stream(send: SendStream, recv: RecvStream, client: Option<Arc<ClientState>>) -> u64 {
     let (tx, _rx) = watch::channel(());
     register(Obj::Stream(Arc::new(StreamState {
         send: tokio::sync::Mutex::new(send),
@@ -162,7 +191,66 @@ fn register_stream(send: SendStream, recv: RecvStream) -> u64 {
         write_deadline_ms: AtomicI64::new(0),
         closed: AtomicBool::new(false),
         epoch: tx,
+        client,
     })))
+}
+
+/// Format a peer-initiated close as `"server refused: <code> <reason>"`, the
+/// reason decoded lossy-UTF8 (the wire allows arbitrary bytes). This is the
+/// one place the allowlist gate's `conn.close(401, b"not allowlisted")`
+/// (irohnet_server_new, the accept loop) becomes readable client-side.
+fn format_application_close(ac: &ApplicationClose) -> String {
+    format!(
+        "server refused: {} {}",
+        ac.error_code,
+        String::from_utf8_lossy(&ac.reason)
+    )
+}
+
+/// If a stream/connection error is a peer-initiated application close,
+/// format it loud; every other error (transport reset, idle timeout, a
+/// locally-closed connection) stays generic — only an application close
+/// carries a reason worth surfacing.
+fn refusal_message(e: &ConnectionError) -> Option<String> {
+    match e {
+        ConnectionError::ApplicationClosed(ac) => Some(format_application_close(ac)),
+        _ => None,
+    }
+}
+
+/// Same, for the error `Endpoint::connect` itself can return: a refusal fast
+/// enough to land before the connection is considered established still
+/// surfaces as `ConnectError::Connection { source: ConnectionError }`.
+fn connect_refusal_message(e: &ConnectError) -> Option<String> {
+    match e {
+        ConnectError::Connection { source, .. } => refusal_message(source),
+        _ => None,
+    }
+}
+
+/// Opening a stream is local-only, so it can outrun the peer's close — the
+/// first read/write on a fresh stream is often where an application close
+/// (e.g. the allowlist gate) is actually observed, not `open_bi`. When that
+/// happens on a client-side stream, record the reason on the owning client
+/// so the next dial (or the Go layer via irohnet_client_last_refusal) can
+/// report it — the stream I/O return-code protocol stays a plain RET_ERR,
+/// this is a side channel, not a protocol change.
+fn record_stream_refusal_read(st: &StreamState, e: &ReadError) {
+    if let (Some(client), ReadError::ConnectionLost(ce)) = (&st.client, e) {
+        if let Some(msg) = refusal_message(ce) {
+            *client.last_refusal.lock().unwrap() = Some(msg);
+            *client.refused_at.lock().unwrap() = Some(Instant::now());
+        }
+    }
+}
+
+fn record_stream_refusal_write(st: &StreamState, e: &WriteError) {
+    if let (Some(client), WriteError::ConnectionLost(ce)) = (&st.client, e) {
+        if let Some(msg) = refusal_message(ce) {
+            *client.last_refusal.lock().unwrap() = Some(msg);
+            *client.refused_at.lock().unwrap() = Some(Instant::now());
+        }
+    }
 }
 
 async fn build_endpoint(secret_hex: &str, relay: &str, with_alpns: bool) -> Result<Endpoint, String> {
@@ -370,7 +458,7 @@ pub extern "C" fn irohnet_server_accept(
     let item = rt().block_on(async { srv.rx.lock().await.recv().await });
     match item {
         Some(acc) => {
-            let sh = register_stream(acc.send, acc.recv);
+            let sh = register_stream(acc.send, acc.recv, None);
             unsafe { *out_stream = sh };
             put_str(remote_out, remote_cap, &acc.remote);
             0
@@ -441,6 +529,8 @@ pub extern "C" fn irohnet_client_new(
                 endpoint,
                 peer,
                 conn: tokio::sync::Mutex::new(None),
+                last_refusal: Mutex::new(None),
+                refused_at: Mutex::new(None),
             })));
             unsafe { *out_handle = h };
             0
@@ -475,22 +565,62 @@ pub extern "C" fn irohnet_client_dial(
         if let Some(c) = guard.as_ref() {
             match c.open_bi().await {
                 Ok(pair) => return Ok(pair),
-                Err(_) => *guard = None, // stale connection; redial below
+                Err(e) => {
+                    if let Some(msg) = refusal_message(&e) {
+                        // The peer closed this connection on purpose (e.g. the
+                        // allowlist gate). Within REFUSAL_COOLDOWN of the last
+                        // refusal, answer from the dead connection — fast,
+                        // local, loud exactly once per distinct reason (the Go
+                        // layer dedupes on that string). Past the cooldown,
+                        // fall through to ONE fresh handshake: the server's
+                        // answer may have changed (enrolment approved), and a
+                        // client must be able to recover without a restart.
+                        let recent = cl
+                            .refused_at
+                            .lock()
+                            .unwrap()
+                            .map(|t| t.elapsed() < REFUSAL_COOLDOWN)
+                            .unwrap_or(false);
+                        *cl.last_refusal.lock().unwrap() = Some(msg.clone());
+                        *cl.refused_at.lock().unwrap() = Some(Instant::now());
+                        if recent {
+                            return Err(msg);
+                        }
+                    }
+                    *guard = None; // stale, or a refusal past cooldown; redial below
+                }
             }
         }
-        let c = cl
-            .endpoint
-            .connect(cl.peer.clone(), ALPN)
-            .await
-            .map_err(|e| format!("connect: {e:?}"))?;
-        let pair = c.open_bi().await.map_err(|e| format!("open_bi: {e:?}"))?;
+        let c = cl.endpoint.connect(cl.peer.clone(), ALPN).await.map_err(|e| {
+            connect_refusal_message(&e).unwrap_or_else(|| format!("connect: {e:?}"))
+        })?;
+        let pair = match c.open_bi().await {
+            Ok(pair) => pair,
+            Err(e) => {
+                let refusal = refusal_message(&e);
+                if let Some(m) = &refusal {
+                    *cl.last_refusal.lock().unwrap() = Some(m.clone());
+                    *cl.refused_at.lock().unwrap() = Some(Instant::now());
+                }
+                // Cache the connection even though it is dead: the next dial
+                // call hits the cached branch above and fails fast on this
+                // same connection instead of redialing into the same refusal.
+                *guard = Some(c);
+                return Err(refusal.unwrap_or_else(|| format!("open_bi: {e:?}")));
+            }
+        };
         *guard = Some(c);
         Ok::<(SendStream, RecvStream), String>(pair)
     };
     let dur = Duration::from_millis(if timeout_ms > 0 { timeout_ms as u64 } else { 30_000 });
     match rt().block_on(async { tokio::time::timeout(dur, fut).await }) {
         Ok(Ok((send, recv))) => {
-            let sh = register_stream(send, recv);
+            // Opening a stream is local-only (bounded by the peer's already
+            // negotiated stream limit), so it can succeed even against a
+            // connection the peer is already closing — pass the client
+            // handle through so a first-read/write ApplicationClosed still
+            // has somewhere to record itself (irohnet_stream_read/write).
+            let sh = register_stream(send, recv, Some(cl.clone()));
             unsafe { *out_stream = sh };
             0
         }
@@ -502,6 +632,27 @@ pub extern "C" fn irohnet_client_dial(
             put_str(err_out, err_cap, "dial timeout");
             -1
         }
+    }
+}
+
+/// The last peer-initiated close (application close, e.g. an allowlist
+/// refusal) seen on this client — from a dial attempt or from the first
+/// read/write on a stream that outran the peer's close. Returns 0 with the
+/// reason written to `out` (formatted "server refused: <code> <reason>"), or
+/// -1 if the client is unknown or has not seen one yet.
+#[no_mangle]
+pub extern "C" fn irohnet_client_last_refusal(h: u64, out: *mut c_char, cap: usize) -> i32 {
+    let cl = match get_client(h) {
+        Some(c) => c,
+        None => return -1,
+    };
+    let guard = cl.last_refusal.lock().unwrap();
+    match guard.as_ref() {
+        Some(msg) => {
+            put_str(out, cap, msg);
+            0
+        }
+        None => -1,
     }
 }
 
@@ -561,7 +712,10 @@ pub extern "C" fn irohnet_stream_read(h: u64, buf: *mut u8, cap: usize) -> i64 {
                     return match r {
                         Ok(Some(n)) => n as i64,
                         Ok(None) => RET_EOF,
-                        Err(_) => RET_ERR,
+                        Err(e) => {
+                            record_stream_refusal_read(&st, &e);
+                            RET_ERR
+                        }
                     };
                 }
                 _ = epoch_rx.changed() => { drop(recv); continue; }
@@ -601,7 +755,10 @@ pub extern "C" fn irohnet_stream_write(h: u64, buf: *const u8, len: usize) -> i6
                 r = send.write(slice) => {
                     return match r {
                         Ok(n) => n as i64,
-                        Err(_) => RET_ERR,
+                        Err(e) => {
+                            record_stream_refusal_write(&st, &e);
+                            RET_ERR
+                        }
                     };
                 }
                 _ = epoch_rx.changed() => { drop(send); continue; }

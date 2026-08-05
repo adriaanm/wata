@@ -41,6 +41,7 @@ extern int32_t irohnet_client_new(const char* secret_hex, const char* peer_id, c
                                   const char* relay, uint64_t* out_handle, char* err_out, size_t err_cap);
 extern int32_t irohnet_client_dial(uint64_t h, int64_t timeout_ms, uint64_t* out_stream,
                                    char* err_out, size_t err_cap);
+extern int32_t irohnet_client_last_refusal(uint64_t h, char* out, size_t cap);
 extern void irohnet_client_close(uint64_t h);
 extern void irohnet_stream_set_deadlines(uint64_t h, int64_t read_ms, int64_t write_ms);
 extern int64_t irohnet_stream_read(uint64_t h, unsigned char* buf, size_t cap);
@@ -107,12 +108,34 @@ func cstr(b []byte) string {
 
 // ---- conn -------------------------------------------------------------------
 
-// Conn is one iroh bidirectional stream as a net.Conn.
+// Conn is one iroh bidirectional stream as a net.Conn. dialer is set only for
+// client-side conns (Dialer.DialContext); it is what lets a stream I/O
+// failure recover a peer-initiated refusal reason (see errForRet) — opening
+// a stream is local-only, so a dial can succeed against a connection the
+// peer is already closing, and the refusal only surfaces on the first
+// read/write.
 type Conn struct {
 	h         C.uint64_t
 	local     Addr
 	remote    Addr
 	closeOnce sync.Once
+	dialer    *Dialer
+}
+
+// errForRet turns a stream return code into an error, using the owning
+// dialer's client handle (if any) to recover a peer refusal reason that
+// outran the dial (irohnet_client_last_refusal, go-pkgs/irohnet/rust/src/lib.rs)
+// instead of the generic "stream reset or connection lost".
+func (c *Conn) errForRet(ret int64) error {
+	if ret == -4 && c.dialer != nil {
+		buf := make([]byte, errCap)
+		if C.irohnet_client_last_refusal(c.dialer.h, (*C.char)(unsafe.Pointer(&buf[0])), errCap) == 0 {
+			reason := cstr(buf)
+			c.dialer.logDialError(reason)
+			return fmt.Errorf("irohnet: dial %s: %s", c.dialer.peer, reason)
+		}
+	}
+	return retErr(ret)
 }
 
 func (c *Conn) Read(b []byte) (int, error) {
@@ -123,7 +146,7 @@ func (c *Conn) Read(b []byte) (int, error) {
 	if ret >= 0 {
 		return int(ret), nil
 	}
-	return 0, retErr(ret)
+	return 0, c.errForRet(ret)
 }
 
 func (c *Conn) Write(b []byte) (int, error) {
@@ -132,7 +155,7 @@ func (c *Conn) Write(b []byte) (int, error) {
 		p := b[written:]
 		ret := int64(C.irohnet_stream_write(c.h, (*C.uchar)(unsafe.Pointer(&p[0])), C.size_t(len(p))))
 		if ret < 0 {
-			return written, retErr(ret)
+			return written, c.errForRet(ret)
 		}
 		written += int(ret)
 	}
@@ -252,6 +275,9 @@ type Dialer struct {
 	h         C.uint64_t
 	peer      string
 	closeOnce sync.Once
+
+	logMu      sync.Mutex
+	lastLogged string // last dial-error reason printed; suppresses repeats
 }
 
 // NewDialer binds a client endpoint from cfg (Peer required; PeerAddrs
@@ -293,9 +319,29 @@ func (d *Dialer) DialContext(ctx context.Context, network, addr string) (net.Con
 	errBuf := make([]byte, errCap)
 	if C.irohnet_client_dial(d.h, C.int64_t(timeoutMs), &sh,
 		(*C.char)(unsafe.Pointer(&errBuf[0])), errCap) != 0 {
-		return nil, fmt.Errorf("irohnet: dial %s: %s", d.peer, cstr(errBuf))
+		reason := cstr(errBuf)
+		d.logDialError(reason)
+		return nil, fmt.Errorf("irohnet: dial %s: %s", d.peer, reason)
 	}
-	return &Conn{h: sh, local: Addr{ID: "client"}, remote: Addr{ID: d.peer}}, nil
+	return &Conn{h: sh, local: Addr{ID: "client"}, remote: Addr{ID: d.peer}, dialer: d}, nil
+}
+
+// logDialError prints a dial failure once per distinct reason string. The
+// HttpDo capability catches the resulting Go error and folds it into
+// HttpResponse(0, "") (the portable core never sees a Go error), so this is
+// the only place a refusal like "server refused: 401 not allowlisted"
+// (go-pkgs/irohnet/rust/src/lib.rs, irohnet_client_dial) becomes visible —
+// both wata-server's client use and wata-fb/wata-tui share this path. The
+// Rust side already keeps a redial loop from repeating an application close
+// on the wire; this dedupes what reaches the log on top of that.
+func (d *Dialer) logDialError(reason string) {
+	d.logMu.Lock()
+	defer d.logMu.Unlock()
+	if reason == d.lastLogged {
+		return
+	}
+	d.lastLogged = reason
+	fmt.Printf("irohnet: dial %s failed: %s\n", d.peer, reason)
 }
 
 // Close shuts the client endpoint down (open conns die with it).

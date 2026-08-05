@@ -107,6 +107,19 @@ func TestAllowlistRefusedAtAccept(t *testing.T) {
 	if e == nil {
 		t.Fatal("request from a non-allowlisted node succeeded")
 	}
+	// [IROH-REFUSAL-LOUD], plan 0013 M5: the reason must survive, not read
+	// as a generic closed connection.
+	if !strings.Contains(e.Error(), "not allowlisted") {
+		t.Fatalf("refusal was not loud: %v", e)
+	}
+	// A second request against the same client hits the cached (now dead)
+	// connection; it must fail fast with the same reason rather than
+	// redialing into a fresh handshake against a peer that will only ever
+	// refuse it again.
+	_, e2 := client.Get("http://wata.iroh/")
+	if e2 == nil || !strings.Contains(e2.Error(), "not allowlisted") {
+		t.Fatalf("second request: refusal was not loud: %v", e2)
+	}
 }
 
 func TestDeadlineInterruptsBlockedRead(t *testing.T) {

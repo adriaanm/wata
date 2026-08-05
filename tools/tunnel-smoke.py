@@ -210,13 +210,24 @@ def main():
                 cwd=WATA, capture_output=True, text=True, timeout=60,
             )
             refused = "INTEG PASS" not in r.stdout
-            loud = "not allowlisted" in (r.stdout + r.stderr)
+            combined = r.stdout + r.stderr
+            loud = "not allowlisted" in combined
             print(f"tunnel-smoke: allowlist-negative: "
                   f"{'PASS' if refused else 'FAIL'} (refusal loud: {loud})")
             if not refused:
                 print("---- intruder output (should have been refused!) ----")
-                print(r.stdout + r.stderr)
+                print(combined)
                 ok = False
+            if refused and not loud:
+                # The refusal must carry its reason, not read as a generic
+                # closed connection (plan 0013 M5, [IROH-REFUSAL-LOUD]) —
+                # irohnet_client_dial formats "server refused: 401 not
+                # allowlisted" and Dialer.DialContext logs it once. A
+                # regression back to a bare "connection closed"/"{e:?}" dump
+                # must fail the gate, not just print a quieter marker.
+                print("---- intruder output (refused, but not loud) ----")
+                print(combined)
+                fail("allowlist-negative: refusal was not loud (no 'not allowlisted' reason reached the client)")
         finally:
             proc.send_signal(signal.SIGTERM)
             try:
