@@ -302,13 +302,12 @@ type Listener struct {
 }
 
 // Listen binds the server endpoint from cfg and starts accepting; the
-// allowlist is enforced at accept, before any stream is surfaced. If
-// cfg.AnnounceFile is set, the listener's id + dialable local addrs are
-// written there.
+// allowlist is enforced at accept, before any stream is surfaced. An EMPTY
+// allowlist listens and refuses every peer — the bootstrap state of a fresh
+// install, from which enrolment approvals admit nodes live (Allow) — while
+// the single entry "*" admits any peer. If cfg.AnnounceFile is set, the
+// listener's id + dialable local addrs are written there.
 func Listen(cfg *Config) (*Listener, error) {
-	if len(cfg.Allowlist) == 0 {
-		return nil, errors.New("irohnet: refusing to listen with an empty allowlist (use [\"*\"] to admit any peer)")
-	}
 	secret := C.CString(cfg.SecretKey)
 	allow := C.CString(strings.Join(cfg.Allowlist, ","))
 	relay := C.CString(cfg.Relay)

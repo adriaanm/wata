@@ -182,6 +182,50 @@ func TestLiveAllowlistAdd(t *testing.T) {
 	}
 }
 
+// The BOOTSTRAP state (plan 0014): a fresh install has approved nobody, so
+// its allowlist is empty — and an empty allowlist LISTENS and refuses every
+// peer, because the only way out of that state is an enrolment approval
+// landing on a server that is already up. The refusal is the ordinary
+// not-allowlisted one, and Allow admits the first node live, no restart.
+func TestEmptyAllowlistBootstrap(t *testing.T) {
+	srvSecret, _, _ := GenKey()
+	cliSecret, cliID, _ := GenKey()
+	dir := t.TempDir()
+	ann := filepath.Join(dir, "announce.json")
+	l, e := Listen(&Config{SecretKey: srvSecret, Relay: "none", Allowlist: []string{}, AnnounceFile: ann})
+	if e != nil {
+		t.Fatalf("an empty allowlist must listen (the fresh-install bootstrap state): %v", e)
+	}
+	defer l.Close()
+	go func() { http.Serve(l, okMux()) }()
+
+	peerID, peerAddrs := announced(t, ann)
+	get := func() error {
+		d, e := NewDialer(&Config{SecretKey: cliSecret, Relay: "none", Peer: peerID, PeerAddrs: peerAddrs})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer d.Close()
+		c := &http.Client{Transport: &http.Transport{DialContext: d.DialContext}, Timeout: 10 * time.Second}
+		resp, e := c.Get("http://wata.iroh/")
+		if e != nil {
+			return e
+		}
+		resp.Body.Close()
+		return nil
+	}
+
+	if e := get(); e == nil || !strings.Contains(e.Error(), "not allowlisted") {
+		t.Fatalf("want the ordinary loud refusal from the bootstrap server, got %v", e)
+	}
+	if e := l.Allow(cliID); e != nil {
+		t.Fatal(e)
+	}
+	if e := get(); e != nil {
+		t.Fatalf("first node allowed into a previously-empty allowlist must be admitted, no restart: %v", e)
+	}
+}
+
 // A REFUSAL IS LOUD BUT NEVER TERMINAL ([FB-REDIAL-AFTER-REFUSAL], plan 0014).
 // The same dialer that was refused has to get in the moment its id is
 // allowlisted — no new dialer, no restarted process — because that is the whole
