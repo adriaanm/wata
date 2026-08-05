@@ -90,10 +90,16 @@ blocks + git log; each entry cites where it was recorded.*
   nothing to unwind here.
 
 - OPEN (filed 2026-08-05 by the plan-0021 milestone-A implementation,
-  acked upstream at sgola `d30adec`, verdict A each, fixes to follow
-  with shas): WATA-DATA10-PLUGIN-CRASH, WATA-MAKESLICE-ARGPOS,
-  WATA-FOLD-LIST-B. Workarounds live in the milestone-A change;
-  details land with its review. Remove each workaround on its repin.
+  acked at sgola `d30adec`): WATA-MAKESLICE-ARGPOS **fixed upstream at
+  `0d15632`** (repin queued: SGOLA-REPIN-MAKESLICE — inline pwhash's
+  two commented val-binds); WATA-DATA10-PLUGIN-CRASH **fixed at
+  `d51e968`** (reporting only — the DATA-10 restriction stands, the
+  string-concat shape stays as ordinary style, nothing to unwind);
+  WATA-FOLD-LIST-B fix in progress upstream (on its repin: drop the
+  IdList/MediaList one-field wrappers in model.scala). Also filed
+  2026-08-05: WATA-SKIP-FRESH-CHECKOUT (sgo driver: fresh checkout of
+  a built tree SKIPs a liblink dep, starving the downstream frontend —
+  workaround: build in the original checkout), triaged upstream.
 - FYI from upstream 2026-08-05 (`4cbea19..d30adec`): several
   template-body construction lifts landed, plus GEN-7 — a new registry
   row RESTRICTING four construction shapes inside generic bodies
