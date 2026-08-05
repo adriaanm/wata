@@ -1,0 +1,35 @@
+# hung-server: the server that ACCEPTS and never answers — the half-open
+# connection a refusal never exercises. The harness SIGSTOPs it 6s into this
+# phase (the kernel keeps accepting into the backlog) and runs the phase with
+# WATA_HTTP_TIMEOUT_MS=1500, so the per-request deadline fires inside the test
+# instead of 30s later.
+#
+# What it pins: a hung request becomes a FAILED ROUND that the ordinary
+# backoff handles (`connerr` rises), a hung upload becomes a SEND FAILED flash
+# rather than a send that never returns, and the frame loop keeps stepping
+# through all of it — this script finishing at all is that assertion, since a
+# UI thread blocked on the client would hang the phase until the harness
+# timeout.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header.
+
+family @bob:localhost
+wait syncing 1 900
+wait convs 1 900
+
+# the server goes silent; the sync round dies on its deadline, not on a
+# connection error the peer sent
+wait connerr 1 6000
+
+# PTT into the hung server: upload -> deadline -> EvSendFailed
+key ptt press
+advance 20
+key ptt release
+wait sendfail 1 3000
+
+# the reconnecting presentation over the ordinary contact list (forced, so the
+# `..` phase is pinned — the health change resets it).
+conn off
+conn error
+advance 1
+checkpoint hung-reconnecting

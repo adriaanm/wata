@@ -1,0 +1,21 @@
+# auth-rejected: a live server that refuses these credentials (the scenario
+# runs the phase with the wrong password). The device must say THAT, not
+# "waiting for network" — the two states need different actions from whoever
+# is holding the handset, and the account case is the one no amount of waiting
+# fixes.
+#
+# No `conn` forcing here: a rejected login reads as DOWN (netstatus.scala), and
+# a down header draws no `..`, so the frame is the same every run without
+# pinning the blink phase.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header.
+
+wait conntag 5 3000
+advance 2
+checkpoint boot-auth-rejected
+
+# the loop is still alive behind that screen (rejection retries at the
+# ceiling, because an account can be provisioned a minute later), and OK still
+# pokes it.
+tap enter
+wait logins 2 900

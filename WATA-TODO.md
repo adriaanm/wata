@@ -84,6 +84,14 @@ blocks + git log; each entry cites where it was recorded.*
   use (filed 2026-08-05, `WATA-FOLD-LIST-B`). Worked around in
   `wata-server` with one-field wrapper case classes
   (`model.scala` `IdList`/`MediaList`); drop them when it lands.
+- An `if`-as-expression of PRIMITIVE type in argument position boxes:
+  `atomic.set(if x > 0.0 then x else 0.0)` on an `Atomic[scala.Double]`
+  reaches the backend as `java.lang.Double` and crashes `sgolaBackend`
+  with "no Go type mapping" — naming the file, with no line or excerpt
+  (filed 2026-08-05, `IF-EXPR-DOUBLE-BOXES`; plan 0022). Worked around
+  by the house `var out = …; if … then out = …` idiom, which is why this
+  had not been hit before; drop nothing when it lands, but the
+  diagnostic half is the part that cost time.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —

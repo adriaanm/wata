@@ -59,6 +59,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -122,6 +124,59 @@ type Conn struct {
 	remote    Addr
 	closeOnce sync.Once
 	dialer    *Dialer
+	// opTimeout bounds each individual Read/Write (0 = unbounded). Set on
+	// CLIENT conns only: the dial already has a 30s bound, and without a
+	// post-dial one a peer that opened the stream and then went quiet leaves
+	// the caller blocked forever — the same wedge the plain-TCP path fixes
+	// with http.Client.Timeout. The accept side deliberately keeps 0: a
+	// server's read between requests is legitimately idle for as long as the
+	// client is quiet.
+	opTimeout time.Duration
+	// the deadlines a CALLER set explicitly (SetDeadline & friends), epoch
+	// millis, 0 = none. They win over opTimeout whenever they are the
+	// earlier bound, so this default never weakens what a caller asked for
+	// (and never overrides the net.Conn contract the tests pin).
+	dlMu    sync.Mutex
+	readDl  int64
+	writeDl int64
+}
+
+// opTimeoutMs is the per-read/write bound client conns carry: 30s, or
+// WATA_HTTP_TIMEOUT_MS when set (the same knob the plain-TCP client reads, so
+// a test can shrink both transports' deadlines together).
+func opTimeoutMs() time.Duration {
+	if v := os.Getenv("WATA_HTTP_TIMEOUT_MS"); v != "" {
+		if ms, e := strconv.ParseInt(v, 10, 64); e == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 30 * time.Second
+}
+
+// armOp starts this operation's deadline. A fresh one per call, so a healthy
+// long-poll (many short reads) is never cut off, while a single read against a
+// peer that has gone silent fails within the bound and becomes a failed sync
+// round the client's backoff already knows how to handle. An idle keep-alive
+// conn's background read hits it too, which retires the conn from the
+// transport's pool — cheaper than the wedge it prevents.
+func (c *Conn) armOp() {
+	if c.opTimeout <= 0 {
+		return
+	}
+	own := time.Now().Add(c.opTimeout).UnixMilli()
+	c.dlMu.Lock()
+	r, w := earlier(c.readDl, own), earlier(c.writeDl, own)
+	c.dlMu.Unlock()
+	C.irohnet_stream_set_deadlines(c.h, C.int64_t(r), C.int64_t(w))
+}
+
+// earlier picks the binding deadline: a caller's explicit one when it is
+// sooner (0 = the caller set none).
+func earlier(user, own int64) int64 {
+	if user > 0 && user < own {
+		return user
+	}
+	return own
 }
 
 // errForRet turns a stream return code into an error, using the owning
@@ -144,6 +199,7 @@ func (c *Conn) Read(b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
+	c.armOp()
 	ret := int64(C.irohnet_stream_read(c.h, (*C.uchar)(unsafe.Pointer(&b[0])), C.size_t(len(b))))
 	if ret >= 0 {
 		return int(ret), nil
@@ -152,6 +208,7 @@ func (c *Conn) Read(b []byte) (int, error) {
 }
 
 func (c *Conn) Write(b []byte) (int, error) {
+	c.armOp()
 	written := 0
 	for written < len(b) {
 		p := b[written:]
@@ -181,18 +238,41 @@ func deadlineMs(t time.Time) C.int64_t {
 }
 
 func (c *Conn) SetDeadline(t time.Time) error {
+	c.rememberDeadline(t, true, true)
 	C.irohnet_stream_set_deadlines(c.h, deadlineMs(t), deadlineMs(t))
 	return nil
 }
 
 func (c *Conn) SetReadDeadline(t time.Time) error {
+	c.rememberDeadline(t, true, false)
 	C.irohnet_stream_set_deadlines(c.h, deadlineMs(t), -1)
 	return nil
 }
 
 func (c *Conn) SetWriteDeadline(t time.Time) error {
+	c.rememberDeadline(t, false, true)
 	C.irohnet_stream_set_deadlines(c.h, -1, deadlineMs(t))
 	return nil
+}
+
+// rememberDeadline records what the caller asked for, so the next armOp
+// (which re-arms the stream for its own bound) cannot silently relax it.
+func (c *Conn) rememberDeadline(t time.Time, read, write bool) {
+	ms := int64(0)
+	if !t.IsZero() {
+		ms = t.UnixMilli()
+		if ms <= 0 {
+			ms = 1 // far past: any positive value has already elapsed
+		}
+	}
+	c.dlMu.Lock()
+	if read {
+		c.readDl = ms
+	}
+	if write {
+		c.writeDl = ms
+	}
+	c.dlMu.Unlock()
 }
 
 func (c *Conn) LocalAddr() net.Addr  { return c.local }
@@ -413,7 +493,8 @@ func (d *Dialer) DialContext(ctx context.Context, network, addr string) (net.Con
 		d.logDialError(reason)
 		return nil, fmt.Errorf("irohnet: dial %s: %s", d.peer, reason)
 	}
-	return &Conn{h: sh, local: Addr{ID: "client"}, remote: Addr{ID: d.peer}, dialer: d}, nil
+	return &Conn{h: sh, local: Addr{ID: "client"}, remote: Addr{ID: d.peer}, dialer: d,
+		opTimeout: opTimeoutMs()}, nil
 }
 
 // logDialError prints a dial failure once per distinct reason string. The

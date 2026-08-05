@@ -183,14 +183,22 @@ object WataLogic:
       out = withPtt(s, false, s.pttHoldTime)
     out
 
+  /** With no conversations to open there is nothing for OK to do — except on
+   *  the screen the device actually sits on when it cannot connect, where OK
+   *  is RETRY NOW: it pokes the client's login/backoff sleep so the next
+   *  attempt happens immediately instead of at the end of a 60s ceiling. */
   def contactsInput(s: WataState, k: Key, ctx: FrameCtx): WataState =
     val count = convCount(ctx.snap)
-    if count == 0 then s
+    if count == 0 then retryOnOk(s, k, ctx)
     else k match
       case _: KDown => downSel(s, count)
       case _: KUp   => upSel(s)
       case _: KEnter => enterConversation(s, ctx)
       case _          => s
+
+  def retryOnOk(s: WataState, k: Key, ctx: FrameCtx): WataState =
+    if isEnter(k) then Runtime.retryNow(ctx.client)
+    s
 
   def downSel(s: WataState, count: scala.Int): WataState =
     val sel = if s.selected < count - 1 then s.selected + 1 else s.selected
@@ -380,7 +388,7 @@ object WataLogic:
     if s.pttHeld then renderRecordingOverlay(s, px)
 
   def renderContacts(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
-    if !NetStatus.everLive() then renderBoot(px, ctx.net)
+    if !NetStatus.everLive() then renderBoot(px, ctx)
     else if !ctx.snap.hasSelfUser && convCount(ctx.snap) == 0 then renderConnecting(px, ctx.connection)
     else
       Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
@@ -390,7 +398,12 @@ object WataLogic:
         Font.drawText(px, "No contacts", 3, 4, Color.midGray, false, 0)
         Font.drawText(px, "Waiting sync", 3, 5, Color.midGray, false, 0)
       else renderContactRows(s, px, ctx, count)
-      Font.drawText(px, "UP/DN sel OK open", 0, FOOTER_ROW, Color.midGray, false, 0)
+      // the footer is the key legend, except while Back is armed: the quit
+      // confirmation is the only thing the next press does, so it takes the row
+      Font.drawText(px, contactsFooter(ctx), 0, FOOTER_ROW, Color.midGray, false, 0)
+
+  def contactsFooter(ctx: FrameCtx): String =
+    if ctx.quitArmed then "BACK again to exit" else "UP/DN sel OK open"
 
   def renderContactRows(s: WataState, px: go.Bytes, ctx: FrameCtx, count: scala.Int): Unit =
     val vis = visibleRows()
@@ -480,27 +493,73 @@ object WataLogic:
    *  before the network and the modem are up, so the first seconds of every
    *  power-on are a state the client cannot distinguish from a failure; naming
    *  it an error there would teach a kid that the radio is broken every morning.
-   *  So the body says what is actually happening, in one calm centered line,
-   *  and the header keeps the ordinary connectivity element — the boot state
-   *  changes the conversation area only.
+   *  So while nothing has actually failed the body says what is happening, in
+   *  one calm centered line.
+   *
+   *  Once something HAS failed it says so, latch or not (plan 0022): a client
+   *  that never got its first connection is exactly the case the old
+   *  `everLive`-gated error text could never reach, and "waiting for network"
+   *  under a live wifi glyph is a lie the device sat on for hours. A transport
+   *  failure and a REJECTED login are different sentences, because they need
+   *  different actions — one is "the server is not reachable", the other is
+   *  "this account is not accepted, look at the server".
+   *
+   *  Both live keys are named on the footer, because this screen is where a
+   *  stuck user presses things: OK retries now (resetting the client's
+   *  backoff), Back is the two-step exit.
    *
    *  Static on purpose: the header's `..` is already the one moving thing on
    *  the screen while the client is reconnecting, and a second animation under
    *  it would be noise rather than information. (Were this to animate, it would
    *  have to ride `NetState.blink`, whose phase resets on a health change —
    *  the discipline that keeps a scripted frame reproducible.) */
-  def renderBoot(px: go.Bytes, net: NetState): Unit =
+  def renderBoot(px: go.Bytes, ctx: FrameCtx): Unit =
     Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
-    renderNet(px, net)
-    Font.drawTextCentered(px, bootMsg(net), 7, Color.midGray, false, 0)
+    renderNet(px, ctx.net)
+    val sub = bootSubMsg(ctx.net, ctx.connection)
+    // one calm line sits centered; a failure's two lines straddle that row
+    val head = if sub == "" then 7 else 6
+    Font.drawTextCentered(px, bootMsg(ctx.net, ctx.connection), head, bootColor(ctx.connection), false, 0)
+    if sub != "" then Font.drawTextCentered(px, sub, 8, Color.midGray, false, 0)
+    Font.drawTextCentered(px, bootKeys(ctx), FOOTER_ROW, Color.midGray, false, 0)
 
-  /** "starting up" until there is BOTH an interface and a client trying to use
-   *  it; "waiting for network" once the pipe is there and the sync loop is
-   *  connecting or backing off. Live never reaches here — the first live frame
-   *  latches `everLive` and the ordinary UI takes over for the session. */
-  def bootMsg(net: NetState): String =
-    if NetStatus.hasInterface(net.pipe) && !NetStatus.isDown(net.health) then "waiting for network"
+  /** the headline: the transport being unavailable outright, then the two
+   *  failure states, then the two calm waiting states ("starting up" until
+   *  there is BOTH an interface and a client trying to use it; "waiting for
+   *  network" once the pipe is there and the sync loop is connecting). Live
+   *  never reaches here — the first live frame latches `everLive` and the
+   *  ordinary UI takes over for the session. */
+  def bootMsg(net: NetState, c: ConnectionState): String =
+    if FbCaps.transportUnavailable() then "transport unavailable"
+    else if isAuthRejected(c) then "account rejected"
+    else if isConnError(c) then "can't reach server"
+    else if NetStatus.hasInterface(net.pipe) && !NetStatus.isDown(net.health) then "waiting for network"
     else "starting up..."
+
+  /** the second line: what to do about it. Empty for the calm states, which
+   *  need no instruction. */
+  def bootSubMsg(net: NetState, c: ConnectionState): String =
+    if FbCaps.transportUnavailable() then "check config"
+    else if isAuthRejected(c) then "check server"
+    else if isConnError(c) then "retrying..."
+    else ""
+
+  def bootColor(c: ConnectionState): scala.Int =
+    if FbCaps.transportUnavailable() || isAuthRejected(c) || isConnError(c) then Color.red
+    else Color.midGray
+
+  /** the footer names the live keys — and, once Back is armed, replaces them
+   *  with the confirmation, since that is the only thing the next press does. */
+  def bootKeys(ctx: FrameCtx): String =
+    if ctx.quitArmed then "BACK again to exit" else "OK retry  BACK exit"
+
+  def isAuthRejected(c: ConnectionState): Boolean = c match
+    case _: ConnAuthRejected => true
+    case _                   => false
+
+  def isConnError(c: ConnectionState): Boolean = c match
+    case _: ConnError => true
+    case _            => false
 
   def renderConnecting(px: go.Bytes, c: ConnectionState): Unit =
     Font.drawText(px, connectingMsg(c), 1, 2, Color.midGray, false, 0)
@@ -533,6 +592,7 @@ object WataLogic:
     case _: Connected    => "Logging in..."
     case _: Syncing      => "Syncing..."
     case _: ConnError    => "Connection error"
+    case _: ConnAuthRejected => "Account rejected"
 
   def convName(snap: StateSnapshot, conv: Conversation): String =
     if isFamily(conv.convType) then familyName(snap)
@@ -636,7 +696,11 @@ case class FrameCtx(
   net: NetState,
   client: MatrixClient,
   audioCmds: sgo.Chan[AudioCmd],
-  audioEvts: sgo.Chan[AudioEvt]
+  audioEvts: sgo.Chan[AudioEvt],
+  // is the two-step quit armed (ui.scala owns the window)? The boot screen is
+  // where the confirmation has to be legible — it is the screen a stuck user
+  // is pressing keys on.
+  quitArmed: Boolean
 )
 
 /** the `Applet` interface: each applet is an IMMUTABLE object holding its OWN

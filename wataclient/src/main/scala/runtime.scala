@@ -9,24 +9,46 @@
  *  semantics). The snapshot stays an immutable value, so the UI never sees
  *  shared mutable state.
  *
+ *  CONNECT LIFECYCLE (plan 0022): the sync loop NEVER terminates on failure.
+ *  Login-or-resume is itself wrapped in the 1s..60s backoff the sync rounds
+ *  use, so a device that boots before its network, or against a server that
+ *  is down, keeps trying until it is stopped. A login the server REJECTS
+ *  (401/403) is distinguished from a transport failure: it also retries, but
+ *  jumps straight to the 60s ceiling and publishes `ConnAuthRejected`, which
+ *  is a different sentence on screen ("check the account", not "waiting for
+ *  network"). A mid-session 401/403 on `/sync` ends the session and relogs
+ *  in rather than backing off against a token that will never work again.
+ *
  *  SHUTDOWN (a close-signalled pattern — no separate cancellation mechanism):
  *  `stop` is a channel that is only ever CLOSED; the sync loop polls it
- *  non-blockingly between rounds and exits via its ordinary while-condition.
- *  The action loop exits on the `ActQuit` POISON PILL (an ordinary value
- *  through the ordinary receive edge — closing the action channel would hand
- *  a nil interface to `match`). `stopClient` = close(stop) + send(ActQuit).
+ *  non-blockingly between rounds AND inside every backoff sleep (which runs in
+ *  short slices), and exits via its ordinary while-condition. The action loop
+ *  exits on the `ActQuit` POISON PILL (an ordinary value through the ordinary
+ *  receive edge — closing the action channel would hand a nil interface to
+ *  `match`). `stopClient` = close(stop) + poison pill, ONCE: it is idempotent
+ *  (a `closed` cell), because the disconnect path (Settings -> Network OFF)
+ *  and the quit path both call it and closing a channel twice panics.
  *
- *  QUEUE-SEMANTICS NOTE: a `Chan.send` here BLOCKS rather than dropping on a
- *  full queue (there is no non-blocking send in this concurrency surface).
- *  The UI-event channel is sized 1024 (~500 sync rounds of slack at <=2
- *  events/round); the app/oracle contract is to poll it.
+ *  QUEUE-SEMANTICS NOTE: NOTHING the UI goroutine calls may block on a
+ *  channel. `sendAction` is a `trySend` — on a full action queue the
+ *  best-effort actions (receipts, favorites, name, redact) drop silently and
+ *  send/play surface their ordinary failure event, which is the flash the UI
+ *  already draws. The UI-event channel is sized 1024 (~500 sync rounds of
+ *  slack at <=2 events/round); the app/oracle contract is to poll it.
+ *
+ *  RETRY-NOW: `retry` is a capacity-1 poke channel. The boot screen's OK key
+ *  calls `retryNow`, which arms it; every backoff sleep polls it between
+ *  slices and returns early, and the caller then resets its backoff to 1s. So
+ *  a user staring at "can't reach server" can force the next attempt instead
+ *  of waiting out a 60s ceiling.
  *
  *  SINGLE-CLIENT-PER-PROCESS: the engine is a singleton and the poll/stash
  *  cells below are module vars — one runtime at a time, phases run
  *  sequentially. Each var is touched by exactly ONE goroutine (stash cells:
- *  the driver; txn counter: the action loop; stop probe + backfill queue:
- *  the sync loop);
- *  `lastAuth` crosses only over the supervised-join barrier. */
+ *  the driver; txn counter: the action loop; stop/retry probes + backfill
+ *  queue: the sync loop). `lastAuthC` is the one cell genuinely shared — the
+ *  sync loop writes it at each login, the action loop reads it per action,
+ *  the app reads it after the join — which is what an `Atomic` cell is for. */
 
 // ---- actions -------------------------------------------------------------------
 import sgo.add  // the Atomic[Int] add extension (the txnCounter cell)
@@ -59,10 +81,16 @@ case class EvPlaybackError() extends UiEvent
  *  caps the walk). Lives only in the sync loop's queue cell. */
 case class BackfillJob(roomId: String, from: String, pages: Int)
 
-/** login-published credentials, carried over a capacity-1 channel. A
- *  zero/empty accessToken = "login failed, stand down" (the channel-close
- *  zero value). */
+/** the credentials one session runs on. An empty accessToken = "not logged in
+ *  right now" — the action loop then builds a token-less `Hs`, whose requests
+ *  the server answers 401, which is the ordinary failure path every action
+ *  already has. */
 case class AuthCreds(accessToken: String, userId: String)
+
+/** what one login-or-resume attempt produced: the credentials (empty token =
+ *  it failed) and whether the failure was a REJECTION (401/403 from /login)
+ *  rather than a transport failure. */
+case class LoginOutcome(creds: AuthCreds, rejected: Boolean)
 
 /** the client's login config plus the stored session for login-or-resume
  *  (where the session comes FROM — config.json — is the app layer's
@@ -84,7 +112,7 @@ case class MatrixClient(
   events: sgo.Chan[UiEvent],
   snaps: sgo.Chan[StateSnapshot],
   stop: sgo.Chan[Boolean],
-  auth: sgo.Chan[AuthCreds],
+  retry: sgo.Chan[Boolean],
   audioEnabled: Boolean,
   audioCmds: sgo.Chan[AudioCmd]
 ) extends Shareable
@@ -111,13 +139,26 @@ object Runtime:
   def mk(cfg: ClientConfig, http: HttpDo, clock: Clock, audioEnabled: Boolean): MatrixClient =
     // chans BOUND TO LOCALS first: makeChan's element-type recording is the
     // local-val path (a makeChan in ARGUMENT position has no symbol to record).
-    val actions = sgo.makeChan[Action](64)
+    val actions = sgo.makeChan[Action](ACTION_QUEUE)
     val events = sgo.makeChan[UiEvent](1024)      // sized for polling, not draining eagerly — see header
     val snaps = sgo.makeChan[StateSnapshot](1)    // the snapshot cell
     val stop = sgo.makeChan[Boolean]()            // close-signalled stop
-    val auth = sgo.makeChan[AuthCreds](1)
+    val retry = sgo.makeChan[Boolean](1)          // the retry-now poke
     val audioCmds = sgo.makeChan[AudioCmd](16)
-    MatrixClient(cfg, http, clock, actions, events, snaps, stop, auth, audioEnabled, audioCmds)
+    resetSession()
+    MatrixClient(cfg, http, clock, actions, events, snaps, stop, retry, audioEnabled, audioCmds)
+
+  /** the action queue's capacity — also the bound on how many queued actions
+   *  the shutdown poke may discard to make room for the poison pill. */
+  val ACTION_QUEUE: Int = 64
+
+  /** the module cells a fresh client starts from (single-client-per-process:
+   *  the host drivers run several sequential sessions in one process). */
+  def resetSession(): Unit =
+    closedC.set(false)
+    lastAuthC.set(AuthCreds("", ""))
+    loginsC.set(0)
+    backfillQC.set(Nil)
 
   /** spawn the sync + action loops in the CALLER's supervised scope: structured
    *  concurrency makes the caller's scope own them —
@@ -132,37 +173,109 @@ object Runtime:
     ()
 
   /** signal both loops to wind down (minus the joins — the enclosing
-   *  `supervised` IS the join). Idempotence caveat: close twice panics,
-   *  send-after-exit just buffers; call once. */
+   *  `supervised` IS the join). IDEMPOTENT: the second call is a no-op, so the
+   *  disconnect path (Settings -> Network OFF) and the quit path may both run
+   *  — closing `stop` twice would panic. */
   def stopClient(c: MatrixClient): Unit =
-    c.stop.close()
-    c.actions.send(ActQuit())
+    if !closedC.getAndSet(true) then
+      c.stop.close()
+      pokeQuit(c, 0)
 
-  def sendAction(c: MatrixClient, a: Action): Unit = c.actions.send(a)
+  /** hand the action loop its poison pill WITHOUT blocking. The queue is
+   *  bounded and may be full of work the loop is still grinding through, so a
+   *  full queue makes room by discarding a queued action — we are shutting
+   *  down, and the alternative is the caller (the UI goroutine) blocking on a
+   *  send. Bounded by the queue's capacity. */
+  def pokeQuit(c: MatrixClient, tries: Int): Unit =
+    if !c.actions.trySend(ActQuit()) && tries < ACTION_QUEUE then
+      dropOne(c)
+      pokeQuit(c, tries + 1)
+
+  def dropOne(c: MatrixClient): Unit =
+    val gone = c.actions.tryReceive()
+    ()
+
+  /** ENQUEUE an action — non-blocking, always. The frame goroutine calls this,
+   *  and a full queue (the action loop stuck on a request against a server
+   *  that is not answering) must never freeze the UI. What a drop costs
+   *  depends on the action: receipts, favorites, name pushes and redactions
+   *  are best-effort and drop silently (a later one supersedes them); a voice
+   *  send or a playback surfaces its ordinary failure event, i.e. the flash
+   *  the UI already draws for a failed send. */
+  def sendAction(c: MatrixClient, a: Action): Unit =
+    if !c.actions.trySend(a) then dropped(c, a)
+
+  def dropped(c: MatrixClient, a: Action): Unit = a match
+    case _: ActSendVoice => sendFailEvent(c)
+    case _: ActPlay      => playFailEvent(c)
+    case _               => ()
+
+  def sendFailEvent(c: MatrixClient): Unit =
+    val ok = c.events.trySend(EvSendFailed(txnCounterC.add(1)))
+    ()
+
+  def playFailEvent(c: MatrixClient): Unit =
+    val ok = c.events.trySend(EvPlaybackError())
+    ()
+
+  /** poke the login/backoff sleep: it ends its current sleep slice, the caller
+   *  resets its backoff to 1s, and the next attempt happens now. The boot
+   *  screen's OK key. Non-blocking — the cell holds one poke and a second one
+   *  while it is armed is redundant. */
+  def retryNow(c: MatrixClient): Unit =
+    val ok = c.retry.trySend(true)
+    ()
+
+  /** login/resume attempts made this session — what a test watches to see that
+   *  the loop is still trying, and that a retry poke landed. */
+  def loginAttempts: Int = loginsC.get()
 
   // ---- the sync loop -----------------------------------------------------------
 
+  /** THE session loop: log in (or resume), run sync rounds until the session
+   *  ends, log in again. It exits only on `stop` — a failed login is a state
+   *  to report and a sleep to serve, never a reason to stand down. */
   def syncLoop(c: MatrixClient): Unit =
-    c.events.send(EvConn(Connecting()))
-    val creds = loginOrResume(c)
-    if creds.accessToken == "" then
-      c.events.send(EvConn(ConnError()))
-      c.auth.close()                     // unblock the action loop (zero creds)
-    else
-      lastAuthC.set(creds)
-      c.events.send(EvConn(Connected()))
-      c.auth.send(creds)
-      SyncEngine.reset()
-      backfillQC.set(Nil)
-      SyncEngine.setSelfUser(creds.userId)
-      syncRounds(c, Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken), creds.userId)
+    var retryMs = 1000L
+    var run = true
+    while run do
+      if isStopped(c) then run = false
+      else
+        c.events.send(EvConn(Connecting()))
+        val o = loginOrResume(c)
+        if o.creds.accessToken != "" then
+          runSession(c, o.creds)
+          retryMs = 1000L                // a session that ended relogs in promptly
+        else
+          c.events.send(EvConn(loginFailState(o)))
+          if o.rejected then retryMs = 60000L   // rejection: straight to the ceiling
+          if backoffSleep(c, retryMs) then retryMs = 1000L
+          else retryMs = nextBackoff(retryMs)
+
+  /** a rejected login is its own state; anything else (status 0, 5xx, a
+   *  timeout, a malformed answer) is a transport failure. */
+  def loginFailState(o: LoginOutcome): ConnectionState =
+    if o.rejected then ConnAuthRejected() else ConnError()
+
+  /** one logged-in session: publish the credentials, reset the engine, run
+   *  rounds until stop or an auth failure ends it. */
+  def runSession(c: MatrixClient, creds: AuthCreds): Unit =
+    lastAuthC.set(creds)
+    c.events.send(EvConn(Connected()))
+    SyncEngine.reset()
+    backfillQC.set(Nil)
+    SyncEngine.setSelfUser(creds.userId)
+    syncRounds(c, Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken), creds.userId)
 
   /** login-or-resume: a stored session's token is validated with a
    *  zero-timeout test sync; expired/foreign -> password login. Empty
-   *  accessToken on total failure. */
-  def loginOrResume(c: MatrixClient): AuthCreds =
+   *  accessToken on failure, with `rejected` telling the two failure kinds
+   *  apart (the server said no, vs. we could not ask). */
+  def loginOrResume(c: MatrixClient): LoginOutcome =
+    tallyLogin()
     var token = ""
     var uid = ""
+    var rejected = false
     val st = c.cfg.stored
     if Sessions.isValid(st) && st.homeserver == c.cfg.homeserver then
       val probe = MatrixHttp.sync(Hs(c.http, c.clock, c.cfg.homeserver, st.accessToken), "", 0)
@@ -172,18 +285,66 @@ object Runtime:
     if token == "" then
       val resp = MatrixHttp.login(Hs(c.http, c.clock, c.cfg.homeserver, ""),
         c.cfg.username, c.cfg.password)
+      if isAuthFail(resp.status) then rejected = true
       if resp.status == 200 then
         val lr = Matrix.parseLogin(MatrixHttp.parseOrNull(resp.body))
         token = lr.accessToken
         uid = lr.userId
-    AuthCreds(token, uid)
+    LoginOutcome(AuthCreds(token, uid), rejected)
+
+  /** the server refusing the credentials themselves (as opposed to failing to
+   *  answer at all). */
+  def isAuthFail(status: Int): Boolean = status == 401 || status == 403
+
+  def tallyLogin(): Unit =
+    val n = loginsC.add(1)
+    ()
+
+  // ---- backoff -------------------------------------------------------------------
+
+  /** one backoff sleep, in slices so a quit does not freeze the last frame for
+   *  up to a minute and a retry poke is felt within a slice. Returns true when
+   *  a POKE cut it short (the caller then resets its backoff), false when it
+   *  ran out or the client was stopped. */
+  def backoffSleep(c: MatrixClient, ms: Long): Boolean =
+    var left = ms
+    var poked = false
+    var run = true
+    while run do
+      if left <= 0L || poked || isStopped(c) then run = false
+      else
+        c.clock.sleepMs(sleepSlice(left))
+        left = left - sleepSlice(left)
+        poked = retryPoked(c)
+    poked
+
+  /** backoff sleeps advance in <= `SLEEP_SLICE_MS` steps. */
+  val SLEEP_SLICE_MS: Long = 200L
+
+  def sleepSlice(left: Long): Long =
+    if left < SLEEP_SLICE_MS then left else SLEEP_SLICE_MS
+
+  /** take the retry poke if one is armed (sync-loop-only, like the stop probe). */
+  def retryPoked(c: MatrixClient): Boolean =
+    sgo.selectValue[Boolean, Boolean](c.retry)((b: Boolean) => true)(false)
+
+  /** 1s, doubling, ceiling 60s. */
+  def nextBackoff(ms: Long): Long =
+    var out = ms * 2L
+    if out > 60000L then out = 60000L
+    out
 
   /** the long-poll loop: stop is checked FIRST each round and re-checked after
    *  the (blocking, <= syncTimeoutMs) sync call — the exit path is the ordinary
    *  while-condition, never a mid-loop abort. While deferred backfill is
    *  pending the sync call uses timeout 0 (an immediate poll), so the queue
    *  drains at `backfillPagesPerRound` per round instead of one bounded slice
-   *  per long-poll expiry. */
+   *  per long-poll expiry.
+   *
+   *  A 401/403 mid-session ENDS the session (the token died — an expired or
+   *  server-side-invalidated one will never come back), dropping the loop out
+   *  to `syncLoop`, which logs in again. Backing off against a dead token
+   *  instead would leave the device permanently "reconnecting". */
   def syncRounds(c: MatrixClient, hs: Hs, selfUid: String): Unit =
     var retryMs = 1000L
     var run = true
@@ -192,11 +353,13 @@ object Runtime:
       else
         val resp = MatrixHttp.sync(hs, SyncEngine.nextBatch, roundTimeoutMs(c))
         if isStopped(c) then run = false
+        else if isAuthFail(resp.status) then
+          lastAuthC.set(AuthCreds("", ""))   // actions fail fast until the relogin lands
+          run = false
         else if resp.status != 200 then
           c.events.send(EvConn(ConnError()))
-          c.clock.sleepMs(retryMs)       // exponential backoff, 1s .. 60s
-          retryMs = retryMs * 2L
-          if retryMs > 60000L then retryMs = 60000L
+          if backoffSleep(c, retryMs) then retryMs = 1000L
+          else retryMs = nextBackoff(retryMs)
         else
           val j = MatrixHttp.parseOrNull(resp.body)
           if isNullJ(j) then c.events.send(EvConn(ConnError())) // parse fail: report error, keep looping
@@ -356,14 +519,19 @@ object Runtime:
 
   // ---- the action loop -----------------------------------------------------------
 
+  /** the action loop runs from process start and NEVER stands down: it takes
+   *  the live credentials (`lastAuthC`) at the moment each action is dequeued,
+   *  so it serves whatever session is current — and while there is none, it
+   *  builds a token-less `Hs` whose requests the server answers 401, which is
+   *  each action's ordinary failure path. Standing down instead is what used
+   *  to let the action queue fill and freeze the UI behind it. */
   def actionLoop(c: MatrixClient): Unit =
-    val creds = c.auth.recv()            // blocks; login failure closes -> zero creds
-    if creds.accessToken == "" then ()   // stand down (mailbox closed while waiting)
-    else
-      val hs = Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken)
-      var run = true
-      while run do
-        run = execAction(c, hs, creds.userId, c.actions.recv())
+    var run = true
+    while run do
+      val a = c.actions.recv()
+      val creds = lastAuthC.get()
+      run = execAction(c, Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken),
+        creds.userId, a)
 
   /** returns false only for the poison pill — every real action keeps looping. */
   def execAction(c: MatrixClient, hs: Hs, selfUid: String, a: Action): Boolean = a match
@@ -447,7 +615,15 @@ object Runtime:
   private val txnCounterC: sgo.Atomic[Int] = sgo.atomic(0)
   /** the deferred-backfill queue (sync-loop-only; reset per session). */
   private val backfillQC: sgo.Atomic[List[BackfillJob]] = sgo.atomic(Nil)
+  /** the CURRENT session's credentials: written by the sync loop at each login
+   *  (and cleared when a session's token dies), read by the action loop per
+   *  action and by the app after the scope joins. */
   private val lastAuthC: sgo.Atomic[AuthCreds] = sgo.atomic(AuthCreds("", ""))
+  /** login/resume attempts this session (a test's window on the retry loop). */
+  private val loginsC: sgo.Atomic[Int] = sgo.atomic(0)
+  /** has `stopClient` run? The teardown is reachable twice (disconnect + quit)
+   *  and `close` on an already-closed channel panics. */
+  private val closedC: sgo.Atomic[Boolean] = sgo.atomic(false)
   /** the credentials the last login/resume produced (the app persists them as
    *  a `Session`; a caller reads this AFTER the supervised scope has joined). */
   def lastAuth: AuthCreds = lastAuthC.get()
@@ -507,6 +683,7 @@ object Runtime:
     case _: Connected    => 2
     case _: Syncing      => 3
     case _: ConnError    => 4
+    case _: ConnAuthRejected => 5
 
   def sameConn(a: ConnectionState, b: ConnectionState): Boolean = connTag(a) == connTag(b)
 

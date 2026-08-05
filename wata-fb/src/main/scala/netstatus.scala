@@ -140,6 +140,9 @@ object NetStatus:
     case _: Connecting   => 1
     case _: ConnError    => 1
     case _: Disconnected => 2
+    // a rejected login is not "coming back": the credentials are the problem,
+    // so it reads as down (red, no `..`) rather than as a reconnect.
+    case _: ConnAuthRejected => 2
 
   def healthOf(tag: scala.Int): NetHealth =
     if tag == 0 then NetLive() else if tag == 1 then NetReconnecting() else NetDown()

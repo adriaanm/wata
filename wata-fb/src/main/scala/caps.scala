@@ -47,21 +47,72 @@ object FbCaps:
    *  underlying client for one whose connections are iroh streams to the
    *  configured peer — same `go.net.http.Client` facade type, so `FbHttp`
    *  and everything above the capability line are untouched. Unset (the
-   *  default, and what every harness uses) is the plain DefaultClient. */
+   *  default, and what every harness uses) is the plain TCP client.
+   *
+   *  EVERY request is bounded by `timeoutMs` (plan 0022): unbounded was a
+   *  wedge — one half-open connection and the sync round, or the action the
+   *  UI is waiting on, never returns. The bound has to clear the Matrix
+   *  long-poll, which the client caps itself (`ClientConfig.syncTimeoutMs`,
+   *  seconds); 30s is the default, and `WATA_HTTP_TIMEOUT_MS` overrides it so
+   *  a hung-server test does not have to wait out a real one. */
   def httpDo(): HttpDo =
     val irohCfg = go.sys.getenv("WATA_IROH_CONFIG")
-    if irohCfg == "" then FbHttp(go.net.http.DefaultClient)
+    if irohCfg == "" then FbHttp(go.httpc.newClient(timeoutMs()))
     else FbHttp(irohClient(irohCfg))
 
-  /** the iroh-backed client, or — on a failed init (bad config, stub build)
-   *  — a loud line + the DefaultClient, whose requests to the placeholder
-   *  iroh base URL then fail visibly (there is no os.Exit facade). */
+  val DEFAULT_TIMEOUT_MS: Long = 30000L
+
+  def timeoutMs(): Long =
+    val raw = go.sys.getenv("WATA_HTTP_TIMEOUT_MS")
+    var out = DEFAULT_TIMEOUT_MS
+    if raw != "" then out = parseMs(raw, DEFAULT_TIMEOUT_MS)
+    out
+
+  /** decimal milliseconds, falling back on anything unparseable. */
+  def parseMs(s: String, dflt: Long): Long =
+    var out = 0L
+    var ok = s.length > 0
+    var i = 0
+    while i < s.length do
+      val d = digitOf(s.substring(i, i + 1))
+      if d < 0 then ok = false else out = out * 10L + d.toLong
+      i = i + 1
+    var res = dflt
+    if ok then res = out
+    res
+
+  def digitOf(ch: String): scala.Int =
+    var i = 0
+    var out = -1
+    while i < 10 do
+      if ch == "" + i then out = i
+      i = i + 1
+    out
+
+  /** the iroh-backed client, or — on a failed init (bad config, stub build) —
+   *  a loud line, a LATCHED "transport unavailable" state the boot screen
+   *  names outright, and a client that can only fail (there is no os.Exit
+   *  facade). Downgrading silently to the plain client left the device
+   *  showing "waiting for network" forever against a transport that was never
+   *  going to come up. */
   def irohClient(cfgPath: String): go.net.http.Client =
     var out = go.net.http.DefaultClient
     try out = go.irohnet.newHTTPClient(cfgPath)
-    catch case e: sgo.GoError =>
-      println("irohnet: client init failed: " + e.message)
-    out
+    catch case e: sgo.GoError => noteTransportDown(e.message)
+    go.httpc.withTimeout(out, timeoutMs())
+
+  def noteTransportDown(msg: String): Unit =
+    println("irohnet: client init failed: " + msg)
+    transportDownC.set(true)
+
+  // the transport's own verdict: set once, at client construction, when the
+  // configured transport could not be brought up at all. Written by the
+  // constructing goroutine before the loops start, read per frame.
+  private val transportDownC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  /** is the configured transport unavailable — a permanent state no retry can
+   *  fix (the UI says so rather than blaming the network)? */
+  def transportUnavailable(): Boolean = transportDownC.get()
 
   def send(req: HttpRequest, client: go.net.http.Client): HttpResponse =
     var out = HttpResponse(0, "")

@@ -334,6 +334,35 @@ republishes `Syncing` on every snapshot, so writing the live cell would
 not survive a frame — and `netpipe` forces the pipe. Both are inert in
 every real run (`Ui.resetCells` clears them per session).
 
+### Request deadlines
+
+`FbCaps.httpDo` builds the `HttpDo` capability, and every client it can
+build carries a **per-request deadline** — 30s by default,
+`WATA_HTTP_TIMEOUT_MS` overriding (the knob the hung-server test shrinks).
+Unbounded was a wedge: one half-open connection — a server that accepted
+and then went away, the ordinary wifi-roam or NAT-drop case — and the
+sync round, or the action the UI is waiting on, never returns, with the
+screen frozen on its last good frame. A hung request must instead become
+a failed round, which `wataclient`'s backoff already knows how to handle
+([wataclient.md](wataclient.md), "The connect lifecycle").
+
+- **TCP**: `go.httpc.newClient(ms)` over `go-pkgs/httpc` — the bound
+  net/http facade exposes the `Client` type but not its `Timeout` field,
+  and `DefaultClient` has none, so the field costs a three-line Go
+  package (the `@go.bind` pattern `go.irohnet`/`go.audio` already use).
+- **iroh**: `go-pkgs/irohnet`'s client conns carry the same bound as a
+  post-dial read/write deadline, re-armed per operation (`Conn.armOp`) —
+  the dial already had 30s, the stream after it had nothing. Server-side
+  accepted conns keep no deadline: a server's read between requests is
+  legitimately idle. An idle keep-alive conn's background read hits the
+  deadline and retires from the transport pool, which is cheaper than the
+  wedge it prevents.
+- **iroh init failure is loud**: a client that cannot be built at all
+  latches `FbCaps.transportUnavailable`, which the boot screen names
+  outright. It used to downgrade silently to the plain client pointed at
+  the placeholder iroh host, i.e. a client that could only ever fail,
+  with a stdout line nobody on a handset can read.
+
 ### The boot presentation
 
 The device boots into wata before the network and the modem are up, so
@@ -352,29 +381,70 @@ distinction.
 While the latch is unset, `WataLogic.renderContacts` draws
 `renderBoot` instead of the contact list or the connection line: the
 `WATA` title, the ordinary connectivity element (the header is
-unchanged — the same `NetState` the rest of the frame draws from), and
-ONE centered line in the conversation area, `WataLogic.bootMsg` of that
-same pipe-and-health record:
+unchanged — the same `NetState` the rest of the frame draws from), a
+centered headline in the conversation area, an optional second line
+saying what to do about it, and a footer naming the two live keys.
 
-| pipe | health | line |
+The copy is `WataLogic.bootMsg`/`bootSubMsg`, in priority order:
+
+| condition | headline | second line |
 |---|---|---|
-| none / unknown | any | `starting up...` |
-| wifi / cellular | down | `starting up...` |
-| wifi / cellular | reconnecting | `waiting for network` |
+| `FbCaps.transportUnavailable()` | `transport unavailable` | `check config` |
+| connection is `ConnAuthRejected` | `account rejected` | `check server` |
+| connection is `ConnError` | `can't reach server` | `retrying...` |
+| an interface, and health not down | `waiting for network` | — |
+| otherwise | `starting up...` | — |
 
-i.e. "starting up" until there is BOTH an interface and a client trying
-to use it. The line is STATIC: the header's `..` is already the one
-moving thing on the screen while the client is reconnecting, and a
-second animation under it would be noise rather than information (were
-it to animate it would ride `NetState.blink`, whose phase resets on a
-health change — the discipline that keeps a scripted frame
-reproducible).
+The two calm states are the boot-before-the-network case: naming it an
+error there would teach a kid that the radio is broken every morning.
+The two failure states are the opposite mistake, and the one the field
+actually hit — the error copy used to be gated behind `everLive`, so a
+client that never got its first connection could only ever show the calm
+line, and a device sat for hours saying "waiting for network" under a
+live wifi glyph. Error copy now renders whenever the state says error,
+latched or not (plan 0022). A rejected login is separated from a
+transport failure because the two need different actions from whoever is
+holding the handset.
+
+BOTH KEYS ARE LIVE on this screen, which is the other half of the same
+fix — the screen a stuck user presses things on used to have exactly one
+live key, and it quit:
+
+- **OK = retry now** (`WataLogic.retryOnOk` -> `Runtime.retryNow`): pokes
+  the client's backoff sleep so the next attempt happens immediately
+  instead of at the end of a 60s ceiling.
+- **Back = the two-step exit** (below); while it is armed the footer
+  becomes `BACK again to exit`, since that is the only thing the next
+  press does.
+
+The lines are STATIC: the header's `..` is already the one moving thing
+on the screen while the client is reconnecting, and a second animation
+under it would be noise rather than information (were it to animate it
+would ride `NetState.blink`, whose phase resets on a health change — the
+discipline that keeps a scripted frame reproducible).
 
 Once the latch is set it stays set for the session, so a later drop
 shows the ordinary presentation — the contact list the snapshot still
 holds, under a yellow header — and never the boot screen again. The
 `early-boot` uitest scenario (`alice-boot.txt`) pins all four frames,
-the last of them being precisely that non-return.
+the last of them being precisely that non-return; `boot-retry` and
+`auth-rejected` pin the failure copy, and `boot-retry` additionally
+proves the recovery — its phase starts with NO server, the harness boots
+one four seconds in, and the SAME process walks into an ordinary
+session.
+
+### Quitting is two-step
+
+`back` on the contacts view is the only quit edge (`Ui.isQuitEdge`), and
+it takes two presses within `Ui.QUIT_ARM_S` (2s): the first arms the
+confirmation and the applet says so (on the boot screen and on the
+contact list footer, via `FrameCtx.quitArmed`), the second quits, and an
+unconfirmed arm ages out in `Ui.tickQuitArm`. The device boots straight
+into wata-fb and inittab respawns it, so quitting is not a user-facing
+action at all — a single stray red key used to leave a black screen on a
+device that looked dead. The ordinary in-session `back` (conversation ->
+contacts, settings -> wata) is untouched; only the quit edge is
+two-step.
 
 ## Input
 
@@ -745,7 +815,7 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Eleven scripted scenarios, each a fresh server and a sequence of
+Fifteen scripted scenarios, each a fresh server and a sequence of
 one-user phases:
 
 | scenario | what it pins |
@@ -760,6 +830,10 @@ one-user phases:
 | `conn-status` | the header's connectivity element and the status line it shares its computed state with: connected (`NET` off-device), reconnecting on both phases of the `..` alternation, disconnected, and — through the `netpipe` override — the device-only wifi and cellular glyphs and the `OFF` state, whose red status line the client's own belief that it is syncing does not override. |
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, the display-name preset round trip (`OK` sets it, the `nameset` probe waits for it to come back through `/sync`), network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Twenty checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
+| `boot-retry` | the connect lifecycle off the happy path (plan 0022): the phase starts with NO server (the scenario's `late_server` key boots one four seconds in), so the client faces a failed first login. Goldens the `can't reach server / retrying...` boot copy with its key footer, the armed two-step quit, and — with no restart, the same process — the ordinary contact list once the server appears. Also asserts the loop is still attempting (`logins`) and that the quit arm ages out. |
+| `auth-rejected` | the scenario's `password` key hands the phase the wrong one: the boot screen must say `account rejected / check server`, not `waiting for network`, and the loop must still be alive behind it (OK pokes it). Needs no `conn` forcing — a rejected login reads as DOWN, and a down header draws no `..`. |
+| `hung-server` | the server that ACCEPTS and never answers: the harness SIGSTOPs it six seconds in (`stop_server_after`) with `http_timeout_ms: 1500`, so the per-request deadline fires inside the test. A hung round becomes a `connerr` and a hung upload becomes `SEND FAILED` — and the script REACHING ITS END is the assertion that the frame loop never blocked on the client. |
+| `disconnect-quit` | Settings -> Network OFF and then the quit edge, i.e. `Runtime.stopClient` twice. The frames are incidental; the run printing `UITEST PASS` is the assertion, since the second close used to panic. |
 | `snake` | the snake applet end to end, on exact frame counts (the game is pure virtual-clock work once open, and the food PRNG is fixed-seed, so `idle N` lands on exact game states — `tools/snake-frames.py` is the mirror that designs the counts): the fresh board, the first eat (score, growth, the next food), the turn-and-wall game over with its overlay, the OK restart continuing the PRNG sequence, and red leaving back to the wata applet. |
 
 A few things the scripts need that are worth knowing. `waitmax` is the
@@ -777,7 +851,10 @@ the harness starts a scenario's server with the env var only when the
 scenario opts in, and probes the hook route on EVERY server so the
 production 404 is asserted each run), and the `sendfail`/`playfail`
 probes over the session tallies are what a script waits on after
-provoking a failure. `conn <state>` and `netpipe <pipe>` force the connectivity
+provoking a failure; `conntag`, `logins`, `connerr`, `quitarm` and
+`frames` are the connect-lifecycle probes (the connection the frames
+report, the client's login attempts, its error transitions, the armed
+quit, and the frame counter). `conn <state>` and `netpipe <pipe>` force the connectivity
 element's two inputs (see "The connectivity element"), which is the only
 way to reach a bad-connection or device-interface frame from a host with
 a healthy loopback server. And a scenario's `users` key writes a
@@ -977,7 +1054,8 @@ it is not part of `just ci`.
 | `main.scala` | 93 | Top-level subcommand dispatcher; also has the pre-device "skeleton" smoke check that exercises the cgo path with a synthesized tone. |
 | `syscall.scala` | 52 | `go.syscall` facade: thin binds for `Open/Close/Read/Write/Mmap/Munmap/Mkdir` plus the flag/prot/map constants, used by every device-layer file that touches `/dev/fb0`, `/dev/input/*`, or sysfs. |
 | `config.scala` | 190 | The session and preferences store: `$WATA_FB_CONFIG` / `/etc/wata/config.json` read and write over `go.sys`/`go.syscall`, and `FbConfig.resolve`, the arguments-override-the-store rule every UI entry point builds its `ClientConfig` with. |
-| `caps.scala` | 83 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`; `WATA_IROH_CONFIG=<json>` swaps the underlying client for the embedded iroh transport (plan 0013), nothing above the capability line changing. |
+| `caps.scala` | 130 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`; `WATA_IROH_CONFIG=<json>` swaps the underlying client for the embedded iroh transport (plan 0013), nothing above the capability line changing. Every request carries a deadline (see "Request deadlines"). |
+| `httpc.scala` | 20 | The `go.httpc` facade over `go-pkgs/httpc` — an `*http.Client` with a `Timeout`, the one net/http field the bound facade does not carry. |
 | `irohnet.scala` | 20 | Sgola-side `@go.bind` facade over `go-pkgs/irohnet`: `newHTTPClient(config)`, an `*http.Client` whose connections are iroh streams (real with `-tags iroh` on darwin and linux/arm; loud-error stub elsewhere). |
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 409 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |

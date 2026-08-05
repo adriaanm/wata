@@ -10,3 +10,6 @@ godep github.com/adriaanm/wata/go-pkgs/audio go-pkgs/audio cgo
 # The embedded iroh transport (plan 0013): a plain Go dep; its REAL cgo build
 # is opt-in (darwin + `-tags iroh`), so ordinary builds ride its pure-Go stub.
 godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet
+# The per-request HTTP deadline (plan 0022): a plain Go dep for the one
+# net/http.Client field the bound facade does not carry.
+godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc

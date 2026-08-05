@@ -48,6 +48,8 @@ object Integ:
       else if name == "dm-stock-create" then ok = s12()
       else if name == "backfill-paged" then ok = s13()
       else if name == "backfill-cap" then ok = s14()
+      else if name == "offline-retry" then ok = s15()
+      else if name == "auth-rejected" then ok = s16()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -646,6 +648,83 @@ object Integ:
     // no later snapshot may exceed the cap's yield — the walk must NOT resume.
     else if Runtime.waitForSnapshot(c, s => hasMsgFrom(s, "@bob:localhost", 521), 2500L) then false
     else true
+
+  // ---- the connect lifecycle off the happy path (plan 0022) ------------------
+
+  /** a base URL nothing is listening on: port 1 on loopback refuses
+   *  immediately, which is the "server is down" case without a second
+   *  harness. */
+  val DEAD_BASE = "http://127.0.0.1:1"
+
+  /** SERVER DOWN: the client keeps trying (login attempts accumulate — the old
+   *  runtime made exactly one and stood down), the failure is reported as
+   *  `ConnError`, a retry poke shortens the wait, the action queue absorbs far
+   *  more actions than it holds WITHOUT ever blocking the caller (a blocking
+   *  send here would hang the scenario until the harness timeout), and the
+   *  double teardown is a no-op rather than a panic. */
+  def s15(): Boolean =
+    val config = ClientConfig(DEAD_BASE, "alice", PASS, 1000, Session("", "", "", "", ""))
+    val c = Runtime.make(config, FbCaps.httpDo(), FbCaps.clock())
+    sgo.supervised {
+      Runtime.start(c)
+      val ok = offlineChecks(c)
+      Runtime.stopClient(c)
+      Runtime.stopClient(c)   // idempotent: Settings->Network OFF, then quit
+      ok
+    }
+
+  def offlineChecks(c: MatrixClient): Boolean =
+    if !Runtime.waitForConnection(c, ConnError(), 10000L) then false
+    else if !spamActions(c, 500) then false
+    else
+      // the poke lands inside a backoff slice, so a second attempt follows
+      // within a second rather than at the end of the current ceiling
+      val before = Runtime.loginAttempts
+      Runtime.retryNow(c)
+      waitLogins(c, before + 1, 5000L)
+
+  /** enqueue far more actions than the queue holds. Every one of these calls
+   *  is a `trySend`, so the whole burst returns immediately; the dropped ones
+   *  surface as failure events (which nothing here has to consume). */
+  def spamActions(c: MatrixClient, n: Int): Boolean =
+    var i = 0
+    while i < n do
+      Runtime.sendAction(c, ActReceipt("!room:localhost", "$evt"))
+      i += 1
+    true
+
+  def waitLogins(c: MatrixClient, want: Int, timeoutMs: Long): Boolean =
+    val deadline = c.clock.nowUnixMillis() + timeoutMs
+    var ok = false
+    var run = true
+    while run do
+      if Runtime.loginAttempts >= want then
+        ok = true
+        run = false
+      else if c.clock.nowUnixMillis() >= deadline then run = false
+      else c.clock.sleepMs(20L)
+    ok
+
+  /** WRONG PASSWORD: a live server that refuses the credentials publishes
+   *  `ConnAuthRejected`, not the generic error — and the loop stays alive, so
+   *  a poke still produces another attempt (the ceiling sleep is
+   *  interruptible). */
+  def s16(): Boolean =
+    val config = ClientConfig(base, "alice", "not-the-password", 1000, Session("", "", "", "", ""))
+    val c = Runtime.make(config, FbCaps.httpDo(), FbCaps.clock())
+    sgo.supervised {
+      Runtime.start(c)
+      val ok = rejectedChecks(c)
+      Runtime.stopClient(c)
+      ok
+    }
+
+  def rejectedChecks(c: MatrixClient): Boolean =
+    if !Runtime.waitForConnection(c, ConnAuthRejected(), 10000L) then false
+    else
+      val before = Runtime.loginAttempts
+      Runtime.retryNow(c)
+      waitLogins(c, before + 1, 5000L)
 
   /** pump `n` voice events by direct HTTP (each ~1ms on loopback — a client
    *  phase would long-poll between sends). Message i gets duration i; the mxc

@@ -1,0 +1,33 @@
+# disconnect-quit: Settings -> Network OFF and then leaving. Both paths call
+# `Runtime.stopClient`, and closing the stop channel twice used to panic — so
+# the assertion here is the run REACHING ITS END and printing UITEST PASS: the
+# driver's own teardown calls stopClient a second time after the script has
+# already disconnected.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header.
+
+family @bob:localhost
+wait syncing 1 900
+wait convs 1 900
+
+# dot2 -> settings; item 4 is Network.
+tap dot2
+tap down
+tap down
+tap down
+tap down
+advance 5
+tap enter
+advance 30
+checkpoint disconnect-off
+
+# back to the wata applet and out through the quit edge: two-step, so both
+# presses are needed. The scripted driver ignores the quit itself (the script
+# says when a session ends) — what matters is the teardown that follows.
+tap dot1
+advance 2
+tap back
+advance 1
+expect quitarm 1
+tap back
+advance 2

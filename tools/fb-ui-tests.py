@@ -24,6 +24,7 @@ import json
 import os
 import random
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,19 @@ PASSWORD = "testpass123"
 #       directive). Every scenario's server is probed for the hook route
 #       right after readiness, so each run asserts the route EXISTS exactly
 #       when the env var says so (404 otherwise — the production surface).
+#   "password": "…" — what the phases log in with (default PASSWORD). A wrong
+#       one is how the auth-rejected leg is provoked.
+#   "late_server": <seconds> — start the phase with NO server, and boot one
+#       that many seconds in. The client must survive the gap on its own and
+#       proceed into a session when the server appears, with no restart (plan
+#       0022): this is the boot-before-the-network case the device hits every
+#       morning, and a server that moved or was down at boot.
+#   "stop_server_after": <seconds> — SIGSTOP the server that far into the
+#       phase: it keeps accepting (the kernel backlog does) and never answers,
+#       which is the HUNG case a connection refusal does not exercise. Pair it
+#       with "http_timeout_ms" so the per-request deadline fires inside the
+#       test rather than 30s later.
+#   "http_timeout_ms": <ms> — WATA_HTTP_TIMEOUT_MS for the phases.
 SCENARIOS = [
     {
         "name": "voice-alice-to-bob",
@@ -139,6 +153,34 @@ SCENARIOS = [
             ("alice", "alice-snake.txt"),
         ],
     },
+    {
+        "name": "boot-retry",
+        "late_server": 4.0,
+        "phases": [
+            ("alice", "alice-boot-retry.txt"),
+        ],
+    },
+    {
+        "name": "auth-rejected",
+        "password": "not-the-password",
+        "phases": [
+            ("alice", "alice-auth-rejected.txt"),
+        ],
+    },
+    {
+        "name": "hung-server",
+        "stop_server_after": 6.0,
+        "http_timeout_ms": 1500,
+        "phases": [
+            ("alice", "alice-hung-server.txt"),
+        ],
+    },
+    {
+        "name": "disconnect-quit",
+        "phases": [
+            ("alice", "alice-disconnect-quit.txt"),
+        ],
+    },
 ]
 
 
@@ -214,6 +256,12 @@ def hook_gate_status():
 
 def stop_server(proc, log):
     if proc is not None:
+        # a SIGSTOP'd server (the hung-server leg) ignores SIGTERM until it
+        # runs again, so wake it first.
+        try:
+            proc.send_signal(signal.SIGCONT)
+        except OSError:
+            pass
         proc.terminate()
         try:
             proc.wait(timeout=10)
@@ -237,34 +285,95 @@ def run_scenario(scenario, fb, server_bin, env, outdir, update):
             json.dump([{"user": u, "password": PASSWORD,
                         "displayname": u.capitalize()} for u in users], f)
         server_env["WATA_USERS"] = upath
-    proc, log = start_server(server_bin, logs, server_env)
-    if proc is None:
-        stop_server(proc, log)
-        return False, "server never became ready"
-    # the test-hook gate, asserted on EVERY server this harness boots: the
-    # route exists exactly when this scenario opted into WATA_TEST_HOOKS=1.
-    want = 200 if hooks else 404
-    got = hook_gate_status()
-    if got != want:
-        stop_server(proc, log)
-        return False, f"test-hook gate: POST /_wata/v1/test/fail = {got}, want {want}"
+    late = scenario.get("late_server")
+    # `srv` is a one-slot holder so a timer firing mid-phase (the late start)
+    # can replace what the teardown has to stop.
+    srv = {"proc": None, "log": None, "err": None}
+    if late is None:
+        srv["proc"], srv["log"] = start_server(server_bin, logs, server_env)
+        if srv["proc"] is None:
+            stop_server(srv["proc"], srv["log"])
+            return False, "server never became ready"
+        gate = check_hook_gate(hooks)
+        if gate is not None:
+            stop_server(srv["proc"], srv["log"])
+            return False, gate
     # Every scenario gets its own session store, so a run never reads or writes
     # the operator's real /etc/wata/config.json and phases only see each other.
     env = dict(env, WATA_FB_CONFIG=os.path.join(outdir, "config.json"))
+    if scenario.get("http_timeout_ms"):
+        env["WATA_HTTP_TIMEOUT_MS"] = str(scenario["http_timeout_ms"])
+    password0 = scenario.get("password", PASSWORD)
     try:
-        for user, script in scenario["phases"]:
+        for phase in scenario["phases"]:
+            user, script = phase[0], phase[1]
             path = os.path.join(SCRIPTS, script)
-            password = PASSWORD if user != "-" else "-"
-            r = subprocess.run(
-                [fb, "uitest", path, BASE, user, password, outdir],
-                capture_output=True, text=True, env=env, timeout=300)
-            tail = (r.stdout + r.stderr).strip().splitlines()
+            password = password0 if user != "-" else "-"
+            tail = run_phase(fb, path, user, password, outdir, env,
+                             phase_timers(scenario, srv, server_bin, logs, server_env, hooks))
+            if srv["err"]:
+                return False, srv["err"]
             passed = any(line.startswith("UITEST PASS") for line in tail)
             if not passed:
                 return False, f"phase {user}/{script}: " + " | ".join(tail[-6:])
     finally:
-        stop_server(proc, log)
+        stop_server(srv["proc"], srv["log"])
     return compare(scenario, outdir, update)
+
+
+def check_hook_gate(hooks):
+    """The test-hook gate, asserted on EVERY server this harness boots: the
+    route exists exactly when the scenario opted into WATA_TEST_HOOKS=1.
+    Returns None when it holds, else the failure message."""
+    want = 200 if hooks else 404
+    got = hook_gate_status()
+    if got != want:
+        return f"test-hook gate: POST /_wata/v1/test/fail = {got}, want {want}"
+    return None
+
+
+def phase_timers(scenario, srv, server_bin, logs, server_env, hooks):
+    """The things that happen TO the server while a phase is running: a late
+    start, or a SIGSTOP that turns it into a hung peer. Each is (delay, fn)."""
+    out = []
+    late = scenario.get("late_server")
+    if late is not None:
+        def start_late():
+            srv["proc"], srv["log"] = start_server(server_bin, logs, server_env)
+            if srv["proc"] is None:
+                srv["err"] = "late server never became ready"
+                return
+            srv["err"] = check_hook_gate(hooks)
+        out.append((late, start_late))
+    stop_after = scenario.get("stop_server_after")
+    if stop_after is not None:
+        def stop_it():
+            if srv["proc"] is not None:
+                srv["proc"].send_signal(signal.SIGSTOP)
+        out.append((stop_after, stop_it))
+    return out
+
+
+def run_phase(fb, path, user, password, outdir, env, timers):
+    """One `wata-fb uitest` run, with the scenario's server timers firing
+    against the wall clock while it runs. Returns its output lines."""
+    # output goes to a file, not a pipe: this driver polls the process rather
+    # than blocking on a read, and a full pipe buffer would deadlock it.
+    outfile = os.path.join(outdir, "phase.log")
+    with open(outfile, "w") as fh:
+        proc = subprocess.Popen(
+            [fb, "uitest", path, BASE, user, password, outdir],
+            stdout=fh, stderr=subprocess.STDOUT, text=True, env=env)
+        t0 = time.time()
+        pending = sorted(timers, key=lambda t: t[0])
+        while proc.poll() is None and time.time() - t0 < 300:
+            while pending and time.time() - t0 >= pending[0][0]:
+                pending.pop(0)[1]()
+            time.sleep(0.05)
+        if proc.poll() is None:
+            proc.kill()
+            return ["phase timed out after 300s"]
+    return open(outfile).read().strip().splitlines()
 
 
 def compare(scenario, outdir, update):

@@ -21,6 +21,11 @@ case class Connecting() extends ConnectionState
 case class Connected() extends ConnectionState // logged in, not yet syncing
 case class Syncing() extends ConnectionState   // sync loop running
 case class ConnError() extends ConnectionState
+/** the server answered the login with 401/403: the credentials this device
+ *  holds are not accepted. Retrying still happens (the account may be
+ *  mid-provisioning) but at the backoff ceiling — the state exists so the UI
+ *  can say "check the account" instead of "waiting for network". */
+case class ConnAuthRejected() extends ConnectionState
 
 // ---- conversation kind -----------------------------------------------------------
 sealed trait ConversationType

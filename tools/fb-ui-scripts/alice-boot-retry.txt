@@ -1,0 +1,52 @@
+# boot-retry: the device booted before its server was reachable (plan 0022).
+# The harness starts this phase with NO server and boots one 4s in
+# ("late_server"), so this is literally the morning case: wata-fb comes up
+# first, the network (or the server) follows.
+#
+# What it pins: the client does NOT stand down on the failed first login (the
+# old runtime made exactly one attempt and stopped, leaving the calm "waiting
+# for network" copy under a live wifi glyph forever), the boot screen names
+# the real state and its two live keys, Back is a two-step exit, and when the
+# server finally answers the SAME process walks into an ordinary session — no
+# restart.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
+# directive vocabulary.
+
+# nothing is listening yet: the login is refused and the loop reports it.
+wait conntag 4 3000
+
+# force the health through a change and back, so the header's `..` phase is
+# reset and this frame is the same one every run (the phase counter restarts
+# on a health CHANGE — connecting and error are both "reconnecting", so the
+# real transition does not reset it). The forced state is the state under test.
+conn off
+conn error
+advance 1
+checkpoint boot-cant-reach
+
+# OK on this screen is RETRY NOW: it pokes the client's backoff sleep. The
+# loop keeps attempting either way — that it is still attempting at all is the
+# assertion here; that a poke SHORTENS the wait is measured in integ
+# (auth-rejected, against the 60s ceiling).
+tap enter
+wait logins 2 900
+
+# Back is two-step: the first press arms the confirmation and says so.
+tap back
+advance 1
+expect quitarm 1
+checkpoint boot-quit-armed
+
+# ...and it ages out on its own (2s of frame time), so a stray press cannot
+# black the screen out later.
+idle 90
+expect quitarm 0
+
+# the server is up by now: the same session logs in and proceeds.
+conn live
+wait syncing 1 6000
+family @bob:localhost
+wait convs 1 900
+advance 30
+checkpoint boot-recovered

@@ -98,6 +98,7 @@ object Repl:
     case _: Connected    => "connected"
     case _: Syncing      => "syncing"
     case _: ConnError    => "error"
+    case _: ConnAuthRejected => "rejected"
 
   /** "" display names print as `-` so every line has the same field count. */
   def display(u: User): String = if u.displayName == "" then "-" else u.displayName

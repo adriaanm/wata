@@ -330,3 +330,31 @@ func TestEOFOnPeerClose(t *testing.T) {
 		t.Fatalf("got %q", body)
 	}
 }
+
+// A peer that ACCEPTS and never answers must not hang a client request
+// forever: client conns carry a post-dial per-operation deadline
+// (WATA_HTTP_TIMEOUT_MS, 30s by default), so the request fails as a timeout
+// and the caller's backoff can do its job. Plan 0022.
+func TestHungPeerHitsPostDialDeadline(t *testing.T) {
+	t.Setenv("WATA_HTTP_TIMEOUT_MS", "500")
+	client, l := pair(t, true)
+	// accept the stream and then sit on it — no response, ever.
+	go func() {
+		for {
+			c, e := l.Accept()
+			if e != nil {
+				return
+			}
+			defer c.Close()
+			select {}
+		}
+	}()
+	start := time.Now()
+	_, e := client.Get("http://wata.iroh/")
+	if e == nil {
+		t.Fatal("want a timeout against a peer that never answers")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("deadline not honored promptly: %v", time.Since(start))
+	}
+}

@@ -23,8 +23,12 @@ import sgo.add  // the Atomic[Int] add extension (the session tally cells)
  *
  *  QUIT: `back` from the contacts view is the only quit edge here — the
  *  device is otherwise meant to run until powered off; this gives a dev/ssh
- *  run a clean way to terminate. Cleanup restores the backlight and tears the
- *  loops down through the ordinary stop edges. */
+ *  run a clean way to terminate. It is TWO-STEP (`QUIT_ARM_S`): the device
+ *  boots straight into this app and inittab respawns it, so quitting is not a
+ *  user-facing action and a single stray red key must not leave a black
+ *  screen. Cleanup restores the backlight and tears the loops down through
+ *  the ordinary stop edges (`Runtime.stopClient` is idempotent, so the
+ *  Settings -> Network OFF path may already have run it). */
 
 /** The FOUR device edges of the frame loop, behind one seam so the same loop
  *  drives real hardware, a terminal, and a deterministic script. Time is NOT
@@ -88,6 +92,11 @@ object Ui:
   // reconnecting/disconnected frame cannot be pinned by writing the live cell
   // — the override is read where the frame reads the state.
   private val connForceC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
+  // the two-step quit's arming window, in seconds remaining (0 = unarmed).
+  // The device boots straight into wata-fb and inittab respawns it, so a
+  // single stray red key on the contact list must not black the screen out —
+  // the first press arms and says so, a second one within the window quits.
+  private val quitArmC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
   private def stateV: ShellState = stateC.get()
   private def connV: ConnectionState = connOf(connForceC.get(), connC.get())
   private def idleTime: scala.Double = idleC.get()
@@ -106,6 +115,13 @@ object Ui:
   /** force the connection the frames report (uitest only; -1 = the live one). */
   def forceConn(tag: scala.Int): Unit = connForceC.set(tag)
 
+  /** seconds the quit confirmation stays armed after the first Back press. */
+  val QUIT_ARM_S: scala.Double = 2.0
+
+  /** is the quit confirmation armed right now (what the applet draws its
+   *  "again to exit" line from, and what a scripted run probes)? */
+  def quitArmed: Boolean = quitArmC.get() > 0.0
+
   def connOf(tag: scala.Int, live: ConnectionState): ConnectionState =
     if tag < 0 then live else stateOfTag(tag)
 
@@ -114,7 +130,8 @@ object Ui:
     else if tag == 1 then Connecting()
     else if tag == 2 then Connected()
     else if tag == 3 then Syncing()
-    else ConnError()
+    else if tag == 4 then ConnError()
+    else ConnAuthRejected()
 
   // Session tallies of the terminal UI events — what a wait-timeout in the
   // scripted driver reports, so "the echo never came" is distinguishable
@@ -131,6 +148,11 @@ object Ui:
   def playFails: scala.Int = playFailC.get()
   /** `ConnError` transitions this session (each one = sync-loop backoff). */
   def connErrs: scala.Int = connErrC.get()
+  /** frames completed this session. A frame loop that a blocked channel send
+   *  has frozen stops advancing this, which is what makes "the UI never blocks
+   *  on the client" an assertion a scripted run can make. */
+  def frames: scala.Int = frameC.get()
+  private val frameC: sgo.Atomic[scala.Int] = sgo.atomic(0)
 
   /** every credential is optional: what the arguments do not give,
    *  `FbConfig.resolve` takes from the stored session, which is what lets the
@@ -200,7 +222,9 @@ object Ui:
     sendFailC.set(0)
     playFailC.set(0)
     connErrC.set(0)
+    frameC.set(0)
     connForceC.set(-1)
+    quitArmC.set(0.0)
     NetStatus.reset()
 
   /** seed the frame clock — every driver calls this once before its first
@@ -242,12 +266,15 @@ object Ui:
     val net = NetStatus.poll(conn)
 
     // build this frame's context: ONE unified FrameCtx shared by every applet
-    val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts)
+    val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts, quitArmed)
 
-    // poll input; a quit edge (back in contacts) ends the loop
+    // poll input; a CONFIRMED quit edge (back twice in contacts) ends the loop
     val keyEvents = dev.pollInput()
     val quit = handleFrameInput(keyEvents, ctx, dev)
     if !quit then
+      // the quit confirmation ages out; a press this frame re-armed it, so
+      // this runs after the input and one frame of dt never expires it
+      tickQuitArm(dt)
       // screensaver idle timeout
       idleC.set(tickIdle(dt, keyEvents, dev))
       // update + render + present (skip render when display off)
@@ -258,6 +285,7 @@ object Ui:
         Shell.render(stateV, px, ctx)
         dev.present(px)
       dev.frameSleep(FRAME_MS)
+    tally(frameC)
     quit
 
   def clampDt(raw: Long): Long =
@@ -279,11 +307,23 @@ object Ui:
         case Nil => going = false
     quit
 
-  /** route one key event; a `back` press on the contacts view = quit. */
+  /** route one key event; `back` on the contacts view is the quit gesture —
+   *  TWO-STEP: the first press arms the confirmation (the applet then says
+   *  "again to exit"), a second press inside the window quits. Anything else
+   *  in between simply lets it age out. */
   def applyOne(ev: KeyEvent, ctx: FrameCtx): Boolean =
-    val isBackOnContacts = isQuitEdge(ev)
+    val quit = isQuitEdge(ev) && quitArmed
+    if isQuitEdge(ev) then quitArmC.set(QUIT_ARM_S)
     stateC.set(Shell.handleInput(stateV, ev.key, ev.state, ctx))
-    isBackOnContacts
+    quit
+
+  /** age the quit confirmation out (0 = unarmed). */
+  def tickQuitArm(dt: scala.Double): Unit =
+    val cur = quitArmC.get()
+    if cur > 0.0 then
+      var left = cur - dt
+      if left < 0.0 then left = 0.0
+      quitArmC.set(left)
 
   def isQuitEdge(ev: KeyEvent): Boolean =
     Shell.isPressed(ev.state) && isBack(ev.key) &&
@@ -375,6 +415,7 @@ object Ui:
     case _            => false
 
   def isBad(cs: ConnectionState): Boolean = cs match
-    case _: ConnError    => true
-    case _: Disconnected => true
-    case _               => false
+    case _: ConnError        => true
+    case _: ConnAuthRejected => true
+    case _: Disconnected     => true
+    case _                   => false

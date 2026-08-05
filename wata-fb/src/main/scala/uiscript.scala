@@ -76,7 +76,13 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  display name equals the settings applet's currently picked preset),
  *  screenoff (1 while the screensaver has the panel blanked), sendfail /
  *  playfail (the session's failed-send / failed-play tallies — what a script
- *  waits on after provoking a failure with `failnext`). */
+ *  waits on after provoking a failure with `failnext`), connerr (the
+ *  session's `ConnError` transitions), conntag (the connection the frames
+ *  report, `Runtime.connTag` — 4 = error, 5 = auth rejected), logins (the
+ *  client's login/resume attempts, which is how a script sees the retry loop
+ *  turning and a retry-now poke landing), quitarm (1 while the two-step quit
+ *  is armed), frames (the session's frame counter — what a script watches to
+ *  prove the frame loop is not blocked). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -339,6 +345,7 @@ object UiScript:
     else if name == "connected" then 2
     else if name == "syncing" then 3
     else if name == "error" then 4
+    else if name == "authrejected" then 5
     else -2
 
   /** force the interface pipe, then advance one frame. */
@@ -447,6 +454,11 @@ object UiScript:
     else if name == "screenoff" then boolProbe(Ui.screenOff)
     else if name == "sendfail" then Ui.sendFails
     else if name == "playfail" then Ui.playFails
+    else if name == "connerr" then Ui.connErrs
+    else if name == "conntag" then Runtime.connTag(Ui.connection)
+    else if name == "logins" then Runtime.loginAttempts
+    else if name == "quitarm" then boolProbe(Ui.quitArmed)
+    else if name == "frames" then Ui.frames
     else -1
 
   def boolProbe(b: Boolean): scala.Int =

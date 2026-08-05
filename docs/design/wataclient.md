@@ -46,7 +46,7 @@ A consumer interacts with `wataclient` mainly through `runtime.scala`'s
 |---|---|---|
 | `Session` | `session.scala` | Stored login credentials (`homeserver`, `username`, `accessToken`, `userId`, `deviceId`), the thing persisted to and loaded from a device-local config file. |
 | `ClientConfig` | `runtime.scala:63` | Login parameters (homeserver/username/password/sync timeout) plus a `Session` to try resuming from. |
-| `MatrixClient` | `runtime.scala:73` | The client handle: config, the two capability instances, and five channels (`actions` in, `events` out, `snaps` out, `stop`, `auth`) plus the audio-command channel. |
+| `MatrixClient` | `runtime.scala:73` | The client handle: config, the two capability instances, and five channels (`actions` in, `events` out, `snaps` out, `stop`, `retry`) plus the audio-command channel. |
 | `Runtime` | `runtime.scala:92` | Construction (`make`/`makeWithAudio`), lifecycle (`start`/`stopClient`), and polling helpers (`pollEvent`, `pollSnap`, `waitForConnection`, `waitForSnapshot`). |
 | `Action` / `UiEvent` | `runtime.scala:36-59` | The command and notification vocabulary between app and client. `ActReceipt`, `ActSendVoice`, `ActPlay`, `ActSetName`, `ActRedact`, `ActFavorite` (the plan-0019 favorite toggle, fire-and-forget — its result arrives as room state on the next sync), `ActQuit`. |
 | `StateSnapshot` | `domain.scala:95` | The immutable UI-facing view of everything the client knows: connection state, self user, contacts, conversations, family. |
@@ -57,7 +57,59 @@ forks the sync loop and the action loop as goroutines), push `Action`s
 with `Runtime.sendAction`, and poll `UiEvent`s / `StateSnapshot`s with
 `Runtime.pollEvent`/`Runtime.pollSnap`. `Runtime.stopClient` closes the
 `stop` channel and sends the `ActQuit` poison pill to wind both loops
-down; the enclosing `supervised` scope is the join point.
+down; the enclosing `supervised` scope is the join point. It is
+**idempotent** — a consumer that both disconnects (`wata-fb`'s
+Settings -> Network OFF) and later quits calls it twice, and closing a
+channel twice panics.
+
+`Runtime.sendAction` **never blocks**. It is a `trySend`; on a full queue
+a best-effort action (receipt, favorite, name, redact) drops silently and
+a send/play surfaces its ordinary failure event. This is a hard rule
+rather than a tuning choice: the caller is typically a UI thread, and the
+action loop can legitimately sit inside a request for the length of the
+HTTP deadline, so a blocking enqueue is a frozen screen.
+
+## The connect lifecycle
+
+The client core **never terminates on failure — it reports and retries**
+(plan 0022). Concretely, in `runtime.scala`:
+
+- **`syncLoop` is a session loop.** Each pass publishes `Connecting`,
+  calls `loginOrResume`, and on success runs `runSession` (engine reset +
+  `syncRounds`) until that session ends. On failure it publishes the
+  failure state, sleeps the backoff, and goes round again. The only exit
+  is `stop`.
+- **Backoff is one shape everywhere**: 1s doubling to a 60s ceiling
+  (`nextBackoff`), reset to 1s on any success. `backoffSleep` serves it in
+  `SLEEP_SLICE_MS` (200ms) slices, checking `stop` and the retry poke
+  between slices — so a quit never freezes the last frame for up to a
+  minute, and a poke is felt within a slice.
+- **Rejection is its own state.** A `/login` answered 401/403 (`isAuthFail`)
+  yields `LoginOutcome(_, rejected = true)`, which publishes
+  `ConnAuthRejected` and jumps straight to the 60s ceiling. It still
+  retries — an account can be provisioned a minute later — but the UI can
+  now say "check the account" instead of "waiting for network", which is a
+  different instruction to whoever is holding the device.
+- **A dead token ends its session rather than backing off forever.** A
+  401/403 on `/sync` clears `lastAuthC` and drops out of `syncRounds`, so
+  the outer loop logs in again; an expired token is not something a
+  reconnect can fix.
+- **`retryNow`** arms the capacity-1 `retry` channel. The device's boot
+  screen binds it to OK, so a user staring at "can't reach server" can
+  force the next attempt instead of waiting out the ceiling.
+  `Runtime.loginAttempts` counts attempts — the handle a test uses to see
+  the loop turning and a poke landing.
+- **The action loop runs from process start and never stands down.** It
+  takes `lastAuthC` at the moment each action is dequeued, so it serves
+  whatever session is current, and while there is none it builds a
+  token-less `Hs` whose requests the server answers 401 — each action's
+  ordinary failure path. (It used to block on a one-shot `auth` channel
+  and stand down when login failed, which is what let the action queue
+  fill behind it.)
+- **Requests are bounded.** The core assumes its `HttpDo` has a
+  per-request deadline; `wata-fb` supplies one (30s, or
+  `WATA_HTTP_TIMEOUT_MS`) on both transports. A hung request must become a
+  failed round, which the machinery above already handles.
 
 ### The two consumers
 
@@ -231,8 +283,10 @@ throughout this module (see also `oracle.scala`).
 `domain.scala` (115 lines) defines the plain data types the engine and
 snapshot are built from:
 
-- `ConnectionState` (sealed, 5 nullary cases: `Disconnected`,
-  `Connecting`, `Connected`, `Syncing`, `ConnError`) and
+- `ConnectionState` (sealed, 6 nullary cases: `Disconnected`,
+  `Connecting`, `Connected`, `Syncing`, `ConnError`, `ConnAuthRejected` —
+  the server refusing these credentials, which is a different sentence on
+  screen and a different backoff than a transport failure) and
   `ConversationType` (`DmConv`, `FamilyConv`) are sealed families of empty
   case classes rather than enums — there is no native enum construct in
   this language subset.
@@ -409,7 +463,7 @@ checked against a separately pinned expected-output file in CI.
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |
 | `oracle.scala` | 398 | Portable byte-level self-test report (CRC, Ogg round trip, `Bytes`/`IArray` conformance) plus a foreign-container fixture walker. |
-| `runtime.scala` | 443 | `MatrixClient` handle, `Runtime` object: construction, sync loop, action loop, backfill orchestration, polling helpers. |
+| `runtime.scala` | 620 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |
 | `session.scala` | 41 | `Session` record (stored login credentials) and its JSON (de)serialization. |
 | `syncdescribe.scala` | 306 | Renders engine state/events/snapshot as deterministic text, driven by real captured fixtures. |
 | `syncengine.scala` | 932 | The sync engine: `process()` (ingest) and `buildSnapshot()` (derive UI view). The core of the module. |

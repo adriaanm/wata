@@ -56,6 +56,7 @@ object ShellStatus:
     case _: Connected    => StConnected()
     case _: Syncing      => StSyncing()
     case _: ConnError    => StErr()
+    case _: ConnAuthRejected => StErr()
 
 // ---- the immutable shell state (the UI half) ---------------------------------
 /** `active` indexes the APPLET LIST — each element an immutable `Applet`
