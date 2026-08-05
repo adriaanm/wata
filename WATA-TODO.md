@@ -41,6 +41,22 @@ blocks + git log; each entry cites where it was recorded.*
   by the Sgola binary. If a rollback artifact is wanted, store it
   somewhere durable.
 
+- **Happy-path sweep, lower-tier findings** (2026-08-05 sweep; the
+  wedge/data-loss tier is scoped in plan 0022): backoff and 429-retry
+  sleeps are not stop-aware (quit during backoff freezes the last frame
+  up to 60s, `runtime.scala`/`mhttp.scala`); config WRITE failure is a
+  silent no-op (a device that can't persist its token re-logins every
+  boot with no sign, `config.scala:123`); zero evdev devices is a
+  legal silent boot — UI renders, nothing responds (`input.scala:99`);
+  mid-session staleness is glyph-only (no way to tell "no new
+  messages" from "offline an hour"); backfill error exits reuse the
+  page-cap exit so a failed walk never requeues; auto-join failures
+  re-POST every sync round with no backoff; failed favorite/delete
+  looks like the button did nothing (not optimistic, error discarded);
+  `setupMixer` failure is silent (no audio at all, no error,
+  `go-pkgs/audio/audio_linux.go:260`); PLAY FAILED conflates network
+  failure with audio-unavailable.
+
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
 - ~~Thicket backend crash~~ FIXED and verified downstream: pin `2083ef6`
