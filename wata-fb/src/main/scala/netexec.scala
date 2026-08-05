@@ -27,10 +27,19 @@ object exec:
      *  completion. Stderr is NOT captured, which is why the shell lines that
      *  need it carry their own `2>&1`. */
     @go.name("Output") def output(): go.Bytes throws sgo.GoError = ???
+    /** `Cmd.Stdin` — the struct field, bound as a pre-run setter (the same
+     *  shape as the http Server facade's addr/handler). The wifi_join PSK
+     *  rides this: stdin is the one channel /proc does not expose, where
+     *  argv and the environment are world-readable on the device. */
+    @go.name("Stdin") def stdin: go.io.Reader = ???
+    @go.name("Stdin") def stdin_=(v: go.io.Reader): Unit = ???
 
   /** `exec.Command(name)` — `name` without a path separator is resolved
    *  through `$PATH` (how "poweroff" finds /sbin/poweroff). */
   @go.name("Command") def command(name: String): go.exec.Cmd = ???
+  /** `exec.Command(name, a1)` — one argument, no shell: the wifi-join
+   *  helper's ssid, passed as real argv so no quoting layer can mangle it. */
+  @go.name("Command") def command1(name: String, a1: String): go.exec.Cmd = ???
   /** `exec.Command(name, a1, a2)` — the `sh -c <line>` arity. */
   @go.name("Command") def command2(name: String, a1: String, a2: String): go.exec.Cmd = ???
 

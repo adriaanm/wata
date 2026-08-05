@@ -205,7 +205,9 @@ object Ui:
       val audioCmds = c.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       Runtime.start(c)
+      CmdPoller.start(c)     // the device-command mailbox (plan 0020)
       frameLoop(c, clock, evts, dev, px)
+      CmdPoller.stop()
       c.audioCmds.send(AcQuit())
       Runtime.stopClient(c)
     }

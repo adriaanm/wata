@@ -1,3 +1,5 @@
+import language.experimental.saferExceptions
+
 /** The LIVE ORACLE: integration-test scenarios run against a real
  *  wata-server, driven by `wata-fb integ <scenario> <baseUrl>`
  *  (tools/wataclient-integ.sh boots a FRESH server per scenario and reads
@@ -56,6 +58,7 @@ object Integ:
       else if name == "refused-then-provisioned" then ok = s20()
       else if name == "group-room" then ok = s21()
       else if name == "family-no-leave" then ok = s22()
+      else if name == "wifi-cmd" then ok = s23()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -1207,6 +1210,122 @@ object Integ:
   def leaveStatus(token: String, roomId: String): Int =
     MatrixHttp.request(directHs(token), "POST",
       "/_matrix/client/v3/rooms/" + roomId + "/leave", "application/json", "{}").status
+
+  /** THE COMMAND POLLER SEAM (plan 0020): bob's client runs the REAL
+   *  `CmdPoller` loop against the fake wifi seam (`$WATA_WIFI_CLI` /
+   *  `$WATA_WIFI_JOIN`, set by the harness) while alice — a direct admin
+   *  token, no second client — queues a wifi_scan and a wifi_join through
+   *  the mailbox and waits on the reports. Asserted end to end: the parked
+   *  long-poll picks the commands up, the scan report carries the parsed
+   *  networks (band dedupe keeping the stronger row, the hidden ssid
+   *  dropped, secured off the flags), the join verdict comes back ok — and
+   *  the fake helper's capture file proves the ssid arrived as the ONE argv
+   *  argument with the PSK on stdin, never argv. Plus the negative: the
+   *  device's own (non-admin) token cannot queue. */
+  def s23(): Boolean =
+    phase("bob")(c => wifiCmdRun(c))
+
+  def wifiCmdRun(c: MatrixClient): Boolean =
+    if !grabSelf(c) then false
+    else
+      CmdPoller.start(c)
+      val ok = wifiCmdDrive(c)
+      CmdPoller.stop()
+      ok
+
+  def wifiCmdDrive(c: MatrixClient): Boolean =
+    val atok = directToken("alice")
+    if atok == "" then false
+    else if queueStatus(atok, "bob", "{\"op\":\"wifi_scan\"}") != 200 then false
+    else if !scanReportGood(cmdReportWait(c, atok, "wifi_scan", 30000L)) then false
+    else if queueStatus(atok, "bob",
+      "{\"op\":\"wifi_join\",\"ssid\":\"HomeNet\",\"psk\":\"hunter2 pass\"}") != 200 then false
+    else if !joinReportGood(cmdReportWait(c, atok, "wifi_join", 30000L)) then false
+    else if !captureGood() then false
+    else queueStatus(Runtime.lastAuth.accessToken, "alice", "{\"op\":\"wifi_scan\"}") == 403
+
+  def queueStatus(token: String, user: String, body: String): Int =
+    MatrixHttp.request(directHs(token), "POST", "/_wata/v1/cmd/" + user,
+      "application/json", body).status
+
+  /** poll the admin's report endpoint until a report exists (the scenario's
+   *  server is fresh, so seq 0 -> any report is THE report); JNull on
+   *  timeout. */
+  def cmdReportWait(c: MatrixClient, token: String, op: String, timeoutMs: Long): Json =
+    val hs = directHs(token)
+    val deadline = c.clock.nowUnixMillis() + timeoutMs
+    var out: Json = JNull()
+    var run = true
+    while run do
+      if c.clock.nowUnixMillis() >= deadline then run = false
+      else
+        val r = MatrixHttp.request(hs, "GET", "/_wata/v1/cmd/bob/report?op=" + op,
+          "application/json", "")
+        if r.status == 200 then
+          out = WJson.objField(MatrixHttp.parseOrNull(r.body), "result")
+          run = false
+        else c.clock.sleepMs(200L)
+    out
+
+  /** the canned table parsed right: HomeNet deduped to its stronger -48 row
+   *  and secured, CafeOpen open at -70, the hidden row gone. */
+  def scanReportGood(result: Json): Boolean =
+    if !WJson.boolField(result, "ok") then false
+    else scanNetsGood(cmdArr(WJson.getField(result, "networks")))
+
+  def cmdArr(j: Option[Json]): List[Json] = j match
+    case s: Some[Json] => cmdArrItems(s.value)
+    case None => Nil
+
+  def cmdArrItems(j: Json): List[Json] = j match
+    case a: JArr => a.items
+    case _       => Nil
+
+  def scanNetsGood(nets: List[Json]): Boolean = nets match
+    case h :: t => netIs(h, "HomeNet", -48L, true) && scanNetsTail(t)
+    case Nil  => false
+
+  def scanNetsTail(nets: List[Json]): Boolean = nets match
+    case h :: t => netIs(h, "CafeOpen", -70L, false) && cmdNil(t)
+    case Nil  => false
+
+  def cmdNil(nets: List[Json]): Boolean = nets match
+    case _ :: _ => false
+    case Nil  => true
+
+  def netIs(j: Json, ssid: String, signal: Long, secured: Boolean): Boolean =
+    WJson.strField(j, "ssid", "") == ssid &&
+      WJson.longField(j, "signal", 0L) == signal &&
+      WJson.boolField(j, "secured") == secured
+
+  def joinReportGood(result: Json): Boolean =
+    WJson.boolField(result, "ok") && WJson.strField(result, "detail", "") == "joined HomeNet"
+
+  /** the fake helper's capture: the PSK came in on stdin verbatim, and no
+   *  argv token carried it. */
+  def captureGood(): Boolean =
+    val path = go.sys.getenv("WATA_WIFI_CAPTURE")
+    if path == "" then false
+    else captureRead(path)
+
+  def captureRead(path: String): Boolean =
+    var raw = ""
+    try raw = go.string(go.sys.readFile(path))
+    catch case e: sgo.GoError => raw = ""
+    if raw == "" then false
+    else captureCheck(MatrixHttp.parseOrNull(raw))
+
+  def captureCheck(j: Json): Boolean =
+    WJson.strField(j, "ssid", "") == "HomeNet" &&
+      WJson.strField(j, "psk", "") == "hunter2 pass" &&
+      argvClean(cmdArr(WJson.getField(j, "argv")))
+
+  def argvClean(xs: List[Json]): Boolean = xs match
+    case h :: t => argvStep(h, t)
+    case Nil  => true
+
+  def argvStep(h: Json, t: List[Json]): Boolean =
+    if WJson.strOr(h, "").indexOf("hunter2") >= 0 then false else argvClean(t)
 
   /** poll the transport's own verdict (`Enrol.refused()`, the boot screen's). */
   def waitRefused(c: MatrixClient, timeoutMs: Long): Boolean =

@@ -27,7 +27,7 @@ SCENARIOS=(login-syncing both-sync voice-to-bob receipt-accepted receipt-roundtr
            multiturn-order redaction download-bytes family-room session-resume
            dm-idempotent dm-stock-create backfill-paged backfill-cap
            offline-retry auth-rejected admin-rename outbox-restart client-handle
-           group-room family-no-leave)
+           group-room family-no-leave wifi-cmd)
 
 # ---- build -------------------------------------------------------------------
 ( cd "$WATA/wata-server" && "$SGO" build ) >/dev/null || { echo "integ: wata-server build failed"; exit 1; }
@@ -40,6 +40,13 @@ CLIENT="$FB_EMIT/wata-fb_race"
 SERVER="$WATA_EMIT/$(binname wata-server)"
 
 TMP=$(mktemp -d)
+# The wifi-cmd scenario's fake device seam (plan 0020): the client's WifiCmd
+# runs these instead of wpa_cli / the alpine wifi-join helper, and the fake
+# helper records what reached it (ssid via argv, PSK via stdin) for the
+# scenario to assert. Inert for every other scenario — nothing else reads them.
+export WATA_WIFI_CLI="$WATA/tools/integ-wifi-cli.py"
+export WATA_WIFI_JOIN="$WATA/tools/integ-wifi-join.py"
+export WATA_WIFI_CAPTURE="$TMP/wifi-capture.json"
 SRV_PID=""
 cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null || true; }
 trap cleanup EXIT

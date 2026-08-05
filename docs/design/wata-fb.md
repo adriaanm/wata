@@ -644,6 +644,51 @@ refusal is forced (`enrolstate`) — a hermetic run cannot provoke a real iroh
 refusal. The admin URL is the harness's fixed `WATA_ADMIN_URL`, because the QR
 is a function of the exact bytes of that string.
 
+### The command poller
+
+`cmdpoller.scala` (plan 0020). One goroutine long-polls the server's
+device-command mailbox (`GET /_wata/v1/cmd/poll?wait=20`, wata-server.md),
+dispatches each command, and reports each result back
+(`POST /_wata/v1/cmd/report`). It authenticates with the session token
+(`Runtime.lastAuth`), so it starts working once a session is up and rides
+whatever transport the client is configured for. There is no device UI:
+provisioning shows nothing on the handset beyond the connectivity element
+reacting to the network change.
+
+`Ui.loopWithDevice` starts it after `Runtime.start` and stops it at the
+quit edge; sim and uitest deliberately do not — they stay deterministic,
+and the integ scenario `wifi-cmd` runs the real loop instead. Lifecycle is
+an epoch cell: `stop` bumps it and the loop exits after its in-flight poll
+returns (bounded by the 20 s wait, under the http capability's 30 s bound).
+A poll error backs off 3 s; an empty session waits 1 s for login.
+
+**The two wifi ops** (`WifiCmd`) shell out the way `Diag` does, behind a
+host-fakeable seam:
+
+- `wifi_scan` — `<cli> scan` then `<cli> scan_results`, where `<cli>` is
+  `$WATA_WIFI_CLI`, else `wpa_cli -i wlan0` on the device, else the op
+  reports `{ok:false, detail:"not on device"}`. The tab-separated table is
+  parsed to `[{ssid, signal, secured}]`: duplicate ssids collapse to the
+  strongest row (one answer per band), hidden (empty-ssid) rows drop, and
+  `secured` reads off the flags column (WPA/WEP/RSN).
+- `wifi_join` — runs the alpine-provided helper (`$WATA_WIFI_JOIN`, else
+  `/usr/local/bin/wifi-join`; the spec handoff is bq268-alpine
+  `docs/planning/wifi-join-helper.md`) with the ssid as the ONE argv
+  argument and the PSK on the helper's STDIN — argv and the environment
+  are world-readable in /proc, stdin is not (`exec.Cmd.Stdin` via the
+  `go.exec` facade). A helper that is not there reports
+  `{ok:false, detail:"wifi-join helper missing"}` honestly; the join's
+  real outcome shows in the connectivity element either way.
+
+The integ scenario `wifi-cmd` is the seam's oracle: the real poller loop
+against the fake cli/helper (`tools/integ-wifi-cli.py`,
+`tools/integ-wifi-join.py`), asserting the parked long-poll wakes, the
+parsed scan report (dedupe, hidden-row drop, secured flags), the join
+verdict, the capture file's proof that the PSK traveled by stdin and never
+argv — and that the device's own non-admin token cannot queue commands.
+On-device `wifi_join` against the real helper is a hardware pass, recorded
+when it happens.
+
 ### Quitting is two-step
 
 `back` on the contacts view is the only quit edge (`Ui.isQuitEdge`), and
@@ -1420,9 +1465,10 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `applets.scala` | 1579 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and their `wataui` bodies (both applets are pure view functions painted by `FbPaint`); also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `netstatus.scala` | 176 | The connectivity element's computed state (`NetState` = pipe + health + blink phase): the cached ~5s interface read, the `ConnectionState` mapping, the reconnecting animation's phase, and what the header draws for each combination — read by both the header indicator and the 1px status line. |
 | `diag.scala` | 371 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test and the goroutine that runs it off the frame loop, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
-| `netexec.scala` | 59 | The `go.exec` facade over `os/exec` (`Command` at one and three arities, `Run`, `Output`) and the `go.netif` facade over `net` — what `Diag` runs system-menu's shell lines and its interface reads through. |
+| `netexec.scala` | 73 | The `go.exec` facade over `os/exec` (`Command` at one, two and three arities, `Run`, `Output`, and the `Stdin` field as a pre-run setter) and the `go.netif` facade over `net` — what `Diag` and `WifiCmd` run their command lines through. |
+| `cmdpoller.scala` | 260 | The command poller (`CmdPoller`, plan 0020): the goroutine long-polling the server's device-command mailbox and reporting results, plus `WifiCmd` — the `wifi_scan`/`wifi_join` device mechanics behind the `$WATA_WIFI_CLI`/`$WATA_WIFI_JOIN` host-fakeable seam. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
-| `integ.scala` | 831 | Live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the server-minted family room, groups (get-or-extend + server-side joins), the family no-leave rule, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename landing on a syncing client, and the outbox's queue/persist/drop/deliver cycle. |
+| `integ.scala` | 831 | Live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the server-minted family room, groups (get-or-extend + server-side joins), the family no-leave rule, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename landing on a syncing client, the outbox's queue/persist/drop/deliver cycle, and the command poller run end to end against the fake wifi seam. |
 | `ui.scala` | 442 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
 | `gio.scala` | 129 | The window front end: `GioDevice` (present/LEDs/keys over the `go.gioshell` facade) and `Gio` (the forked frame loop, the packed-key decoding, the `--scale`/`--frames` flags). |
 | `gioshell.scala` | 63 | The `go.gioshell` facade for `go-pkgs/gioshell`. |
