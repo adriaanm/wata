@@ -1,6 +1,9 @@
 # 0020 — the wifi panel: provisioning a handset's network from the tui
 
-Status: proposed
+Status: accepted (owner rulings 2026-08-05: mailbox seam approved as
+designed; commanding is ADMIN-FLAG-gated — superseding the pre-0021
+"any authenticated account" stance below; the device's own poll/report
+routes authenticate as the device's account, unchanged)
 
 ## Problem
 
@@ -35,10 +38,12 @@ GET  /_wata/v1/cmd/{userId}/report?op=…              the admin reads the lates
   A server restart drops pending commands; the tui retries. (The PSK
   still crosses the wire: iroh is encrypted, plain LAN HTTP is inside
   the trust boundary — recorded, not solved, here.)
-- **Auth**: any authenticated account may command any device in v1 (the
-  network is the family; the tui logs in as a real account). Revisit
-  alongside plan 0018's power-level story if "any member administers
-  any handset" ever becomes wrong.
+- **Auth** (ruled 2026-08-05): queueing a command and reading a report
+  require the ADMIN flag (plan 0021's gate — commanding a device,
+  especially pushing wifi credentials, is an admin act; the tui logs in
+  as an admin account). The device's own `/cmd/poll` and `/cmd/report`
+  authenticate as the device's account. The plan's original
+  any-member stance predated the admin flag and is superseded.
 - The long-poll reuses the waiter discipline `/sync` already has;
   device-side cost is one extra idle long-poll goroutine.
 

@@ -1,6 +1,8 @@
 # 0018 — canonical family and group rooms
 
-Status: proposed
+Status: accepted (owner rulings 2026-08-05: server-side membership
+writes approved — no invite/accept round-trip for family or groups;
+leaving the family room is not offered, the account list is the roster)
 
 ## Problem
 
