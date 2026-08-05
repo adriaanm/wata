@@ -1,6 +1,7 @@
 # 0026 — bindgen: generated Go over the ObjC runtime (plan 0023 M3)
 
-Status: proposed
+Status: done, except the on-hardware hello (the owner's leg: Apple must
+grant the restricted push-to-talk entitlement before the app can run at all)
 
 ## Problem
 
@@ -63,6 +64,25 @@ the generated bindings, before anything integrates with wataclient.
 Generator unit tests run on the committed AST fixtures (a checked-in
 JSON snippet per tricky decl shape), so `just ci` exercises the
 generator without Xcode; regeneration + the hello are Mac-gated legs.
+
+**What landed** (design: `docs/design/bindgen.md`). Everything below the
+phone is proven here: 23 generator unit tests over committed AST
+fixtures in `just ci`; regeneration checked by gofmt, `go vet` and a
+GOOS=ios GOARCH=arm64 build; and — the leg the plan did not anticipate —
+a second allowlist target generated from the *macOS* Foundation SDK, so
+the dispatch, the bridging, the blocks and the delegate trampolines are
+exercised against a live ObjC runtime (`just bindgen-runtime`) with no
+device involved. The hello app builds unattended into a 2.5 MB arm64
+bundle linked against PushToTalk.framework (`just ptt-hello`).
+
+**What did not**: running it. `com.apple.developer.push-to-talk` is a
+restricted entitlement Apple grants per team on request, and PushToTalk
+does not function in the simulator, so the system PTT UI and the mic
+round-trip wait on that grant plus a phone. `tools/bindgen/hello/README.md`
+has the request link and the exact owner steps. Audio capture is
+deliberately not in the hello: the framework hands over an activated
+AVAudioSession and the hello logs the handoff, but `AVAudioEngine` is not
+on the allowlist yet.
 
 ## What changes (file-level)
 

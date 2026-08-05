@@ -52,7 +52,15 @@ grew a window toolkit. Phone PACKAGING (gogio, iOS/Android) is not
 done — the same Gio source is what would be packaged, and audio stays
 a no-op until M3.
 
-**M3 — the bindings generator.** A DarwinKit-style codegen pass over
+**M3 — the bindings generator.** DONE except the on-hardware hello
+(plan 0026; design: `docs/design/bindgen.md`). `tools/bindgen` emits Go
+over purego/objc from clang's JSON AST of the SDK headers, allowlisted
+per package; `go-pkgs/appleptt` carries the six PushToTalk types plus a
+Foundation package generated from the macOS SDK, which is what makes the
+dispatch, blocks and delegate trampolines testable on a Mac with no
+phone. The hello app builds unattended (`just ptt-hello`); running it
+waits on Apple granting the restricted push-to-talk entitlement.
+Original sketch: a DarwinKit-style codegen pass over
 Apple's machine-readable framework metadata, scoped to what wata
 needs: `PTChannelManager` (+ delegate, synthesized at runtime via the
 ObjC runtime), `AVAudioEngine`/`AVAudioSession`,

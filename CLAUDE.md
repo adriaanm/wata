@@ -242,6 +242,7 @@ justfile just gives it a name.
 | [docs/design/wataclient.md](docs/design/wataclient.md) | client core: sync engine, domain model, transport, audio |
 | [docs/design/wata-fb.md](docs/design/wata-fb.md) | device client: display, input, audio, cross-build, deploy |
 | [docs/design/wata-tui.md](docs/design/wata-tui.md) | terminal client: the command REPL, the admin surface, its smoke |
+| [docs/design/bindgen.md](docs/design/bindgen.md) | Apple bindings: the generator, the allowlist, refusals, how they are verified |
 | [justfile](justfile) | every repeatable operation, one recipe each (`just` to list) |
 | [TODO.jsonl](TODO.jsonl) | the open-work queue (protocol above) |
 | [WATA-TODO.md](WATA-TODO.md) | known debt |
