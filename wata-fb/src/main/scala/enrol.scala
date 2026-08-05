@@ -1,5 +1,25 @@
 import language.experimental.saferExceptions
 
+/** everything the enrolment screen draws, read ONCE by the caller — the
+ *  identity cells, the admin URL, and the encoder's answer. The screen is a
+ *  `wataui` BODY (plan 0024) and a body reads its arguments and nothing else,
+ *  so the reads live in `Enrol.snap` and the drawing in `Enrol.body`.
+ *
+ *  `side` is 0 when there is no block to draw, which covers both "nothing is
+ *  configured" and "the encoder refused"; `err`/`sub1`/`sub2` are then the
+ *  centered lines that say which. `code` is empty for the unconfigured cases —
+ *  a code that selects a pending row is worth nothing on a device with no
+ *  identity to be pending. */
+case class EnrolSnap(
+  modules: Bytes,
+  side: scala.Int,
+  code: String,
+  hint: String,
+  err: String,
+  sub1: String,
+  sub2: String
+)
+
 /** ENROLMENT — the device half of plan 0014: this handset's own iroh identity,
  *  and the screen a parent points a phone at to admit it.
  *
@@ -195,11 +215,19 @@ object Enrol:
    *  cannot get through (plan 0014's ruling), so the only thing a failure
    *  costs is the typed-code fallback, which needs a pending row to select.
    *  Called when the enrolment screen first appears — a device is only ever
-   *  waiting to be admitted while someone is looking at that screen. */
+   *  waiting to be admitted while someone is looking at that screen.
+   *
+   *  It runs on a goroutine of its own, because the frame that decides the
+   *  screen appears is the frame that calls this: a request bounded at 1.5s is
+   *  still 45 dropped frames on a panel that must keep answering the keypad.
+   *  The latch is set BEFORE the spawn, so "once per session" is decided by the
+   *  UI goroutine that owns the cell rather than by whichever goroutine gets
+   *  there first. Nothing waits for the result — an announce that fails costs
+   *  the typed-code fallback and nothing else. */
   def announceOnce(): Unit =
     if !announcedC.get() then
       announcedC.set(true)
-      announce()
+      sgo.spawn(() => announce())
 
   def announce(): Unit =
     val base = adminUrl()
@@ -250,45 +278,66 @@ object Enrol:
    *  for the full block, so the border reads as wider than it is. */
   val QUIET = 2
 
-  /** the enrolment screen: header, QR, typed code, one line of instruction.
-   *  `hint` is the caller's — the settings applet names the key that closes
-   *  the screen, the boot state names the keys it already had. */
-  def render(px: go.Bytes, hint: String): Unit =
-    Font.drawText(px, "ENROLL", 0, 0, Color.cyan, false, 0)
+  /** the caller's read: the URL, the identity, and the QR encode. Every frame,
+   *  exactly as the painter did it — the matrix is a pure function of a URL
+   *  that cannot change within a session, so caching it would buy CPU and owe a
+   *  cell. */
+  def snap(hint: String): EnrolSnap =
     val u = url()
-    if u == "" then renderUnconfigured(px)
-    else
-      val drawn = drawQr(px, u)
-      if !drawn then Font.drawTextCentered(px, "QR failed", 6, Color.red, false, 0)
-      Font.drawTextCentered(px, code(), CODE_ROW, Color.white, false, 0)
-    Font.drawTextCentered(px, hint, HINT_ROW, Color.midGray, false, 0)
+    if u == "" then unconfigured(hint) else encoded(u, hint)
 
   /** nothing to encode: say WHICH half is missing, since the two have
    *  completely different fixes (a deployment that forgot `adminUrl` vs a
    *  config the device cannot mint a key into). */
-  def renderUnconfigured(px: go.Bytes): Unit =
+  def unconfigured(hint: String): EnrolSnap =
+    val none = Bytes.empty
     if nodeId() == "" then
-      Font.drawTextCentered(px, "no device key", 6, Color.red, false, 0)
-      Font.drawTextCentered(px, WataLogic.clip(shortErr(), 26), 7, Color.midGray, false, 0)
-    else
-      Font.drawTextCentered(px, "no admin URL", 6, Color.red, false, 0)
-      Font.drawTextCentered(px, "set adminUrl in", 7, Color.midGray, false, 0)
-      Font.drawTextCentered(px, "the iroh config", 8, Color.midGray, false, 0)
+      EnrolSnap(none, 0, "", hint, "no device key", WataLogic.clip(shortErr(), 26), "")
+    else EnrolSnap(none, 0, "", hint, "no admin URL", "set adminUrl in", "the iroh config")
+
+  /** the encoder refusing the text (a payload too long for any version) is a
+   *  deployment error — an admin URL nobody can scan — and the screen says so
+   *  rather than drawing nothing. The typed code still shows: it is the
+   *  fallback for exactly the case where the block cannot be read. */
+  def encoded(text: String, hint: String): EnrolSnap =
+    var m = Bytes.empty
+    var err = ""
+    try m = modules(go.qr.matrix(text))
+    catch case e: sgo.GoError =>
+      println("enrol: QR encode failed: " + e.message)
+      err = "QR failed"
+    EnrolSnap(m, isqrt(m.length), code(), hint, err, "", "")
+
+  /** the facade's module grid as the PORTABLE byte type: the body draws from
+   *  `Bytes`, so nothing about the screen is tied to the `go.qr` facade — and
+   *  `wataui`'s `VImage` takes the same currency. */
+  def modules(m: go.Bytes): Bytes =
+    val b = new BytesBuilder
+    var i = 0
+    while i < m.length do
+      b.addByte(m(i).toInt)
+      i = i + 1
+    b.result()
 
   def shortErr(): String =
     if idError() == "" then "check the iroh config" else idError()
 
-  /** encode and blit. False when the encoder refused the text (a payload too
-   *  long for any version), which is a deployment error — an admin URL nobody
-   *  can scan — and says so rather than drawing nothing. */
-  def drawQr(px: go.Bytes, text: String): Boolean =
-    var ok = false
-    try
-      val m = go.qr.matrix(text)
-      blit(px, m, isqrt(m.length))
-      ok = true
-    catch case e: sgo.GoError => println("enrol: QR encode failed: " + e.message)
-    ok
+  /** THE BODY: header, the QR block, the typed code, and one line of
+   *  instruction. `hint` is the caller's — the settings applet names the key
+   *  that closes the screen, the boot state names the keys it already had. */
+  def body(s: EnrolSnap): View =
+    var kids: List[Keyed] =
+      Keyed("hint", VText(FbPaint.centerCol(s.hint), HINT_ROW, s.hint, Color.midGray)) :: Nil
+    if s.code != "" then
+      kids = Keyed("code", VText(FbPaint.centerCol(s.code), CODE_ROW, s.code, Color.white)) :: kids
+    if s.sub2 != "" then
+      kids = Keyed("sub2", VText(FbPaint.centerCol(s.sub2), 8, s.sub2, Color.midGray)) :: kids
+    if s.sub1 != "" then
+      kids = Keyed("sub1", VText(FbPaint.centerCol(s.sub1), 7, s.sub1, Color.midGray)) :: kids
+    if s.err != "" then
+      kids = Keyed("err", VText(FbPaint.centerCol(s.err), 6, s.err, Color.red)) :: kids
+    if s.side > 0 then kids = Keyed("qr", qrView(s.modules, s.side)) :: kids
+    VGroup(Keyed("title", VText(0, 0, "ENROLL", Color.cyan)) :: kids)
 
   /** the largest whole `n` with `n*n <= v` — the module grid's side, since the
    *  facade hands back one flat array. */
@@ -297,25 +346,39 @@ object Enrol:
     while (n + 1) * (n + 1) <= v do n = n + 1
     n
 
-  /** white block, dark modules on top, centered horizontally. Integer scale
-   *  only: a QR module drawn at a fractional size is a QR module a camera
-   *  cannot decode. */
-  def blit(px: go.Bytes, m: go.Bytes, side: scala.Int): Unit =
-    if side > 0 then
-      val full = side + 2 * QUIET
-      val scale = scaleFor(full)
-      val dim = full * scale
-      val x0 = (Display.W - dim) / 2
-      Draw.fillRect(px, x0, TOP_Y, dim, dim, Color.white)
-      var y = 0
-      while y < side do
-        var x = 0
-        while x < side do
-          if m(y * side + x).toInt != 0 then
-            Draw.fillRect(px, x0 + (x + QUIET) * scale, TOP_Y + (y + QUIET) * scale,
-              scale, scale, Color.black)
-          x = x + 1
-        y = y + 1
+  /** the block as an IMAGE, centered horizontally: the one `VImage` wata draws.
+   *  Integer scale only — a QR module drawn at a fractional size is a QR module
+   *  a camera cannot decode. */
+  def qrView(m: Bytes, side: scala.Int): View =
+    val full = side + 2 * QUIET
+    val scale = scaleFor(full)
+    val dim = full * scale
+    VImage((Display.W - dim) / 2, TOP_Y, dim, dim, qrPixels(m, side, scale, dim))
+
+  /** the module bitmap scaled into RGB565 LITTLE-ENDIAN pairs — the panel's own
+   *  format, which is what makes the framebuffer arm a copy. Written in scan
+   *  order, one pixel at a time, rather than as a white field with rectangles
+   *  laid over it: the destination is an immutable `Bytes`, and a sequential
+   *  build needs no scatter buffer. The quiet zone falls out of the same walk —
+   *  a pixel whose module is outside the grid is field. */
+  def qrPixels(m: Bytes, side: scala.Int, scale: scala.Int, dim: scala.Int): Bytes =
+    val b = new BytesBuilder
+    var y = 0
+    while y < dim do
+      var x = 0
+      while x < dim do
+        b.addU16LE(moduleColor(m, side, x / scale - QUIET, y / scale - QUIET))
+        x = x + 1
+      y = y + 1
+    b.result()
+
+  /** the color of the pixel sitting on module `(mx, my)`: dark modules black,
+   *  everything else — including the quiet zone around the grid — white. */
+  def moduleColor(m: Bytes, side: scala.Int, mx: scala.Int, my: scala.Int): scala.Int =
+    var out = Color.white
+    if mx >= 0 && my >= 0 && mx < side && my < side then
+      if m(my * side + mx) != 0 then out = Color.black
+    out
 
   /** pixels per module: as many as fit between the header and the code line,
    *  at least one. 41 modules (the ~110-byte URL this screen encodes) plus the

@@ -131,13 +131,24 @@ would eventually disagree. The conversation screen
 (`WataLogic.bodyContacts`) follow.
 
 **A screen's alternative states belong inside its body, not around it.**
-The contact list is three screens — the boot screen until the link has
-been live once, a connection line while the sync has produced nothing
-yet, then the list — and the body owns that choice, calling `bodyBoot`
-for the first rather than being picked between by the caller. What the
-caller keeps is the one branch that is not a view at all: the enrolment
-screen announces the device to the server on the frame it appears, and
-an effect cannot live inside a pure function of the state.
+The contact list is four screens — the enrolment QR when the server has
+refused this handset outright, the boot screen until the link has been
+live once, a connection line while the sync has produced nothing yet,
+then the list — and the body owns that choice, calling `bodyBoot` and
+`Enrol.body` for the first two rather than being picked between by the
+caller. What the caller keeps is what is not a view: the ambient reads,
+and the effect the enrolment state carries — the device announces itself
+to the server on the frame that screen appears, which `announceOnce`
+latches on the UI goroutine and then SPAWNS, since a body cannot hold an
+effect and a frame cannot wait on a request.
+
+**The enrolment screen is where `VImage` earns its place.** `Enrol.snap`
+does the reading — the identity cells, the admin URL, and the `go.qr`
+call that answers a module grid — and `Enrol.body` scales that grid into
+one image: RGB565 pairs in scan order, the quiet zone falling out of the
+walk as the pixels whose module lies outside the grid. The grid crosses
+into the body as the portable `Bytes`, so the screen names no `go.*`
+type at all.
 
 **A selected row is a group whose first child is its highlight.** The
 immediate-mode painter filled the highlight rectangle and then drew the

@@ -65,10 +65,11 @@ blocks + git log; each entry cites where it was recorded.*
   counter, or to seed it from something per-run.
 
 - **Frame-loop blocking one-shots** (reviewer note, 2026-08-05): the
-  enrol announce and `Diag.netTest` both make a synchronous HTTP call
-  from the render path — latched/once-per-session and bounded (~1.5s),
-  but the milestone-A rule is "the frame goroutine never blocks"; move
-  both onto the action loop when either is next touched.
+  enrol announce is FIXED — `Enrol.announceOnce` latches on the UI
+  goroutine and spawns the request, so the frame that decides the
+  enrolment screen appears no longer waits up to 1.5s for it.
+  `Diag.netTest` still runs its four probes synchronously on the input
+  path (seconds of frozen UI); move it onto the same off-frame path.
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
@@ -120,6 +121,16 @@ blocks + git log; each entry cites where it was recorded.*
   cross-unit val reads inside one module (filed 2026-08-05,
   `CROSS-MODULE-VAL-READ`; plan 0022). Worked around with
   `Outbox.cap()`; inline `Outbox.CAP` again when it lands.
+- A `go.Slice[T]` (`go.Bytes`) case-class FIELD crashes `sgolaBackend` with
+  "no Go type mapping for `go.Slice`" plus an unhandled exception — a
+  restriction reported as a crash, and with a message about function types
+  that names neither the field nor its type (filed 2026-08-05,
+  `GOSLICE-CASECLASS-FIELD-CRASH`; plan 0024). The same type is fine as a def
+  parameter and as a def result. Worked around by converting at the facade
+  edge: `Enrol.snap` turns `go.qr.matrix`'s `go.Bytes` into the portable core
+  `Bytes` the enrolment snapshot carries. If the restriction is deliberate the
+  workaround stays (it is better code — the body references no `go.*`); the
+  crash is the part to fix either way.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —

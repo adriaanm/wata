@@ -523,12 +523,13 @@ secret ever crosses the gap; enrolment is the approval of a public id.
 address a parent's phone can reach, and a guessed one produces a QR that leads
 nowhere. With neither set, the screen says so instead of encoding a dead link.
 
-**The QR screen** (`Enrol.render`) encodes
-`<adminUrl>/admin#enroll/<nodeId>/<nonce>` — about 106 bytes, which
+**The QR screen** (`Enrol.snap` + `Enrol.body`, a `wataui` body — plan 0024)
+encodes `<adminUrl>/admin#enroll/<nodeId>/<nonce>` — about 106 bytes, which
 `go-pkgs/qr` — a thin adapter over `rsc.io/qr`, an ordinary fetched Go
-dependency, at level L — turns into a 37-module code.
-`Enrol.blit` centres it at the largest whole pixels-per-module that fits
-between the header and the code line: **2** on this panel, an 82x82 block, with
+dependency, at level L — turns into a 37-module code. `snap` reads (the
+identity, the URL, the encoder); `body` draws, scaling the module grid into the
+one `VImage` wata has. It is centred at the largest whole pixels-per-module
+that fits between the header and the code line: **2** on this panel, an 82x82 block, with
 a two-module quiet zone (the spec asks for four; two is what 160x128 can
 afford, and the extra pixel per module is what a camera actually needs). The
 block is white with black modules — a QR on a black background does not scan.
@@ -546,8 +547,8 @@ network), is in `docs/design/wata-server.md` under Device enrolment.
 
 **Two ways in:**
 
-- **the boot state.** `WataLogic.renderContacts` draws `renderEnrolBoot`
-  instead of the body's boot screen when `Enrol.required()` — iroh is configured *and*
+- **the boot state.** `WataLogic.bodyContacts` draws `Enrol.body`
+  instead of the boot screen when `Enrol.required()` — iroh is configured *and*
   the transport has refused this node id outright. That refusal is
   `irohnet.LastRefusal()` containing `not allowlisted`, the loud reason the
   Rust layer formats and `Dialer.logDialError` records; it is a transport-level
@@ -565,7 +566,11 @@ network), is in `docs/design/wata-server.md` under Device enrolment.
 
 **The announce is best-effort and rides the plain-TCP client.** Showing the
 screen posts `{nodeId, nonce}` to `<adminUrl>/_wata/v1/enroll` once per session
-(`FbCaps.plainHttp`, a 1.5s bound) — over TCP, because announcing over the iroh
+(`FbCaps.plainHttp`, a 1.5s bound) — on a goroutine of its own, because the
+frame that decides the screen appears is the frame that starts it and a bounded
+1.5s is still 45 dropped frames. The once-per-session latch is set by the UI
+goroutine before the spawn, so the "once" is decided by the cell's owner. Over
+TCP, because announcing over the iroh
 transport that just refused this device is the one thing that cannot work. It
 is silent on failure: with plan 0014's page-side-announce ruling the parent's
 phone posts the announce from the admin page anyway, so a failed announce costs
@@ -1335,7 +1340,7 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `httpc.scala` | 20 | The `go.httpc` facade over `go-pkgs/httpc` — an `*http.Client` with a `Timeout`, the one net/http field the bound facade does not carry. |
 | `irohnet.scala` | 35 | Sgola-side `@go.bind` facade over `go-pkgs/irohnet`: `newHTTPClient(config)`, an `*http.Client` whose connections are iroh streams (real with `-tags iroh` on darwin and linux/arm; loud-error stub elsewhere); `ensureKey(config)`, the device-minted identity; `lastRefusal()`, the dial-refusal reason the enrolment screen reads. |
 | `qr.scala` | 18 | The `go.qr` facade over `go-pkgs/qr`, the thin adapter over the fetched `rsc.io/qr`: text in, the QR module grid out as one byte per module. |
-| `enrol.scala` | 333 | Device identity and enrolment: the minted node key, the session nonce, the admin URL, the QR screen's layout and blit, the typed code, and the best-effort plain-TCP announce. |
+| `enrol.scala` | 392 | Device identity and enrolment: the minted node key, the session nonce, the admin URL, the QR screen's snapshot and body, the typed code, and the best-effort plain-TCP announce. |
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 409 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |
 | `png.scala` | 127 | Minimal deterministic PNG encoder (CRC-32, Adler-32, one stored DEFLATE block) used only for the host-side golden-frame dump. |

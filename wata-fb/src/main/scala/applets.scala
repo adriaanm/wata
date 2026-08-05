@@ -415,26 +415,45 @@ object WataLogic:
     if s.pttHeld then renderRecordingOverlay(s, px)
 
   /** the contact list is a `wataui` BODY (plan 0024). Everything it needs is
-   *  read HERE, at the call site: the session latch `NetStatus.everLive` and
-   *  the app-edge `FbCaps.transportUnavailable` are ambient reads, and a body
-   *  reads its arguments and nothing else.
-   *
-   *  The enrolment boot screen stays outside the body: it announces this
-   *  device to the server on the frame it first appears, and an effect cannot
-   *  live inside a pure function of the state. It becomes a body when the
-   *  enrolment screen itself is ported. */
+   *  read HERE, at the call site: the session latch `NetStatus.everLive`, the
+   *  app-edge `FbCaps.transportUnavailable` and the enrolment identity are
+   *  ambient reads, and a body reads its arguments and nothing else. The one
+   *  EFFECT this screen has — announcing the device the first time the
+   *  enrolment state appears — is here too, for the same reason. */
   def renderContacts(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
     val everLive = NetStatus.everLive()
-    if !everLive && Enrol.required() then renderEnrolBoot(px, ctx)
-    else
-      FbPaint.draw(px, bodyContacts(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
-        ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable()))
+    FbPaint.draw(px, bodyContacts(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
+      ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable(),
+      enrolSnap(ctx, everLive)))
 
-  /** three screens in one, in the order the session passes through them: the
-   *  boot screen until the link has been live once (`bodyBoot` — ONE
-   *  definition, not a second copy of it), the connection line while the sync
-   *  has not yet produced a self user or a conversation, then the list. */
+  /** the enrolment screen's data, and the announce that goes with the frame it
+   *  first appears on — `Some` exactly when the transport has refused this node
+   *  id and the session has never been live. Reading it costs a QR encode, so
+   *  it is read only when the screen is the one being drawn.
+   *
+   *  Announcing rides here rather than on a keypress because nobody presses
+   *  anything on a handset that has never connected: the screen appearing IS
+   *  the event. It is once per session, best-effort, and off the frame path
+   *  (`Enrol.announceOnce` spawns it). */
+  def enrolSnap(ctx: FrameCtx, everLive: Boolean): Option[EnrolSnap] =
+    if everLive || !Enrol.required() then None
+    else
+      Enrol.announceOnce()
+      Some(Enrol.snap(enrolBootHint(ctx)))
+
+  /** four screens in one, in the order the session passes through them: the
+   *  enrolment QR when the server has refused this handset outright, the boot
+   *  screen until the link has been live once (`bodyBoot` — ONE definition, not
+   *  a second copy of it), the connection line while the sync has not yet
+   *  produced a self user or a conversation, then the list. */
   def bodyContacts(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
+      quitArmed: Boolean, unsent: List[String], undelivered: List[String],
+      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap]): View =
+    enrol match
+      case e: Some[EnrolSnap] => Enrol.body(e.value)
+      case None               => bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail)
+
+  def bodyLive(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
       everLive: Boolean, unavail: Boolean): View =
     if !everLive then bodyBoot(net, c, quitArmed, unavail)
@@ -712,23 +731,15 @@ object WataLogic:
     case _: ConnError => true
     case _            => false
 
-  /** THE ENROLMENT BOOT SCREEN — what replaces the boot screen when the
-   *  transport has refused this node id outright (`server refused: 401 not
-   *  allowlisted`). That is not a network problem and no amount of waiting
-   *  fixes it: the server does not know this handset yet, and the one useful
-   *  thing the device can do is show the parent how to admit it. So the calm
-   *  "waiting for network" line gives way to the QR and its typed code.
+  /** THE ENROLMENT BOOT SCREEN's hint line. That screen replaces the boot
+   *  screen when the transport has refused this node id outright (`server
+   *  refused: 401 not allowlisted`): not a network problem, and no amount of
+   *  waiting fixes it — the server does not know this handset yet, and the one
+   *  useful thing the device can do is show the parent how to admit it. So the
+   *  calm "waiting for network" line gives way to the QR and its typed code.
    *
-   *  Announcing rides here rather than on a keypress because nobody presses
-   *  anything on a handset that has never connected — the screen appearing IS
-   *  the event. It happens once per session and is best-effort (enrol.scala).
-   *
-   *  The footer still names the exit while the two-step quit is armed: this is
-   *  a boot screen, and the confirmation has to be legible wherever it lands. */
-  def renderEnrolBoot(px: go.Bytes, ctx: FrameCtx): Unit =
-    Enrol.announceOnce()
-    Enrol.render(px, enrolBootHint(ctx))
-
+   *  The hint still names the exit while the two-step quit is armed: this is a
+   *  boot screen, and the confirmation has to be legible wherever it lands. */
   def enrolBootHint(ctx: FrameCtx): String =
     if ctx.quitArmed then "BACK again to exit" else "scan to add this device"
 
@@ -1290,9 +1301,11 @@ object SettingsLogic:
       renderMenu(s, px)
       renderDetail(s, px, ctx)
 
+  /** the ambient reads and the announce stay at the call site; the screen
+   *  itself is `Enrol.body` (plan 0024). */
   def renderEnrol(px: go.Bytes): Unit =
     Enrol.announceOnce()
-    Enrol.render(px, "BACK to close")
+    FbPaint.draw(px, Enrol.body(Enrol.snap("BACK to close")))
 
   def renderMenu(s: SettingsState, px: go.Bytes): Unit =
     Font.drawText(px, "SETTINGS", 0, 0, Color.cyan, false, 0)
