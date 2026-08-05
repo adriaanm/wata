@@ -1,9 +1,25 @@
 # 0020 — the wifi panel: provisioning a handset's network from the tui
 
-Status: accepted (owner rulings 2026-08-05: mailbox seam approved as
-designed; commanding is ADMIN-FLAG-gated — superseding the pre-0021
+Status: done (2026-08-06; owner rulings 2026-08-05: mailbox seam approved
+as designed; commanding is ADMIN-FLAG-gated — superseding the pre-0021
 "any authenticated account" stance below; the device's own poll/report
 routes authenticate as the device's account, unchanged)
+
+Outcome: landed as specified — `devicecmd.scala` (server), the tui
+`wifi`/`join` flow, `cmdpoller.scala`/`WifiCmd` (wata-fb), and the
+`wifi-join` helper spec handed off to bq268-alpine
+(`docs/planning/wifi-join-helper.md` + its TASKS.md line). One addition
+beyond the letter of the plan: the device side's poll/report accept the
+trusted `X-Wata-Node-Id` header as an alternative credential — resolved
+through the account BINDING (`Bindings.userFor`), since the mailbox is
+addressed per account and transport proof alone names no queue; over TCP
+that path is unreachable by construction (both edges strip the header),
+which the cmd-smoke pins. Reports carry a server-stamped monotonic seq
+so the tui's queue-then-wait is skew-free. Gates: `just cmd-smoke` (in
+ci), the tui-smoke wifi session, and integ `wifi-cmd` (the real poller
+against the fake wifi seam, PSK-via-stdin proven). Still open: the
+on-device `wifi_join` hardware pass, blocked on the alpine helper
+(queue key `WIFI-JOIN-DEVICE-PASS`).
 
 ## Problem
 
