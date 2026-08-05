@@ -1,8 +1,12 @@
 # 0018 — canonical family and group rooms
 
-Status: accepted (owner rulings 2026-08-05: server-side membership
-writes approved — no invite/accept round-trip for family or groups;
-leaving the family room is not offered, the account list is the roster)
+Status: done (landed 2026-08-06 — server: family.scala/group.scala +
+store transactions; client: stamp classification + GroupConv; fb/tui
+rendering + goldens; verification: full ci green, conformance 84/84,
+new integ scenarios group-room and family-no-leave, persist/admin smoke
+extended. Owner rulings 2026-08-05: server-side membership writes
+approved — no invite/accept round-trip for family or groups; leaving
+the family room is not offered, the account list is the roster)
 
 ## Problem
 
