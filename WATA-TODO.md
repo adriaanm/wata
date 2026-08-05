@@ -27,12 +27,6 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## client / device
 
-- **tinyalsa vendored patch — upstream call never made** (M8 ch.6:
-  `grep "SGOLA PATCH" vendor/tinyalsa/src/pcm.c`; pull-mode
-  sync_ptr on non-MMAP handles, kernel-semantics-correct, fixes the
-  long-standing replay/stutter bug that also afflicted the Zig
-  client). Decide: upstream it, or pin vendored-forever with the
-  reason written down.
 - **FFmpeg EOS-flag nuance on our Ogg/Opus output** (DOGFOOD M8
   ch.6b) — one look, as promised there: third-party tools reading
   our streams is ecosystem courtesy. (The writer itself is
