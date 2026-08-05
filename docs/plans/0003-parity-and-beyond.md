@@ -197,8 +197,13 @@ handoffs written yet — it stays queued polish):
   vt.global_cursor_default=0` (patched in place, backup kept; alpine
   `ae0aa01` has the method and the carry-forward note for future
   boot.img assemblies). Boot is dark-to-wata together with the tty1
-  flip (alpine `be06c0e`, gate consciously lifted by owner — power
-  actions still unverified on hardware).
+  flip (alpine `be06c0e`; owner verified settings power-off on hardware
+  2026-08-05 and the device rode a reboot cycle — the gate's substance
+  is met, reboot-to-bootloader/EDL still untried from settings).
+  Post-flip fix that made it clean: start.sh unbinds the fbcon
+  vtconsole (alpine `3264fef`) — without it the VT paints and echoes
+  over wata's frames; the mechanism had been buried in system-menu's
+  launcher.
 - **the last gap** — kernel-to-wata handoff — is already covered by the
   tty1 flip spec (`wata-fb-early-boot.md` there) plus the calm boot
   presentation below; wata itself needs nothing new beyond supplying
