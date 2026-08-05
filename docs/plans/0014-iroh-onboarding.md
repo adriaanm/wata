@@ -1,6 +1,6 @@
 # 0014 — enrolling a device onto the family's iroh network
 
-Status: **accepted, on hold**
+Status: **accepted** (hold lifted 2026-08-05 — server half landed, rulings below)
 
 Held 2026-08-05: the approach depends on a phone acting on the device's
 QR, and there was no surface for that. Re-pointed same day: the QR now
@@ -107,7 +107,7 @@ not built.
 
 ## Milestones
 
-Nothing here is started; the hold above is why.
+Milestone 2 landed with plan 0021-B; 1, 3 and 4 are open.
 
 1. **Device-minted identity**: the device generates its keypair on
    first boot and persists it with the rest of its config; nothing
