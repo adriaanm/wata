@@ -123,11 +123,7 @@ object Enrol:
    *  a page. Minted once per session from the clock, in the same alphabet the
    *  server's `validNonce` accepts. */
   def nonce(): String =
-    // bind to a String local so `==` stays native: comparing an
-    // `Atomic[String].get()` against a literal in place emits a call to an
-    // undefined `equalsObject(Object, Object)` (sgola ticket ATOMIC-STR-EQ).
-    val cur: String = nonceC.get()
-    if cur == "" then nonceC.set(mintNonce(go.time.nowUnixMilli()))
+    if nonceC.get() == "" then nonceC.set(mintNonce(go.time.nowUnixMilli()))
     nonceC.get()
 
   /** four base-32 characters of the millisecond clock — the low bits, which

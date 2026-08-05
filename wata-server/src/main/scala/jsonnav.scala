@@ -81,12 +81,7 @@ object JsonNav:
     case Nil  => None
 
   def lookupStep(p: (String, Json), t: List[(String, Json)], key: String): Option[Json] =
-    // bind the tuple's `_1` to a String local before comparing: comparing the
-    // tuple accessor directly makes the compiler pick a boxed-equality helper
-    // over an undefined `Object` (a broken stub) rather than native string `==`.
-    // The local's declared String type restores native ==.
-    val k: String = p._1
-    if k == key then Some(p._2) else lookupList(t, key)
+    if p._1 == key then Some(p._2) else lookupList(t, key)
 
   /** a JSON value as a String, or `None` if it is not a `JStr`. */
   def asStr(j: Json): Option[String] = j match

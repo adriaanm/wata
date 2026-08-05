@@ -118,15 +118,6 @@ blocks + git log; each entry cites where it was recorded.*
   cross-unit val reads inside one module (filed 2026-08-05,
   `CROSS-MODULE-VAL-READ`; plan 0022). Worked around with
   `Outbox.cap()`; inline `Outbox.CAP` again when it lands.
-- Comparing an `sgo.Atomic[String].get()` against a String literal IN
-  PLACE emits a call to `equalsObject(Object, Object)` — a function the
-  emitter writes but whose `Object` type it never declares, so the Go
-  build fails with `undefined: Object` (filed 2026-08-05,
-  `ATOMIC-STR-EQ`; plan 0014). Reading the same cell through a `def`
-  that returns `String` compares natively, so it is the inline
-  `.get() == <literal>` position. Worked around in `Enrol.nonce` by
-  binding to a typed local first — the same trick `wjson.scala` already
-  carries a comment for; inline it again when it lands.
 - No emission shape is an importable Go PACKAGE that carries the sgola
   runtime: `mode app` emits `package main` (un-importable) and `mode
   library` is the runtime-free `@goexport` facade, which a core-dependent
@@ -167,10 +158,14 @@ blocks + git log; each entry cites where it was recorded.*
   proof); walls of that class are POSITIONED now. ~~CROSS-MODULE-VAL-READ~~ FIXED and verified downstream: pin
   `f0bce9e` full-gate green with `Outbox.cap()` deleted and the
   direct cross-module `Outbox.CAP` reads restored in integ.scala
-  (standing proof). Open upstream: GOMOD-TRANSITIVE-SUM (generated
-  app go.mod lacks transitive requires/sums; GOFLAGS=-mod=mod in
-  sgo-env until then), ATOMIC-STR-EQ (inline Atomic[String] equality
-  emits undeclared Object; typed-local workaround, fix dispatching). ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
+  (standing proof). ~~ATOMIC-STR-EQ~~ FIXED and verified downstream:
+  pin `effbfcb` full-gate green with both typed-local binds inlined
+  again (`Enrol.nonce`'s `.get() == ""` and jsonnav's tuple-accessor
+  compare, kept as standing proofs). Open upstream:
+  GOMOD-TRANSITIVE-SUM (generated app go.mod lacks transitive
+  requires/sums; GOFLAGS=-mod=mod in sgo-env until then),
+  NO-LIB-EMIT-FOR-RUNTIME-LIBS + INLINK-DEP-SEARCH-PARENT-ONLY
+  (plan 0023 M1, workarounds above). ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
   `94ce542`, verified by the original repro: a fresh worktree with the
   shared toolchain home rebuilds the liblink dep (RUN) and the
   cross-build succeeds; isolated-worktree deploy builds work directly
