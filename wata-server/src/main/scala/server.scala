@@ -146,6 +146,7 @@ object Server:
     MediaFiles.boot()                   // before Journal.boot: replay migrates blobs out
     Journal.boot()
     Dm.migrate()                        // derive the pair map from replayed rooms
+    Family.ensure()                     // the family room exists, everyone joined
     Retain.boot()                       // media retention: sweep now, then daily
     val mux = go.net.http.newServeMux()
     val h = new WataHandler()
@@ -201,6 +202,8 @@ object Server:
     mux.handle("PUT /_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}", h)
     // the wata dialect: canonical DMs (dm.scala).
     mux.handle("POST /_wata/v1/dm/{userId}", h)
+    // the wata dialect: groups (group.scala) — get-or-extend by stamp name.
+    mux.handle("POST /_wata/v1/group", h)
     // the wata dialect: favorites (favorite.scala) — the joined-member rule a
     // raw state PUT cannot express.
     mux.handle("POST /_wata/v1/favorite/{roomId}/{eventId}", h)
@@ -287,6 +290,8 @@ object SelfCheck:
     dmDemo()
     syncDemo()
     pwhashDemo()
+    familyDemo()
+    groupDemo()
 
   def printProfile(userId: String): Unit = Store.getProfile(userId) match
     case s: Some[Profile] => println("profile " + Json.write(Router.profileJson(s.value)))
@@ -515,3 +520,51 @@ object SelfCheck:
 
   def vec(pw: String, salt: String, iters: scala.Int, dkLen: scala.Int): String =
     Pwhash.hex(Pwhash.derive(go.bytes(pw), go.bytes(salt), iters, dkLen))
+
+  // ---- the canonical family room + groups (plan 0018) --------------------------
+
+  /** `Family.ensure()` over the default alice/bob pair: the room exists at the
+   *  canonical alias, stamped, everyone joined, and a second ensure changes
+   *  nothing. Booleans and membership strings only — never the volatile id. */
+  def familyDemo(): Unit =
+    Family.ensure()
+    val r1 = famRoomId()
+    println("family-minted " + boolStr(r1 != ""))
+    println("family-stamped " + boolStr(Family.isFamilyRoom(r1)))
+    println("family-name " + roomNameOf(r1))
+    println("family-joined " + Mem.str(Store.getMembership(r1, "@alice:localhost"))
+      + " " + Mem.str(Store.getMembership(r1, "@bob:localhost")))
+    Family.ensure()
+    println("family-ensure-idempotent " + boolStr(famRoomId() == r1))
+
+  def famRoomId(): String = Store.getRoomIdByAlias(Family.aliasName) match
+    case s: Some[String] => s.value
+    case None => ""
+
+  def roomNameOf(roomId: String): String = Store.getRoom(roomId) match
+    case s: Some[Room] => nameState(s.value)
+    case None => "none"
+
+  def nameState(room: Room): String = Store.stateContent(room, "m.room.name", "") match
+    case s: Some[Json] => JsonNav.strField(s.value, "name", "")
+    case None => "none"
+
+  /** `Group.getOrExtend` — the endpoint's core, driven directly: one room per
+   *  name, the caller and members joined, a re-ask is the same room, another
+   *  name is another room. */
+  def groupDemo(): Unit =
+    val alice = "@alice:localhost"
+    val bob = "@bob:localhost"
+    val g1 = Group.getOrExtend(alice, "kids", oneStr(bob))
+    println("group-minted " + boolStr(g1 != ""))
+    println("group-stamp-name " + Group.nameOf(g1))
+    println("group-joined " + Mem.str(Store.getMembership(g1, alice))
+      + " " + Mem.str(Store.getMembership(g1, bob)))
+    println("group-idempotent " + boolStr(Group.getOrExtend(alice, "kids", Nil) == g1))
+    println("group-distinct " + boolStr(Group.getOrExtend(alice, "camping", Nil) != g1))
+    println("group-not-family " + boolStr(!Family.isFamilyRoom(g1)))
+
+  def oneStr(s: String): List[String] =
+    var xs: List[String] = Nil
+    xs = s :: xs
+    xs

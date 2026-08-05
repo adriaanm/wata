@@ -599,6 +599,102 @@ object Store:
     putPairLocked(st, DmPair(lo, hi, roomId))
     true
 
+  // ---- the canonical family room / groups (plan 0018) -------------------------
+  //
+  // The same one-transaction shape as the DM pair map, keyed differently: the
+  // family room by its `net.wata.family` stamp (falling back to the
+  // `#family:<server>` alias for a room that predates the stamp), a group by
+  // the `name` in its `net.wata.group` stamp. No dedicated slice and no new
+  // journal op: the stamps are ordinary state events, so a replayed journal
+  // reconstructs the keys by itself and these lookups just scan the rooms —
+  // family-sized, so a scan is not a scaling concern.
+
+  /** THE family-room get-or-create, one transaction: a room already stamped
+   *  `net.wata.family` wins (oldest first, the `Dm.migrate` rule); else the
+   *  room the alias names is STAMPED IN PLACE rather than duplicated; else a
+   *  room is minted from `seeds` and the alias registered. */
+  def familyGetOrCreate(alias: String, sender: String, stamp: StateSeed, seeds: List[StateSeed]): DmRoom =
+    cell.withLock(st => familyLocked(st, alias, sender, stamp, seeds))
+
+  def familyLocked(st: StoreState, alias: String, sender: String, stamp: StateSeed, seeds: List[StateSeed]): DmRoom =
+    findStamped(st, ListOps.reverse(st.roomIds), "net.wata.family") match
+      case s: Some[String] => DmRoom(s.value, false)
+      case None => familyByAlias(st, alias, sender, stamp, seeds)
+
+  def familyByAlias(st: StoreState, alias: String, sender: String, stamp: StateSeed, seeds: List[StateSeed]): DmRoom =
+    HashMap.get(st.aliases, alias) match
+      case s: Some[String] => stampInPlace(st, s.value, sender, stamp)
+      case None => mintFamily(st, alias, sender, seeds)
+
+  def stampInPlace(st: StoreState, roomId: String, sender: String, stamp: StateSeed): DmRoom =
+    addEventLocked(st, roomId, stamp.etype, sender, stamp.content, true, stamp.sk, false, "", JNull())
+    DmRoom(roomId, false)
+
+  def mintFamily(st: StoreState, alias: String, sender: String, seeds: List[StateSeed]): DmRoom =
+    val id = mintSeeded(st, sender, seeds)
+    st.aliases = HashMap.put(st.aliases, alias, id)
+    if Journal.enabled then Journal.rec(Journal.aliasOp(alias, id)) else ()
+    DmRoom(id, true)
+
+  /** THE group get-or-create, one transaction: the oldest room whose
+   *  `net.wata.group` stamp carries this `name` wins; else a room is minted
+   *  from `seeds` (no alias — groups are reached through the stamp alone). */
+  def groupGetOrCreate(name: String, sender: String, seeds: List[StateSeed]): DmRoom =
+    cell.withLock(st => groupLocked(st, name, sender, seeds))
+
+  def groupLocked(st: StoreState, name: String, sender: String, seeds: List[StateSeed]): DmRoom =
+    findGroupNamed(st, ListOps.reverse(st.roomIds), name) match
+      case s: Some[String] => DmRoom(s.value, false)
+      case None => DmRoom(mintSeeded(st, sender, seeds), true)
+
+  /** mint a room and write its seed state, all under the caller's lock. */
+  def mintSeeded(st: StoreState, sender: String, seeds: List[StateSeed]): String =
+    val id = genRoomId()
+    st.rooms = HashMap.put(st.rooms, id, Room(id, "10", Nil, Nil))
+    st.roomIds = id :: st.roomIds
+    if Journal.enabled then Journal.rec(Journal.roomOp(id)) else ()
+    seedEvents(st, id, sender, seeds)
+    id
+
+  /** the OLDEST room carrying a `etype` stamp (`ids` arrives oldest-first). */
+  def findStamped(st: StoreState, ids: List[String], etype: String): Option[String] = ids match
+    case h :: t => findStampedStep(st, h, t, etype)
+    case Nil  => None
+
+  def findStampedStep(st: StoreState, h: String, t: List[String], etype: String): Option[String] =
+    if roomHasState(st, h, etype) then Some(h) else findStamped(st, t, etype)
+
+  def roomHasState(st: StoreState, roomId: String, etype: String): Boolean =
+    HashMap.get(st.rooms, roomId) match
+      case s: Some[Room] => stateHasKey(s.value.state, stateKeyOf(etype, ""))
+      case None => false
+
+  def stateHasKey(state: List[(String, Event)], key: String): Boolean = lookupState(state, key) match
+    case _: Some[Event] => true
+    case None => false
+
+  /** the OLDEST room whose `net.wata.group` stamp names `name`. */
+  def findGroupNamed(st: StoreState, ids: List[String], name: String): Option[String] = ids match
+    case h :: t => findGroupStep(st, h, t, name)
+    case Nil  => None
+
+  def findGroupStep(st: StoreState, h: String, t: List[String], name: String): Option[String] =
+    if groupNameLocked(st, h) == name then Some(h) else findGroupNamed(st, t, name)
+
+  def groupNameLocked(st: StoreState, roomId: String): String =
+    HashMap.get(st.rooms, roomId) match
+      case s: Some[Room] => groupNameIn(s.value.state)
+      case None => ""
+
+  def groupNameIn(state: List[(String, Event)]): String =
+    lookupState(state, stateKeyOf("net.wata.group", "")) match
+      case s: Some[Event] => strField(s.value.content, "name", "")
+      case None => ""
+
+  /** a room's `net.wata.group` stamp name, or "" (not a group). */
+  def groupNameOf(roomId: String): String =
+    cell.withLock(st => groupNameLocked(st, roomId))
+
   def stateContent(room: Room, etype: String, sk: String): Option[Json] =
     lookupState(room.state, stateKeyOf(etype, sk)) match
       case s: Some[Event] => Some(s.value.content)

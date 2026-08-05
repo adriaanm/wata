@@ -25,6 +25,8 @@ lines:
 | `handlers.scala` | 359 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
 | `keys.scala` | 83 | the E2EE device-key routes, as no-op stubs |
 | `dm.scala` | 308 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
+| `family.scala` | 137 | the canonical family room: boot/provisioning ensure, the `net.wata.family` stamp, server-side joins (shared with groups) |
+| `group.scala` | 110 | groups: the `POST /_wata/v1/group` get-or-extend endpoint and the `net.wata.group` stamp |
 | `rooms.scala` | 721 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
 | `sync.scala` | 510 | `/sync` (initial + incremental + leave) and the long-poll wait |
 | `testhooks.scala` | 65 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
@@ -738,6 +740,63 @@ closed at most once. The blocking wait itself (`Store.waitForEvents`,
 waiter channel and a timer (`sgo.select2` + `go.time.After`), executed by the
 handling goroutine outside any lock.
 
+## The family room and groups
+
+The family room is a server concept, not a convention (`family.scala`; the
+reasoning is `docs/plans/0018-canonical-family-rooms.md`). The same move as
+canonical DMs: **the server owns the identity**, and identity lives in room
+state.
+
+**Server-minted, stamped.** `Family.ensure()` makes THE family room exist:
+alias `#family:<server>`, name `Family`, the public-chat shape family-model.md
+specifies, and a `net.wata.family` state event (`{}` — the stamp is the
+identity, like `net.wata.dm`; clients classify by it, never by alias). It runs
+at boot (`Server.serve`, after `Journal.boot` and `Dm.migrate`) and after
+every account-provisioning write (`Admin.created` — both the setup claim and
+an admin create), so a newly provisioned account is in the family before its
+client ever syncs. Convergence is the `Dm.migrate` rule, one transaction in
+`Store.familyGetOrCreate`: a room already stamped wins (oldest first — the
+journal-replay path), else the room the alias names is stamped in place,
+else a room is minted; nothing is deleted. With no accounts at all (first-run
+setup) nothing is minted — a room needs a creator (the first admin account,
+else the first account), and the first claimed account becomes it.
+
+**Server-membered, no-leave.** Every account is joined, always: `ensure()`
+writes an `m.room.member` join for each configured account not already
+joined (`Family.joinUsers`). There is no join flow because there is no
+unjoined state, and leaving is refused at the API (`Rooms.leaveFamilyGate`,
+`403`): the account list IS the roster. A ban is the one membership the
+ensure does not walk over — kick undoes itself at the next ensure, ban holds
+until lifted. Client-side auto-join survives only as compat for stock
+clients' invite flows.
+
+**Groups are the same concept with a member list** (`group.scala`). A group
+is a room stamped `net.wata.group` with `{"name": …}` — the name is the key,
+one group per name, like one DM per pair — minted through one dialect
+endpoint:
+
+    POST /_wata/v1/group   {"name": "kids", "members": ["bob", …]}
+      -> {"room_id": …}
+
+Auth required; the caller is included implicitly; members are bare localparts
+or full MXIDs (`Dm.normalize`), and an entry naming nobody here is `404
+M_NOT_FOUND` *before* anything is created or joined. The server creates the
+room (private shape, no alias, power levels creator 100 / members 0 /
+`events_default` 0 so everyone speaks), stamps it, and **joins every listed
+member server-side** — the DM-resolve precedent: membership is an act of
+whoever created the group, acceptable because the server population is the
+family. Re-POSTing the same name with more members is the idempotent
+GET-OR-EXTEND (`Group.getOrExtend`: `Store.groupGetOrCreate` is one
+transaction keyed on the stamp's name; `Family.joinUsers` is shared with the
+family path). Nothing removes members; kick/ban exist for the pathological
+case.
+
+**No new journal ops.** Rooms, events, and aliases already journal; the
+stamps are ordinary state events, so a replay reconstructs both keys by
+itself and the store lookups just scan the (family-sized) room list. The
+persist smoke pins the loop: family room id, stamp, membership, the no-leave
+403, and the group's get-or-extend identity all survive `kill -9` + replay.
+
 ## Sync
 
 `/sync` (`sync.scala`) has a pure part and a blocking part.
@@ -1046,6 +1105,8 @@ acceptance check for that run.
 - **`rooms.scala`** — `Rooms`: createRoom, join, invite, leave/kick/ban, the generic state PUT, send/redact events, receipts, media upload, and `GET /messages` pagination.
 - **`favorite.scala`** — `Favorite`: the `POST /_wata/v1/favorite/{roomId}/{eventId}` toggle, the joined-member rule, and the `net.wata.favorite` marker's read side (`isFavorited`, which the sweep calls).
 - **`dm.scala`** — `Dm`: canonical DMs. The `POST /_wata/v1/dm/{userId}` endpoint, the `net.wata.dm`/alias identity, the boot migration, and the one-way `m.direct` compat projection.
+- **`family.scala`** — `Family`: the canonical family room. `ensure()` (boot + every provisioning write), the `net.wata.family` stamp, the server-side `joinUsers` shared with groups; the no-leave rule lives at `Rooms.leaveFamilyGate`.
+- **`group.scala`** — `Group`: groups. The `POST /_wata/v1/group` idempotent get-or-extend endpoint, keyed on the `net.wata.group` stamp's name.
 - **`sync.scala`** — `Sync`: the pure sync-parts builder (initial + incremental, account data through `Dm.project`) and the long-poll orchestration.
 - **`testhooks.scala`** — `TestHooks`: the `WATA_TEST_HOOKS=1`-only fail-on-demand counter and its `POST /_wata/v1/test/fail` route (see "Test hooks").
 - **`server.scala`** — `WataHandler`/`MediaEdge`/`AdminPage`/`NotFound`/`Respond` (the HTTP edge), `Server` (boot + route table + the dual listener), `Main`, and `SelfCheck` (a deterministic smoke test of the store/handler logic, diffed against a golden file by the build's smoke script).

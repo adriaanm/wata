@@ -146,42 +146,44 @@ For v1, admin operations happen via TUI or scripts. Future versions may have ded
 
 ### Creating the Family
 
-First-time setup (run once per server):
-
-```typescript
-// 1. Create family room
-const familyRoom = await client.createRoom({
-  name: 'Family',
-  preset: 'public_chat',
-  visibility: 'public',
-  room_alias_name: 'family',
-});
-```
+Nobody creates the family room: **the server mints it** (plan 0018). At boot,
+and after every account-provisioning write, the server ensures THE family
+room exists — alias `#family:<server>`, name `Family`, the public-chat shape
+above — stamped with a `net.wata.family` state event (`{}`; the stamp is the
+identity, and clients classify by it, never by alias). A pre-existing
+`#family:<server>` room is stamped in place rather than duplicated.
 
 ### Adding a Family Member
 
-```typescript
-// 1. Create user account (via Conduit admin room or registration)
-// 2. Invite to family room
-await client.invite(familyRoomId, '@newmember:server.local');
-// 3. New member auto-joins (invite is accepted automatically)
-// 4. New member appears in everyone's contact list
-```
+Creating the account IS joining the family: the server writes the
+`m.room.member` join for every account not already joined, at boot and at
+every provisioning write. There is no invite, no accept, and no client-side
+step — a newly provisioned account is in the family before its client ever
+syncs, and it appears in everyone's contact list through the family roster.
 
-**Auto-join behavior:** Since Wata runs in a trusted environment (family-owned server with controlled accounts), **all room invites are automatically accepted**. When a family member receives an invite, the client immediately joins without user interaction. This includes:
-- Family room invites - for joining the family broadcast channel
-- DM room invites - prevents duplicate room creation when another member initiates a DM
-
-This simplifies onboarding - admins just need to invite new members, and they appear in everyone's contact list automatically. It also ensures DM conversations work bidirectionally without creating duplicate rooms.
+**Auto-join behavior** survives as compat only: since Wata runs in a trusted
+environment (family-owned server with controlled accounts), clients still
+accept room invites automatically — which is what keeps DM rooms
+bidirectional for stock clients — but family membership no longer rests on
+it.
 
 ### Removing a Family Member
 
-```typescript
-// Kick from family room
-await client.kick(familyRoomId, '@member:server.local', 'Removed from family');
-// Member disappears from contact lists
-// Existing DM rooms remain (for history) but no new messages
-```
+Removing the account is the real operation (the account list is the roster).
+Leaving the family room is refused by the server (403) — a family member
+cannot leave the family — and a kick undoes itself at the server's next
+membership ensure; a ban is the one membership the server does not walk over
+(the pathological-case escape hatch). Existing DM rooms remain (for history).
+
+### Groups
+
+A group ("kids", "camping trip") is the family-room concept with a member
+list: a room stamped `net.wata.group` with `{"name": …}` — one group per
+name — minted through `POST /_wata/v1/group {"name", "members"}`. The caller
+is included implicitly and every listed member is joined server-side; nobody
+accepts an invitation. Re-POSTing the same name with more members extends the
+same room. Groups are created from the tui or the phone client, deliberately
+not from the handset.
 
 ## Discovery
 

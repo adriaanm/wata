@@ -202,9 +202,12 @@ object Admin:
     else created(lp, display)
 
   /** seed the new account's profile the way `Store.init` seeds a booted one,
-   *  so `/profile` answers for it without a restart. */
+   *  so `/profile` answers for it without a restart — then `Family.ensure()`:
+   *  provisioning an account IS joining the family, and the very first
+   *  account is what mints the family room (family.scala). */
   def created(lp: String, display: String): Either[MErr, Json] =
     Store.setDisplayName(Store.userIdOf(lp), display)
+    Family.ensure()
     Right(obj1("user_id", JStr(Store.userIdOf(lp))))
 
   /** Matrix localparts, minus the slash: lowercase alphanumerics plus

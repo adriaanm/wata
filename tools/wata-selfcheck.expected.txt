@@ -50,3 +50,14 @@ pwhash-format pbkdf2-sha256$1000$MDEyMzQ1Njc4OWFiY2RlZg==$pj4T35D2v4tYmC1sTJ1y5t
 pwhash-verify true
 pwhash-verify-wrong false
 pwhash-plaintext-never false
+family-minted true
+family-stamped true
+family-name Family
+family-joined join join
+family-ensure-idempotent true
+group-minted true
+group-stamp-name kids
+group-joined join join
+group-idempotent true
+group-distinct true
+group-not-family true

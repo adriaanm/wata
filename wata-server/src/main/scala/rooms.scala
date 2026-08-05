@@ -309,8 +309,15 @@ object Rooms:
   def leave1(userId: String, r: go.net.http.Request, body: String): Either[MErr, Json] =
     val roomId = r.pathValue("roomId")
     Store.getRoom(roomId) match
-      case _: Some[Room] => leave2(userId, roomId, body)
+      case _: Some[Room] => leaveFamilyGate(userId, roomId, body)
       case None => Left(MErr(404, M_NOT_FOUND(), "Room not found"))
+
+  /** the family room is NO-LEAVE: the account list is the roster (family.scala),
+   *  so leaving is not a thing a member can do — not merely not offered in the
+   *  UI, refused at the API. */
+  def leaveFamilyGate(userId: String, roomId: String, body: String): Either[MErr, Json] =
+    if Family.isFamilyRoom(roomId) then Left(MErr(403, M_FORBIDDEN(), "The family room cannot be left"))
+    else leave2(userId, roomId, body)
 
   def leave2(userId: String, roomId: String, body: String): Either[MErr, Json] =
     Mem.transition(Store.getMembership(roomId, userId), ALeave()) match

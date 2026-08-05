@@ -395,6 +395,16 @@ def crud(atok, users):
     _, prof, _ = req("GET", "/_matrix/client/v3/profile/@kid:localhost")
     check(prof.get("displayname") == "Kid", "the new account has a profile")
 
+    # plan 0018: provisioning an account IS joining the family — the new
+    # account's very first sync serves the stamped family room, joined, with
+    # no client-side join and no restart.
+    ktok = login("kid", "kidpw123")
+    _, sync, _ = req("GET", "/_matrix/client/v3/sync?timeout=0", None, ktok)
+    fam = [rid for rid, room in sync.get("rooms", {}).get("join", {}).items()
+           if any(e["type"] == "net.wata.family"
+                  for e in room.get("state", {}).get("events", []))]
+    check(len(fam) == 1, "the new account is joined to THE stamped family room")
+
     status, body, _ = req("POST", "/_wata/v1/admin/users",
                           {"user": "kid", "password": "other"}, atok)
     check(status == 400 and body.get("errcode") == "M_USER_IN_USE",

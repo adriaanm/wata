@@ -122,6 +122,10 @@ curl -s -X POST "${A[@]}" -d '{"user_id":"@bob:localhost","reason":"persist-test
 # canonical DM identity: the pair -> room claim is journalled post-generation, so
 # the SAME room must come back after the reboot.
 DM=$(curl -s -X POST "${A[@]}" "$BASE/_wata/v1/dm/bob" | jget room_id)
+# the boot-minted family room and a group (plan 0018): both are ordinary
+# journalled rooms/state, so the SAME ids must come back after the reboot.
+FAM=$(curl -s "${A[@]}" "$BASE/_matrix/client/v1/directory/room/%23family:localhost" | jget room_id)
+GR=$(curl -s -X POST "${A[@]}" -d '{"name":"trip","members":["bob"]}' "$BASE/_wata/v1/group" | jget room_id)
 LINES=$(wc -l < "$LOG" | tr -d ' ')
 
 # ---- crash + reboot from the log -------------------------------------------
@@ -190,6 +194,24 @@ check "dm-pair-symmetric"       "$(curl -s -X POST "${B[@]}" "$BASE/_wata/v1/dm/
 check "dm-stock-create-survives" "$(curl -s -X POST "${A[@]}" -d '{"is_direct":true,"invite":["@bob:localhost"]}' \
                                     "$BASE/_matrix/client/v3/createRoom" | jget room_id)"                                "$DM"
 check "dm-alias-survives"       "$(curl -s "${A[@]}" "$BASE/_matrix/client/v1/directory/room/%23dm.alice.bob:localhost" | jget room_id)" "$DM"
+
+# ---- the family room + groups across the reboot (plan 0018) ------------------
+# `Family.ensure()` at boot must CONVERGE on the replayed room (the stamp wins),
+# never mint a second one; the group get-or-extend is keyed on its replayed
+# stamp; membership and the no-leave rule are served back.
+check "family-room-survives"    "$(curl -s "${A[@]}" "$BASE/_matrix/client/v1/directory/room/%23family:localhost" | jget room_id)" "$FAM"
+check "family-stamp-survives"   "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
+                                    | python3 -c 'import json,sys
+st=json.load(sys.stdin)["rooms"]["join"]["'"$FAM"'"]["state"]["events"]
+print(any(e["type"]=="net.wata.family" for e in st))')" "True"
+check "family-bob-joined"       "$(curl -s "${B[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
+                                    | python3 -c 'import json,sys; print("'"$FAM"'" in json.load(sys.stdin).get("rooms",{}).get("join",{}))')" "True"
+check "family-no-leave"         "$(curl -s -o /dev/null -w '%{http_code}' -X POST "${A[@]}" "$BASE/_matrix/client/v3/rooms/$FAM/leave")" "403"
+check "group-room-survives"     "$(curl -s -X POST "${A[@]}" -d '{"name":"trip"}' "$BASE/_wata/v1/group" | jget room_id)" "$GR"
+check "group-stamp-survives"    "$(curl -s "${B[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
+                                    | python3 -c 'import json,sys
+st=json.load(sys.stdin)["rooms"]["join"]["'"$GR"'"]["state"]["events"]
+print([e["content"].get("name") for e in st if e["type"]=="net.wata.group"]==["trip"])')" "True"
 
 check "favorite-set"            "$FAVSET"                                                                                  "True"
 check "favorite-survives"       "$(curl -s "${A[@]}" "$BASE/_matrix/client/v3/sync?timeout=0" \
