@@ -1,6 +1,6 @@
 # 0021 — the admin web interface
 
-Status: accepted
+Status: accepted (A, B landed; C added by owner ruling 2026-08-05)
 
 ## Problem
 
@@ -88,6 +88,30 @@ handler surface is one mux on both listeners.
   stay in plan 0014 and unblock separately; the QR encodes
   `http://<server>/admin#enroll/<nodeId>/<nonce>` so the stock camera
   app lands the parent on the approval row after login.
+
+**Milestone C — first-run setup (owner ruling 2026-08-05: acceptance
+is "start from an empty install and do the initial admin flow").**
+
+- **Setup mode**: when `WATA_USERS` is SET but the file is missing or
+  holds zero accounts, the server is in setup mode — `/admin` serves a
+  create-the-admin-account screen, and `POST /_wata/v1/admin/setup
+  {user, password, displayname}` (unauthenticated, valid ONLY in setup
+  mode) creates that account with the admin flag, writes the file
+  (hashed, atomic, 0600), and ends setup mode in the same operation —
+  first-comer-claims on the LAN, router-style; the window closes with
+  the first write. Every other admin route answers 503 during setup so
+  nothing half-works without an account.
+- **The fallback pair narrows to harness mode**: alice/bob apply only
+  when `WATA_USERS` is UNSET (every harness runs that way). A real
+  install always sets it, so a real install never has a baked-in
+  credential.
+- **The install stops seeding accounts**: `tools/server-service.py`'s
+  template no longer writes placeholder users; a fresh install boots
+  into setup mode. `server-selftest` covers the setup round-trip.
+- Acceptance (owner-run): wipe/point at an empty prefix, install,
+  browse `/admin`, create the admin account + password, log in, create
+  a member account, reboot the service, both survive; the users file
+  holds only hashes.
 
 ## What changes (file-level)
 
