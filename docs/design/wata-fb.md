@@ -268,6 +268,20 @@ stable **ids** rather than menu positions — `itemAt` maps a position to
 an id, so inserting Enroll after Network shifts no id and invalidates
 no golden of a plain-TCP device.
 
+**Every one of those reads is CACHED, together, on one countdown.** The
+screen is a `wataui` body (plan 0024), and a body reads its arguments and
+nothing else — so nothing on the render path may touch a sysfs node, the
+modem, the interface table or the environment. `SettingsLogic.refreshDiag`
+reads all eight (`readDiag` -> `DiagSnap`: the wlan0 address, the ppp0 link
+and signal, the ppp0 address, the wifi state, the battery percentage,
+uptime, free memory, and whether this handset has an identity to enroll)
+every `DIAG_REFRESH` frames — ~5s, system-menu's own refresh cadence —
+and the applet's state carries the answers. One record because they share
+one cadence; reading half of them per frame and half every five seconds
+would be two policies for one idea. `enrol` is the one field seeded at
+construction, because the MENU SHAPE depends on it and an input event can
+reach the menu before the first refresh does.
+
 Three rules hold this together:
 
 - **`Diag.onDevice()` gates every read and every command** (it probes

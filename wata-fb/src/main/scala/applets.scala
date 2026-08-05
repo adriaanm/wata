@@ -934,11 +934,37 @@ case class EchoPlaying() extends EchoState
 case class EchoDone() extends EchoState
 case class EchoErr() extends EchoState
 
+/** every diagnostic the settings applet shows, read TOGETHER on `refreshDiag`'s
+ *  countdown. All of them are AMBIENT reads — sysfs nodes, a modem call, the
+ *  interface table, the environment — and a body reads its arguments and
+ *  nothing else, so they are cached in the applet's state rather than read by
+ *  the screen that draws them. One record because they share one cadence:
+ *  reading half of them per frame and half every five seconds would be two
+ *  policies for one idea.
+ *
+ *  `battery` is -1 where sysfs has no battery node (every dev host), which is
+ *  how the Device Info line knows to leave the percentage out; the text fields
+ *  answer `Diag.UNAVAILABLE` in the same situation. `enrol` is whether this
+ *  handset has an identity to enroll — decided from the environment, so
+ *  constant for a run, and the one field seeded at construction, because the
+ *  MENU SHAPE depends on it and input reaches the menu before the first
+ *  refresh does. */
+case class DiagSnap(
+  ip: String,
+  cell: String,
+  cellAddr: String,
+  wifi: String,
+  battery: scala.Int,
+  uptime: String,
+  mem: String,
+  enrol: Boolean
+)
+
 /** `armed` is the action-row confirmation latch: OK on a power row or a
  *  toggle arms it, a second OK runs the action, any other key drops it.
- *  `ipText`/`cellText`/`wifiText` are the diagnostics rows' cached values,
- *  re-read by `refreshDiag` every `DIAG_REFRESH` frames (`diagLeft` counts
- *  down to the next read). `netLine1`/`netLine2` hold the last net test's
+ *  `diag` is the cached diagnostics, re-read by `refreshDiag` every
+ *  `DIAG_REFRESH` frames (`diagLeft` counts down to the next read).
+ *  `netLine1`/`netLine2` hold the last net test's
  *  verdicts ("" = never run this session) and `actionMsg` the last toggle's
  *  failure text — an action that did not do what the row says it does has to
  *  say so rather than leave the row looking untouched. `enrolOpen` is the one
@@ -951,9 +977,7 @@ case class SettingsState(
   screenTimeoutIdx: scala.Int,
   connected: Boolean,
   armed: Boolean,
-  ipText: String,
-  cellText: String,
-  wifiText: String,
+  diag: DiagSnap,
   netLine1: String,
   netLine2: String,
   actionMsg: String,
@@ -1005,28 +1029,25 @@ object SettingsLogic:
   val REBOOT_EDL = 12
   val ENROLL = 13
 
-  /** does this handset have an identity to enroll (i.e. is it configured for
-   *  iroh)? Decided from the environment, so it is constant for a run. */
-  def enrolAvailable(): Boolean = Enrol.configured()
-
-  /** how many rows the menu has this run. */
-  def nItems(): scala.Int =
+  /** how many rows the menu has this run — one more on a handset with an
+   *  identity to enroll. */
+  def nItems(s: SettingsState): scala.Int =
     var n = N_BASE
-    if enrolAvailable() then n = N_BASE + 1
+    if s.diag.enrol then n = N_BASE + 1
     n
 
   /** the item id shown at menu POSITION `i`. Enroll sits right after Network,
    *  where a parent looking for "how do I get this thing online" will find it
    *  — not after the reboot rows. Everything below it shifts down by one
    *  position while keeping its id. */
-  def itemAt(i: scala.Int): scala.Int =
-    if !enrolAvailable() then i
+  def itemAt(s: SettingsState, i: scala.Int): scala.Int =
+    if !s.diag.enrol then i
     else if i <= DISCONNECT then i
     else if i == DISCONNECT + 1 then ENROLL
     else i - 1
 
   /** the item id the selection is on. */
-  def cur(s: SettingsState): scala.Int = itemAt(s.selected)
+  def cur(s: SettingsState): scala.Int = itemAt(s, s.selected)
 
   /** menu rows visible at once — the menu is a scrolling window now that the
    *  item count outgrew the grid (six two-row items + the two detail rows).
@@ -1052,13 +1073,26 @@ object SettingsLogic:
   val DETAIL_ROW = 13
 
   def initial(): SettingsState =
-    SettingsState(0, 40, EchoIdle(), 1, true, false, "", "", "", "", "", "", 0, false)
+    SettingsState(0, 40, EchoIdle(), 1, true, false, noDiag(), "", "", "", 0, false)
 
   /** the boot state: preferences come back from the config store, so a device
    *  keeps the backlight and timeout its owner set. */
   def restored(p: FbPrefs): SettingsState =
     SettingsState(0, p.brightness, EchoIdle(), p.timeoutIdx, true, false,
-      "", "", "", "", "", "", 0, false)
+      noDiag(), "", "", "", 0, false)
+
+  /** nothing read yet — the first `refreshDiag` fills it in on the first frame
+   *  (`diagLeft` starts at 0). `enrol` is the exception: it decides how many
+   *  rows the menu has, and an input event can reach the menu before an update
+   *  does, so it is read here. */
+  def noDiag(): DiagSnap = DiagSnap("", "", "", "", -1, "", "", Enrol.configured())
+
+  /** all eight diagnostics, read together. Off-device every one of them answers
+   *  a constant ("n/a", -1, ""), which is what keeps the frames the goldens pin
+   *  independent of when a refresh lands. */
+  def readDiag(): DiagSnap =
+    DiagSnap(Diag.wlanIp(), Diag.cellData(), Diag.cellAddr(), Diag.wifiState(),
+      Led.readBatteryPercent(), Diag.uptime(), Diag.memAvail(), Enrol.configured())
 
   def getScreenTimeout(s: SettingsState): scala.Int = timeoutSecs(s.screenTimeoutIdx)
   def getBrightness(s: SettingsState): scala.Int = s.brightness
@@ -1066,35 +1100,34 @@ object SettingsLogic:
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
     SettingsState(sel, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
     SettingsState(s.selected, b, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
     SettingsState(s.selected, s.brightness, e, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, i, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, c,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withArmed(s: SettingsState, a: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      a, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
-  def withDiag(s: SettingsState, ip: String, cell: String, wifi: String, left: scala.Int): SettingsState =
+      a, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+  def withDiag(s: SettingsState, d: DiagSnap, left: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, ip, cell, wifi, s.netLine1, s.netLine2, s.actionMsg, left, s.enrolOpen)
+      s.armed, d, s.netLine1, s.netLine2, s.actionMsg, left, s.enrolOpen)
   def withNetTest(s: SettingsState, l1: String, l2: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, l1, l2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, l1, l2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withEnrolOpen(s: SettingsState, o: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg,
-      s.diagLeft, o)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, o)
   def withActionMsg(s: SettingsState, m: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, m, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, m, s.diagLeft, s.enrolOpen)
 
   // ---- input (press-only) ------------------------------------------------------
   /** every key goes through `persisted`, so the three stored preferences are
@@ -1145,7 +1178,7 @@ object SettingsLogic:
 
   def moveDown(s: SettingsState): SettingsState =
     var out = s
-    if s.selected < nItems() - 1 then out = withSelected(s, s.selected + 1)
+    if s.selected < nItems(s) - 1 then out = withSelected(s, s.selected + 1)
     out
 
   def onEnter(s: SettingsState, ctx: FrameCtx): SettingsState =
@@ -1191,7 +1224,7 @@ object SettingsLogic:
     else Diag.rebootEdl()
 
   def toggleWifi(s: SettingsState): String =
-    if isOn(s.wifiText) then Diag.wifiStop() else Diag.wifiStart()
+    if isOn(s.diag.wifi) then Diag.wifiStop() else Diag.wifiStart()
 
   /** the data toggle acts once per OK and NEVER retries: this modem accepts a
    *  single data call per boot, so a hidden second attempt would spend it. */
@@ -1199,14 +1232,14 @@ object SettingsLogic:
     if dataOn(s) then Diag.dataStop() else Diag.dataStart()
 
   def isOn(t: String): Boolean = t == "ON"
-  def dataOn(s: SettingsState): Boolean = s.cellText.startsWith("up")
+  def dataOn(s: SettingsState): Boolean = s.diag.cell.startsWith("up")
 
   /** the data row's ON/OFF, derived from the same cellular text the info row
    *  shows ("n/a" off-device, so the toggle reads "n/a" too). */
   def dataState(s: SettingsState): String =
     var out = Diag.UNAVAILABLE
-    if s.cellText.startsWith("up") then out = "ON"
-    else if s.cellText.startsWith("off") then out = "OFF"
+    if s.diag.cell.startsWith("up") then out = "ON"
+    else if s.diag.cell.startsWith("off") then out = "OFF"
     out
 
   /** the net test is synchronous — a few seconds of pings block the frame
@@ -1280,8 +1313,8 @@ object SettingsLogic:
    *  both reads answer a constant "n/a", which keeps the frames the goldens
    *  pin independent of when a refresh lands. */
   def refreshDiag(s: SettingsState): SettingsState =
-    if s.diagLeft > 0 then withDiag(s, s.ipText, s.cellText, s.wifiText, s.diagLeft - 1)
-    else withDiag(s, Diag.wlanIp(), Diag.cellData(), Diag.wifiState(), DIAG_REFRESH)
+    if s.diagLeft > 0 then withDiag(s, s.diag, s.diagLeft - 1)
+    else withDiag(s, readDiag(), DIAG_REFRESH)
 
   /** one echo event, routed here by `Shell.routeAudio`; the catch-all is
    *  unreachable (wata events route to the wata applet). */
@@ -1292,33 +1325,115 @@ object SettingsLogic:
     case _: AeEchoError     => withEcho(s, EchoErr())
     case _                  => s // wata events (unreachable)
 
-  // ---- render --------------------------------------------------------------------
-  /** the enrolment screen takes the whole frame when it is open — it is a QR
-   *  code, and the menu behind it would only steal pixels from the modules. */
+  // ---- render (a `wataui` body — plan 0024) ---------------------------------------
+  /** the whole applet is ONE body. Everything ambient it needs was cached into
+   *  `s.diag` by `refreshDiag` frames ago, so the only reads left here are the
+   *  enrolment screen's — which is also where this applet's one render-path
+   *  EFFECT lives (`announceOnce`, once per session, spawned). */
   def render(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
-    if s.enrolOpen then renderEnrol(px)
+    FbPaint.draw(px, body(s, enrolSnap(s)))
+
+  def enrolSnap(s: SettingsState): Option[EnrolSnap] =
+    if !s.enrolOpen then None
     else
-      renderMenu(s, px)
-      renderDetail(s, px, ctx)
+      Enrol.announceOnce()
+      Some(Enrol.snap("BACK to close"))
 
-  /** the ambient reads and the announce stay at the call site; the screen
-   *  itself is `Enrol.body` (plan 0024). */
-  def renderEnrol(px: go.Bytes): Unit =
-    Enrol.announceOnce()
-    FbPaint.draw(px, Enrol.body(Enrol.snap("BACK to close")))
+  /** two screens: the menu, and the enrolment QR that takes the whole frame
+   *  while it is open — it is a QR code, and the menu behind it would only
+   *  steal pixels from the modules. */
+  def body(s: SettingsState, enrol: Option[EnrolSnap]): View =
+    enrol match
+      case e: Some[EnrolSnap] => Enrol.body(e.value)
+      case None               => menuView(s)
 
-  def renderMenu(s: SettingsState, px: go.Bytes): Unit =
-    Font.drawText(px, "SETTINGS", 0, 0, Color.cyan, false, 0)
+  def menuView(s: SettingsState): View =
     val start = windowStart(s)
+    VGroup(Keyed("title", VText(0, 0, "SETTINGS", Color.cyan)) ::
+      (Keyed("rows", rowsView(s, start)) ::
+        (Keyed("cues", cuesView(s, start)) ::
+          (Keyed("detail", detailView(s)) :: Nil))))
+
+  /** the visible window of menu rows, KEYED ON THE ITEM ID — the stable id, not
+   *  the position, so the conditional Enroll row appearing renames nothing
+   *  below it. */
+  def rowsView(s: SettingsState, start: scala.Int): View =
+    var acc: List[Keyed] = Nil
     var i = start
     while i < start + VISIBLE do
-      val row = 2 + (i - start) * 2
-      val sel = i == s.selected
-      if sel then Draw.fillRect(px, 0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)
-      val fg = if sel then Color.black else Color.green
-      renderItem(s, px, itemAt(i), row, fg)
+      val id = itemAt(s, i)
+      acc = Keyed("item" + id, itemView(s, id, 2 + (i - start) * 2, i == s.selected)) :: acc
       i += 1
-    renderScrollCues(px, start)
+    VGroup(ListOps.reverse(acc))
+
+  /** a row: the selection highlight FIRST (children paint in list order), the
+   *  label in column 0, and the row's value — a state, a setting, a reading —
+   *  in the column that item keeps it in. A row with nothing to show on the
+   *  right is label-only. */
+  def itemView(s: SettingsState, i: scala.Int, row: scala.Int, sel: Boolean): View =
+    val fg = if sel then Color.black else Color.green
+    var kids: List[Keyed] = Nil
+    if sel then
+      kids = Keyed("hl", VRect(0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)) :: kids
+    kids = Keyed("label", VText(0, row, itemLabel(i), fg)) :: kids
+    val v = itemValue(s, i)
+    if v != "" then kids = Keyed("value", VText(valueCol(i), row, v, valueColor(s, i, fg))) :: kids
+    VGroup(ListOps.reverse(kids))
+
+  def itemLabel(i: scala.Int): String =
+    if i == ECHO then "Audio Echo"
+    else if i == BRIGHTNESS then "Brightness"
+    else if i == SCREEN_OFF then "Screen off"
+    else if i == DISCONNECT then "Network"
+    else if i == ENROLL then "Enroll"
+    else if i == INFO then "Device Info"
+    else if i == IP_ADDR then "IP"
+    else if i == CELL_DATA then "Cell data"
+    else if i == NET_TEST then "Net test"
+    else if i == WIFI_TOGGLE then "Wifi"
+    else if i == DATA_TOGGLE then "Data link"
+    else if i == POWER_OFF then "Power off"
+    else if i == REBOOT_BL then "Reboot to BL"
+    else "Reboot to EDL"
+
+  /** the row's right-hand value; "" for the rows that are a label alone (Device
+   *  Info and the three power actions, whose whole content is in the detail
+   *  block). The two long readings are clipped to what is left of the row. */
+  def itemValue(s: SettingsState, i: scala.Int): String =
+    if i == ECHO then echoStatus(s.echo)
+    else if i == BRIGHTNESS then "" + s.brightness + "/40"
+    else if i == SCREEN_OFF then timeoutLabel(s.screenTimeoutIdx)
+    else if i == DISCONNECT then netLabel(s)
+    else if i == ENROLL then "OK=QR"
+    else if i == IP_ADDR then WataLogic.clip(s.diag.ip, 21)
+    else if i == CELL_DATA then WataLogic.clip(s.diag.cell, 14)
+    else if i == NET_TEST then netTestStatus(s)
+    else if i == WIFI_TOGGLE then s.diag.wifi
+    else if i == DATA_TOGGLE then dataState(s)
+    else ""
+
+  def netLabel(s: SettingsState): String =
+    var out = "OFF"
+    if s.connected then out = "ON"
+    out
+
+  /** where each row's value starts — the column its label leaves free. */
+  def valueCol(i: scala.Int): scala.Int =
+    if i == BRIGHTNESS then 14
+    else if i == ECHO || i == SCREEN_OFF then 12
+    else if i == IP_ADDR then 4
+    else 11
+
+  /** values take the row's color, except the two that ARE a verdict: a failed
+   *  echo is red, and the network row's ON/OFF is green/red whether or not the
+   *  row is selected. */
+  def valueColor(s: SettingsState, i: scala.Int, fg: scala.Int): scala.Int =
+    var out = fg
+    if i == ECHO && isEchoErr(s.echo) then out = Color.red
+    if i == DISCONNECT then
+      out = Color.red
+      if s.connected then out = Color.green
+    out
 
   /** first visible item: 0 until the selection passes the window's last row,
    *  then whatever keeps it on the last row (derived, not stored — see
@@ -1330,119 +1445,61 @@ object SettingsLogic:
 
   /** "^"/"v" in the last column of the first/last menu rows when the window
    *  has items above/below it. */
-  def renderScrollCues(px: go.Bytes, start: scala.Int): Unit =
-    if start > 0 then Font.drawText(px, "^", 25, 2, Color.midGray, false, 0)
-    if start + VISIBLE < nItems() then
-      Font.drawText(px, "v", 25, 2 + (VISIBLE - 1) * 2, Color.midGray, false, 0)
-
-  def renderItem(s: SettingsState, px: go.Bytes, i: scala.Int, row: scala.Int, fg: scala.Int): Unit =
-    if i == ECHO then
-      Font.drawText(px, "Audio Echo", 0, row, fg, false, 0)
-      var statusFg = fg
-      if isEchoErr(s.echo) then statusFg = Color.red
-      Font.drawText(px, echoStatus(s.echo), 12, row, statusFg, false, 0)
-    else if i == BRIGHTNESS then
-      Font.drawText(px, "Brightness", 0, row, fg, false, 0)
-      Font.drawText(px, "" + s.brightness + "/40", 14, row, fg, false, 0)
-    else if i == SCREEN_OFF then
-      Font.drawText(px, "Screen off", 0, row, fg, false, 0)
-      Font.drawText(px, timeoutLabel(s.screenTimeoutIdx), 12, row, fg, false, 0)
-    else if i == DISCONNECT then
-      Font.drawText(px, "Network", 0, row, fg, false, 0)
-      var netTxt = "OFF"
-      var netFg = Color.red
-      if s.connected then
-        netTxt = "ON"
-        netFg = Color.green
-      Font.drawText(px, netTxt, 11, row, netFg, false, 0)
-    else if i == ENROLL then
-      Font.drawText(px, "Enroll", 0, row, fg, false, 0)
-      Font.drawText(px, "OK=QR", 11, row, fg, false, 0)
-    else if i == INFO then
-      Font.drawText(px, "Device Info", 0, row, fg, false, 0)
-    else if i == IP_ADDR then
-      Font.drawText(px, "IP", 0, row, fg, false, 0)
-      Font.drawText(px, WataLogic.clip(s.ipText, 21), 4, row, fg, false, 0)
-    else if i == CELL_DATA then
-      Font.drawText(px, "Cell data", 0, row, fg, false, 0)
-      Font.drawText(px, WataLogic.clip(s.cellText, 14), 11, row, fg, false, 0)
-    else if i == NET_TEST then
-      Font.drawText(px, "Net test", 0, row, fg, false, 0)
-      Font.drawText(px, netTestStatus(s), 11, row, fg, false, 0)
-    else if i == WIFI_TOGGLE then
-      Font.drawText(px, "Wifi", 0, row, fg, false, 0)
-      Font.drawText(px, s.wifiText, 11, row, fg, false, 0)
-    else if i == DATA_TOGGLE then
-      Font.drawText(px, "Data link", 0, row, fg, false, 0)
-      Font.drawText(px, dataState(s), 11, row, fg, false, 0)
-    else if i == POWER_OFF then
-      Font.drawText(px, "Power off", 0, row, fg, false, 0)
-    else if i == REBOOT_BL then
-      Font.drawText(px, "Reboot to BL", 0, row, fg, false, 0)
-    else
-      Font.drawText(px, "Reboot to EDL", 0, row, fg, false, 0)
+  def cuesView(s: SettingsState, start: scala.Int): View =
+    var kids: List[Keyed] = Nil
+    if start + VISIBLE < nItems(s) then
+      kids = Keyed("down", VText(25, 2 + (VISIBLE - 1) * 2, "v", Color.midGray)) :: kids
+    if start > 0 then kids = Keyed("up", VText(25, 2, "^", Color.midGray)) :: kids
+    VGroup(kids)
 
   /** the selected item's detail, on the two grid rows left below the menu. */
-  def renderDetail(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
-    val row = DETAIL_ROW
+  def detailView(s: SettingsState): View =
     val i = cur(s)
-    if i == ENROLL then
-      Font.drawText(px, "OK shows the QR code", 0, row, Color.midGray, false, 0)
-      Font.drawText(px, "a parent scans to add", 0, row + 1, Color.midGray, false, 0)
-    else if i == INFO then
-      renderBattery(px, row)
-      Font.drawText(px, "Mem:" + Diag.memAvail() + " wata-fb", 0, row + 1, Color.midGray, false, 0)
-    else if i == ECHO then
-      Font.drawText(px, "Records 2s, plays", 0, row, Color.midGray, false, 0)
-      Font.drawText(px, "back thru speaker", 0, row + 1, Color.midGray, false, 0)
-    else if i == DISCONNECT then
-      if s.connected then Font.drawText(px, "OK to disconnect", 0, row, Color.midGray, false, 0)
-      else Font.drawText(px, "Restart to reconn", 0, row, Color.midGray, false, 0)
-    else if i == BRIGHTNESS then
-      Font.drawText(px, "</> adjust", 0, row, Color.midGray, false, 0)
-    else if i == SCREEN_OFF then
-      Font.drawText(px, "</> timeout", 0, row, Color.midGray, false, 0)
-      Font.drawText(px, "Any key wakes", 0, row + 1, Color.midGray, false, 0)
-    else if i == IP_ADDR then
-      Font.drawText(px, "wlan0 IPv4 address", 0, row, Color.midGray, false, 0)
-    else if i == CELL_DATA then
-      Font.drawText(px, "ppp0 link + signal", 0, row, Color.midGray, false, 0)
-      renderCellAddr(px, row + 1)
-    else if i == NET_TEST then
-      renderNetTestDetail(s, px, row)
-    else
-      renderActionDetail(s, px, row)
+    if i == ENROLL then twoLines("OK shows the QR code", "a parent scans to add")
+    else if i == INFO then lines(batteryLine(s), Color.midGray,
+      "Mem:" + s.diag.mem + " wata-fb", Color.midGray)
+    else if i == ECHO then twoLines("Records 2s, plays", "back thru speaker")
+    else if i == DISCONNECT then twoLines(connectDetail(s), "")
+    else if i == BRIGHTNESS then twoLines("</> adjust", "")
+    else if i == SCREEN_OFF then twoLines("</> timeout", "Any key wakes")
+    else if i == IP_ADDR then twoLines("wlan0 IPv4 address", "")
+    else if i == CELL_DATA then twoLines("ppp0 link + signal", cellAddrLine(s))
+    else if i == NET_TEST then netTestDetail(s)
+    else actionDetail(s)
 
-  /** the ppp0 address, which the row itself has no room for next to the
-   *  signal strength; nothing to draw when the link is down. */
-  def renderCellAddr(px: go.Bytes, row: scala.Int): Unit =
-    val addr = Diag.cellAddr()
-    if addr != "" then Font.drawText(px, "ppp0 " + addr, 0, row, Color.midGray, false, 0)
+  /** the detail block's two rows, in the color everything but a warning uses. */
+  def twoLines(l1: String, l2: String): View = lines(l1, Color.midGray, l2, Color.midGray)
+
+  def lines(l1: String, c1: scala.Int, l2: String, c2: scala.Int): View =
+    var kids: List[Keyed] = Nil
+    if l2 != "" then kids = Keyed("d2", VText(0, DETAIL_ROW + 1, l2, c2)) :: kids
+    if l1 != "" then kids = Keyed("d1", VText(0, DETAIL_ROW, l1, c1)) :: kids
+    VGroup(kids)
+
+  def connectDetail(s: SettingsState): String =
+    if s.connected then "OK to disconnect" else "Restart to reconn"
+
+  /** the ppp0 address, which the row itself has no room for next to the signal
+   *  strength; nothing to draw when the link is down. */
+  def cellAddrLine(s: SettingsState): String =
+    if s.diag.cellAddr == "" then "" else "ppp0 " + s.diag.cellAddr
 
   /** before a run, what OK will do; after one, the four verdicts. */
-  def renderNetTestDetail(s: SettingsState, px: go.Bytes, row: scala.Int): Unit =
-    if s.netLine1 == "" then
-      Font.drawText(px, "OK pings gw/DNS", 0, row, Color.midGray, false, 0)
-      Font.drawText(px, "takes a few seconds", 0, row + 1, Color.midGray, false, 0)
-    else
-      Font.drawText(px, s.netLine1, 0, row, Color.midGray, false, 0)
-      Font.drawText(px, s.netLine2, 0, row + 1, Color.midGray, false, 0)
+  def netTestDetail(s: SettingsState): View =
+    if s.netLine1 == "" then twoLines("OK pings gw/DNS", "takes a few seconds")
+    else twoLines(s.netLine1, s.netLine2)
 
   /** the action rows' detail doubles as the confirmation prompt: unarmed it
    *  says what OK starts, armed it says what the NEXT OK does — in red, with
    *  the escape route on the second line. A run that reported something (a
    *  failed toggle, or the off-device no-op) shows that instead, in red,
    *  until the next keypress. */
-  def renderActionDetail(s: SettingsState, px: go.Bytes, row: scala.Int): Unit =
+  def actionDetail(s: SettingsState): View =
     if s.actionMsg != "" then
-      Font.drawText(px, WataLogic.clip(s.actionMsg, 26), 0, row, Color.red, false, 0)
-      Font.drawText(px, "not retried", 0, row + 1, Color.midGray, false, 0)
+      lines(WataLogic.clip(s.actionMsg, 26), Color.red, "not retried", Color.midGray)
     else if s.armed then
-      Font.drawText(px, "OK again: " + actionVerb(s), 0, row, Color.red, false, 0)
-      Font.drawText(px, "other keys cancel", 0, row + 1, Color.midGray, false, 0)
-    else
-      Font.drawText(px, "OK arms " + actionVerb(s), 0, row, Color.midGray, false, 0)
-      Font.drawText(px, "then OK again runs", 0, row + 1, Color.midGray, false, 0)
+      lines("OK again: " + actionVerb(s), Color.red, "other keys cancel", Color.midGray)
+    else twoLines("OK arms " + actionVerb(s), "then OK again runs")
 
   /** what the armed OK would do — for a toggle that is the OPPOSITE of the
    *  state the row shows. */
@@ -1451,7 +1508,7 @@ object SettingsLogic:
     if i == POWER_OFF then "power off"
     else if i == REBOOT_BL then "reboot to BL"
     else if i == REBOOT_EDL then "reboot to EDL"
-    else if i == WIFI_TOGGLE then toggleVerb("wifi", isOn(s.wifiText))
+    else if i == WIFI_TOGGLE then toggleVerb("wifi", isOn(s.diag.wifi))
     else toggleVerb("data", dataOn(s))
 
   def toggleVerb(what: String, on: Boolean): String =
@@ -1459,15 +1516,14 @@ object SettingsLogic:
     if on then out = what + " off"
     out
 
-  /** Device Info's two lines: battery + uptime, then free memory next to what
-   *  is running. sysfs has no battery node off-device, and
-   *  `readBatteryPercent` says so with -1 rather than by failing — the
-   *  battery part is simply left out then, and uptime/memory answer "n/a". */
-  def renderBattery(px: go.Bytes, row: scala.Int): Unit =
-    val pct = Led.readBatteryPercent()
-    var line = "Up:" + Diag.uptime()
-    if pct >= 0 then line = "Bat:" + pct + "% " + line
-    Font.drawText(px, line, 0, row, Color.midGray, false, 0)
+  /** Device Info's first line: battery + uptime. sysfs has no battery node
+   *  off-device, and `readBatteryPercent` says so with -1 rather than by
+   *  failing — the battery part is simply left out then, and uptime answers
+   *  "n/a". */
+  def batteryLine(s: SettingsState): String =
+    var line = "Up:" + s.diag.uptime
+    if s.diag.battery >= 0 then line = "Bat:" + s.diag.battery + "% " + line
+    line
 
   /** the net-test row's own value: what OK does, or that it has run (the
    *  verdicts themselves need the detail block's width). */

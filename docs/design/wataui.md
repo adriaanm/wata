@@ -150,6 +150,15 @@ walk as the pixels whose module lies outside the grid. The grid crosses
 into the body as the portable `Bytes`, so the screen names no `go.*`
 type at all.
 
+**The settings applet is the purity rule's real test.** Its screen used to
+read a sysfs battery node, `/proc/meminfo`, the ppp0 address and the
+environment while painting. None of those became body parameters: they
+joined the cached diagnostics the applet already refreshed on a countdown
+(`DiagSnap` in its state), so the body is a function of the applet's own
+state and one option. Ambient reads a screen needs belong on a cadence
+someone owns, not in the painter — that is the same answer the connectivity
+element got, and the argument list is the tell.
+
 **A selected row is a group whose first child is its highlight.** The
 immediate-mode painter filled the highlight rectangle and then drew the
 row's text over it; as data that ordering is the child list's, since
