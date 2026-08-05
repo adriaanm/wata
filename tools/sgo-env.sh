@@ -33,9 +33,20 @@ _sgo_go_pin="$(sed -n 's/^SGOLA_GO_PIN="\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p' "$SGOLA
 # sgola's own go.work must not capture wata's modules.
 export GOWORK=off
 
+# EXTERNAL GO DEPS (plan 0014, rsc.io/qr). `sgo`'s go.mod stage writes a
+# require+replace per `godep` and nothing else — the emitted app module gets no
+# go.sum and no line for a godep's own upstream requirements, so a fetched
+# transitive dep fails with "missing go.sum entry". `-mod=mod` lets the go
+# build stage add both to the GENERATED module; the authoritative go.sum is the
+# one committed in the go-pkgs module that declares the require. Mirrors
+# tools/toolchain.py's build_env (sgola ticket GOMOD-TRANSITIVE-SUM).
+export GOFLAGS=-mod=mod
+
 # The driver. json and wataclient resolve as ordinary in-tree author modules
 # (sgo searches the declaring module's parent dir, then the toolchain home), so
-# nothing else needs setting up — no module proxy, no populated module cache.
+# nothing else needs setting up for THOSE. Go module dependencies are ordinary
+# Go dependencies and may be fetched (GOPROXY is left at whatever the host has,
+# i.e. proxy.golang.org by default).
 SGO="${SGO:-$SGOLA_HOME/sgo/sgo}"
 if [ ! -x "$SGO" ]; then
   echo "sgo-env: building the sgo driver…" >&2

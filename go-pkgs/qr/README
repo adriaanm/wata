@@ -1,0 +1,21 @@
+go-pkgs/qr — the QR encoder behind the device's enrolment screen
+===============================================================
+
+`rsc.io/qr` (BSD 3-clause, https://github.com/rsc/qr) is used as an ORDINARY
+GO DEPENDENCY: a normal `require` in go.mod with a committed go.sum, fetched
+through the module proxy like any Go project. Plan 0014's revised ruling —
+external deps are to be exercised, not vendored around.
+
+This module is a THIN ADAPTER and nothing else. It exists because:
+
+  * the device draws QR modules straight into an RGB565 framebuffer, so it
+    wants the module grid, not `qr.Code`'s PNG or image.Image; and
+  * a Sgola facade binds one result plus an error, so `Matrix` collapses
+    (bitmap, size, stride) into one flat row-major byte slice whose side is
+    the integer square root of its length; and
+  * `wata-fb/sgo.build`'s `godep` names a LOCAL directory, so an upstream
+    package reaches the emitted app through a local module that requires it.
+
+matrix.go is the whole of it. `wata-fb/src/main/scala/qr.scala` is the facade.
+
+UPDATING: `go get rsc.io/qr@<version> && go mod tidy` here, then rebuild.

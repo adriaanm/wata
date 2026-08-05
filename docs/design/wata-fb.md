@@ -257,6 +257,14 @@ about what "Data: off" means:
 | Wifi | ON/OFF, OK toggles | `rc-service wifi start` / `stop`; the state is whether wlan0 exists |
 | Data link | ON/OFF, OK toggles | `pppd call cellular &` / `killall pppd`; the state is the same ppp0 read the info row does |
 | Power off / Reboot to BL / Reboot to EDL | OK arms, OK again runs | `poweroff`, `/usr/local/bin/reboot-bootloader`, `/usr/local/bin/reboot-edl` |
+| Enroll | OK opens the enrolment QR (Back closes) | nothing external — `enrol.scala`; see "Device identity and enrolment" |
+
+Enroll is the one CONDITIONAL row: it exists only when this handset is
+configured to speak iroh, i.e. when it has an identity that needs
+admitting. That is also why the item constants in `SettingsLogic` are
+stable **ids** rather than menu positions — `itemAt` maps a position to
+an id, so inserting Enroll after Network shifts no id and invalidates
+no golden of a plain-TCP device.
 
 Three rules hold this together:
 
@@ -469,6 +477,95 @@ the last of them being precisely that non-return; `boot-retry` and
 proves the recovery — its phase starts with NO server, the harness boots
 one four seconds in, and the SAME process walks into an ordinary
 session.
+
+### Device identity and enrolment
+
+`enrol.scala` — the device half of plan 0014. On a handset configured to speak
+iroh (`WATA_IROH_CONFIG` names a file), the transport's allowlist decides
+whether this device exists at all, and a brand-new device is not on it.
+
+**The identity is minted on the device.** A handset is deployed with an iroh
+config that names the family's server and carries **no secret**:
+
+```json
+{
+  "peer":      "<the family server's node id>",
+  "relay":     "n0",
+  "peerAddrs": ["192.168.1.4:52011"],
+  "adminUrl":  "http://192.168.1.4:8008"
+}
+```
+
+`Enrol.nodeId` calls `irohnet.EnsureKey` on first use: an ed25519 key is
+generated in the process, written into that same file (temp + rename, `0600`,
+every other field preserved), and only the **public node id** is returned. The
+call is idempotent, so re-deploying never re-mints an identity that is already
+enrolled, and it is tried exactly once per session — a config that cannot be
+written will not become writable between two frames, and retrying inside the
+render path would turn a broken deployment into a stuttering one. Nothing
+secret ever crosses the gap; enrolment is the approval of a public id.
+
+`adminUrl` is the base URL the enrolment QR encodes, overridden by
+`WATA_ADMIN_URL`. It is **config, never derived**: the device does not know an
+address a parent's phone can reach, and a guessed one produces a QR that leads
+nowhere. With neither set, the screen says so instead of encoding a dead link.
+
+**The QR screen** (`Enrol.render`) encodes
+`<adminUrl>/admin#enroll/<nodeId>/<nonce>` — about 106 bytes, which
+`go-pkgs/qr` — a thin adapter over `rsc.io/qr`, an ordinary fetched Go
+dependency, at level L — turns into a 37-module code.
+`Enrol.blit` centres it at the largest whole pixels-per-module that fits
+between the header and the code line: **2** on this panel, an 82x82 block, with
+a two-module quiet zone (the spec asks for four; two is what 160x128 can
+afford, and the extra pixel per module is what a camera actually needs). The
+block is white with black modules — a QR on a black background does not scan.
+Under it sit the typed code and one line of instruction.
+
+The nonce is minted once per session from the millisecond clock, four
+characters of an uppercase base-32 alphabet the server's `validNonce` accepts.
+It is a correlator, not a credential.
+
+**The typed code** is `<nonce>-<first 8 hex of the node id>` — the fallback for
+a screen too dim to scan. It **selects** a pending row on the admin page and
+cannot create one; the argument for why, and the resulting limitation (the
+typed path needs a device that could announce itself, i.e. one on the family
+network), is in `docs/design/wata-server.md` under Device enrolment.
+
+**Two ways in:**
+
+- **the boot state.** `WataLogic.renderContacts` draws `renderEnrolBoot`
+  instead of `renderBoot` when `Enrol.required()` — iroh is configured *and*
+  the transport has refused this node id outright. That refusal is
+  `irohnet.LastRefusal()` containing `not allowlisted`, the loud reason the
+  Rust layer formats and `Dialer.logDialError` records; it is a transport-level
+  verdict, so it never reaches the portable core (the `HttpDo` capability folds
+  every transport error into `HttpResponse(0, "")`) and it is read at the app
+  edge exactly like `FbCaps.transportUnavailable()`. It is not an extra
+  `ConnectionState`: `wataclient` cannot produce this verdict, so a case there
+  would have to be synthesised at the app edge anyway. Being refused is not a
+  network problem and no amount of waiting fixes it, so the calm "waiting for
+  network" line gives way to the QR.
+- **Settings -> Enroll**, offered whenever iroh is configured (`SettingsLogic`'s
+  `ENROLL` row, `enrolOpen` in `SettingsState`). Back closes it; nothing else
+  does, because a QR a stray keypress dismisses is a QR a parent has to go find
+  again mid-scan.
+
+**The announce is best-effort and rides the plain-TCP client.** Showing the
+screen posts `{nodeId, nonce}` to `<adminUrl>/_wata/v1/enroll` once per session
+(`FbCaps.plainHttp`, a 1.5s bound) — over TCP, because announcing over the iroh
+transport that just refused this device is the one thing that cannot work. It
+is silent on failure: with plan 0014's page-side-announce ruling the parent's
+phone posts the announce from the admin page anyway, so a failed announce costs
+only the typed-code fallback. Announcing rides the screen appearing rather than
+a keypress because nobody presses anything on a handset that has never
+connected.
+
+Goldens: the `enroll` uitest scenario (`alice-enroll.txt`) pins the
+not-allowlisted boot frame, the settings row, the QR opened from it, and the
+close. Both minted halves are pinned from the script (`enrolid`), and the
+refusal is forced (`enrolstate`) — a hermetic run cannot provoke a real iroh
+refusal. The admin URL is the harness's fixed `WATA_ADMIN_URL`, because the QR
+is a function of the exact bytes of that string.
 
 ### Quitting is two-step
 
@@ -1097,6 +1194,47 @@ removed), and runs the `login-syncing` integ scenario from the device
 over the LAN — direct addresses, no relay. It needs the hardware, so
 it is not part of `just ci`.
 
+### Deploying an iroh-mode device config, and the flip
+
+`tools/fb-deploy.sh` provisions the device's iroh config when
+`BQ268_IROH_PEER` is set:
+
+```
+BQ268_IROH_PEER=<the server's node id> WATA_ADMIN_URL=http://192.168.1.4:8008 \
+  tools/fb-deploy.sh
+```
+
+It writes `/etc/wata/iroh.json` (`0600`) with `peer`, `relay`
+(`BQ268_IROH_RELAY`, default `n0`) and `adminUrl` — **never a secretKey**, which
+the handset mints itself on first boot — leaves an existing file alone so a
+re-deploy cannot re-mint an enrolled identity, and runs the transient
+`/dev/shm` binary with `WATA_IROH_CONFIG` pointing at it.
+
+That is a RUN, not an install. **Making iroh the handset's permanent transport
+is a deliberate on-hardware step**, done once per device, and these are the
+exact commands:
+
+1. `wata-server` must be serving over iroh and reachable: start it with
+   `WATA_IROH_CONFIG` and `WATA_LISTEN` (the dual listener — no browser can
+   dial iroh, and `/admin` has to be loadable), and take its node id from the
+   `irohnet: node <id>` line it prints.
+2. Provision the device config once, exactly as fb-deploy does:
+   `ssh root@bq268 'mkdir -p /etc/wata && cat > /etc/wata/iroh.json'` with
+   `{"peer":"<server node id>","relay":"n0","adminUrl":"http://<server>:8008"}`,
+   then `chmod 600 /etc/wata/iroh.json`.
+3. Make the durable launcher pass it: `/opt/wata/start.sh` becomes
+   `exec env WATA_IROH_CONFIG=/etc/wata/iroh.json /opt/wata/wata-fb ui`. The
+   file lives in the `bq268-alpine` rootfs overlay, so a change that should
+   survive a reflash belongs there, not only on the running device.
+4. Reboot the handset. It mints its key, is refused (`401 not allowlisted`),
+   and shows the enrolment QR instead of "waiting for network".
+5. Scan it with a phone, sign in to `/admin`, approve the row. The device is
+   admitted with no server restart.
+
+Step 3 is the flip, and it is the only irreversible-feeling one: TCP-LAN
+remains the fallback transport and every harness's default, so undoing it is
+deleting `WATA_IROH_CONFIG` from `start.sh`.
+
 ## File-by-file map
 
 | file | lines | what it does |
@@ -1106,7 +1244,9 @@ it is not part of `just ci`.
 | `config.scala` | 266 | The session and preferences store: `$WATA_FB_CONFIG` / `/etc/wata/config.json` read and write over `go.sys`/`go.syscall`, `FbConfig.resolve` (the arguments-override-the-store rule every UI entry point builds its `ClientConfig` with), and `FbOutbox`, the slot-file `OutboxStore` under `<config dir>/outbox/`. |
 | `caps.scala` | 130 | App-edge implementations of `wataclient`'s `Clock` and `HttpDo` capability traits, over `go.time` and Go's `net/http`; `WATA_IROH_CONFIG=<json>` swaps the underlying client for the embedded iroh transport (plan 0013), nothing above the capability line changing. Every request carries a deadline (see "Request deadlines"). |
 | `httpc.scala` | 20 | The `go.httpc` facade over `go-pkgs/httpc` — an `*http.Client` with a `Timeout`, the one net/http field the bound facade does not carry. |
-| `irohnet.scala` | 20 | Sgola-side `@go.bind` facade over `go-pkgs/irohnet`: `newHTTPClient(config)`, an `*http.Client` whose connections are iroh streams (real with `-tags iroh` on darwin and linux/arm; loud-error stub elsewhere). |
+| `irohnet.scala` | 35 | Sgola-side `@go.bind` facade over `go-pkgs/irohnet`: `newHTTPClient(config)`, an `*http.Client` whose connections are iroh streams (real with `-tags iroh` on darwin and linux/arm; loud-error stub elsewhere); `ensureKey(config)`, the device-minted identity; `lastRefusal()`, the dial-refusal reason the enrolment screen reads. |
+| `qr.scala` | 18 | The `go.qr` facade over `go-pkgs/qr`, the thin adapter over the fetched `rsc.io/qr`: text in, the QR module grid out as one byte per module. |
+| `enrol.scala` | 333 | Device identity and enrolment: the minted node key, the session nonce, the admin URL, the QR screen's layout and blit, the typed code, and the best-effort plain-TCP announce. |
 | `audio.scala` | 88 | Sgola-side `@go.bind` facade over the `go-pkgs/audio` Go package: constants, `Encoder`/`Decoder`/`Capture` opaque handles, `setupMixer`, `playMessage`, `tone`, `stateName`. |
 | `display.scala` | 409 | RGB565 draw primitives (`Draw`), color constants (`Color`), the 5x8 bitmap font and glyph table (`Font`), fixed 160x128 geometry (`Display`). |
 | `png.scala` | 127 | Minimal deterministic PNG encoder (CRC-32, Adler-32, one stored DEFLATE block) used only for the host-side golden-frame dump. |

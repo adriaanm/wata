@@ -26,7 +26,12 @@ of a pure function:
     id in memory and nothing else, the pending set is bounded by both an
     expiry and a cap, approve appends the id to the allowlist file atomically
     (and reports that the live apply is unavailable in this plain-TCP,
-    stub-transport process), deny drops the row without writing anything.
+    stub-transport process), deny drops the row without writing anything;
+  * the page-side announce and the typed code (plan 0014) — the endpoint
+    sequence the admin page performs when a QR fragment names a node nobody
+    announced, and the negative that makes the typed code safe: a node-id
+    PREFIX is refused everywhere on the enrol surface, so a code a parent types
+    can only ever select a row a device created.
 
 The PBKDF2 derivation itself is oracled elsewhere: `wata-server selfcheck`
 prints the published test vectors and `tools/wata-smoke.sh` byte-compares them
@@ -498,6 +503,64 @@ def enrolment(atok, btok, iroh):
     check(req("POST", "/_wata/v1/enroll", {"nodeId": two, "nonce": "GH78"})[0] == 200,
           "a denied device may announce again")
     req("POST", f"/_wata/v1/admin/enroll/{two}/deny", None, atok)
+
+    fragment_announce(atok, iroh)
+    typed_code(atok)
+
+
+def fragment_announce(atok, iroh):
+    """The PAGE-SIDE ANNOUNCE (plan 0014's ruling, adminui/index.html): a parent
+    scans a handset's QR, lands on /admin#enroll/<nodeId>/<nonce>, and the page
+    — finding no pending row — posts the announce ITSELF before highlighting it
+    for approval. That is what lets a handset with no route to this server at
+    all (cellular-only, or refused by the very allowlist it is trying to join)
+    be enrolled.
+
+    The page's JavaScript cannot run in this harness, so what is asserted here
+    is the ENDPOINT SEQUENCE it performs, in order, with the same authority it
+    has: an unauthenticated announce, then an authenticated read, then an
+    authenticated approve."""
+    print("enrolment: the page-side announce (the fragment sequence)")
+    node = node_id(0x9A)
+    check(node not in pending(atok), "the scanned node has no row yet — nobody announced it")
+    check(req("POST", "/_wata/v1/enroll", {"nodeId": node, "nonce": "QR01"})[0] == 200,
+          "the PAGE announces it, unauthenticated, on the parent's behalf")
+    rows = pending(atok)
+    check(node in rows and rows[node]["nonce"] == "QR01",
+          "the row the page just created is the one it can highlight")
+    check(req("POST", f"/_wata/v1/admin/enroll/{node}/approve", None, atok)[0] == 200,
+          "and approving it from that row works like any other")
+    check(node in allowlist(iroh)["allowlist"], "the page-announced node reaches the allowlist file")
+
+
+def typed_code(atok):
+    """The TYPED-CODE FALLBACK (milestone 4). The handset prints
+    `<nonce>-<first 8 of its node id>` under the QR, and the page matches that
+    against the pending rows it already has — a SELECTION, never a creation.
+
+    The security property is asserted from the other side: a prefix must not be
+    able to reach the server AS an identity. Eight hex characters are not a node
+    id, the announce validator says so, and nothing else on the enrol surface
+    takes anything shorter — so no typed code can put an id into the allowlist
+    that a device never announced."""
+    print("enrolment: the typed code selects, and a prefix cannot inject")
+    node = node_id(0xBEEF)
+    req("POST", "/_wata/v1/enroll", {"nodeId": node, "nonce": "QR02"})
+    rows = pending(atok)
+    check(node in rows, "the device announced itself (the typed path needs a reachable device)")
+    prefix = node[:8]
+    hits = [n for n, p in rows.items() if p["nonce"] == "QR02" and n.startswith(prefix)]
+    check(hits == [node], f"nonce+prefix picks exactly one pending row (saw {hits})")
+
+    check(req("POST", "/_wata/v1/enroll", {"nodeId": prefix, "nonce": "QR02"})[0] == 400,
+          "a PREFIX announce is refused — 8 hex characters are not a node id")
+    check(req("POST", "/_wata/v1/enroll", {"nodeId": node[:63], "nonce": "QR02"})[0] == 400,
+          "so is a 63-character near-miss")
+    check(req("POST", f"/_wata/v1/admin/enroll/{prefix}/approve", None, atok)[0] == 404,
+          "approving a prefix approves nothing — the id has to be one that announced")
+    check(set(pending(atok)) == {node},
+          "none of the rejected forms left a row behind")
+    req("POST", f"/_wata/v1/admin/enroll/{node}/deny", None, atok)
 
 
 def bounded():

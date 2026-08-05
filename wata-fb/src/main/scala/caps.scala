@@ -60,6 +60,15 @@ object FbCaps:
     if irohCfg == "" then FbHttp(go.httpc.newClient(timeoutMs()))
     else FbHttp(irohClient(irohCfg))
 
+  /** a PLAIN-TCP `HttpDo` with its own bound, whatever transport the session
+   *  is configured for. The enrolment announce (enrol.scala) needs it: a
+   *  handset showing its QR is a handset the iroh transport has just refused,
+   *  so announcing over that transport is the one thing that cannot work.
+   *  Over TCP on the family LAN it can — and when it cannot either, the
+   *  announce is silently skipped and the parent's phone does it instead
+   *  (plan 0014's page-side-announce ruling). */
+  def plainHttp(timeoutMs: Long): HttpDo = FbHttp(go.httpc.newClient(timeoutMs))
+
   val DEFAULT_TIMEOUT_MS: Long = 30000L
 
   def timeoutMs(): Long =

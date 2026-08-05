@@ -13,6 +13,20 @@
 #                                      #   pattern on the panel + keys register)
 #   BQ268_HOST=192.168.1.9 tools/fb-deploy.sh fbsmoke
 #
+# IROH MODE (plan 0014). Setting BQ268_IROH_PEER provisions the device's iroh
+# config at /etc/wata/iroh.json — server node id, relay, and the admin base URL
+# the enrolment QR encodes — and runs this deploy against it:
+#
+#   BQ268_IROH_PEER=<server node id> WATA_ADMIN_URL=http://192.168.1.4:8008 \
+#     tools/fb-deploy.sh
+#
+# The file carries NO secret: the handset mints its own key into it on first
+# boot (irohnet.EnsureKey) and only its public node id ever leaves. An existing
+# config is left alone, so re-deploying never re-mints an identity that is
+# already enrolled. This deploy is a RUN, not an install — making iroh the
+# device's permanent transport is a separate, deliberate edit on the hardware;
+# see the deploy section of docs/design/wata-fb.md.
+#
 # The device is ssh host `bq268` (wifi/DHCP — if it is unreachable, update
 # ~/.ssh/config HostName). A failed ssh exits non-zero with a clear banner
 # rather than silently "passing".
@@ -39,8 +53,19 @@ if ! scp -q "$BIN" "root@$HOST:$REMOTE"; then
   exit 1
 fi
 
+RUN_ENV=""
+if [ -n "${BQ268_IROH_PEER:-}" ]; then
+  : "${WATA_ADMIN_URL:?BQ268_IROH_PEER needs WATA_ADMIN_URL (the base URL the enrolment QR encodes)}"
+  REMOTE_IROH="/etc/wata/iroh.json"
+  echo "== fb-deploy: iroh mode -> $REMOTE_IROH (no secret; the device mints its own) =="
+  ssh "root@$HOST" "mkdir -p /etc/wata; [ -f $REMOTE_IROH ] || printf '%s\n' \
+    '{\"peer\":\"$BQ268_IROH_PEER\",\"relay\":\"${BQ268_IROH_RELAY:-n0}\",\"adminUrl\":\"$WATA_ADMIN_URL\"}' \
+    > $REMOTE_IROH; chmod 600 $REMOTE_IROH; cat $REMOTE_IROH"
+  RUN_ENV="env WATA_IROH_CONFIG=$REMOTE_IROH WATA_ADMIN_URL=$WATA_ADMIN_URL"
+fi
+
 echo "== fb-deploy: remount /dev/shm exec + run ($REMOTE $FB_CMD) =="
 # /dev/shm is noexec by default (README shortcut); remount, run, remove. The
 # smoke ($FB_CMD=fbsmoke) runs ~20s+ polling input — stream its output live.
-ssh "root@$HOST" "mount -o remount,exec /dev/shm && chmod +x $REMOTE && $REMOTE $FB_CMD; rc=\$?; rm -f $REMOTE; exit \$rc"
+ssh "root@$HOST" "mount -o remount,exec /dev/shm && chmod +x $REMOTE && $RUN_ENV $REMOTE $FB_CMD; rc=\$?; rm -f $REMOTE; exit \$rc"
 echo "== fb-deploy: done (binary removed from /dev/shm) =="

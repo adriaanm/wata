@@ -18,3 +18,18 @@ import language.experimental.saferExceptions
 object irohnet:
   /** `irohnet.NewHTTPClient(configPath)` — `(*http.Client, error)`. */
   @go.name("NewHTTPClient") def newHTTPClient(cfgPath: String): go.net.http.Client throws sgo.GoError = ???
+
+  /** `irohnet.EnsureKey(configPath)` — `(string, error)`: mint this device's
+   *  own node key into the config if it has none (0600, other fields
+   *  preserved) and answer its public node id. The DEVICE-MINTED IDENTITY of
+   *  plan 0014 milestone 1: the secret is generated here and never travels,
+   *  so enrolment is an approval of a public id rather than a key delivery. */
+  @go.name("EnsureKey") def ensureKey(cfgPath: String): String throws sgo.GoError = ???
+
+  /** `irohnet.LastRefusal()` — the most recent dial-failure reason, "" if
+   *  none. A peer refusal reads "server refused: 401 not allowlisted"; that
+   *  string is the only way the app edge can tell a device that is not
+   *  ENROLLED from one whose network is merely down, because the HttpDo
+   *  capability folds every transport error into `HttpResponse(0, "")` before
+   *  the portable core sees it. */
+  @go.name("LastRefusal") def lastRefusal(): String = ???

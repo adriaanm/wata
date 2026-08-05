@@ -16,8 +16,13 @@ import (
 
 var errIrohStub = errors.New("irohnet: stub build (the real transport needs `-tags iroh` on darwin or linux/arm — run mklib.py [arm], then build with the tag)")
 
-// GenKey — stub; see the darwin+iroh build.
+// GenKey — stub; see the darwin+iroh build. EnsureKey (irohnet.go, shared)
+// rides this, so a device build without the real transport reports that it
+// cannot mint an identity rather than writing a fake one.
 func GenKey() (string, string, error) { return "", "", errIrohStub }
+
+// IDOf — stub; see the darwin+iroh build.
+func IDOf(secretHex string) (string, error) { return "", errIrohStub }
 
 // Listener — stub type so callers compile; Listen always errors.
 type Listener struct{}

@@ -316,16 +316,53 @@ removes the row and writes nothing; a denied device may announce again, which
 is what makes deny the safe answer to "I don't recognize this".
 
 **The QR contract.** The handset displays
-`http://<server>/admin#enroll/<nodeId>/<nonce>`, so a stock camera app lands
-the parent on the admin page with that row highlighted (the fragment never
-leaves the browser and grants nothing — it only says which row to look at). The
-nonce is a human-visible correlator — "this is the handset in my hand" — not a
-secret and not a credential. The device-side halves (first-boot keypair mint,
-the QR screen) stay in plan 0014.
+`<adminUrl>/admin#enroll/<nodeId>/<nonce>`, so a stock camera app lands the
+parent on the admin page with that row highlighted. The nonce is a
+human-visible correlator — "this is the handset in my hand" — not a secret and
+not a credential. The device half (first-boot keypair mint, the QR screen, the
+typed code) is in `docs/design/wata-fb.md`.
+
+**The page announces** (plan 0014's ruling; `adminui/index.html`). When the
+fragment names a node with no pending row, the page POSTs the announce
+**itself**, from the parent's authenticated session, and then highlights the
+row it just created. That is what makes the QR work for a handset with no route
+to this server at all — a cellular-only device, or one refused by the very
+allowlist it is trying to join — which is the common case rather than the
+exotic one: a device that has never been enrolled is by definition a device the
+transport refuses. The id's provenance is a parent reading a physical screen,
+which is a better provenance than an unauthenticated POST arriving from the
+network. The page shape-checks the fragment first (the same 64-hex / 52-z32
+forms the server accepts) so a mangled link never becomes an announce, and it
+announces a given id at most once per page load so a failure cannot turn
+refreshes into a POST loop.
+
+The announce endpoint nevertheless stays open and unauthenticated: a
+LAN-reachable handset still uses it, and it grants nothing either way.
+
+**The typed code** (plan 0014 milestone 4) is the fallback for a screen too dim
+or scratched to scan. The handset prints `<nonce>-<first 8 hex of its node id>`
+under the QR; the admin page's "type the code" box matches that against the
+pending rows it has already fetched and highlights the one it picks.
+
+*It selects; it never creates.* Eight hex characters are not an identity, and
+the reason that matters is the injection this design has to refuse: if a typed
+prefix could be turned into an announce, the server would have to invent the
+other 56 characters, and whatever it invented would be an allowlist entry no
+device ever asked for. So no short form is accepted anywhere on the enrol
+surface — `Enroll.validNodeId` rejects anything but a full key, and
+`approve`/`deny` take only ids that are already pending. The typed path
+therefore requires the device to have announced itself, i.e. **to be reachable
+on the family network**; a cellular-only handset has the QR and only the QR.
+That limitation is real and recorded in plan 0014's fallback section rather
+than papered over.
 
 Gates: `tools/wata-admin-smoke.py` covers the announce, its validation, the
 dedupe, the cap and the expiry, the 401/403 gate, the atomic file write and
-its preservation of the rest of the config, and the deny path.
+its preservation of the rest of the config, the deny path, the endpoint
+sequence the page performs for a fragment nobody announced (page JS cannot run
+in the smoke, so the sequence is what is asserted), and the prefix negative —
+a prefix is refused as an announce, as a 63-character near-miss, and as an
+approve target, leaving no row behind.
 `tools/tunnel-smoke.py` runs the loop end to end over real iroh — the node the
 server just refused announces itself, an admin approves it, and the **same
 key** is accepted by the **same process**, no restart.

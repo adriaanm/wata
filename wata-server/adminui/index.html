@@ -61,11 +61,19 @@
 
   <h2>Devices waiting to be approved</h2>
   <p class="muted" id="enroll-empty">No device is waiting. A handset shows a QR code with its own
-    link; scanning it brings you back here with the device highlighted.</p>
+    link; scanning it brings you back here with the device highlighted — even if the handset
+    cannot reach this server itself. If the screen is too dim to scan, type the code printed
+    under it instead; that one needs the handset to be on the family network.</p>
   <table id="enroll" class="hidden">
     <thead><tr><th>node id</th><th>code</th><th>waiting</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
+  <form class="row" id="code-form">
+    <label for="code-input">Or type the code shown under the QR:</label>
+    <input id="code-input" class="mono" placeholder="QR01-797d477b" autocomplete="off"
+           autocapitalize="off" spellcheck="false">
+    <button type="submit">Find</button>
+  </form>
 
   <h2>Accounts</h2>
   <p class="muted">The <em>username</em> is the login and never changes; the
@@ -211,18 +219,68 @@ function renderUsers(users) {
 // The QR contract (plan 0021 / plan 0014): a handset that has minted its node
 // key shows http://<server>/admin#enroll/<nodeId>/<nonce>, so the stock camera
 // app lands the parent here with that device's row singled out. The fragment
-// never leaves the browser and grants nothing — it only says which row to
-// look at; approving is still a click behind the admin login.
+// never leaves the browser on its own and grants nothing — approving is still a
+// click behind the admin login.
+//
+// THE PAGE ANNOUNCES (plan 0014's ruling). When the fragment names a node with
+// no pending row, this page POSTs the announce itself, from the parent's
+// authenticated session, rather than waiting for the handset to manage it. That
+// is what lets a cellular-only device — one that cannot reach this server at
+// all until it is allowlisted — be enrolled: the id's provenance is a parent
+// reading a physical screen, which is a better provenance than an unauthorized
+// POST from the network. The announce endpoint stays unauthenticated because a
+// LAN handset still uses it, and it grants nothing either way: it parks a
+// (nodeId, nonce) pair in memory for a human to approve.
 function enrollTarget() {
   const m = /^#enroll\/([^/]+)(?:\/([^/]*))?$/.exec(location.hash || "");
   return m ? { nodeId: m[1], nonce: m[2] || "" } : null;
+}
+
+// A node id in either form the server's own validator accepts (64 lowercase
+// hex, or the 52-character z-base-32 spelling). Checked HERE too so a hand-typed
+// or mangled fragment never becomes an announce.
+function validNodeId(s) {
+  return /^[0-9a-f]{64}$/.test(s) || /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/.test(s);
+}
+
+// Announce a fragment's node id at most once per page load: a failed announce
+// must not turn every refresh into another POST, and a successful one is
+// already visible as a pending row.
+const announced = new Set();
+async function announceTarget(target) {
+  if (!validNodeId(target.nodeId) || announced.has(target.nodeId)) return false;
+  announced.add(target.nodeId);
+  await api("POST", "/_wata/v1/enroll", { nodeId: target.nodeId, nonce: target.nonce || "QR" });
+  return true;
+}
+
+// THE TYPED CODE (plan 0014 milestone 4) — the fallback for a screen too dim or
+// scratched to scan. The handset shows `<nonce>-<first 8 of the node id>`, and
+// this SELECTS the matching pending row; it never creates one. Eight characters
+// are not an identity: a server that accepted a prefix as an announce could be
+// told to allowlist a node nobody ever saw, so the prefix is only ever matched
+// against ids the DEVICE announced. The cost is the honest one — the typed path
+// needs a device that could reach this server, i.e. the family LAN.
+function matchCode(pending, text) {
+  const m = /^\s*([0-9A-Za-z_-]{1,64}?)[-\s]+([0-9a-fA-F]{4,64})\s*$/.exec(text || "");
+  if (!m) return { error: "That does not look like a code. Type it as it appears: QR01-797d477b." };
+  const nonce = m[1].toUpperCase(), prefix = m[2].toLowerCase();
+  const hits = pending.filter((p) => p.nonce.toUpperCase() === nonce &&
+    p.node_id.toLowerCase().startsWith(prefix));
+  if (hits.length === 1) return { hit: hits[0] };
+  if (hits.length > 1) return { error: "That code matches more than one waiting device. Use the QR." };
+  return { error: "No waiting device matches that code. The handset has to reach this server " +
+    "to announce itself — put it on the family wifi, or scan its QR instead." };
 }
 
 function short(id) {
   return id.length > 16 ? id.slice(0, 8) + "…" + id.slice(-6) : id;
 }
 
+let lastPending = [];
+
 function renderEnroll(pending) {
+  lastPending = pending;
   const table = $("enroll");
   const tb = table.querySelector("tbody");
   const target = enrollTarget();
@@ -252,11 +310,19 @@ function renderEnroll(pending) {
     if (target && target.nodeId === p.node_id) { tr.classList.add("target"); found = tr; }
     tb.append(tr);
   }
-  if (target && !found) {
-    say("Waiting for " + short(target.nodeId) + " to announce itself — keep the handset on its " +
-      "pairing screen, then reload.", false);
-  } else if (found) {
+  if (found) {
     found.scrollIntoView({ block: "center" });
+  } else if (target && !validNodeId(target.nodeId)) {
+    say("That enrolment link does not carry a valid node id.", true);
+  } else if (target && !announced.has(target.nodeId)) {
+    // the page-side announce: post it, then come straight back through refresh
+    // so the row this parent just created is the one highlighted.
+    announceTarget(target)
+      .then(() => refresh())
+      .catch((e) => say(e.message, true));
+  } else if (target) {
+    say("Announced " + short(target.nodeId) + ", but no row came back — the announce may have " +
+      "expired. Reload this page with the handset's QR again.", true);
   }
 }
 
@@ -321,6 +387,18 @@ $("setup-form").addEventListener("submit", async (e) => {
 });
 
 $("signout-form").addEventListener("submit", (e) => { e.preventDefault(); signOut(); say("signed out"); });
+
+$("code-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const r = matchCode(lastPending, $("code-input").value);
+  if (r.error) { say(r.error, true); return; }
+  // reuse the QR's own path: point the fragment at the row we matched and
+  // re-render, so a typed code and a scanned one land on the same highlight.
+  location.hash = "#enroll/" + r.hit.node_id + "/" + r.hit.nonce;
+  $("code-input").value = "";
+  say("");
+  renderEnroll(lastPending);
+});
 
 $("add-form").addEventListener("submit", async (e) => {
   e.preventDefault();

@@ -67,6 +67,15 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              glyphs, `OFF`) pinned without faking
  *                              interfaces under `Diag`, which would make the
  *                              goldens depend on the host's network
+ *    enrolid <nodeId> <nonce>  pin the identity the enrolment QR encodes —
+ *                              both halves are otherwise minted (a fresh key,
+ *                              the wall clock), so a goldened QR needs them
+ *                              fixed. The admin URL comes from the harness's
+ *                              `WATA_ADMIN_URL`
+ *    enrolstate <state>        force the not-allowlisted verdict
+ *                              (refused|ok|auto), then one frame — the real
+ *                              one comes from an iroh dial refusal, which a
+ *                              hermetic run cannot provoke
  *
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
@@ -229,6 +238,10 @@ object UiScript:
       err = connDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "netpipe" then
       err = pipeDirective(nth(ts, 1), c, clock, evts, dev, px)
+    else if cmd == "enrolid" then
+      err = enrolIdDirective(nth(ts, 1), nth(ts, 2))
+    else if cmd == "enrolstate" then
+      err = enrolStateDirective(nth(ts, 1), c, clock, evts, dev, px)
     else err = "unknown directive '" + cmd + "'"
     err
 
@@ -364,6 +377,38 @@ object UiScript:
     else if name == "cell" then NetStatus.P_CELL
     else if name == "none" then NetStatus.P_NONE
     else if name == "net" then NetStatus.P_UNKNOWN
+    else -2
+
+  // ---- the enrolment overrides ------------------------------------------------------
+
+  /** pin the identity the enrolment QR encodes. The code is a pure function of
+   *  node id + nonce + admin URL, and the first two are minted (a fresh key,
+   *  the wall clock) — so without this a goldened QR frame would differ every
+   *  run. The admin URL is the harness's, through `WATA_ADMIN_URL`. */
+  def enrolIdDirective(id: String, n: String): String =
+    var err = ""
+    if id == "" || n == "" then err = "enrolid wants <nodeId> <nonce>"
+    else Enrol.force(id, n)
+    err
+
+  /** force the not-allowlisted verdict, then advance one frame so the forced
+   *  state is what the next checkpoint draws. `auto` hands it back to the
+   *  transport. The real verdict comes from an iroh dial refusal, which a
+   *  hermetic scripted run has no way to provoke. */
+  def enrolStateDirective(name: String, c: MatrixClient, clock: Clock,
+                          evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
+    val tag = enrolTagOf(name)
+    var err = ""
+    if tag == -2 then err = "enrolstate wants refused|ok|auto"
+    else
+      Enrol.forceRefused(tag)
+      step(c, clock, evts, dev, px)
+    err
+
+  def enrolTagOf(name: String): scala.Int =
+    if name == "auto" then -1
+    else if name == "ok" then 0
+    else if name == "refused" then 1
     else -2
 
   // ---- checkpoints ---------------------------------------------------------------

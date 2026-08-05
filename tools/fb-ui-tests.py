@@ -42,6 +42,11 @@ GOLDEN = os.path.join(WATA, "tools", "fb-ui-golden")
 PORT = int(os.environ.get("FB_UI_PORT") or random.randint(20000, 39999))
 BASE = f"http://127.0.0.1:{PORT}"
 PASSWORD = "testpass123"
+# The admin base URL an enrolment QR encodes (the "iroh" scenarios). FIXED and
+# deliberately not this run's server: the QR's module grid is a function of the
+# exact bytes of this string, so a random port would make the frame unpinnable
+# — and nothing in the gate may reach a real address.
+ADMIN_URL = "http://192.168.1.4:8008"
 
 # A scenario: a name and the phases to run in order, each (user, script file).
 # A phase user of "-" means "start with no credentials": the driver is handed
@@ -71,6 +76,15 @@ PASSWORD = "testpass123"
 #       with "http_timeout_ms" so the per-request deadline fires inside the
 #       test rather than 30s later.
 #   "http_timeout_ms": <ms> — WATA_HTTP_TIMEOUT_MS for the phases.
+#   "iroh": True — write a device iroh config for the phases and point
+#       WATA_IROH_CONFIG + WATA_ADMIN_URL at it, i.e. run them as a handset
+#       configured to speak iroh (plan 0014). That is what turns the Enroll
+#       settings row on and what gives the enrolment QR an admin URL to
+#       encode; the URL is a FIXED unroutable one so the frame is a golden and
+#       nothing in the gate touches a real network. The config carries no
+#       secretKey on purpose — a device mints its own, and in this stub-
+#       transport build that mint fails loudly rather than inventing a key,
+#       which is why the scripts pin the identity with `enrolid`.
 SCENARIOS = [
     {
         "name": "voice-alice-to-bob",
@@ -189,6 +203,16 @@ SCENARIOS = [
         "http_timeout_ms": 1500,
         "phases": [
             ("alice", "alice-hung-server.txt"),
+        ],
+    },
+    {
+        # The wrong password keeps the session from ever going live, which is
+        # what keeps the wata applet on the boot screen the QR takes over.
+        "name": "enroll",
+        "iroh": True,
+        "password": "not-the-password",
+        "phases": [
+            ("alice", "alice-enroll.txt"),
         ],
     },
     {
@@ -317,6 +341,13 @@ def run_scenario(scenario, fb, server_bin, env, outdir, update):
     # Every scenario gets its own session store, so a run never reads or writes
     # the operator's real /etc/wata/config.json and phases only see each other.
     env = dict(env, WATA_FB_CONFIG=os.path.join(outdir, "config.json"))
+    if scenario.get("iroh"):
+        ipath = os.path.join(outdir, "iroh.json")
+        with open(ipath, "w") as f:
+            json.dump({"peer": "b" * 64, "relay": "none",
+                       "adminUrl": ADMIN_URL}, f)
+        env["WATA_IROH_CONFIG"] = ipath
+        env["WATA_ADMIN_URL"] = ADMIN_URL
     if scenario.get("http_timeout_ms"):
         env["WATA_HTTP_TIMEOUT_MS"] = str(scenario["http_timeout_ms"])
     password0 = scenario.get("password", PASSWORD)

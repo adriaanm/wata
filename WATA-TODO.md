@@ -70,6 +70,12 @@ blocks + git log; each entry cites where it was recorded.*
   correct for them and does not widen this. The fix is to persist the
   counter, or to seed it from something per-run.
 
+- **Frame-loop blocking one-shots** (reviewer note, 2026-08-05): the
+  enrol announce and `Diag.netTest` both make a synchronous HTTP call
+  from the render path — latched/once-per-session and bounded (~1.5s),
+  but the milestone-A rule is "the frame goroutine never blocks"; move
+  both onto the action loop when either is next touched.
+
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
 - ~~Thicket backend crash~~ FIXED and verified downstream: pin `2083ef6`

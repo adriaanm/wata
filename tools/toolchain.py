@@ -120,6 +120,16 @@ def build_env(home=None):
         env["GOTOOLCHAIN"] = pin
     # sgola's own go.work must not capture wata's modules.
     env["GOWORK"] = "off"
+    # EXTERNAL GO DEPS (plan 0014, rsc.io/qr). `sgo`'s go.mod stage writes a
+    # require+replace per `godep` and nothing else: the emitted app module gets
+    # no go.sum and no line for a godep's own upstream requirements, so a
+    # fetched transitive dep fails the build with "missing go.sum entry".
+    # `-mod=mod` lets the go build stage add both to the GENERATED module,
+    # which is the right place for them — the authoritative go.sum is the one
+    # committed in the go-pkgs module that declares the require.
+    # Workaround for sgola ticket GOMOD-TRANSITIVE-SUM; drop it when the go.mod
+    # stage propagates its godeps' requirements.
+    env["GOFLAGS"] = "-mod=mod"
     return env
 
 

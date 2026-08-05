@@ -1,0 +1,35 @@
+# Enrolment (plan 0014): the QR screen, both ways in.
+#
+# The scenario's server rejects this password, so the session never goes live
+# and the wata applet stays on its boot screen — which is exactly the state a
+# handset the server has never heard of is in. The identity is PINNED
+# (`enrolid`): a real device mints a fresh key and a clock-derived nonce, and a
+# goldened QR needs both fixed. The admin URL is the harness's WATA_ADMIN_URL.
+enrolid 797d477bc3f2f2c86e6f9e0af698f9069be65020007cf041b120444b053085a7 QR01
+
+# 1. the not-allowlisted boot state: the transport refused this node id, which
+#    no amount of waiting fixes, so the QR replaces "waiting for network".
+enrolstate refused
+advance 2
+checkpoint enroll-boot
+
+# 2. the same screen on demand, from Settings -> Enroll. Hand the verdict back
+#    first: the row is offered whenever iroh is configured, refused or not.
+enrolstate auto
+tap dot2
+advance 2
+tap down
+tap down
+tap down
+tap down
+advance 1
+checkpoint enroll-settings-row
+
+tap enter
+advance 2
+checkpoint enroll-settings-qr
+
+# 3. Back closes it and leaves the menu where it was.
+tap back
+advance 2
+checkpoint enroll-settings-closed

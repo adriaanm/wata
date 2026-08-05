@@ -145,7 +145,8 @@ itself — see "The handset flip" below.
 2. **Pending enrolment** — DONE (plan 0021-B).
 3. **The QR** — DONE. `enrol.scala` renders
    `<adminUrl>/admin#enroll/<nodeId>/<nonce>` through `go-pkgs/qr`
-   (vendored `rsc.io/qr`, level L) into the framebuffer: 37 modules at
+   (a thin adapter over `rsc.io/qr`, fetched as an ordinary Go
+   dependency; level L) into the framebuffer: 37 modules at
    2px each, an 82x82 block with a two-module quiet zone. It appears
    automatically as the boot screen when the transport has refused this
    node id (`not allowlisted`) and on demand from Settings -> Enroll.

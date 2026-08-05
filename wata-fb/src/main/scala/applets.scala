@@ -415,7 +415,8 @@ object WataLogic:
     if s.pttHeld then renderRecordingOverlay(s, px)
 
   def renderContacts(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
-    if !NetStatus.everLive() then renderBoot(px, ctx)
+    if !NetStatus.everLive() && Enrol.required() then renderEnrolBoot(px, ctx)
+    else if !NetStatus.everLive() then renderBoot(px, ctx)
     else if !ctx.snap.hasSelfUser && convCount(ctx.snap) == 0 then renderConnecting(px, ctx.connection)
     else
       Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
@@ -641,6 +642,26 @@ object WataLogic:
     case _: ConnError => true
     case _            => false
 
+  /** THE ENROLMENT BOOT SCREEN — what replaces the boot screen when the
+   *  transport has refused this node id outright (`server refused: 401 not
+   *  allowlisted`). That is not a network problem and no amount of waiting
+   *  fixes it: the server does not know this handset yet, and the one useful
+   *  thing the device can do is show the parent how to admit it. So the calm
+   *  "waiting for network" line gives way to the QR and its typed code.
+   *
+   *  Announcing rides here rather than on a keypress because nobody presses
+   *  anything on a handset that has never connected — the screen appearing IS
+   *  the event. It happens once per session and is best-effort (enrol.scala).
+   *
+   *  The footer still names the exit while the two-step quit is armed: this is
+   *  a boot screen, and the confirmation has to be legible wherever it lands. */
+  def renderEnrolBoot(px: go.Bytes, ctx: FrameCtx): Unit =
+    Enrol.announceOnce()
+    Enrol.render(px, enrolBootHint(ctx))
+
+  def enrolBootHint(ctx: FrameCtx): String =
+    if ctx.quitArmed then "BACK again to exit" else "scan to add this device"
+
   def renderConnecting(px: go.Bytes, c: ConnectionState): Unit =
     Font.drawText(px, connectingMsg(c), 1, 2, Color.midGray, false, 0)
 
@@ -833,7 +854,9 @@ case class EchoErr() extends EchoState
  *  down to the next read). `netLine1`/`netLine2` hold the last net test's
  *  verdicts ("" = never run this session) and `actionMsg` the last toggle's
  *  failure text — an action that did not do what the row says it does has to
- *  say so rather than leave the row looking untouched. */
+ *  say so rather than leave the row looking untouched. `enrolOpen` is the one
+ *  row that opens a screen of its own (Enroll): while it is true the applet
+ *  draws the enrolment QR full-frame and the only live key is Back. */
 case class SettingsState(
   selected: scala.Int,
   brightness: scala.Int,
@@ -847,7 +870,8 @@ case class SettingsState(
   netLine1: String,
   netLine2: String,
   actionMsg: String,
-  diagLeft: scala.Int
+  diagLeft: scala.Int,
+  enrolOpen: Boolean
 )
 
 /** the settings applet: a thin dynamic-dispatch shell over `SettingsLogic`
@@ -870,7 +894,15 @@ object SettingsLogic:
   // There is deliberately NO display-name row: a person's name is the
   // account's, set by whoever administers the server (the admin interface,
   // plan 0021), not something a handset picks from a list of presets.
-  val N_ITEMS = 13
+  //
+  // ENROLL is a CONDITIONAL row (plan 0014): it exists only on a handset
+  // configured to speak iroh, where a node id has to be admitted by a parent
+  // before anything works. A plain-TCP deployment has nothing to enroll and
+  // shows the same 13 rows it always did — which is also why the item
+  // CONSTANTS below are stable ids rather than menu positions: `itemAt` maps
+  // a position to an id, so inserting the row after Network shifts no id and
+  // invalidates no golden of a non-iroh device.
+  val N_BASE = 13
   val ECHO = 0
   val BRIGHTNESS = 1
   val SCREEN_OFF = 2
@@ -884,6 +916,30 @@ object SettingsLogic:
   val POWER_OFF = 10
   val REBOOT_BL = 11
   val REBOOT_EDL = 12
+  val ENROLL = 13
+
+  /** does this handset have an identity to enroll (i.e. is it configured for
+   *  iroh)? Decided from the environment, so it is constant for a run. */
+  def enrolAvailable(): Boolean = Enrol.configured()
+
+  /** how many rows the menu has this run. */
+  def nItems(): scala.Int =
+    var n = N_BASE
+    if enrolAvailable() then n = N_BASE + 1
+    n
+
+  /** the item id shown at menu POSITION `i`. Enroll sits right after Network,
+   *  where a parent looking for "how do I get this thing online" will find it
+   *  — not after the reboot rows. Everything below it shifts down by one
+   *  position while keeping its id. */
+  def itemAt(i: scala.Int): scala.Int =
+    if !enrolAvailable() then i
+    else if i <= DISCONNECT then i
+    else if i == DISCONNECT + 1 then ENROLL
+    else i - 1
+
+  /** the item id the selection is on. */
+  def cur(s: SettingsState): scala.Int = itemAt(s.selected)
 
   /** menu rows visible at once — the menu is a scrolling window now that the
    *  item count outgrew the grid (six two-row items + the two detail rows).
@@ -909,13 +965,13 @@ object SettingsLogic:
   val DETAIL_ROW = 13
 
   def initial(): SettingsState =
-    SettingsState(0, 40, EchoIdle(), 1, true, false, "", "", "", "", "", "", 0)
+    SettingsState(0, 40, EchoIdle(), 1, true, false, "", "", "", "", "", "", 0, false)
 
   /** the boot state: preferences come back from the config store, so a device
    *  keeps the backlight and timeout its owner set. */
   def restored(p: FbPrefs): SettingsState =
     SettingsState(0, p.brightness, EchoIdle(), p.timeoutIdx, true, false,
-      "", "", "", "", "", "", 0)
+      "", "", "", "", "", "", 0, false)
 
   def getScreenTimeout(s: SettingsState): scala.Int = timeoutSecs(s.screenTimeoutIdx)
   def getBrightness(s: SettingsState): scala.Int = s.brightness
@@ -923,31 +979,35 @@ object SettingsLogic:
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
     SettingsState(sel, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
+      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
     SettingsState(s.selected, b, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
+      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
     SettingsState(s.selected, s.brightness, e, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
+      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, i, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
+      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, c,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
+      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withArmed(s: SettingsState, a: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      a, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft)
+      a, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withDiag(s: SettingsState, ip: String, cell: String, wifi: String, left: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, ip, cell, wifi, s.netLine1, s.netLine2, s.actionMsg, left)
+      s.armed, ip, cell, wifi, s.netLine1, s.netLine2, s.actionMsg, left, s.enrolOpen)
   def withNetTest(s: SettingsState, l1: String, l2: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, l1, l2, s.actionMsg, s.diagLeft)
+      s.armed, s.ipText, s.cellText, s.wifiText, l1, l2, s.actionMsg, s.diagLeft, s.enrolOpen)
+  def withEnrolOpen(s: SettingsState, o: Boolean): SettingsState =
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
+      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, s.actionMsg,
+      s.diagLeft, o)
   def withActionMsg(s: SettingsState, m: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, m, s.diagLeft)
+      s.armed, s.ipText, s.cellText, s.wifiText, s.netLine1, s.netLine2, m, s.diagLeft, s.enrolOpen)
 
   // ---- input (press-only) ------------------------------------------------------
   /** every key goes through `persisted`, so the three stored preferences are
@@ -960,6 +1020,7 @@ object SettingsLogic:
    *  two-OK-in-a-row gesture, nothing else keeps it alive. */
   def handleKey(s: SettingsState, k: Key, ks: KeyState, ctx: FrameCtx): SettingsState =
     if !Shell.isPressed(ks) then s
+    else if s.enrolOpen then closeOnBack(s, k)
     else k match
       case _: KUp    => moveUp(disarmed(s))
       case _: KDown  => moveDown(disarmed(s))
@@ -967,6 +1028,12 @@ object SettingsLogic:
       case _: KLeft  => onLeft(disarmed(s))
       case _: KRight => onRight(disarmed(s))
       case _           => disarmed(s)
+
+  /** the enrolment screen swallows every key but Back, which closes it. A QR
+   *  a stray keypress can dismiss is a QR a parent has to go find again
+   *  mid-scan; Back is the one way out and the screen says so. */
+  def closeOnBack(s: SettingsState, k: Key): SettingsState =
+    if Shell.isBackKey(k) then withEnrolOpen(s, false) else s
 
   /** any key but OK drops the confirm latch AND the last action's message —
    *  the message belongs to the gesture that produced it, not to the row. */
@@ -991,14 +1058,16 @@ object SettingsLogic:
 
   def moveDown(s: SettingsState): SettingsState =
     var out = s
-    if s.selected < N_ITEMS - 1 then out = withSelected(s, s.selected + 1)
+    if s.selected < nItems() - 1 then out = withSelected(s, s.selected + 1)
     out
 
   def onEnter(s: SettingsState, ctx: FrameCtx): SettingsState =
-    if s.selected == ECHO then startEcho(s, ctx)
-    else if s.selected == DISCONNECT then doDisconnect(s, ctx)
-    else if s.selected == NET_TEST then runNetTest(s)
-    else if isActionRow(s.selected) then armOrRun(s)
+    val i = cur(s)
+    if i == ECHO then startEcho(s, ctx)
+    else if i == DISCONNECT then doDisconnect(s, ctx)
+    else if i == NET_TEST then runNetTest(s)
+    else if i == ENROLL then withEnrolOpen(s, true)
+    else if isActionRow(i) then armOrRun(s)
     else s
 
   def isPowerRow(i: scala.Int): Boolean =
@@ -1024,8 +1093,8 @@ object SettingsLogic:
    *  back at all on the hardware). */
   def runAction(s: SettingsState): String =
     var out = ""
-    if isPowerRow(s.selected) then runPower(s.selected)
-    else if s.selected == WIFI_TOGGLE then out = toggleWifi(s)
+    if isPowerRow(cur(s)) then runPower(cur(s))
+    else if cur(s) == WIFI_TOGGLE then out = toggleWifi(s)
     else out = toggleData(s)
     out
 
@@ -1083,13 +1152,13 @@ object SettingsLogic:
     out
 
   def onLeft(s: SettingsState): SettingsState =
-    if s.selected == BRIGHTNESS then brightnessDown(s)
-    else if s.selected == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
+    if cur(s) == BRIGHTNESS then brightnessDown(s)
+    else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
     else s
 
   def onRight(s: SettingsState): SettingsState =
-    if s.selected == BRIGHTNESS then brightnessUp(s)
-    else if s.selected == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
+    if cur(s) == BRIGHTNESS then brightnessUp(s)
+    else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
     else s
 
   /** wrap-decrement (the `if x==0 then n-1 else x-1` idiom as a plain fn). */
@@ -1137,9 +1206,17 @@ object SettingsLogic:
     case _                  => s // wata events (unreachable)
 
   // ---- render --------------------------------------------------------------------
+  /** the enrolment screen takes the whole frame when it is open — it is a QR
+   *  code, and the menu behind it would only steal pixels from the modules. */
   def render(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
-    renderMenu(s, px)
-    renderDetail(s, px, ctx)
+    if s.enrolOpen then renderEnrol(px)
+    else
+      renderMenu(s, px)
+      renderDetail(s, px, ctx)
+
+  def renderEnrol(px: go.Bytes): Unit =
+    Enrol.announceOnce()
+    Enrol.render(px, "BACK to close")
 
   def renderMenu(s: SettingsState, px: go.Bytes): Unit =
     Font.drawText(px, "SETTINGS", 0, 0, Color.cyan, false, 0)
@@ -1150,7 +1227,7 @@ object SettingsLogic:
       val sel = i == s.selected
       if sel then Draw.fillRect(px, 0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)
       val fg = if sel then Color.black else Color.green
-      renderItem(s, px, i, row, fg)
+      renderItem(s, px, itemAt(i), row, fg)
       i += 1
     renderScrollCues(px, start)
 
@@ -1166,7 +1243,7 @@ object SettingsLogic:
    *  has items above/below it. */
   def renderScrollCues(px: go.Bytes, start: scala.Int): Unit =
     if start > 0 then Font.drawText(px, "^", 25, 2, Color.midGray, false, 0)
-    if start + VISIBLE < N_ITEMS then
+    if start + VISIBLE < nItems() then
       Font.drawText(px, "v", 25, 2 + (VISIBLE - 1) * 2, Color.midGray, false, 0)
 
   def renderItem(s: SettingsState, px: go.Bytes, i: scala.Int, row: scala.Int, fg: scala.Int): Unit =
@@ -1189,6 +1266,9 @@ object SettingsLogic:
         netTxt = "ON"
         netFg = Color.green
       Font.drawText(px, netTxt, 11, row, netFg, false, 0)
+    else if i == ENROLL then
+      Font.drawText(px, "Enroll", 0, row, fg, false, 0)
+      Font.drawText(px, "OK=QR", 11, row, fg, false, 0)
     else if i == INFO then
       Font.drawText(px, "Device Info", 0, row, fg, false, 0)
     else if i == IP_ADDR then
@@ -1216,26 +1296,30 @@ object SettingsLogic:
   /** the selected item's detail, on the two grid rows left below the menu. */
   def renderDetail(s: SettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
     val row = DETAIL_ROW
-    if s.selected == INFO then
+    val i = cur(s)
+    if i == ENROLL then
+      Font.drawText(px, "OK shows the QR code", 0, row, Color.midGray, false, 0)
+      Font.drawText(px, "a parent scans to add", 0, row + 1, Color.midGray, false, 0)
+    else if i == INFO then
       renderBattery(px, row)
       Font.drawText(px, "Mem:" + Diag.memAvail() + " wata-fb", 0, row + 1, Color.midGray, false, 0)
-    else if s.selected == ECHO then
+    else if i == ECHO then
       Font.drawText(px, "Records 2s, plays", 0, row, Color.midGray, false, 0)
       Font.drawText(px, "back thru speaker", 0, row + 1, Color.midGray, false, 0)
-    else if s.selected == DISCONNECT then
+    else if i == DISCONNECT then
       if s.connected then Font.drawText(px, "OK to disconnect", 0, row, Color.midGray, false, 0)
       else Font.drawText(px, "Restart to reconn", 0, row, Color.midGray, false, 0)
-    else if s.selected == BRIGHTNESS then
+    else if i == BRIGHTNESS then
       Font.drawText(px, "</> adjust", 0, row, Color.midGray, false, 0)
-    else if s.selected == SCREEN_OFF then
+    else if i == SCREEN_OFF then
       Font.drawText(px, "</> timeout", 0, row, Color.midGray, false, 0)
       Font.drawText(px, "Any key wakes", 0, row + 1, Color.midGray, false, 0)
-    else if s.selected == IP_ADDR then
+    else if i == IP_ADDR then
       Font.drawText(px, "wlan0 IPv4 address", 0, row, Color.midGray, false, 0)
-    else if s.selected == CELL_DATA then
+    else if i == CELL_DATA then
       Font.drawText(px, "ppp0 link + signal", 0, row, Color.midGray, false, 0)
       renderCellAddr(px, row + 1)
-    else if s.selected == NET_TEST then
+    else if i == NET_TEST then
       renderNetTestDetail(s, px, row)
     else
       renderActionDetail(s, px, row)
@@ -1274,7 +1358,7 @@ object SettingsLogic:
   /** what the armed OK would do — for a toggle that is the OPPOSITE of the
    *  state the row shows. */
   def actionVerb(s: SettingsState): String =
-    val i = s.selected
+    val i = cur(s)
     if i == POWER_OFF then "power off"
     else if i == REBOOT_BL then "reboot to BL"
     else if i == REBOOT_EDL then "reboot to EDL"

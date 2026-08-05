@@ -48,6 +48,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 )
 
 // Config is the per-node JSON config (the enrollment file format of plan
@@ -74,6 +75,13 @@ type Config struct {
 	// {"id":..., "addrs":[...]} there once bound (the smoke harness reads
 	// it to provision the client).
 	AnnounceFile string `json:"announceFile"`
+	// AdminURL (device) is the base URL of the admin interface the
+	// enrolment QR encodes ("http://192.168.1.4:8008" today, a domain
+	// later). Nothing in this package uses it — it rides here because the
+	// device's whole iroh provisioning is one file, and wata-fb reads the
+	// field itself (WATA_ADMIN_URL overrides). It is CONFIG: the device
+	// cannot derive the address a parent's phone can reach.
+	AdminURL string `json:"adminUrl"`
 }
 
 // LoadConfig reads and parses the JSON config at path.
@@ -90,6 +98,91 @@ func LoadConfig(path string) (*Config, error) {
 		c.Relay = "n0"
 	}
 	return &c, nil
+}
+
+// EnsureKey gives the config at path a node key of its OWN and reports the
+// resulting node id — the device-minted identity of plan 0014 milestone 1.
+//
+// A handset is flashed with a config that names the family's server and NO
+// secret: the key is minted here, on the device, on first boot, and never
+// travels. Enrolment is then an approval of a public id rather than a delivery
+// of a secret, which is the whole point of that plan's reframing.
+//
+// Idempotent: a config that already carries a secretKey is left alone and only
+// its id is derived. The rewrite preserves every other field (it edits the
+// parsed JSON object rather than re-marshalling Config, so an adminUrl, a
+// peerAddrs list or a field this package does not know survives), goes through
+// a temp file + rename in the same directory, and lands 0600 — the file holds
+// the node's secret.
+func EnsureKey(path string) (string, error) {
+	raw, e := os.ReadFile(path)
+	if e != nil {
+		return "", fmt.Errorf("irohnet: config: %w", e)
+	}
+	var obj map[string]json.RawMessage
+	if e := json.Unmarshal(raw, &obj); e != nil {
+		return "", fmt.Errorf("irohnet: config %s: %w", path, e)
+	}
+	var secret string
+	if v, ok := obj["secretKey"]; ok {
+		_ = json.Unmarshal(v, &secret)
+	}
+	if secret != "" {
+		return IDOf(secret)
+	}
+	secret, id, e := GenKey()
+	if e != nil {
+		return "", e
+	}
+	enc, e := json.Marshal(secret)
+	if e != nil {
+		return "", e
+	}
+	obj["secretKey"] = enc
+	body, e := json.MarshalIndent(obj, "", "  ")
+	if e != nil {
+		return "", e
+	}
+	tmp := path + ".tmp"
+	if e := os.WriteFile(tmp, append(body, '\n'), 0o600); e != nil {
+		return "", fmt.Errorf("irohnet: minting a key into %s: %w", path, e)
+	}
+	if e := os.Rename(tmp, path); e != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("irohnet: minting a key into %s: %w", path, e)
+	}
+	return id, nil
+}
+
+// refusal is the most recent reason a dial FAILED, recorded package-wide by
+// Dialer.logDialError alongside the line it prints. A refusal by the peer
+// formats as "server refused: <code> <reason>" (irohnet_client_dial), so
+// "not allowlisted" is a substring test away; anything else here is an
+// ordinary transport failure. The distinction is the transport's own and never
+// reaches the portable client core (the HttpDo capability folds every Go error
+// into HttpResponse(0, "")), so this is the only way the app edge can tell a
+// device that is NOT ENROLLED from one whose network is merely down — the
+// difference between showing a QR code and showing "waiting for network".
+var (
+	refusalMu sync.Mutex
+	refusal   string
+)
+
+func noteRefusal(reason string) {
+	refusalMu.Lock()
+	defer refusalMu.Unlock()
+	refusal = reason
+}
+
+// LastRefusal is the most recent dial-failure reason seen by any dialer in
+// this process, or "" if none. Never cleared: having been refused once is a
+// standing fact about this node id. It does not need clearing: the screen that
+// reads it is only ever drawn before the link has been live once, so an
+// approval that lands mid-session retires it by succeeding.
+func LastRefusal() string {
+	refusalMu.Lock()
+	defer refusalMu.Unlock()
+	return refusal
 }
 
 // Addr is the net.Addr both sides report: network "iroh", the node id as the

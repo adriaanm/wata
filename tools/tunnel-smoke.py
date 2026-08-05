@@ -15,8 +15,10 @@ Steps:
   4. boot wata-server with WATA_IROH_CONFIG, read its announce file;
   5. run integ scenarios (integ.scala) over iroh — a FRESH server per
      scenario, exactly like tools/wataclient-integ.sh;
-  6. the allowlist negative: a node the config never listed is refused at
-     accept, loudly;
+  6. the allowlist negative: a FRESH DEVICE IDENTITY — minted by
+     irohnet.EnsureKey into a config that was deployed with no secret at all
+     (plan 0014 milestone 1), the same call wata-fb makes on first boot — is
+     refused at accept, loudly;
   7. enrolment (plan 0021 milestone B): that same refused node announces
      itself, an admin approves it over the admin listener, and it is then
      accepted by the same server process — no restart.
@@ -79,6 +81,18 @@ def keygen(env, keygen_bin):
     if out.returncode != 0:
         fail(f"keygen failed: {out.stderr}")
     return json.loads(out.stdout)
+
+
+def mint_into(env, keygen_bin, cfg_path):
+    """The DEVICE-MINTED identity (plan 0014 milestone 1): irohnet.EnsureKey
+    over a config that carries no secret. Same call wata-fb makes on first boot
+    — `irohnet-keygen -config` exists so this harness drives that code path
+    instead of hand-minting a key and pasting it into a file. Returns the node
+    id; the secret never leaves the config."""
+    out = run([keygen_bin, "-config", str(cfg_path)], env, capture_output=True, text=True)
+    if out.returncode != 0:
+        fail(f"EnsureKey failed: {out.stderr}")
+    return json.loads(out.stdout)["id"]
 
 
 def start_server(server_bin, env, cfg_path, log_path, listen=None):
@@ -311,7 +325,6 @@ def main():
     # (QUIC close 401 "not allowlisted", before any stream). The intruder's
     # integ run must NOT pass — and the refusal should be the loud kind.
     if ok:
-        intruder_key = keygen(env, str(keygen_bin))
         sdir = tmp / "allowlist-negative"
         sdir.mkdir()
         announce = sdir / "announce.json"
@@ -334,13 +347,31 @@ def main():
                 time.sleep(0.1)
             ann = json.loads(announce.read_text())
             v4 = [a for a in ann["addrs"] if not a.startswith("[")]
+            # A FRESH DEVICE, provisioned the way one really is (plan 0014):
+            # the config names the family's server and carries NO secret; the
+            # key is minted into it on first use and only the public id comes
+            # back out.
             bad_cfg = sdir / "intruder.json"
             bad_cfg.write_text(json.dumps({
-                "secretKey": intruder_key["secretKey"],
                 "relay": "none",
                 "peer": ann["id"],
                 "peerAddrs": v4,
+                "adminUrl": f"http://127.0.0.1:{ENROLL_PORT}",
             }))
+            intruder_id = mint_into(env, str(keygen_bin), bad_cfg)
+            minted = json.loads(bad_cfg.read_text())
+            check_mint = [
+                (len(minted.get("secretKey", "")) == 64, "the mint wrote a secret key into the config"),
+                (minted.get("peer") == ann["id"] and minted.get("adminUrl", "").startswith("http"),
+                 "the mint preserved every other field"),
+                ((bad_cfg.stat().st_mode & 0o777) == 0o600, "the config holding the secret is 0600"),
+                (mint_into(env, str(keygen_bin), bad_cfg) == intruder_id,
+                 "minting again is idempotent — the identity is stable across boots"),
+            ]
+            for good, what in check_mint:
+                print(f"tunnel-smoke: device-minted identity: {'PASS' if good else 'FAIL'} — {what}")
+                if not good:
+                    ok = False
             r = subprocess.run(
                 [str(client_bin), "integ", "login-syncing", "http://wata.iroh"],
                 env={**env, "WATA_IROH_CONFIG": str(bad_cfg)},
@@ -368,7 +399,7 @@ def main():
             # ---- 7. enrolment (plan 0021 M B): the refused node announces,
             # an admin approves it, and it is admitted by the SAME process.
             if refused and not enrol_leg(env, client_bin, bad_cfg, srv_cfg,
-                                         intruder_key["id"], spare_key["id"]):
+                                         intruder_id, spare_key["id"]):
                 ok = False
         finally:
             proc.send_signal(signal.SIGTERM)

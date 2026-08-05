@@ -13,3 +13,8 @@ godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet
 # The per-request HTTP deadline (plan 0022): a plain Go dep for the one
 # net/http.Client field the bound facade does not carry.
 godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc
+# The enrolment QR (plan 0014): a thin local adapter (go-pkgs/qr) over
+# rsc.io/qr, which it requires as an ORDINARY fetched Go dependency —
+# `godep` names a local dir, so an upstream package rides in through one.
+# Pure Go, no build tag.
+godep github.com/adriaanm/wata/go-pkgs/qr go-pkgs/qr

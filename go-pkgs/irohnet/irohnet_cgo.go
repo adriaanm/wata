@@ -101,6 +101,19 @@ func GenKey() (string, string, error) {
 	return cstr(sec), cstr(id), nil
 }
 
+// IDOf derives the node id of an existing secret key (lowercase hex), so a
+// device that minted its key on an earlier boot can still say who it is
+// without touching the file again.
+func IDOf(secretHex string) (string, error) {
+	sec := C.CString(secretHex)
+	defer C.free(unsafe.Pointer(sec))
+	id := make([]byte, 128)
+	if C.irohnet_id_of(sec, (*C.char)(unsafe.Pointer(&id[0])), 128) != 0 {
+		return "", errors.New("irohnet: the configured secretKey is not a valid node key")
+	}
+	return cstr(id), nil
+}
+
 func cstr(b []byte) string {
 	for i, c := range b {
 		if c == 0 {
@@ -512,6 +525,7 @@ func (d *Dialer) logDialError(reason string) {
 		return
 	}
 	d.lastLogged = reason
+	noteRefusal(reason)
 	fmt.Printf("irohnet: dial %s failed: %s\n", d.peer, reason)
 }
 

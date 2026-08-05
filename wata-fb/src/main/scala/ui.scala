@@ -240,6 +240,7 @@ object Ui:
     unsentC.set(Nil)
     undelivC.set(Nil)
     NetStatus.reset()
+    Enrol.reset()
 
   /** seed the frame clock — every driver calls this once before its first
    *  `frameStep`, so the first frame's dt is a frame and not the epoch. */

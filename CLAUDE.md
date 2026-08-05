@@ -136,13 +136,28 @@ that home's `sgo` driver if it is absent.
 
 ### How the deps resolve
 
-`json` and `wataclient` need **no module proxy and no populated module
-cache**. `sgo` resolves an in-link library (the names in `sgo.deps`) by
-searching the declaring module's parent dir first, then the toolchain home
+Two kinds of dependency, resolved two different ways.
+
+**In-link Sgola libraries** (`json`, `wataclient` — the names in
+`sgo.deps`) need **no module proxy and no populated module cache**. `sgo`
+searches the declaring module's parent dir first, then the toolchain home
 — so `wataclient` is found as a sibling in this repo and `json` as the
 author module in the sgola tree, and both compile from those sources.
-The build works with `GOPROXY`, `GOMODCACHE`, `GOFLAGS`, and `GOPRIVATE`
-all unset.
+
+**Go module dependencies are ordinary Go dependencies.** External ones are
+permitted and deliberately exercised (plan 0014's revised ruling — the
+first is `rsc.io/qr`): a normal `require` plus a committed `go.sum` in the
+`go-pkgs/` module that declares it, fetched through the module proxy like
+any Go project. The offline-no-proxy build was a self-imposed invariant
+and is **no longer absolute**; a cold build may reach the network.
+
+Because `sgo.build`'s `godep` names a local directory, an upstream package
+rides in through a local `go-pkgs/` module that requires it. `sgo`'s go.mod
+stage writes only require+replace for those godeps — no go.sum, and no line
+for a godep's own upstream requirements — so `tools/sgo-env.sh` and
+`tools/toolchain.py` set `GOFLAGS=-mod=mod`, which lets the go build stage
+add both to the GENERATED module. That is a workaround (sgola ticket
+`GOMOD-TRANSITIVE-SUM`), not the destination.
 
 ## How we work here
 
