@@ -24,7 +24,9 @@ class SpikeHttp(client: go.net.http.Client) extends HttpDo:
 /** the goroutine capability: one line of `go.spawn` over the core's own scope
  *  body. */
 class SpikeSpawner extends Spawner:
-  def runDetached(h: Handle): Unit = SpikeCaps.spawnScope(h)
+  // lambda inline in the class method: the standing proof of the class-method
+  // lambda fix (this exact shape once emitted undefined: runDetached__anonfun_1)
+  def runDetached(h: Handle): Unit = go.spawn(() => ClientHandle.runScope(h))
 
 object SpikeCaps:
 
@@ -37,7 +39,6 @@ object SpikeCaps:
   /** the spawn lives on the OBJECT: a lambda inside a CLASS method is lifted
    *  to a method but called as a top-level function, which does not compile
    *  (sgola ticket `CLASS-METHOD-LAMBDA-LIFT-MISMATCH`). */
-  def spawnScope(h: Handle): Unit = go.spawn(() => ClientHandle.runScope(h))
 
   /** sleep via the timeout-channel facade (`time.After` + recv; there is no
    *  bare sleep bind). */

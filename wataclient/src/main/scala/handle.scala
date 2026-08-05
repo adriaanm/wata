@@ -55,7 +55,7 @@ case class EvStopped() extends Event
  *  only detached goroutine sgola has (there is no `sgo` spelling for one:
  *  sgola ticket `SGO-DETACHED-SPAWN`). So the app supplies it, exactly like
  *  `HttpDo` and `Clock`; an impl is one line of the facade spawn over
- *  `ClientHandle.runScope` (see `wata-fb`'s `FbSpawner`/`FbCaps.spawnScope`).
+ *  `ClientHandle.runScope` (see `wata-fb`'s `FbSpawner`).
  *
  *  The body it runs is `ClientHandle.runScope`, so the scope's shape stays
  *  here and the app cannot get it wrong. */
@@ -101,8 +101,11 @@ case class Handle(client: MatrixClient, done: sgo.Chan[Boolean]) extends Shareab
    *  gone, so its module cells are free for the next `start`. */
   def join(timeoutMs: Long): Boolean = ClientHandle.join(this, timeoutMs)
 
-  /** has the goroutine exited? (a closed channel is always ready). */
-  def stopped(): Boolean = ClientHandle.stopped(this)
+  /** has the goroutine exited? (a closed channel is always ready). The
+   *  lambda sits inline in the class method as the standing proof of the
+   *  selectValue-adapter half of the class-method lambda fix. */
+  def stopped(): Boolean =
+    sgo.selectValue[Boolean, Boolean](done)((b: Boolean) => true)(false)
 
 object ClientHandle:
 
@@ -155,19 +158,10 @@ object ClientHandle:
     if !ok then Runtime.dropped(c, a)
     ok
 
-  /** take one topic if the queue has one.
-   *
-   *  Lives on the OBJECT, like every other member here that takes a lambda:
-   *  a lambda inside a CLASS method emits an orphan adapter function that
-   *  references the receiver (`self`) at Go top level, which does not compile
-   *  (sgola ticket `CLASS-METHOD-LAMBDA-SELF-ADAPTER`). `Handle`'s methods are
-   *  therefore one-line delegations and the bodies live here. */
+  /** take one topic if the queue has one. (The object-side bodies here are
+   *  house style — class methods may carry lambdas again since the
+   *  class-method lambda fix; `Handle.stopped` keeps one inline as proof.) */
   def pollEvent(c: MatrixClient): Option[Event] = c.topics.tryReceive()
-
-  /** has the client's goroutine exited? A CLOSED channel's receive is always
-   *  ready, so this never blocks. */
-  def stopped(h: Handle): Boolean =
-    sgo.selectValue[Boolean, Boolean](h.done)((b: Boolean) => true)(false)
 
   /** the current snapshot: take a newly published one if the cell holds it
    *  (that also refreshes `Runtime.lastSnap`), else the last one seen. */
