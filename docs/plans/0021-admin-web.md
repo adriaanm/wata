@@ -113,6 +113,27 @@ is "start from an empty install and do the initial admin flow").**
   a member account, reboot the service, both survive; the users file
   holds only hashes.
 
+**Names (owner ruling 2026-08-05: "both usernames and display names,
+exposed through the admin interface and display name used consistently
+through the client UI").** `[DISPLAY-NAMES]`
+
+- Admin side (largely landed with A): the user table shows BOTH columns
+  — username (the immutable login/localpart) and display name
+  (editable); create and setup (C) take a display name. Audit the page
+  so both are always visible, never conflated.
+- Client consistency: everywhere a human sees a user, it is the display
+  name; the fallback for a member with no profile displayname becomes
+  the LOCALPART, never the full mxid (today `syncengine.scala:438`
+  falls back to the raw `@user:server` id). tui `display()` gets the
+  same fallback instead of `-`.
+- The device settings' preset NAME PICKER is removed: it cycles
+  hardcoded names and overwrites the server-side displayname, which
+  now belongs to the admin interface. The server's profile fan-out
+  (m.room.member) is the propagation path; verify a rename lands on
+  a syncing device without restart and add the integ leg if missing.
+  (The `ActSetName` action stays in wataclient — the tui/admin may use
+  it; only the fb settings row goes.)
+
 ## What changes (file-level)
 
 - `wata-server/src/main/scala/adminapi.scala` (new), `webembed.scala`
