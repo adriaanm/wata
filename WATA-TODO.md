@@ -111,11 +111,13 @@ blocks + git log; each entry cites where it was recorded.*
   (def-result and withLock-lambda-tail, kept as standing proofs).
   ~~IF-EXPR-DOUBLE-BOXES~~ FIXED and verified downstream: pin
   `4834bec`, tickQuitArm's direct if-expression restored (standing
-  proof); walls of that class are POSITIONED now. **Every compiler
-  ticket wata has filed to date is landed and downstream-verified.**
-  Still open:
-  WATA-SKIP-FRESH-CHECKOUT (sgo driver; build in the original
-  checkout).
+  proof); walls of that class are POSITIONED now. **Every ticket
+  wata has filed to date — compiler and driver — is landed and
+  downstream-verified.** ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
+  `94ce542`, verified by the original repro: a fresh worktree with the
+  shared toolchain home rebuilds the liblink dep (RUN) and the
+  cross-build succeeds; isolated-worktree deploy builds work directly
+  now.
 - FYI from upstream 2026-08-05 (`4cbea19..d30adec`): several
   template-body construction lifts landed, plus GEN-7 — a new registry
   row RESTRICTING four construction shapes inside generic bodies
