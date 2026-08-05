@@ -63,6 +63,19 @@ targets — darwin (`just tunnel-smoke` builds it) and linux/arm, the device
 cross-build (`just iroh-lan-smoke`); every other build links the package's
 loud-error stub, so ordinary builds need no cargo.
 
+**The trusted node-id header** (plan 0027). Requests that arrive over the
+iroh listener reach the handler with `X-Wata-Node-Id` set to the
+connection's **authenticated** remote node id — the id the accept gate
+verified before surfacing any stream. The iroh bridge
+(`go-pkgs/irohnet/nodeid.go` + `Serve`) deletes any inbound copy of the
+header before injecting, and **every TCP listener serves through the
+matching strip** (`irohnet.StripNodeID`, wrapped in `Server.serveTcp` — the
+strip half is untagged Go, so it is real in stub builds too). A handler that
+sees the header may therefore treat it as proof of key possession; a
+request without it arrived where peer identity cannot be proven.
+Device-login authenticates on exactly this, and plan 0020's command mailbox
+is meant to next.
+
 ## Scope
 
 Implemented: password login (`m.login.password`) against the configured users
@@ -218,8 +231,8 @@ dispatches), so a new admin route cannot be added ungated by accident.
 | `POST /_wata/v1/admin/users/{user}/displayname` | rename |
 | `POST /_wata/v1/admin/users/{user}/admin` | grant/revoke the flag |
 | `DELETE /_wata/v1/admin/users/{user}` | remove the account |
-| `GET /_wata/v1/admin/enroll` | the devices waiting to be approved, plus the ids already allowlisted (see "Device enrolment") |
-| `POST /_wata/v1/admin/enroll/{nodeId}/approve` | allowlist that node id |
+| `GET /_wata/v1/admin/enroll` | the devices waiting to be approved, the ids already allowlisted, the account roster the approve picker offers, and the node-id→account bindings (see "Device enrolment") |
+| `POST /_wata/v1/admin/enroll/{nodeId}/approve` | allowlist that node id; an optional body `{"user": lp}` binds an account — creating a passwordless one when the name is new (see "Account provisioning") |
 | `POST /_wata/v1/admin/enroll/{nodeId}/deny` | drop the pending row |
 
 Two of them are more than a file edit. A **rename** also runs the store's
@@ -393,7 +406,52 @@ on the family network**; a cellular-only handset has the QR and only the QR.
 That limitation is real and recorded in plan 0014's fallback section rather
 than papered over.
 
-Gates: `tools/wata-admin-smoke.py` covers the announce, its validation, the
+### Account provisioning: device-login
+
+Plan 0027; `bindings.scala`. Approving the transport is half an onboarding —
+the handset still needs an account and a session, and the field test that
+motivated the plan closed that gap with a `curl` and an ssh. Now the approval
+closes it:
+
+- **Approve binds an account.** `POST …/approve` takes an optional body
+  `{"user": lp}`. An existing localpart binds as-is; a NEW valid name is the
+  **inline create-and-bind** (the owner's ruling): a passwordless account —
+  stored hash `""`, which `Pwhash.verify` accepts nothing against, so
+  password login is impossible by construction — created, profile-seeded and
+  family-joined like any admin-created account, then bound, one step. The
+  binding `nodeId -> localpart` lives in `Bindings` (its own mutex), is
+  journaled (`bind` op), and is written after the allowlist file held but
+  before the live allow — a bound-but-unadmitted node cannot log in anyway,
+  while an admitted-but-unbound one would race device-login. The approve
+  response then carries `user` + `user_id`; the enroll listing carries
+  `users` (the roster the page's picker offers) and `bindings` (so enrolled
+  rows can name their account).
+
+- **`POST /_wata/v1/device-login`** takes **no credentials**: the handler
+  reads the trusted `X-Wata-Node-Id` header (see "Serving transports") and
+  answers a fresh token + `user_id` + `device_id` for the bound account —
+  the password login's exact response shape (`Router.loginOk`, so the minted
+  device is journaled and revoked like any other). Where the header is
+  absent — every TCP-path request, however decorated, since both edges strip
+  inbound copies — it is **403 unconditionally**. An admitted node with no
+  binding is 404 (the handset retries and gets in when a binding lands); a
+  binding to a since-removed account is 403, with the binding left in place
+  so re-creating the account restores the handset without a re-enrolment.
+
+The trust argument is the plan's: the iroh handshake proves possession of
+the device's secret key, and the admin approved that exact key while looking
+at the physical handset — the connection *is* the authenticated channel, and
+a token sent over it would add friction, not security. Passwords remain a
+human-at-the-admin-page concern.
+
+Revocation: removing the *account* revokes its sessions today (the admin
+DELETE); a per-handset revoke endpoint (disallow + drop the binding +
+invalidate tokens) is still the unclaimed half — the FFI exists
+(`Listener.Disallow` closes live connections) but no route drives it.
+
+### Gates
+
+`tools/wata-admin-smoke.py` covers the announce, its validation, the
 dedupe, the cap and the expiry, the 401/403 gate, the atomic file write and
 its preservation of the rest of the config, the deny path, the endpoint
 sequence the page performs for a fragment nobody announced (page JS cannot run
@@ -402,15 +460,16 @@ a prefix is refused as an announce, as a 63-character near-miss, and as an
 approve target, leaving no row behind. It also pins the already-enrolled
 answer: the listing carries the allowlisted ids, a re-announce of one of them
 answers the marker and leaves no row, and an id nobody approved still answers
-pending.
+pending. For provisioning it pins the TCP half — device-login 403 with no
+header AND with a forged header naming a genuinely bound node — plus the
+approve-side binding, the roster, the inline create's passwordlessness, and
+the bindings' journal round-trip across a reboot.
 `tools/tunnel-smoke.py` runs the loop end to end over real iroh — the node the
-server just refused announces itself, an admin approves it, and the **same
-key** is accepted by the **same server process** and by the **same client
-process**, which is left running across the approval and redials its way in.
-
-Not built: a revoke endpoint. The FFI half exists and is covered by the
-irohnet Go tests (`Listener.Disallow` closes live connections), but removing a
-node id from the allowlist file and from the interface is unclaimed work.
+server just refused announces itself, an admin approves it **with an
+inline-created account**, and the **same key** is accepted by the **same
+server process** and by the **same client process**, which is left running
+across the approval, redials its way in, and reaches an authenticated sync
+as the bound account through device-login, no credential anywhere.
 
 ## Request lifecycle
 
@@ -916,11 +975,13 @@ method calls `Journal.rec` with a small `Json` object describing the
 *concrete post-generation record* — the already-minted event id, token,
 timestamp, and seq, never the generator inputs — so replay reinserts state
 verbatim without re-invoking `crypto/rand` or the wall clock (`persist.scala:14-21`).
-Fourteen op kinds are logged: `device`, `rmDevice`, `profile`, `acct`,
+The op kinds logged: `device`, `rmDevice`, `profile`, `acct`,
 `room`, `event`, `redact`, `alias`, `media` (metadata only —
 `{media_id, content_type, size}`; the bytes live in the blob file, written
 before the op — see "Media" above), `receipt`, `txn`, `dmpair` (a canonical
-DM's pair -> room claim). Long-poll waiters are
+DM's pair -> room claim), and `bind` (a device-account binding
+nodeId -> user, plan 0027 — a re-bind of the same node overwrites, so
+replay in commit order converges on the latest binding). Long-poll waiters are
 explicitly *not* logged (they're in-flight goroutines, transient by nature).
 
 Replaying a `media` op probes the blob file rather than decoding a payload; a
@@ -1116,6 +1177,7 @@ acceptance check for that run.
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
 - **`power.scala`** — `Power`: the `m.room.power_levels` authorization table (send/state/redact/invite/kick/ban).
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
+- **`bindings.scala`** — `Bindings` (the journaled nodeId→user map an approval writes) and `DeviceLogin` (`POST /_wata/v1/device-login`: the trusted-header check, then a fresh session for the bound account).
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
 - **`osfile.scala`** — `go.osfile`/`go.fsx`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove` for the blob store, `Rename` for the accounts file's atomic write, `Stat` for the sizes the status panel reports) plus `io/fs.FileInfo`; perms passed as literals, errors dropped except `Stat`'s.

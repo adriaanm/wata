@@ -602,6 +602,22 @@ network), is in `docs/design/wata-server.md` under Device enrolment.
   (`TestRefusedClientRedialsAfterAllow`, which dials faster than the cooldown
   throughout), and `just tunnel-smoke`'s enrolment leg approves a client
   process that is left RUNNING and refused.
+  **After the approval: the provisioning arc** (plan 0027). A handset
+  enrolled this way has no password — its session comes from
+  `POST /_wata/v1/device-login`, which `wataclient` calls whenever the config
+  carries no password (`Runtime.freshLogin`): the iroh connection's proven
+  node id is exchanged for a token belonging to the account bound at approve,
+  and the session is saved through the ordinary `persistSession` path, so the
+  next boot resumes on the stored token like any other. The window between
+  the QR coming down and the first live frame reads as
+  `Enrol.provisioning()` — this session WAS refused (`everRefused`, latched
+  only by the real transport verdict, never a scripted forced one) and no
+  longer is — and the boot screen says "setting up... / handset approved"
+  there instead of "waiting for network", because the parent is watching that
+  screen right after the approve click. The whole arc — refused with no
+  credentials, approved with an inline-created account, device-logged-in,
+  syncing as that account — is the `refused-then-provisioned` integ scenario,
+  driven by `just tunnel-smoke`.
 - **Settings -> Enroll**, offered whenever iroh is configured (`SettingsLogic`'s
   `ENROLL` row, `enrolOpen` in `SettingsState`). Back closes it; nothing else
   does, because a QR a stray keypress dismisses is a QR a parent has to go find

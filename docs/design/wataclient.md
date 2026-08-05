@@ -192,6 +192,15 @@ The client core **never terminates on failure — it reports and retries**
   `SLEEP_SLICE_MS` (200ms) slices, checking `stop` and the retry poke
   between slices — so a quit never freezes the last frame for up to a
   minute, and a poke is felt within a slice.
+- **Which login door is the config's password field** (plan 0027,
+  `freshLogin`). A config carrying a password logs in with it; a config with
+  NONE — a handset provisioned by enrolment, which has nothing to type —
+  calls `POST /_wata/v1/device-login` instead: no body worth the name, the
+  iroh connection's proven node id is the credential, and the same response
+  shape comes back, so everything downstream (`AuthCreds`, the session
+  save, resume) is door-blind. Never both: a config WITH a password asked
+  for that account explicitly. Over TCP device-login is 403 by design,
+  which reads as an ordinary rejection below.
 - **Rejection is its own state.** A `/login` answered 401/403 (`isAuthFail`)
   yields `LoginOutcome(_, rejected = true)`, which publishes
   `ConnAuthRejected` and jumps straight to the 60s ceiling. It still
@@ -452,7 +461,7 @@ bytes over a socket":
   transport dependency.
 - **`mhttp.scala`** (225 lines, `Hs` + object `MatrixHttp`) is the actual
   Matrix Client-Server API surface: one function per endpoint (`login`,
-  `sync`, `setDisplayName`, `redactEvent`, `sendReadReceipt`,
+  `deviceLogin`, `sync`, `setDisplayName`, `redactEvent`, `sendReadReceipt`,
   `uploadMedia`, `downloadMedia`, `joinRoom`, `dmRoom`, `setFavorite`,
   `createRoomWithAlias`, `createRoomStockDm`, `getMessages`,
   `sendVoiceMessage`), all going through
