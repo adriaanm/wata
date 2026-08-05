@@ -8,7 +8,8 @@ the reproduction.
 Stages (each runnable alone with --only):
 
   emit    `sgo build` the watabind Sgola module (core + json + wataclient
-          whole-program linked), then aslib.py to make the emission importable.
+          whole-program linked); `emitpackage` also produces the importable
+          .sgo/watacore-pkg package dir that the bind consumes.
   bind    `gomobile bind -target=ios,iossimulator` -> out/Watamobile.xcframework
           and `-target=macos` -> out/Watamobile-macos.xcframework.
   shell   swiftc the Swift shell against the macOS framework -> out/watashell.
@@ -23,7 +24,7 @@ Two more, opt-in, for the iOS-simulator leg:
           because the internal disk is tight. The INSTALL still lands on the
           internal disk.
   --only sim          build the shell for the simulator and run it there
-          against a live server. See REPORT.md for what blocks it here.
+          against a live server, in a custom device set (WATA_SIM_DEVSET).
 
 Requires: the pinned sgola toolchain (`just sync`), Xcode, and gomobile +
 gobind on PATH or under $GOBIN/~/go/bin:
@@ -73,10 +74,10 @@ def run(cmd, **kw):
 
 
 def gomobile_env():
-    """gomobile runs OUTSIDE the sgo driver, so it needs the same two knobs the
-    sgo scripts set: no go.work capture, and -mod=mod so the go build stage may
-    complete the generated module's requirements (sgola ticket
-    GOMOD-TRANSITIVE-SUM)."""
+    """gomobile runs OUTSIDE the sgo driver: no go.work capture, and -mod=mod
+    because watamobile is a local-replace host — its replace points into the
+    emitted package dir, whose requirements go resolves at build time rather
+    than from a committed go.sum of our own."""
     env = dict(os.environ)
     env["GOWORK"] = "off"
     env["GOFLAGS"] = "-mod=mod"
@@ -97,7 +98,9 @@ def tool(name, env):
 
 def stage_emit():
     run([str(WATA / "tools" / "sgo"), "build"], cwd=HERE / "watabind")
-    run([sys.executable, str(HERE / "aslib.py"), str(HERE / "watabind" / ".sgo" / "watacore")])
+    pkg = HERE / "watabind" / ".sgo" / "watacore-pkg"
+    if not pkg.is_dir():
+        sys.exit(f"spike: {pkg} missing — the toolchain pin must carry emitpackage")
 
 
 def stage_bind():

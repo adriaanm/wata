@@ -100,11 +100,12 @@ blocks + git log; each entry cites where it was recorded.*
 
 - The Gio window backend (plan 0023 M2) depends on the emitted `main` and
   the body of `sgo.supervised` running on the Go MAIN goroutine — Gio's
-  `app.Main()` panics anywhere else and never returns, so the supervised
-  body ends in it. That holds today (`sgolaSupervised` runs its body
-  inline); filed 2026-08-05 as `MAIN-GOROUTINE-GUARANTEE` asking for it to
-  be stated and pinned rather than left an implementation detail. No
-  workaround exists if it ever changes.
+  `app.Main()` panics anywhere else and never returns. ANSWERED upstream
+  same day (`6f16a53`): the guarantee is now a stated consumer-facing
+  promise (sgola CONCURRENCY.md §4.1 + the go-boundary spec, citing our
+  shape), with a runtime pin scenario in their ci; any future change is a
+  designer ruling with a consumer heads-up. Nothing to unwind — this was
+  a pin request, not a defect.
 - `HashMap.foldLeft` with `B` = a generic `List[T]` leaves `B`
   unspecialized in the linker and emits an `any` the call site cannot
   use (filed 2026-08-05, `WATA-FOLD-LIST-B`). Worked around in
@@ -125,14 +126,6 @@ blocks + git log; each entry cites where it was recorded.*
   cross-unit val reads inside one module (filed 2026-08-05,
   `CROSS-MODULE-VAL-READ`; plan 0022). Worked around with
   `Outbox.cap()`; inline `Outbox.CAP` again when it lands.
-- No emission shape is an importable Go PACKAGE that carries the sgola
-  runtime: `mode app` emits `package main` (un-importable) and `mode
-  library` is the runtime-free `@goexport` facade, which a core-dependent
-  in-link library like `wataclient` cannot ride (filed 2026-08-05,
-  `NO-LIB-EMIT-FOR-RUNTIME-LIBS`; plan 0023 M1). Worked around with
-  `tools/phone-spike/aslib.py`, which rewrites the emitted `package main`
-  into `package watacore` after every `sgo build`; delete that file when
-  an `emitpackage` marker (or an equivalent third mode) lands.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —
@@ -161,9 +154,13 @@ blocks + git log; each entry cites where it was recorded.*
   ~~INLINK-DEP-SEARCH-PARENT-ONLY~~ FIXED and verified downstream: pin
   `0d45d7f`, the committed symlink deleted and `watabind/sgo.deps`
   naming `wataclient ../../../wataclient` explicitly (standing proof;
-  spike emit + full gate green). Open upstream:
-  NO-LIB-EMIT-FOR-RUNTIME-LIBS (plan 0023 M1, workaround above; fix
-  dispatching). ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
+  spike emit + full gate green). ~~NO-LIB-EMIT-FOR-RUNTIME-LIBS~~ FIXED
+  and verified downstream: pin `a5e3d27`, `emitpackage watacore` in the
+  spike's sgo.build, aslib.py DELETED, gomobile binding the emitted
+  `.sgo/watacore-pkg` dir directly — full spike (emit/bind/shell/smoke)
+  plus the iOS-simulator leg plus full ci all green. The plan-0023
+  friction ledger is EMPTY: every ticket the spike filed was fixed
+  upstream and verified downstream same-day. ~~WATA-SKIP-FRESH-CHECKOUT~~ FIXED at
   `94ce542`, verified by the original repro: a fresh worktree with the
   shared toolchain home rebuilds the liblink dep (RUN) and the
   cross-build succeeds; isolated-worktree deploy builds work directly

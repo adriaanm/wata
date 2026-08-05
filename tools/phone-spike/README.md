@@ -26,7 +26,6 @@ for it. It is not in `just ci` — it needs Xcode and a several-minute bind.
 |------|------------|
 | `watabind/` | a Sgola module linking `wataclient` whole-program; its `Bind` object is the surface the phone reaches |
 | `watabind/sgo.deps` | names `wataclient` by explicit relative path (`wataclient ../../../wataclient`) — the nested-module form `sgo.deps` grew for exactly this layout |
-| `aslib.py` | rewrites the emitted `package main` into an importable `package watacore` |
 | `watamobile/` | the hand-written Go shim that gobind actually binds: strings in, strings out |
 | `swift/` | the Swift shell (+ its bridging header) that drives the bound macOS framework |
 | `spike.py` | the four stages, end to end |
@@ -36,10 +35,10 @@ for it. It is not in `just ci` — it needs Xcode and a several-minute bind.
 
 `sgo build` compiles `watabind` — core + json + wataclient + the spike's own
 capability impls — into one whole-program Go module under
-`watabind/.sgo/watacore/`. That module is `package main`, which Go cannot
-import, so `aslib.py` rewrites the package clause (and `func main` to
-`func RunCLI`, which keeps the CLI runnable and the `os` import used). The
-hand-written `watamobile` package requires that module through a `replace` and
+`watabind/.sgo/watacore/`, and — via `emitpackage watacore` in `sgo.build` —
+also into the importable sibling package dir `watabind/.sgo/watacore-pkg/`
+(`func main` becomes the exported `RunCLI()` there). The hand-written
+`watamobile` package requires the `-pkg` module through a `replace` and
 re-exports two functions in types gobind can carry. `gomobile bind` turns
 `watamobile` into an xcframework for `ios,iossimulator` and another for
 `macos`. `swiftc` builds a CLI against the macOS one, and the smoke boots a
@@ -48,6 +47,5 @@ prints — which are rendered inside Sgola, from a live `StateSnapshot`.
 
 ## Rerunning after a source change
 
-`sgo build` rewrites the emission on every build, so `aslib.py` has to run
-again — that is why `emit` is one stage. Running `just phone-spike` from the
-top always does the right thing.
+`sgo build` rewrites both emission dirs on every build. Running
+`just phone-spike` from the top always does the right thing.

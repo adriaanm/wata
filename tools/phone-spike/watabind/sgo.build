@@ -1,12 +1,12 @@
 # sgo.build — the phone spike's Sgola side (plan 0023 M1).
 #
-# APP mode, even though what we want is a Go LIBRARY: `mode library` is the
-# @goexport publish shape, which emits a runtime-free package and so cannot
-# carry a core-dependent in-link library like wataclient. So this module
-# declares an (empty) `object Main`, is built as an app, and tools/phone-spike
-# /aslib.py rewrites the emitted `package main` into an importable package.
-# See REPORT.md and sgola ticket NO-LIB-EMIT-FOR-RUNTIME-LIBS.
+# APP mode plus `emitpackage`: alongside the ordinary package-main binary,
+# the whole-program emission (sgola runtime included) is ALSO produced as an
+# importable Go package in the sibling dir .sgo/watacore-pkg — that package
+# is what gomobile binds. Its `func main` is the exported `RunCLI()`, which
+# the spike never calls.
 mode app
 emitname watacore
+emitpackage watacore
 binname watabind
 gomod github.com/adriaanm/wata/tools/phone-spike/watacore

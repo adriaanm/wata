@@ -8,6 +8,6 @@ require (
 )
 
 // The sgola emission is a build product under watabind/.sgo/ (gitignored):
-// `sgo build` writes it, tools/phone-spike/aslib.py rewrites `package main`
-// into `package watacore`, and this replace points at it.
-replace github.com/adriaanm/wata/tools/phone-spike/watacore => ../watabind/.sgo/watacore
+// `sgo build` with `emitpackage watacore` writes the importable package dir,
+// and this replace points at it.
+replace github.com/adriaanm/wata/tools/phone-spike/watacore => ../watabind/.sgo/watacore-pkg
