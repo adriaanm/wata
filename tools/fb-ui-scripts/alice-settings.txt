@@ -61,7 +61,11 @@ tap down
 advance 5
 checkpoint settings-nettest
 
+# OK starts the probes on a goroutine and returns — the frame loop does not
+# wait on four network round trips. The verdicts land in the applet's state a
+# frame or two later, so the run waits for them rather than for a frame count.
 tap enter
+wait nettest 1 300
 advance 5
 checkpoint settings-nettest-run
 

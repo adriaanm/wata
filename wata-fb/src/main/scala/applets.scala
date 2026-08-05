@@ -406,25 +406,34 @@ object WataLogic:
   def notifyPlayError(s: WataState, fetchFailed: Boolean): WataState =
     withPlayErr(s, false, true, !fetchFailed, 2.0)
 
-  // ---- render (bitmap-font only) -----------------------------------------------
-  def render(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
-    s.view match
-      case _: VContacts     => renderContacts(s, px, ctx)
-      case _: VConversation => renderConversation(s, px, ctx)
-    renderStatusFlash(s, px)
-    if s.pttHeld then renderRecordingOverlay(s, px)
-
-  /** the contact list is a `wataui` BODY (plan 0024). Everything it needs is
-   *  read HERE, at the call site: the session latch `NetStatus.everLive`, the
-   *  app-edge `FbCaps.transportUnavailable` and the enrolment identity are
-   *  ambient reads, and a body reads its arguments and nothing else. The one
-   *  EFFECT this screen has — announcing the device the first time the
+  // ---- render (a `wataui` body — plan 0024) -------------------------------------
+  /** ONE view per frame, painted by the framebuffer interpreter. Everything
+   *  ambient the screens need is read HERE, at the call site: the session latch
+   *  `NetStatus.everLive`, the app-edge `FbCaps.transportUnavailable` and the
+   *  enrolment identity, since a body reads its arguments and nothing else. The
+   *  one EFFECT on this path — announcing the device the first time the
    *  enrolment state appears — is here too, for the same reason. */
-  def renderContacts(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
+  def render(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
     val everLive = NetStatus.everLive()
-    FbPaint.draw(px, bodyContacts(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
+    FbPaint.draw(px, body(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
       ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable(),
       enrolSnap(ctx, everLive)))
+
+  /** the screen, then the two things that sit OVER it: the send/play status
+   *  flash and the recording bar. They are children after the screen because
+   *  children paint in list order, which is the same reason the old painter
+   *  drew them last. */
+  def body(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
+      quitArmed: Boolean, unsent: List[String], undelivered: List[String],
+      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap]): View =
+    val screen: View = s.view match
+      case _: VContacts =>
+        bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol)
+      case _: VConversation => bodyConversation(s, snap)
+    var kids: List[Keyed] = Nil
+    if s.pttHeld then kids = Keyed("rec", recordingView(s)) :: kids
+    if s.statusTimer > 0.0 then kids = Keyed("flash", statusFlashView(s)) :: kids
+    VGroup(Keyed("screen", screen) :: ListOps.reverse(kids))
 
   /** the enrolment screen's data, and the announce that goes with the frame it
    *  first appears on — `Some` exactly when the transport has refused this node
@@ -562,12 +571,8 @@ object WataLogic:
     val fg = if mark == 2 then Color.red else Color.yellow
     VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, g, fg)
 
-  /** the conversation screen is a `wataui` BODY (plan 0024): a pure function of
-   *  the applet state and the frame's snapshot, painted by the framebuffer
-   *  interpreter. Nothing here reads an atomic, a clock or the network. */
-  def renderConversation(s: WataState, px: go.Bytes, ctx: FrameCtx): Unit =
-    FbPaint.draw(px, bodyConversation(s, ctx.snap))
-
+  /** the conversation screen: a pure function of the applet state and the
+   *  frame's snapshot. Nothing here reads an atomic, a clock or the network. */
   def bodyConversation(s: WataState, snap: StateSnapshot): View =
     convAt(snap, s.convContactIdx) match
       case c: Some[Conversation] => convBodyView(s, c.value)
@@ -631,24 +636,31 @@ object WataLogic:
       kids = Keyed("star", VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, Font.ICON_STAR, fg)) :: kids
     VGroup(ListOps.reverse(kids))
 
-  def renderStatusFlash(s: WataState, px: go.Bytes): Unit =
-    if s.statusTimer > 0.0 then
-      if s.sendError then Font.drawText(px, "SEND FAILED", 3, 9, Color.red, false, 0)
-      else if s.playError then Font.drawText(px, playErrMsg(s), 3, 9, Color.red, false, 0)
-      else if s.sendOk then Font.drawText(px, "SENT", 8, 9, Color.green, false, 0)
+  /** the send/play flash, while its timer runs. An empty group is what "no
+   *  flash" looks like as data — the three states are exclusive and the losing
+   *  ones draw nothing. */
+  def statusFlashView(s: WataState): View =
+    var kids: List[Keyed] = Nil
+    if s.sendError then kids = Keyed("msg", VText(3, 9, "SEND FAILED", Color.red)) :: kids
+    else if s.playError then kids = Keyed("msg", VText(3, 9, playErrMsg(s), Color.red)) :: kids
+    else if s.sendOk then kids = Keyed("msg", VText(8, 9, "SENT", Color.green)) :: kids
+    VGroup(kids)
 
   /** the two play failures the user can act on differently: the network could
    *  not give us the message, or this device cannot play one. */
   def playErrMsg(s: WataState): String =
     if s.noAudio then "NO AUDIO" else "PLAY FAILED"
 
-  def renderRecordingOverlay(s: WataState, px: go.Bytes): Unit =
+  /** the recording bar: a red band across the bottom with the elapsed time
+   *  centered on it — the rectangle first, since it sits behind the text. */
+  def recordingView(s: WataState): View =
     val barY = Display.H - 24
-    Draw.fillRect(px, 0, barY, Display.W, 24, Color.red)
     val secs = s.pttHoldTime.toInt
     val tenths = (s.pttHoldTime * 10.0).toInt % 10
     val txt = "REC " + secs + "." + tenths + "s"
-    Font.drawTextCentered(px, txt, (barY + 8) / Font.GLYPH_H, Color.white, false, 0)
+    VGroup(Keyed("bar", VRect(0, barY, Display.W, 24, Color.red)) ::
+      (Keyed("time", VText(FbPaint.centerCol(txt), (barY + 8) / Font.GLYPH_H, txt,
+        Color.white)) :: Nil))
 
   /** THE BOOT SCREEN — what the applet shows from session start until the link
    *  has been live once (`NetStatus.everLive`). The device boots into wata
@@ -965,7 +977,8 @@ case class DiagSnap(
  *  `diag` is the cached diagnostics, re-read by `refreshDiag` every
  *  `DIAG_REFRESH` frames (`diagLeft` counts down to the next read).
  *  `netLine1`/`netLine2` hold the last net test's
- *  verdicts ("" = never run this session) and `actionMsg` the last toggle's
+ *  verdicts ("" = never run this session) and `netRunning` is true while the
+ *  goroutine running the probes has not answered yet and `actionMsg` the last toggle's
  *  failure text — an action that did not do what the row says it does has to
  *  say so rather than leave the row looking untouched. `enrolOpen` is the one
  *  row that opens a screen of its own (Enroll): while it is true the applet
@@ -980,6 +993,7 @@ case class SettingsState(
   diag: DiagSnap,
   netLine1: String,
   netLine2: String,
+  netRunning: Boolean,
   actionMsg: String,
   diagLeft: scala.Int,
   enrolOpen: Boolean
@@ -1073,13 +1087,13 @@ object SettingsLogic:
   val DETAIL_ROW = 13
 
   def initial(): SettingsState =
-    SettingsState(0, 40, EchoIdle(), 1, true, false, noDiag(), "", "", "", 0, false)
+    SettingsState(0, 40, EchoIdle(), 1, true, false, noDiag(), "", "", false, "", 0, false)
 
   /** the boot state: preferences come back from the config store, so a device
    *  keeps the backlight and timeout its owner set. */
   def restored(p: FbPrefs): SettingsState =
     SettingsState(0, p.brightness, EchoIdle(), p.timeoutIdx, true, false,
-      noDiag(), "", "", "", 0, false)
+      noDiag(), "", "", false, "", 0, false)
 
   /** nothing read yet — the first `refreshDiag` fills it in on the first frame
    *  (`diagLeft` starts at 0). `enrol` is the exception: it decides how many
@@ -1100,34 +1114,34 @@ object SettingsLogic:
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
     SettingsState(sel, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
     SettingsState(s.selected, b, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
     SettingsState(s.selected, s.brightness, e, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, i, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, c,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withArmed(s: SettingsState, a: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      a, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      a, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withDiag(s: SettingsState, d: DiagSnap, left: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, d, s.netLine1, s.netLine2, s.actionMsg, left, s.enrolOpen)
-  def withNetTest(s: SettingsState, l1: String, l2: String): SettingsState =
+      s.armed, d, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, left, s.enrolOpen)
+  def withNetTest(s: SettingsState, l1: String, l2: String, running: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, l1, l2, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, l1, l2, running, s.actionMsg, s.diagLeft, s.enrolOpen)
   def withEnrolOpen(s: SettingsState, o: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.actionMsg, s.diagLeft, o)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, o)
   def withActionMsg(s: SettingsState, m: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, m, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, m, s.diagLeft, s.enrolOpen)
 
   // ---- input (press-only) ------------------------------------------------------
   /** every key goes through `persisted`, so the three stored preferences are
@@ -1242,12 +1256,18 @@ object SettingsLogic:
     else if s.diag.cell.startsWith("off") then out = "OFF"
     out
 
-  /** the net test is synchronous — a few seconds of pings block the frame
-   *  loop, exactly as system-menu's own net test blocks its menu. Off-device
-   *  it runs nothing and says "n/a". */
+  /** OK on the net-test row STARTS the probes on a goroutine and returns: they
+   *  take a few seconds — four network round trips — and a frame is 33ms. The
+   *  row says it is running until `collectNetTest` picks the verdicts up; a
+   *  second OK while it runs does nothing, since one test is one test. The
+   *  previous run's verdicts are dropped at the start, because they are not
+   *  this run's answer. Off-device the probes run nothing and say "n/a". */
   def runNetTest(s: SettingsState): SettingsState =
-    val r = Diag.netTest()
-    withNetTest(s, r.line1, r.line2)
+    var out = s
+    if !s.netRunning then
+      Diag.startNetTest()
+      out = withNetTest(s, "", "", true)
+    out
 
   def startEcho(s: SettingsState, ctx: FrameCtx): SettingsState =
     var out = s
@@ -1306,7 +1326,15 @@ object SettingsLogic:
    *  via `Shell.routeAudio` -> `onEcho`, NOT a drain — the shell owns the
    *  mailbox's single drain (plan 0009). */
   def update(s: SettingsState, dt: scala.Double, ctx: FrameCtx): SettingsState =
-    refreshDiag(s)
+    refreshDiag(collectNetTest(s))
+
+  /** the net test's verdicts, the frame after the goroutine running them
+   *  finished. `takeNetTest` answers once, so this is a no-op on every other
+   *  frame. */
+  def collectNetTest(s: SettingsState): SettingsState =
+    Diag.takeNetTest() match
+      case r: Some[NetTestResult] => withNetTest(s, r.value.line1, r.value.line2, false)
+      case None                   => s
 
   /** re-read the IP / cellular info rows every `DIAG_REFRESH` frames (the
    *  first frame reads immediately — `diagLeft` starts at 0). Off-device
@@ -1484,9 +1512,11 @@ object SettingsLogic:
   def cellAddrLine(s: SettingsState): String =
     if s.diag.cellAddr == "" then "" else "ppp0 " + s.diag.cellAddr
 
-  /** before a run, what OK will do; after one, the four verdicts. */
+  /** before a run, what OK will do; during one, that it is going; after one,
+   *  the four verdicts. */
   def netTestDetail(s: SettingsState): View =
-    if s.netLine1 == "" then twoLines("OK pings gw/DNS", "takes a few seconds")
+    if s.netRunning then twoLines("pinging gw/DNS...", "takes a few seconds")
+    else if s.netLine1 == "" then twoLines("OK pings gw/DNS", "takes a few seconds")
     else twoLines(s.netLine1, s.netLine2)
 
   /** the action rows' detail doubles as the confirmation prompt: unarmed it
@@ -1525,10 +1555,15 @@ object SettingsLogic:
     if s.diag.battery >= 0 then line = "Bat:" + s.diag.battery + "% " + line
     line
 
+  /** has this session's net test produced verdicts (what a scripted run waits
+   *  on — the probes answer on their own goroutine)? */
+  def hasNetTestResult(s: SettingsState): Boolean = !s.netRunning && s.netLine1 != ""
+
   /** the net-test row's own value: what OK does, or that it has run (the
    *  verdicts themselves need the detail block's width). */
   def netTestStatus(s: SettingsState): String =
-    if s.netLine1 == "" then "OK=run"
+    if s.netRunning then "run.."
+    else if s.netLine1 == "" then "OK=run"
     else if s.netLine1 == Diag.UNAVAILABLE then Diag.UNAVAILABLE
     else "done"
 

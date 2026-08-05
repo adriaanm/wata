@@ -192,13 +192,48 @@ object Diag:
 
   // ---- net test ------------------------------------------------------------------
 
+  // the running test's answer, handed from the goroutine that runs it to the
+  // UI goroutine that draws it. Three cells rather than one holding the record:
+  // `done` is the publication, written LAST and read FIRST, so a reader that
+  // sees it set sees both lines.
+  private val ntDoneC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  private val ntL1C: sgo.Atomic[String] = sgo.atomic("")
+  private val ntL2C: sgo.Atomic[String] = sgo.atomic("")
+
+  /** start the probes ON A GOROUTINE OF THEIR OWN and return immediately. They
+   *  take seconds — four network round trips with their own timeouts — and the
+   *  frame loop has 33ms. The caller (the settings applet) shows the row as
+   *  running until `takeNetTest` hands it the verdicts. */
+  def startNetTest(): Unit =
+    ntDoneC.set(false)
+    sgo.spawn(() => runNetTestJob())
+
+  def runNetTestJob(): Unit =
+    val r = netTest()
+    ntL1C.set(r.line1)
+    ntL2C.set(r.line2)
+    ntDoneC.set(true)
+
+  /** the finished test's verdicts, ONCE — `None` while a run is still going, or
+   *  when there is nothing new to collect. */
+  def takeNetTest(): Option[NetTestResult] =
+    if !ntDoneC.getAndSet(false) then None
+    else Some(NetTestResult(ntL1C.get(), ntL2C.get()))
+
+  /** a fresh session per run, like `Ui.resetCells`' other cells: a verdict left
+   *  over from the previous session must not land in a new applet's state. */
+  def resetNetTest(): Unit =
+    ntDoneC.set(false)
+    ntL1C.set("")
+    ntL2C.set("")
+
   /** the net test's four probes, system-menu's `show_nettest` line for line:
    *  ping the default gateway (auto-detected off wlan0, then ppp0), 1.1.1.1
    *  and 8.8.8.8, then an nslookup DNS probe. Returns the two detail lines
    *  the row renders; off-device it runs NOTHING and says so.
    *
-   *  The probes are synchronous — a few seconds of frozen UI, the same cost
-   *  system-menu's own net test has. */
+   *  The probes are synchronous, which is why nobody calls this on the UI
+   *  goroutine — `startNetTest` is the entry point. */
   def netTest(): NetTestResult =
     var out = NetTestResult(UNAVAILABLE, "not on device")
     if onDevice() then out = runNetTest()

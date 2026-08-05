@@ -64,13 +64,6 @@ blocks + git log; each entry cites where it was recorded.*
   correct for them and does not widen this. The fix is to persist the
   counter, or to seed it from something per-run.
 
-- **Frame-loop blocking one-shots** (reviewer note, 2026-08-05): the
-  enrol announce is FIXED — `Enrol.announceOnce` latches on the UI
-  goroutine and spawns the request, so the frame that decides the
-  enrolment screen appears no longer waits up to 1.5s for it.
-  `Diag.netTest` still runs its four probes synchronously on the input
-  path (seconds of frozen UI); move it onto the same off-frame path.
-
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
 - ~~Thicket backend crash~~ FIXED and verified downstream: pin `2083ef6`

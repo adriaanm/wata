@@ -241,6 +241,17 @@ explicit state machine, not a generic widget framework:
   unwatched. The snake takes no part in the audio routing the
   always-tick rule exists for.
 
+**Every screen an applet shows is a `wataui` BODY** (plan 0024): an
+applet's `render` reads whatever is ambient, hands it to a pure
+`(state, ...) => View`, and makes ONE `FbPaint.draw` call. `WataLogic`
+has one body (`body` -> the enrolment screen, the boot screen, the
+connection line, the contact list or the conversation, plus the status
+flash and the recording bar as children over it) and `SettingsLogic` one
+(`body` -> the menu or the enrolment screen). Nothing else writes into
+the pixel buffer from an applet. The exception is deliberate: the snake
+keeps its own painter, because it is a game surface rather than a wata
+screen and no second backend will ever render it.
+
 ### The settings device rows
 
 The settings applet is the whole of what system-menu offered a parent
@@ -299,10 +310,13 @@ Three rules hold this together:
   accepts a single data call per boot and a silent second attempt would
   spend it. `pppd` is backgrounded, so the outcome arrives through the
   row's own ~5s ppp0 refresh, not through the exec's exit status.
-- **The net test blocks the frame loop** for the few seconds its pings
-  take, exactly as system-menu's does. A background probe would need
-  its own thread and a result mailbox for a diagnostic that is used
-  once in a blue moon; the row's detail says it takes a few seconds.
+- **The net test runs OFF the frame loop.** OK starts the four probes on
+  a goroutine (`Diag.startNetTest`) and returns; the row reads `run..`
+  until `SettingsLogic.collectNetTest` picks the verdicts up from
+  `Diag.takeNetTest` on a later frame's update. The probes take seconds
+  and a frame is 33ms — the frame goroutine never blocks, which is the
+  rule the whole UI is held to. A second OK while a test runs does
+  nothing; one test is one test.
 
 Commands run as `sh -c "<system-menu's line>"` through the `go.exec`
 facade, which is why the lines keep their redirections verbatim; the
@@ -446,11 +460,11 @@ unchanged — the same `NetState` the rest of the frame draws from), a
 centered headline in the conversation area, an optional second line
 saying what to do about it, and a footer naming the two live keys.
 
-This is the first screen built as a `wataui` BODY (plan 0024):
+This was the first screen built as a `wataui` BODY (plan 0024):
 `WataLogic.bodyBoot` is a pure function of
 `(NetState, ConnectionState, quitArmed, transportUnavailable)` to a view
 tree. The app-edge read — `FbCaps.transportUnavailable()` — is hoisted
-to `renderContacts`, the call site that paints the whole applet, because
+to `WataLogic.render`, the call site that paints the whole applet, because
 a body reads its arguments and nothing else ([wataui.md](wataui.md)).
 Centering is the body's arithmetic (`FbPaint.centerCol`), so the
 interpreter only ever sees a positioned `VText`. The connectivity
@@ -1367,17 +1381,17 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
 | `shell.scala` | 214 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, red-in-snake goes back to wata, everything else goes to the active applet; the snake is also the one applet ticked only while active). |
 | `snake.scala` | 275 | The snake applet, ported from the Zig client's `applets/snake.zig`: packed-cell body, deterministic minstd food PRNG, tick/step game logic, and rendering; frame counts for its uitest scenario are designed with `tools/snake-frames.py`, an exact Python mirror. |
-| `applets.scala` | 1315 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and rendering; also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `applets.scala` | 1579 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and their `wataui` bodies (both applets are pure view functions painted by `FbPaint`); also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
 | `netstatus.scala` | 176 | The connectivity element's computed state (`NetState` = pipe + health + blink phase): the cached ~5s interface read, the `ConnectionState` mapping, the reconnecting animation's phase, and what the header draws for each combination — read by both the header indicator and the 1px status line. |
-| `diag.scala` | 336 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
+| `diag.scala` | 371 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test and the goroutine that runs it off the frame loop, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
 | `netexec.scala` | 59 | The `go.exec` facade over `os/exec` (`Command` at one and three arities, `Run`, `Output`) and the `go.netif` facade over `net` — what `Diag` runs system-menu's shell lines and its interface reads through. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 831 | Live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename landing on a syncing client, and the outbox's queue/persist/drop/deliver cycle. |
-| `ui.scala` | 380 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
+| `ui.scala` | 442 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
 | `gio.scala` | 129 | The window front end: `GioDevice` (present/LEDs/keys over the `go.gioshell` facade) and `Gio` (the forked frame loop, the packed-key decoding, the `--scale`/`--frames` flags). |
 | `gioshell.scala` | 63 | The `go.gioshell` facade for `go-pkgs/gioshell`. |
 | `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
-| `uiscript.scala` | 583 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
+| `uiscript.scala` | 673 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
 
 ## Known gaps / debt observed while reading
 

@@ -504,7 +504,15 @@ object UiScript:
     else if name == "unsent" then countKeys(Ui.unsentKeys)
     else if name == "undeliv" then countKeys(Ui.undeliveredKeys)
     else if name == "frames" then Ui.frames
+    else if name == "nettest" then netTestProbe()
     else -1
+
+  /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run
+   *  on a goroutine of their own, so "OK pressed" and "the row shows a result"
+   *  are different frames — a scripted run waits for the second one rather than
+   *  assuming a number of frames is enough. */
+  def netTestProbe(): scala.Int =
+    boolProbe(SettingsLogic.hasNetTestResult(Shell.settingsState(Ui.shellState)))
 
   /** how many conversations carry one of the outbox markers. */
   def countKeys(xs: List[String]): scala.Int =

@@ -1,7 +1,6 @@
 # 0024 — wataui: the declarative UI layer
 
-Status: accepted — the module and the fb interpreter have landed;
-adoption continues applet by applet (`[UI-DSL-WATAUI]`)
+Status: done — the module, the fb interpreter, and every applet
 
 ## Problem
 
@@ -96,29 +95,39 @@ anything required.
 2. Applet by applet, `renderX(s, px, ctx)` becomes
    `bodyX(s, snap): View` + one `FbPaint.draw` call at the frame loop.
    Order: boot screen (smallest), conversation, contacts (the mark
-   alignment subtleties), settings, enrol (VImage), diag last.
-   **The boot screen is done** — `WataLogic.bodyBoot`, with
-   `FbCaps.transportUnavailable()` hoisted to the call site so the body
-   reads only its arguments. The connectivity element rode along as
-   `WataLogic.netView`: three screens draw it, and one view definition
-   beats two painters of the same indicator. All 18 uitest scenarios
-   and the fb golden stayed byte-identical; nothing was regenerated.
-   **The conversation screen is done** — `WataLogic.bodyConversation(s,
-   snap)`: rows are a `VGroup` keyed on the message's event id, and a
-   row's selection highlight is a `VRect` first in that row's child
-   list, the list-order painting rule's first real exercise.
-   **The contact list is done** — `WataLogic.bodyContacts(...)`, which
-   owns all three of that screen's states (boot via `bodyBoot`, the
-   connection line, the list) and takes `NetStatus.everLive()` and
-   `FbCaps.transportUnavailable()` as arguments, hoisted to
-   `renderContacts`. The enrolment boot screen stayed at the call site:
-   it announces the device on the frame it appears, and an effect
-   cannot sit inside a body.
+   alignment subtleties), settings, enrol (VImage), diag last. **Done**,
+   with two corrections to that list: enrol came before settings, since
+   porting the QR screen is what let the contact list's last call-site
+   branch collapse; and there is no diag SCREEN to port — the diagnostics
+   are rows of the settings menu, so "diag last" was really the net test,
+   which moved off the frame path in the last step.
+   The interesting ones:
+   - the boot screen brought `WataLogic.netView` with it, since three
+     screens draw the connectivity element and two implementations of
+     one indicator would eventually disagree;
+   - the conversation and contact rows key on the thing they show (an
+     event id, a room-or-contact id) with the selection highlight as the
+     row's FIRST child, since children paint in list order;
+   - enrolment is the `VImage` arm's real exercise: `Enrol.snap` reads
+     (identity, admin URL, the `go.qr` encode) and `Enrol.body` scales
+     the module grid into RGB565 pairs;
+   - settings was the purity work: a sysfs battery node, `/proc/uptime`,
+     `/proc/meminfo`, the ppp0 address and the environment were being
+     read WHILE PAINTING. They joined the diagnostics the applet already
+     refreshed on a countdown (`DiagSnap`) rather than becoming nine
+     body parameters.
+   - the net test was the last effect on the frame path: OK now starts
+     the four probes on a goroutine and the row says `run..` until a
+     later frame's update collects the verdicts. The scripted run waits
+     on a `nettest` probe rather than a frame count, so the golden it
+     pins stays deterministic.
 3. After each applet: `just fb-ui-tests` — every golden byte-identical.
    A golden that moves means the port is wrong; goldens are not
    regenerated during adoption.
 4. When all applets are bodies: `render` is one match dispatching to
    bodies, and M2's blit shell drives the identical code on the phone.
+   **Done.** The snake applet is the deliberate exception — a game
+   surface, not a wata screen, and no second backend will render it.
 
 ## What changes (file-level)
 
@@ -148,3 +157,30 @@ and animation (the flash/overlay timers stay in WataState ticks).
 ## Open questions for the owner
 
 - none blocking; sequencing after M1 spike results is designer's call.
+
+## What it cost, and what it repaid
+
+Six screens, five commits, and not one golden moved: all 18 uitest
+scenarios and the fb golden stayed byte-identical through every step,
+nothing regenerated. That is the claim the plan was built to be able to
+make — the interpreter calls the same `Font`/`Draw` entry points in the
+same order, so a ported screen is the same pixels or it is a bug.
+
+The purity rule turned out to be the valuable half. Writing bodies
+forced out every ambient read the painter had accumulated: the session
+latches and app-edge probes (hoisted to the call sites), the settings
+applet's five per-frame device reads (moved onto the cadence the other
+diagnostics already had), and the two EFFECTS that were sitting in the
+render path — the enrolment announce and the net test, both of which now
+run on goroutines of their own. Those were recorded debt against the
+"the frame goroutine never blocks" rule before this plan started; a rule
+that says a screen is a pure function of the state is what made them
+impossible to leave. The one thing that had to be preserved outside the
+rule is the call site: an effect belongs where the ambient reads are,
+not inside the function that draws.
+
+`VImage` earned its constructor exactly once, as predicted, on the
+enrolment QR. No sixth constructor was needed, and the five arms of
+`FbPaint` are still five arms. What remains for the UIKit backend is a
+second interpreter over the same trees plus the differ that already
+exists and is already tested.

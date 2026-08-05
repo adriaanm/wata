@@ -122,13 +122,18 @@ and hands the interpreter a plain positioned `VText`. Centering is
 layout, and a backend that is not a 26-column grid must be free to place
 the same text its own way.
 
-Adoption is applet by applet, each step its own commit so a golden drift
-bisects to one screen. The boot screen (`WataLogic.bodyBoot`) is the
-first; the connectivity element (`WataLogic.netView`) came with it,
-since three screens share it and two implementations of one indicator
-would eventually disagree. The conversation screen
-(`WataLogic.bodyConversation`) and the contact list
-(`WataLogic.bodyContacts`) follow.
+**Every wata screen is a body.** Each applet's `render` reads what is
+ambient, calls one pure `(state, ...) => View`, and makes ONE
+`FbPaint.draw` call: `WataLogic.body` covers the enrolment screen, the
+boot screen, the connection line, the contact list and the conversation,
+with the send/play flash and the recording bar as children over
+whichever of those is showing; `SettingsLogic.body` covers the menu and
+the enrolment screen. The connectivity element is `WataLogic.netView`,
+one definition every screen that shows it embeds — three screens draw
+it, and two implementations of one indicator would eventually make
+disagreeing claims about the same connection. The snake applet keeps its
+own painter on purpose: it is a game surface, not a wata screen, and no
+second backend will render it.
 
 **A screen's alternative states belong inside its body, not around it.**
 The contact list is four screens — the enrolment QR when the server has
