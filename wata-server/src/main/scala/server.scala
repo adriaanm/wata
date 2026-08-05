@@ -176,10 +176,15 @@ object Server:
     val v = go.sys.getenv("WATA_LISTEN")
     if v == "" then addr else v
 
+  /** the TCP edge always serves through the node-id strip: a request that
+   *  arrives where peer identity cannot be proven must never carry the
+   *  trusted header, forged or otherwise (go-pkgs/irohnet/nodeid.go — the
+   *  strip half exists in stub builds too). The iroh listener does its own
+   *  strip-and-inject inside `irohnet.Serve`. */
   def serveTcp(addr: String, mux: go.net.http.ServeMux): Unit =
     val server = go.net.http.newServer()
     server.addr = addr
-    server.handler = mux
+    server.handler = go.irohnet.stripNodeId(mux)
     println("Wata server listening on " + addr)
     val fin = server.listenAndServe()
     println("wata stopped " + fin.message)
@@ -227,6 +232,10 @@ object Server:
     // grants nothing; the approve/deny pair behind the admin gate is what
     // moves a node id into the allowlist.
     mux.handle("POST /_wata/v1/enroll", h)
+    // device-login (plan 0027): no credentials — the iroh transport's proven
+    // node id, delivered as the trusted header, is exchanged for a session;
+    // any request without that header (every TCP-path request) is 403.
+    mux.handle("POST /_wata/v1/device-login", h)
     mux.handle("GET /_wata/v1/admin/enroll", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/approve", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/deny", h)

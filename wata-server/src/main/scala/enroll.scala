@@ -13,7 +13,7 @@ import sgo.{Mutex, mutex}
  *  {{{
  *  POST /_wata/v1/enroll                       {nodeId, nonce}   (no auth)
  *  GET  /_wata/v1/admin/enroll                                   (admin)
- *  POST /_wata/v1/admin/enroll/{nodeId}/approve                  (admin)
+ *  POST /_wata/v1/admin/enroll/{nodeId}/approve   [{user}]       (admin)
  *  POST /_wata/v1/admin/enroll/{nodeId}/deny                     (admin)
  *  }}}
  *
@@ -221,7 +221,10 @@ object Enroll:
   /** `GET /_wata/v1/admin/enroll` — the pending rows, oldest first, expired
    *  ones pruned as they are read (there is no timer; the list is only ever
    *  observed through here and through `approve`), plus `allowlisted`: the ids
-   *  the durable allowlist already holds.
+   *  the durable allowlist already holds, plus what the approve dialog needs
+   *  (plan 0027): `users` — the account roster the picker offers — and
+   *  `bindings`, so an enrolled handset's row can name the account it is
+   *  bound to.
    *
    *  The second field is what makes "there is no row for this handset"
    *  answerable. A page holding a node id (a scanned fragment, or the row it
@@ -233,7 +236,29 @@ object Enroll:
   def list(): Json =
     val now = Store.nowMs()
     val xs = cell.withLock(st => pruneLocked(st, now))
-    obj2("pending", JArr(rows(xs, now, Nil)), "allowlisted", JArr(allowlistIds()))
+    var fs: List[(String, Json)] = startObj
+    fs = ("pending", JArr(rows(xs, now, Nil))) :: fs
+    fs = ("allowlisted", JArr(allowlistIds())) :: fs
+    fs = ("users", JArr(rosterRows(Config.allUsers(), Nil))) :: fs
+    fs = ("bindings", JArr(bindingRows(Bindings.all(), Nil))) :: fs
+    endObj(fs)
+
+  /** the roster as the picker renders it: localpart + display name only —
+   *  the full account rows (device counts, admin flags) stay on the users
+   *  surface. */
+  def rosterRows(us: List[UserCfg], acc: List[Json]): List[Json] = us match
+    case h :: t => rosterRows(t, rosterRow(h) :: acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def rosterRow(u: UserCfg): Json =
+    obj2("user", JStr(u.localpart), "displayname", JStr(u.displayName))
+
+  def bindingRows(bs: List[Binding], acc: List[Json]): List[Json] = bs match
+    case h :: t => bindingRows(t, bindingRow(h) :: acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def bindingRow(b: Binding): Json =
+    obj2("node_id", JStr(b.nodeId), "user", JStr(b.user))
 
   def allowlistIds(): List[Json] =
     val p = allowlistPath()
@@ -272,10 +297,51 @@ object Enroll:
     st.pending = without(live, nodeId, Nil)
     count(live, 0) != count(st.pending, 0)
 
-  /** `POST /_wata/v1/admin/enroll/{nodeId}/approve` — the allowlist write. */
-  def approve(nodeId: String): Either[MErr, Json] =
+  /** `POST /_wata/v1/admin/enroll/{nodeId}/approve` — the allowlist write,
+   *  plus (plan 0027) the optional account binding: a body `{"user": lp}`
+   *  binds the approved node to that account, creating it on the spot when
+   *  the name is new (the owner's inline create-and-bind ruling — a
+   *  passwordless account whose only credential is this handset's node key).
+   *  No body, or no `user` field, approves the transport alone, which leaves
+   *  the handset admitted but answering 404 at device-login until a binding
+   *  lands. */
+  def approve(nodeId: String, body: String): Either[MErr, Json] =
     if !isPending(nodeId) then Left(MErr(404, M_NOT_FOUND(), "No such pending enrolment"))
-    else approve2(nodeId)
+    else bindingUser(body) match
+      case l: Left[MErr, String]   => Left(l.left)
+      case rr: Right[MErr, String] => approve2(nodeId, rr.right)
+
+  /** the requested binding target: "" for none; an existing localpart as-is;
+   *  a NEW valid localpart after creating the account (display name = the
+   *  name — renameable later, exactly like any account). Creation happens
+   *  BEFORE the allowlist write and is idempotent through `ensureUser`, so
+   *  an approve whose file write then fails retries cleanly. */
+  def bindingUser(body: String): Either[MErr, String] =
+    if body == "" then Right("")
+    else Json.tryParse(body) match
+      case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
+      case Right(j) => bindingUser2(strField(j, "user", ""))
+
+  def bindingUser2(lp: String): Either[MErr, String] =
+    if lp == "" then Right("")
+    else if !Admin.validLocalpart(lp) then Left(MErr(400, M_BAD_JSON(), "Invalid user name"))
+    else ensureUser(lp)
+
+  def ensureUser(lp: String): Either[MErr, String] = Store.userByLocalpart(lp) match
+    case _: Some[UserCfg] => Right(lp)
+    case None => createBound(lp)
+
+  /** the inline create: a device account (no password — the node key is the
+   *  credential), seeded like any admin-created account: profile display
+   *  name, then the family join. */
+  def createBound(lp: String): Either[MErr, String] =
+    if !Config.createDeviceUser(lp, lp) then Left(MErr(500, M_UNKNOWN(), "Could not create the account"))
+    else seeded(lp)
+
+  def seeded(lp: String): Either[MErr, String] =
+    Store.setDisplayName(Store.userIdOf(lp), lp)
+    Family.ensure()
+    Right(lp)
 
   def isPending(nodeId: String): Boolean =
     val now = Store.nowMs()
@@ -290,13 +356,17 @@ object Enroll:
 
   /** durable first: a file write that cannot be confirmed leaves the row
    *  pending and answers 500, because the alternative — a row that vanished
-   *  while nothing was granted — is the one outcome nobody can debug. */
-  def approve2(nodeId: String): Either[MErr, Json] =
+   *  while nothing was granted — is the one outcome nobody can debug. The
+   *  binding is written only once the allowlist held, and before the live
+   *  apply: a bound-but-not-yet-admitted node cannot log in anyway, while an
+   *  admitted-but-unbound one would race device-login. */
+  def approve2(nodeId: String, lp: String): Either[MErr, Json] =
     val note = writeAllow(nodeId)
     if note != "" then Left(MErr(500, M_UNKNOWN(), note))
-    else approved(nodeId)
+    else approved(nodeId, lp)
 
-  def approved(nodeId: String): Either[MErr, Json] =
+  def approved(nodeId: String, lp: String): Either[MErr, Json] =
+    if lp != "" then Bindings.bind(nodeId, lp) else ()
     val live = liveAllow(nodeId)
     take(nodeId)
     var fs: List[(String, Json)] = startObj
@@ -304,6 +374,9 @@ object Enroll:
     fs = ("allowlist_file", JStr(allowlistPath())) :: fs
     fs = ("live", JBool(live == "")) :: fs
     fs = ("note", JStr(live)) :: fs
+    if lp != "" then
+      fs = ("user", JStr(lp)) :: fs
+      fs = ("user_id", JStr(Store.userIdOf(lp))) :: fs
     Right(endObj(fs))
 
   /** apply to the RUNNING listener. Returns "" on success, else why not — a

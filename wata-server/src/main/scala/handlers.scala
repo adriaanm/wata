@@ -37,6 +37,7 @@ object Router:
     else if isFavoritePath(path, n) then Favorite.route(r)
     else if isAdminPath(path, n) then Admin.route(r, m, body)
     else if isEnrollPath(path) then Enroll.announce(body)
+    else if isDeviceLoginPath(path) then DeviceLogin.route(r)
     else if TestHooks.enabled && isTestFailPath(path) then TestHooks.route(body)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)
@@ -112,6 +113,11 @@ object Router:
    *  unauthenticated wata route: a device with no allowlist entry has no way
    *  to obtain a token, and the announce grants nothing by itself. */
   def isEnrollPath(path: String): Boolean = path == "/_wata/v1/enroll"
+
+  /** `/_wata/v1/device-login` — token-less BY DESIGN (bindings.scala): the
+   *  credential is the iroh connection's proven node id, read off the trusted
+   *  header; where that is absent the handler answers 403 itself. */
+  def isDeviceLoginPath(path: String): Boolean = path == "/_wata/v1/device-login"
 
   /** `/_wata/v1/test/fail` — dispatched only when `TestHooks.enabled`,
    *  mirroring its conditional registration (server.scala). */

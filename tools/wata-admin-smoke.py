@@ -142,12 +142,14 @@ def stop_server(proc, log):
 
 
 # ---- HTTP --------------------------------------------------------------------
-def req(method, path, body=None, token=None):
+def req(method, path, body=None, token=None, headers=None):
     """-> (status, parsed-json-or-text, content-type)."""
     data = json.dumps(body).encode() if body is not None else None
     r = urllib.request.Request(BASE + path, data=data, method=method)
     if token:
         r.add_header("Authorization", "Bearer " + token)
+    for k, v in (headers or {}).items():
+        r.add_header(k, v)
     if data is not None:
         r.add_header("Content-Type", "application/json")
     try:
@@ -221,6 +223,7 @@ def run(server, env, tmp):
         crud(atok, users)
         revoke(atok, users)
         enrolment(atok, btok, iroh)
+        provisioning(atok, users)
     finally:
         stop_server(proc, log)
 
@@ -617,6 +620,62 @@ def already_enrolled(atok, enrolled_id):
     check(fresh not in allowed, "a device nobody approved is not in that list")
 
 
+def provisioning(atok, users):
+    """Account provisioning via enrolment (plan 0027). This process serves
+    plain TCP only, which is exactly what makes it the right place to prove
+    the seam's TCP half: device-login must be 403 here UNCONDITIONALLY — with
+    no header, and with a FORGED X-Wata-Node-Id naming a genuinely bound node
+    (the strip in server.serveTcp is what makes the forgery inert). The
+    approve-side binding, the roster the picker reads, and the inline
+    create-and-bind are all plain admin-API properties and are asserted here
+    too; the iroh-path positive (a real device-login answering a session)
+    needs a provable peer and lives in tunnel-smoke."""
+    print("provisioning: device-login is 403 on the TCP path, always")
+    node_p, node_q = node_id(0x70), node_id(0x71)
+    status, body, _ = req("POST", "/_wata/v1/device-login", {})
+    check(status == 403, f"no trusted node id -> 403 (saw {status} {body})")
+
+    print("provisioning: approve binds an existing account")
+    req("POST", "/_wata/v1/enroll", {"nodeId": node_p, "nonce": "PV01"})
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{node_p}/approve",
+                          {"user": "bob"}, atok)
+    check(status == 200 and body.get("user") == "bob"
+          and body.get("user_id") == "@bob:localhost",
+          f"approve with a roster account answers the binding (saw {status} {body})")
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    check({b["node_id"]: b["user"] for b in listing.get("bindings", [])}.get(node_p) == "bob",
+          "the listing reports the binding beside the enrolled id")
+    check({u["user"] for u in listing.get("users", [])} >= {"alice", "bob"},
+          "the listing carries the roster the picker renders")
+
+    # the forgery: a REAL bound node id in the header, over TCP. If the strip
+    # ever regressed, this would mint a session for bob with no credential.
+    status, body, _ = req("POST", "/_wata/v1/device-login", {},
+                          headers={"X-Wata-Node-Id": node_p})
+    check(status == 403, f"a forged trusted header over TCP is stripped -> 403 (saw {status} {body})")
+
+    print("provisioning: inline create-and-bind")
+    req("POST", "/_wata/v1/enroll", {"nodeId": node_q, "nonce": "PV02"})
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_q}/approve",
+              {"user": "Bad/Name"}, atok)[0] == 400,
+          "an invalid inline name is refused")
+    check(node_q in pending(atok), "a refused binding leaves the row pending")
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{node_q}/approve",
+                          {"user": "handset1"}, atok)
+    check(status == 200 and body.get("user_id") == "@handset1:localhost",
+          f"a NEW name creates the account and binds it, one step (saw {status} {body})")
+    es = entries(users)
+    check("handset1" in es, "the created account is in users.json")
+    check(es["handset1"].get("hash", "x") == "", "the device account stores NO password hash")
+    check(login("handset1", "") is None and login("handset1", "guess") is None,
+          "no password logs in as it — the node key is its only credential")
+    _, prof, _ = req("GET", "/_matrix/client/v3/profile/@handset1:localhost")
+    check(prof.get("displayname") == "handset1", "the created account has a profile")
+    _, sroom, _ = req("GET", "/_wata/v1/admin/status", None, atok)
+    check("handset1" in {u["user"] for u in sroom["users"]},
+          "the created account is on the users surface like any other")
+
+
 def bounded():
     print("enrolment: the pending set is bounded (max 3, expiry 1.5s)")
     atok = login("alice", "alicepw1")
@@ -638,10 +697,18 @@ def after_reboot(users):
     check(login("kid", "kidpw456") is None, "a removed account stays removed")
     atok = login("alice", "alicepw1")
     _, s, _ = req("GET", "/_wata/v1/admin/status", None, atok)
-    check(s is not None and {u["user"] for u in s["users"]} == {"alice", "bob"},
-          "the account set round-trips the reboot")
-    check(all(hashed(e) for e in entries(users).values()),
+    check(s is not None and {u["user"] for u in s["users"]} == {"alice", "bob", "handset1"},
+          "the account set round-trips the reboot (incl. the bound device account)")
+    check(all(hashed(e) for e in entries(users).values() if e["user"] != "handset1"),
           "the file is still fully hashed after the reboot")
+    check(entries(users)["handset1"].get("hash", "x") == "",
+          "the device account is still passwordless after the reboot")
+
+    print("reboot: bindings replay from the journal")
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    binds = {b["node_id"]: b["user"] for b in listing.get("bindings", [])}
+    check(binds.get(node_id(0x70)) == "bob" and binds.get(node_id(0x71)) == "handset1",
+          f"both bindings round-trip the reboot (saw {binds})")
 
 
 def builtin_defaults():

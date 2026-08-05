@@ -30,3 +30,9 @@ object irohnet:
    *  live apply, so its failure (no iroh listener in this process, a stub
    *  build, a malformed id) is reported rather than fatal. */
   @go.name("Allow") def allow(nodeId: String): Unit throws sgo.GoError = ???
+
+  /** `irohnet.StripNodeID(handler)` — wrap a handler so any client-supplied
+   *  `X-Wata-Node-Id` is deleted before dispatch: the TCP edge's half of the
+   *  trusted-header contract (plan 0027). Untagged in the Go package, so it
+   *  is real in every build, stub transport included. */
+  @go.name("StripNodeID") def stripNodeId(h: go.net.http.Handler): go.net.http.Handler = ???

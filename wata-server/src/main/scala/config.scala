@@ -214,6 +214,15 @@ object Config:
     val u = UserCfg(lp, Pwhash.hash(password), display, admin)
     cell.withLock(st => createLocked(st, u))
 
+  /** create an account with NO password (hash "": `Pwhash.verify` accepts
+   *  nothing against it, so password login is impossible by construction) —
+   *  the inline create-and-bind of an enrolment approval (plan 0027), where
+   *  the handset's node key is the only credential the account needs. A
+   *  password can be set later through the ordinary admin reset. False when
+   *  the localpart is already taken. */
+  def createDeviceUser(lp: String, display: String): Boolean =
+    cell.withLock(st => createLocked(st, UserCfg(lp, "", display, false)))
+
   def createLocked(st: ConfigState, u: UserCfg): Boolean = findUser(st.users, u.localpart) match
     case _: Some[UserCfg] => false
     case None => commit(st, appendUser(st.users, u))

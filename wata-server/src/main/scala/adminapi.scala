@@ -138,11 +138,12 @@ object Admin:
     else if n == 5 && Router.seg(path, 3) == "users" then removeUser(a, r.pathValue("user"))
     else if n == 6 && Router.seg(path, 3) == "users" then userField(r.pathValue("user"), Router.seg(path, 5), body)
     else if n == 4 && Router.seg(path, 3) == "enroll" then Right(Enroll.list())
-    else if n == 6 && Router.seg(path, 3) == "enroll" then enrollVerb(r.pathValue("nodeId"), Router.seg(path, 5))
+    else if n == 6 && Router.seg(path, 3) == "enroll" then enrollVerb(r.pathValue("nodeId"), Router.seg(path, 5), body)
     else Left(MErr(404, M_UNRECOGNIZED(), "Unrecognized request"))
 
-  def enrollVerb(nodeId: String, verb: String): Either[MErr, Json] =
-    if verb == "approve" then Enroll.approve(nodeId)
+  /** approve carries the optional account binding in its body (plan 0027). */
+  def enrollVerb(nodeId: String, verb: String, body: String): Either[MErr, Json] =
+    if verb == "approve" then Enroll.approve(nodeId, body)
     else if verb == "deny" then Enroll.deny(nodeId)
     else Left(MErr(404, M_UNRECOGNIZED(), "Unrecognized request"))
 

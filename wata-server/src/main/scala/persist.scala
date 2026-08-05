@@ -38,6 +38,10 @@ import sgo.{Mutex, mutex}
  *   - `txn`                  — per-device send idempotency
  *   - `dmpair`               — a canonical DM's pair -> room claim, so DM
  *                              identity survives a restart with no re-derivation
+ *   - `bind`                 — a device-account binding nodeId -> user (plan
+ *                              0027); a re-bind of the same node overwrites,
+ *                              so replay in commit order converges on the
+ *                              latest binding
  *
  *  NOT logged (transient by nature): long-poll waiters (in-flight goroutines).
  */
@@ -188,6 +192,14 @@ object Journal:
     fs = ("room_id", JStr(p.roomId)) :: fs
     endObj(fs)
 
+  /** a device-account binding: the node id and the account's localpart. */
+  def bindOp(nodeId: String, user: String): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("bind")) :: fs
+    fs = ("node_id", JStr(nodeId)) :: fs
+    fs = ("user", JStr(user)) :: fs
+    endObj(fs)
+
   def txnOp(key: String, eventId: String): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("op", JStr("txn")) :: fs
@@ -255,6 +267,7 @@ object Journal:
     else if op == "receipt" then Store.replayReceipt(receiptOf(j))
     else if op == "txn" then Store.replayTxn(strField(j, "key", ""), strField(j, "event_id", ""))
     else if op == "dmpair" then Store.replayDmPair(DmPair(strField(j, "a", ""), strField(j, "b", ""), strField(j, "room_id", "")))
+    else if op == "bind" then Bindings.replayBind(strField(j, "node_id", ""), strField(j, "user", ""))
     else ()
 
   def acctOf(j: Json): AcctData =
