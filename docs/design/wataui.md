@@ -105,6 +105,29 @@ which is what makes golden-equivalence a byte-identical claim rather
 than an approximate one. The differ is for retained backends and is
 tested entirely on its own.
 
+## The framebuffer backend
+
+`wata-fb/src/main/scala/paint.scala`. `FbPaint.draw(px, view)` is five
+match arms over the same `Font`/`Draw` entry points the immediate-mode
+painter always called, in the same order with the same arguments —
+`VText` to `Font.drawText`, `VGlyph` to `Font.drawChar`, `VRect` to
+`Draw.fillRect`, `VImage` to a clipped `Draw.setPixel` walk over the
+RGB565 pairs, `VGroup` to its children in order. Nothing new sits
+between a view and the pixels, which is why a ported screen leaves every
+golden byte-identical.
+
+`FbPaint.centerCol` is the one piece of layout that had to move: the
+grid arithmetic `Font.drawTextCentered` did, lifted so a BODY does it
+and hands the interpreter a plain positioned `VText`. Centering is
+layout, and a backend that is not a 26-column grid must be free to place
+the same text its own way.
+
+Adoption is applet by applet, each step its own commit so a golden drift
+bisects to one screen. The boot screen (`WataLogic.bodyBoot`) is the
+first; the connectivity element (`WataLogic.netView`) came with it,
+since three screens share it and two implementations of one indicator
+would eventually disagree.
+
 ## The oracle
 
 `oracle.scala`'s `DiffOracle.report()` is a deterministic report, driven

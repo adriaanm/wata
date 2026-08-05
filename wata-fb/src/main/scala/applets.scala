@@ -594,15 +594,26 @@ object WataLogic:
    *  it would be noise rather than information. (Were this to animate, it would
    *  have to ride `NetState.blink`, whose phase resets on a health change —
    *  the discipline that keeps a scripted frame reproducible.) */
+  /** The boot screen is the first applet to be a `wataui` BODY (plan 0024): a
+   *  pure function to a view tree, painted by the framebuffer interpreter.
+   *  `FbCaps.transportUnavailable()` is an app-edge read, so it is hoisted to
+   *  HERE, the call site, and passed in — a body reads its arguments and
+   *  nothing else. */
   def renderBoot(px: go.Bytes, ctx: FrameCtx): Unit =
-    Font.drawText(px, "WATA", 0, 0, Color.cyan, false, 0)
-    renderNet(px, ctx.net)
-    val sub = bootSubMsg(ctx.net, ctx.connection)
+    FbPaint.draw(px, bodyBoot(ctx.net, ctx.connection, ctx.quitArmed, FbCaps.transportUnavailable()))
+
+  def bodyBoot(net: NetState, c: ConnectionState, quitArmed: Boolean, unavail: Boolean): View =
+    val sub = bootSubMsg(net, c, unavail)
     // one calm line sits centered; a failure's two lines straddle that row
     val head = if sub == "" then 7 else 6
-    Font.drawTextCentered(px, bootMsg(ctx.net, ctx.connection), head, bootColor(ctx.connection), false, 0)
-    if sub != "" then Font.drawTextCentered(px, sub, 8, Color.midGray, false, 0)
-    Font.drawTextCentered(px, bootKeys(ctx), FOOTER_ROW, Color.midGray, false, 0)
+    val msg = bootMsg(net, c, unavail)
+    val keys = bootKeys(quitArmed)
+    var kids: List[Keyed] =
+      Keyed("footer", VText(FbPaint.centerCol(keys), FOOTER_ROW, keys, Color.midGray)) :: Nil
+    if sub != "" then
+      kids = Keyed("sub", VText(FbPaint.centerCol(sub), 8, sub, Color.midGray)) :: kids
+    kids = Keyed("head", VText(FbPaint.centerCol(msg), head, msg, bootColor(c, unavail))) :: kids
+    VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) :: (Keyed("net", netView(net)) :: kids))
 
   /** the headline: the transport being unavailable outright, then the two
    *  failure states, then the two calm waiting states ("starting up" until
@@ -610,8 +621,8 @@ object WataLogic:
    *  network" once the pipe is there and the sync loop is connecting). Live
    *  never reaches here — the first live frame latches `everLive` and the
    *  ordinary UI takes over for the session. */
-  def bootMsg(net: NetState, c: ConnectionState): String =
-    if FbCaps.transportUnavailable() then "transport unavailable"
+  def bootMsg(net: NetState, c: ConnectionState, unavail: Boolean): String =
+    if unavail then "transport unavailable"
     else if isAuthRejected(c) then "account rejected"
     else if isConnError(c) then "can't reach server"
     else if NetStatus.hasInterface(net.pipe) && !NetStatus.isDown(net.health) then "waiting for network"
@@ -619,20 +630,20 @@ object WataLogic:
 
   /** the second line: what to do about it. Empty for the calm states, which
    *  need no instruction. */
-  def bootSubMsg(net: NetState, c: ConnectionState): String =
-    if FbCaps.transportUnavailable() then "check config"
+  def bootSubMsg(net: NetState, c: ConnectionState, unavail: Boolean): String =
+    if unavail then "check config"
     else if isAuthRejected(c) then "check server"
     else if isConnError(c) then "retrying..."
     else ""
 
-  def bootColor(c: ConnectionState): scala.Int =
-    if FbCaps.transportUnavailable() || isAuthRejected(c) || isConnError(c) then Color.red
+  def bootColor(c: ConnectionState, unavail: Boolean): scala.Int =
+    if unavail || isAuthRejected(c) || isConnError(c) then Color.red
     else Color.midGray
 
   /** the footer names the live keys — and, once Back is armed, replaces them
    *  with the confirmation, since that is the only thing the next press does. */
-  def bootKeys(ctx: FrameCtx): String =
-    if ctx.quitArmed then "BACK again to exit" else "OK retry  BACK exit"
+  def bootKeys(quitArmed: Boolean): String =
+    if quitArmed then "BACK again to exit" else "OK retry  BACK exit"
 
   def isAuthRejected(c: ConnectionState): Boolean = c match
     case _: ConnAuthRejected => true
@@ -675,16 +686,26 @@ object WataLogic:
    *  reflow the mark (a mark that shuffles with the phase reads as glitch).
    *  The 1px status line derives from the same `NetState`
    *  (`ShellStatus.fromNet`), so the two always agree. */
-  def renderNet(px: go.Bytes, net: NetState): Unit =
+  def renderNet(px: go.Bytes, net: NetState): Unit = FbPaint.draw(px, netView(net))
+
+  /** the connectivity element as a view: the header's right-aligned mark, plus
+   *  the `..` that alternates while the link is reconnecting. It is ONE
+   *  definition because the boot screen, the contact list and the enrolment
+   *  screen all show it — two implementations would eventually make
+   *  disagreeing claims about the same connection. */
+  def netView(net: NetState): View =
     val g = NetStatus.glyph(net.pipe)
     val text = if g >= 0 then "" else NetStatus.label(net.pipe)
     val dots = if NetStatus.showsDots(net) then ".." else ""
     val markCols = if g >= 0 then 1 else text.length
     val col = Font.COLS - markCols
     val fg = NetStatus.color(net)
-    if g >= 0 then Font.drawChar(px, g, col * Font.GLYPH_W, 1, fg, false, 0)
-    else Font.drawText(px, text, col, 0, fg, false, 0)
-    if dots != "" then Font.drawText(px, dots, col - 2, 0, fg, false, 0)
+    val mark: View =
+      if g >= 0 then VGlyph(col * Font.GLYPH_W, 1, g, fg)
+      else VText(col, 0, text, fg)
+    var kids: List[Keyed] = Nil
+    if dots != "" then kids = Keyed("dots", VText(col - 2, 0, dots, fg)) :: Nil
+    VGroup(Keyed("mark", mark) :: kids)
 
   // ---- string / snapshot helpers --------------------------------------------
   def connectingMsg(c: ConnectionState): String = c match

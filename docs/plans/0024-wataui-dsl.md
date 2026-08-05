@@ -1,6 +1,7 @@
 # 0024 — wataui: the declarative UI layer
 
-Status: proposed
+Status: accepted — the module and the fb interpreter have landed;
+adoption continues applet by applet (`[UI-DSL-WATAUI]`)
 
 ## Problem
 
@@ -87,11 +88,21 @@ anything required.
 
 1. `wataui/` module: the ADTs, the differ, `FbPaint.draw(px, view)` —
    an interpreter whose five arms call the existing `Font`/`Draw`
-   entry points.
+   entry points. **Done.** The module is `core`-only, gated by
+   `just wataui-tests` (two tripwires + the differ oracle, in `just
+   ci`); the interpreter is `wata-fb/src/main/scala/paint.scala`.
+   `VImage` carries RGB565-LE pairs rather than a mask, so the fb arm
+   is a copy — its first real exercise is the enrolment QR.
 2. Applet by applet, `renderX(s, px, ctx)` becomes
    `bodyX(s, snap): View` + one `FbPaint.draw` call at the frame loop.
    Order: boot screen (smallest), conversation, contacts (the mark
    alignment subtleties), settings, enrol (VImage), diag last.
+   **The boot screen is done** — `WataLogic.bodyBoot`, with
+   `FbCaps.transportUnavailable()` hoisted to the call site so the body
+   reads only its arguments. The connectivity element rode along as
+   `WataLogic.netView`: three screens draw it, and one view definition
+   beats two painters of the same indicator. All 18 uitest scenarios
+   and the fb golden stayed byte-identical; nothing was regenerated.
 3. After each applet: `just fb-ui-tests` — every golden byte-identical.
    A golden that moves means the port is wrong; goldens are not
    regenerated during adoption.

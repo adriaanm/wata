@@ -14,10 +14,11 @@ everyone auto-joins) alongside 1:1 DMs.
 
 The module is a Sgola (restricted Scala 3 → Go) application. It is
 built with `../tools/sgo build` from `wata-fb/`, links `core`
-(implicit), `json`, and `wataclient` (the portable Matrix client
+(implicit), `json`, `wataclient` (the portable Matrix client
 engine that lives in a sibling module and is NOT owned by this repo
-area), and pulls in one cgo Go dependency, `go-pkgs/audio`, for Opus
-and ALSA (tinyalsa) access. `wata-fb/sgo.build` and `sgo.deps`
+area) and `wataui` (the backend-free view algebra whose framebuffer
+interpreter is `paint.scala`), and pulls in one cgo Go dependency,
+`go-pkgs/audio`, for Opus and ALSA (tinyalsa) access. `wata-fb/sgo.build` and `sgo.deps`
 describe this; see `wata-fb/go.mod` for the Go-level requires.
 
 wata-fb builds two ways:
@@ -430,6 +431,17 @@ While the latch is unset, `WataLogic.renderContacts` draws
 unchanged — the same `NetState` the rest of the frame draws from), a
 centered headline in the conversation area, an optional second line
 saying what to do about it, and a footer naming the two live keys.
+
+This is the first screen built as a `wataui` BODY (plan 0024):
+`renderBoot` is one `FbPaint.draw` over `WataLogic.bodyBoot`, a pure
+function of `(NetState, ConnectionState, quitArmed, transportUnavailable)`
+to a view tree. The app-edge read — `FbCaps.transportUnavailable()` —
+is hoisted to the CALL SITE and passed in, because a body reads its
+arguments and nothing else ([wataui.md](wataui.md)). Centering is the
+body's arithmetic (`FbPaint.centerCol`), so the interpreter only ever
+sees a positioned `VText`. The connectivity element is
+`WataLogic.netView`, one view definition that `renderNet` paints for
+every screen that shows it.
 
 The copy is `WataLogic.bootMsg`/`bootSubMsg`, in priority order:
 
