@@ -53,7 +53,7 @@ object Integ:
       else if name == "admin-rename" then ok = s17()
       else if name == "outbox-restart" then ok = s18()
       else if name == "client-handle" then ok = s19()
-      else if name == "refused-then-admitted" then ok = s20()
+      else if name == "refused-then-provisioned" then ok = s20()
       else if name == "group-room" then ok = s21()
       else if name == "family-no-leave" then ok = s22()
       else println("integ: unknown scenario " + name)
@@ -1053,21 +1053,30 @@ object Integ:
     case h :: t => if h == k then true else keyIn(t, k)
     case Nil    => false
 
-  // ---- the enrolment redial (plan 0014) --------------------------------------
+  // ---- the enrolment redial + device provisioning (plans 0014 + 0027) --------
 
-  /** REFUSED, THEN ADMITTED, IN ONE PROCESS. The iroh transport refuses this
-   *  node id (it is not in the server's allowlist), the driver says so on
-   *  stdout, and the harness — tools/tunnel-smoke.py's enrolment leg — approves
-   *  the node while this very process keeps running. The SAME client object
-   *  then has to reach a live session on its ordinary retry cadence: an
-   *  approval a parent just made must not need the handset restarted, which is
-   *  the whole promise of the enrolment flow.
+  /** REFUSED, THEN PROVISIONED, IN ONE PROCESS — the whole zero-manual-steps
+   *  arc. The client carries NO credentials at all: the iroh transport
+   *  refuses its node id, the driver says so on stdout, and the harness —
+   *  tools/tunnel-smoke.py's enrolment leg — approves the node WITH AN
+   *  ACCOUNT while this very process keeps running. The SAME client object
+   *  then has to redial its way in on its ordinary retry cadence AND turn
+   *  the admitted connection into a session through device-login (there is
+   *  no password to fall back on), reaching Syncing with a self user — an
+   *  authenticated sync, the acceptance call of plan 0027.
    *
-   *  It also pins the UI half: `Enrol.refused()` — what puts the QR screen on
-   *  the boot frame — must read false again once the link is up, or the handset
-   *  would sit on its QR over a working connection. */
+   *  `WATA_EXPECT_USER`, when the harness sets it, pins WHOSE session came
+   *  back: the token must belong to the account bound at approve, not to
+   *  anything the client named (it named nothing).
+   *
+   *  It also pins the UI half: `Enrol.refused()` — what puts the QR screen
+   *  on the boot frame — must read false again once the link is up, and the
+   *  admitted-but-unauthenticated window must read as `Enrol.provisioning()`
+   *  (the boot screen's "setting up..." arc), still true after the session
+   *  since only `everLive` retires the boot screen. */
   def s20(): Boolean =
-    phase("alice")(c => admittedAfterRefusal(c))
+    phaseCfg(ClientConfig(base, "", "", 1000, Session("", "", "", "", "")))(c =>
+      admittedAfterRefusal(c))
 
   def admittedAfterRefusal(c: MatrixClient): Boolean =
     if !waitRefused(c, 30000L) then
@@ -1076,13 +1085,25 @@ object Integ:
     else
       println("INTEG REFUSED")     // the harness approves this node on this line
       if !waitAdmitted(c, 90000L) then
-        println("integ: the approved node never got a session — the refusal latched")
+        println("integ: the approved node never got a session — the refusal latched, or device-login answered nothing")
         false
       else if !Runtime.waitForSnapshot(c, s => s.hasSelfUser, 20000L) then false
+      else if !expectedSelf() then
+        println("integ: the session belongs to " + Runtime.lastSnap.selfUser.id +
+          ", not the bound account " + go.sys.getenv("WATA_EXPECT_USER"))
+        false
       else if Enrol.refused() then
         println("integ: the refusal survived a live session — the QR screen would stay up")
         false
+      else if !Enrol.provisioning() then
+        println("integ: the provisioning arc never latched — the boot screen would say 'waiting for network' over an approval")
+        false
       else true
+
+  /** the harness's pin on WHOSE session device-login answered; unset = any. */
+  def expectedSelf(): Boolean =
+    val want = go.sys.getenv("WATA_EXPECT_USER")
+    want == "" || Runtime.lastSnap.selfUser.id == want
 
   /** wait for a live session while POKING the retry between slices — what the
    *  boot screen's OK key does, and what a device with several loops of its own

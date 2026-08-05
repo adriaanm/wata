@@ -349,7 +349,12 @@ object Runtime:
     syncRounds(c, Hs(c.http, c.clock, c.cfg.homeserver, creds.accessToken), creds.userId)
 
   /** login-or-resume: a stored session's token is validated with a
-   *  zero-timeout test sync; expired/foreign -> password login. Empty
+   *  zero-timeout test sync; expired/foreign -> a fresh login. A config with
+   *  a password logs in with it; a config with NONE — a handset provisioned
+   *  by enrolment (plan 0027) — trades its transport identity through
+   *  device-login instead, which is the admitted-but-unauthenticated arc:
+   *  the approval bound an account to this node id, so the same response
+   *  shape comes back and nothing downstream knows which door it was. Empty
    *  accessToken on failure, with `rejected` telling the two failure kinds
    *  apart (the server said no, vs. we could not ask). */
   def loginOrResume(c: MatrixClient): LoginOutcome =
@@ -364,14 +369,21 @@ object Runtime:
         token = st.accessToken
         uid = st.userId
     if token == "" then
-      val resp = MatrixHttp.login(Hs(c.http, c.clock, c.cfg.homeserver, ""),
-        c.cfg.username, c.cfg.password)
+      val resp = freshLogin(c)
       if isAuthFail(resp.status) then rejected = true
       if resp.status == 200 then
         val lr = Matrix.parseLogin(MatrixHttp.parseOrNull(resp.body))
         token = lr.accessToken
         uid = lr.userId
     LoginOutcome(AuthCreds(token, uid), rejected)
+
+  /** which door: password when the config carries one, device-login when it
+   *  does not. Never both — a handset with no password has nothing to type,
+   *  and a config WITH one asked for that account explicitly. */
+  def freshLogin(c: MatrixClient): HttpResponse =
+    val hs = Hs(c.http, c.clock, c.cfg.homeserver, "")
+    if c.cfg.password == "" then MatrixHttp.deviceLogin(hs)
+    else MatrixHttp.login(hs, c.cfg.username, c.cfg.password)
 
   /** the server refusing the credentials themselves (as opposed to failing to
    *  answer at all). */

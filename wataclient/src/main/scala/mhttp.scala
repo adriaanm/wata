@@ -67,6 +67,16 @@ object MatrixHttp:
     request(hs, "POST", "/_matrix/client/v3/login", JSON,
       Json.write(Matrix.loginBody(user, password)))
 
+  /** POST /_wata/v1/device-login — NO credentials (plan 0027): over the iroh
+   *  transport the connection's proven node id is the credential, and the
+   *  server answers the same shape as /login for the account bound to it at
+   *  enrolment approval. Anywhere peer identity cannot be proven (any TCP
+   *  path) the server answers 403 unconditionally; an admitted node whose
+   *  binding has not landed yet is 404 — both are just failed logins to the
+   *  session loop, which keeps retrying. */
+  def deviceLogin(hs: Hs): HttpResponse =
+    request(hs, "POST", "/_wata/v1/device-login", JSON, "{}")
+
   /** GET /sync — long-polls up to `timeoutMs` server-side ("" since = initial). */
   def sync(hs: Hs, since: String, timeoutMs: Int): HttpResponse =
     request(hs, "GET", "/_matrix/client/v3/sync" + Matrix.syncQuery(since, timeoutMs), JSON, "")

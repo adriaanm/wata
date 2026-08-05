@@ -92,6 +92,8 @@ object Enrol:
   private val urlC: sgo.Atomic[String] = sgo.atomic("")
   private val urlTriedC: sgo.Atomic[Boolean] = sgo.atomic(false)
   private val announcedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  /** latched by the first REAL refusal this session — see `provisioning`. */
+  private val everRefusedC: sgo.Atomic[Boolean] = sgo.atomic(false)
   // the scripted driver's overrides: -1 = the real verdict, 0/1 = forced.
   private val forceRefusedC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
 
@@ -112,9 +114,28 @@ object Enrol:
   def refused(): Boolean =
     val forced = forceRefusedC.get()
     if forced >= 0 then forced == 1
-    else configured() && notAllowlisted(go.irohnet.lastRefusal())
+    else realRefused()
+
+  /** the real transport verdict, latching `everRefused`: the QR screen was up
+   *  this session, which is what makes the admission that follows read as
+   *  PROVISIONING rather than an ordinary connect (the scripted driver's
+   *  forced verdicts never latch — goldens stay a pure function of the
+   *  forced state). */
+  def realRefused(): Boolean =
+    val v = configured() && notAllowlisted(go.irohnet.lastRefusal())
+    if v then everRefusedC.set(true) else ()
+    v
 
   def notAllowlisted(reason: String): Boolean = reason.indexOf("not allowlisted") >= 0
+
+  /** the admitted-but-not-yet-live arc after an enrolment (plan 0027): this
+   *  session WAS refused and no longer is, so the approval just landed and
+   *  the client is exchanging its proven node id for a session
+   *  (device-login). The boot screen names that state instead of "waiting
+   *  for network" — to the parent watching both screens, the handset is
+   *  finishing its own setup. Reads true only until the first live frame
+   *  latches `everLive` (the boot screen's whole lifetime). */
+  def provisioning(): Boolean = everRefusedC.get() && !refused()
 
   /** does the enrolment screen replace the boot screen this frame? */
   def required(): Boolean = configured() && refused()
@@ -267,6 +288,7 @@ object Enrol:
     urlC.set("")
     urlTriedC.set(false)
     announcedC.set(false)
+    everRefusedC.set(false)
     forceRefusedC.set(-1)
 
   // ---- the screen ------------------------------------------------------------------

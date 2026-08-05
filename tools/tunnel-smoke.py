@@ -135,12 +135,14 @@ def dual_listener():
 
 
 # ---- the admin API, over the plain-TCP listener the iroh mode also serves ----
-def api(base, method, path, body=None, token=None):
+def api(base, method, path, body=None, token=None, headers=None):
     """-> (status, parsed body). The enrolment leg's whole client."""
     data = json.dumps(body).encode() if body is not None else None
     r = urllib.request.Request(base + path, data=data, method=method)
     if token:
         r.add_header("Authorization", "Bearer " + token)
+    for k, v in (headers or {}).items():
+        r.add_header(k, v)
     if data is not None:
         r.add_header("Content-Type", "application/json")
     try:
@@ -176,20 +178,24 @@ def wait_for_line(log_path, needle, proc, timeout_s):
 
 
 def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id, sdir):
-    """The approve loop end to end (plan 0021 milestone B): the node the
-    server just refused announces itself, an admin approves it through the
-    admin API, and the SAME key is then accepted — no server restart. The
-    durable half (the config file's allowlist) and the live half (the new
-    irohnet_server_allow FFI) are both asserted, since only the second one
-    can make this run pass without a restart.
+    """The approve loop end to end (plan 0021 milestone B + plan 0027): the
+    node the server just refused announces itself, an admin approves it
+    through the admin API WITH AN ACCOUNT — the inline create-and-bind: the
+    name is new, so the approve creates a passwordless account and binds it
+    to the node id in one step — and the SAME key is then accepted, no server
+    restart. The durable half (the config file's allowlist), the live half
+    (irohnet_server_allow), and the binding are all asserted.
 
-    THE CLIENT IS NOT RESTARTED EITHER (plan 0014, [FB-REDIAL-AFTER-REFUSAL]).
-    The approval lands while a `wata-fb integ refused-then-admitted` process is
-    running and refused; that process has to redial its way in on the sync
-    loop's own cadence and take its QR screen down (`Enrol.refused()` reads
-    false again). Approving against a client started AFTERWARDS proves only the
-    server half — the hardware repro is a handset a parent approves while it
-    sits there showing its code.
+    THE CLIENT IS NOT RESTARTED EITHER (plan 0014, [FB-REDIAL-AFTER-REFUSAL]),
+    AND IT CARRIES NO CREDENTIALS (plan 0027). The approval lands while a
+    `wata-fb integ refused-then-provisioned` process is running and refused;
+    that process has to redial its way in on the sync loop's own cadence,
+    trade its proven node id for a session through POST /_wata/v1/device-login
+    (there is no password to fall back on), reach an authenticated sync AS the
+    bound account (WATA_EXPECT_USER pins whose token came back), and take its
+    QR screen down (`Enrol.refused()` reads false again). That is the
+    zero-manual-steps acceptance arc: enrol -> approve-with-account ->
+    device-login -> sync, one client process end to end.
 
     Once the id is in the allowlist, "already enrolled" has to be an ANSWER
     rather than an empty pending list ([ADMIN-ENROLL-ALREADY-DONE]): the
@@ -228,13 +234,25 @@ def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id, sdir
     check(spare_id not in json.loads(srv_cfg.read_text())["allowlist"],
           "the denied node never reaches the allowlist file")
 
+    # device-login over the admin TCP listener of an IROH-mode process: 403,
+    # even carrying a forged trusted header — the dual listener serves through
+    # the same strip as a plain-TCP deployment (plan 0027's TCP half, proven
+    # against the very server whose iroh listener will honor the real thing).
+    status, body = api(base, "POST", "/_wata/v1/device-login", {},
+                       headers={"X-Wata-Node-Id": intruder_id})
+    check(status == 403,
+          f"device-login over TCP is 403 even with a forged node-id header (saw {status} {body})")
+
     # THE CLIENT IS ALREADY RUNNING when the approval lands: start it, wait for
-    # it to report the refusal it is sitting on, and only then approve.
+    # it to report the refusal it is sitting on, and only then approve. It has
+    # NO credentials — after admission, only device-login can produce its
+    # session, and it must belong to the account bound below.
     log_path = sdir / "redial-client.log"
     log = log_path.open("w")
     proc = subprocess.Popen(
-        [str(client_bin), "integ", "refused-then-admitted", "http://wata.iroh"],
-        env={**env, "WATA_IROH_CONFIG": str(cli_cfg_dir)},
+        [str(client_bin), "integ", "refused-then-provisioned", "http://wata.iroh"],
+        env={**env, "WATA_IROH_CONFIG": str(cli_cfg_dir),
+             "WATA_EXPECT_USER": "@kid1:localhost"},
         cwd=WATA, stdout=log, stderr=subprocess.STDOUT, text=True,
     )
     try:
@@ -243,16 +261,25 @@ def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id, sdir
             print(log_path.read_text(errors="replace"))
             return False
 
-        status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{intruder_id}/approve", None, token)
+        # approve WITH the inline create-and-bind: "kid1" names no existing
+        # account, so this one call creates it (passwordless) and binds it.
+        status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{intruder_id}/approve",
+                           {"user": "kid1"}, token)
         check(status == 200, f"approve answers 200 (saw {status} {body})")
         check(body.get("live") is True,
               f"approve applied to the LIVE listener (note: {body.get('note')!r})")
+        check(body.get("user_id") == "@kid1:localhost",
+              f"approve created and bound the inline account (saw {body})")
         check(intruder_id in json.loads(srv_cfg.read_text())["allowlist"],
               "approve appended the node id to the server's iroh config allowlist")
         _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
         check(listing.get("pending") == [], "the approved row cleared")
         check(intruder_id in (listing.get("allowlisted") or []),
               "the listing reports the approved id as allowlisted (the page's 'already enrolled')")
+        check({b["node_id"]: b["user"] for b in listing.get("bindings", [])}.get(intruder_id) == "kid1",
+              "the listing reports the binding beside the enrolled id")
+        check("kid1" in {u.get("user") for u in listing.get("users", [])},
+              "the inline-created account is on the roster the picker reads")
         _, again = api(base, "POST", "/_wata/v1/enroll",
                        {"nodeId": intruder_id, "nonce": "QR01"})
         check(again.get("allowlisted") is True and again.get("pending") is False,
@@ -262,14 +289,17 @@ def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id, sdir
               "and it leaves no pending row behind — there is nothing left to decide")
 
         # the point of the whole leg: the SAME key, the SAME server process,
-        # and the SAME client process that was refused a moment ago.
+        # and the SAME client process that was refused a moment ago — now
+        # syncing as the account the approve bound, with no credential ever
+        # typed anywhere (the device-login positive).
         try:
             proc.wait(timeout=240)
         except subprocess.TimeoutExpired:
             proc.kill()
         out = log_path.read_text(errors="replace")
         if not check("INTEG PASS" in out,
-                     "the approved node is admitted with NO restart — of the server OR the client"):
+                     "the approved node device-logs-in as the bound account, "
+                     "with NO restart — of the server OR the client"):
             print("---- approved-client output ----")
             print(out)
     finally:

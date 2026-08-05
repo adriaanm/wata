@@ -417,7 +417,7 @@ object WataLogic:
     val everLive = NetStatus.everLive()
     FbPaint.draw(px, body(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
       ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable(),
-      enrolSnap(ctx, everLive)))
+      enrolSnap(ctx, everLive), Enrol.provisioning()))
 
   /** the screen, then the two things that sit OVER it: the send/play status
    *  flash and the recording bar. They are children after the screen because
@@ -425,10 +425,10 @@ object WataLogic:
    *  drew them last. */
   def body(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap]): View =
+      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean): View =
     val screen: View = s.view match
       case _: VContacts =>
-        bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol)
+        bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol, prov)
       case _: VConversation => bodyConversation(s, snap)
     var kids: List[Keyed] = Nil
     if s.pttHeld then kids = Keyed("rec", recordingView(s)) :: kids
@@ -457,15 +457,15 @@ object WataLogic:
    *  produced a self user or a conversation, then the list. */
   def bodyContacts(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap]): View =
+      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean): View =
     enrol match
       case e: Some[EnrolSnap] => Enrol.body(e.value)
-      case None               => bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail)
+      case None               => bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, prov)
 
   def bodyLive(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean): View =
-    if !everLive then bodyBoot(net, c, quitArmed, unavail)
+      everLive: Boolean, unavail: Boolean, prov: Boolean): View =
+    if !everLive then bodyBoot(net, c, quitArmed, unavail, prov)
     else if !snap.hasSelfUser && convCount(snap) == 0 then
       VText(1, 2, connectingMsg(c), Color.midGray)
     else
@@ -695,11 +695,12 @@ object WataLogic:
    *  is reached through `bodyContacts`, which is where the ambient reads it
    *  needs (`NetStatus.everLive`, `FbCaps.transportUnavailable`) are hoisted
    *  to — a body reads its arguments and nothing else. */
-  def bodyBoot(net: NetState, c: ConnectionState, quitArmed: Boolean, unavail: Boolean): View =
-    val sub = bootSubMsg(net, c, unavail)
+  def bodyBoot(net: NetState, c: ConnectionState, quitArmed: Boolean, unavail: Boolean,
+      prov: Boolean): View =
+    val sub = bootSubMsg(net, c, unavail, prov)
     // one calm line sits centered; a failure's two lines straddle that row
     val head = if sub == "" then 7 else 6
-    val msg = bootMsg(net, c, unavail)
+    val msg = bootMsg(net, c, unavail, prov)
     val keys = bootKeys(quitArmed)
     var kids: List[Keyed] =
       Keyed("footer", VText(FbPaint.centerCol(keys), FOOTER_ROW, keys, Color.midGray)) :: Nil
@@ -714,19 +715,24 @@ object WataLogic:
    *  network" once the pipe is there and the sync loop is connecting). Live
    *  never reaches here — the first live frame latches `everLive` and the
    *  ordinary UI takes over for the session. */
-  def bootMsg(net: NetState, c: ConnectionState, unavail: Boolean): String =
+  def bootMsg(net: NetState, c: ConnectionState, unavail: Boolean, prov: Boolean): String =
     if unavail then "transport unavailable"
     else if isAuthRejected(c) then "account rejected"
     else if isConnError(c) then "can't reach server"
+    else if prov then "setting up..."
     else if NetStatus.hasInterface(net.pipe) && !NetStatus.isDown(net.health) then "waiting for network"
     else "starting up..."
 
   /** the second line: what to do about it. Empty for the calm states, which
-   *  need no instruction. */
-  def bootSubMsg(net: NetState, c: ConnectionState, unavail: Boolean): String =
+   *  need no instruction — provisioning (plan 0027: this session's QR was
+   *  just approved and the handset is trading its node id for a session)
+   *  says so, because the parent is WATCHING this screen right after the
+   *  approve click and "waiting for network" would read as a failure. */
+  def bootSubMsg(net: NetState, c: ConnectionState, unavail: Boolean, prov: Boolean): String =
     if unavail then "check config"
     else if isAuthRejected(c) then "check server"
     else if isConnError(c) then "retrying..."
+    else if prov then "handset approved"
     else ""
 
   def bootColor(c: ConnectionState, unavail: Boolean): scala.Int =
