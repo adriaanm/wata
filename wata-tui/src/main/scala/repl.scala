@@ -329,11 +329,13 @@ object Repl:
 
   // ---- files ---------------------------------------------------------------------
 
+  /** the nested-assignment shape — this exact form was rejected (and, worse,
+   *  in other contexts silently bypassed the catch) before toolchain
+   *  `c81ed0f` (TRY-STMT-NESTED-THROWING-SHAPES); it stays nested as the
+   *  repin's downstream proof that the error edge reaches this catch. */
   def readFile(path: String): Bytes =
     var out = Bytes.empty
-    try
-      val raw = go.sys.readFile(path)
-      out = GoBytes.toPortable(raw)
+    try out = GoBytes.toPortable(go.sys.readFile(path))
     catch case e: sgo.GoError => out = Bytes.empty
     out
 

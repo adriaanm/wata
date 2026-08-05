@@ -51,10 +51,12 @@ blocks + git log; each entry cites where it was recorded.*
   VARIADIC-FACADE-BIND — terminal state is a Scala-varargs bind with
   call-site spread): until then `exec.Command` stays five explicit
   arities in `wata-tui/src/main/scala/facades.scala`.
-- Try-shape sensitivity (filed 2026-08-05; ruled A upstream, ticketed
-  TRY-STMT-NESTED-THROWING-SHAPES — all three statement shapes should
-  lower via the 9d4f544 hoist machinery): keep val-bound shapes until it
-  lands.
+- ~~Try-shape sensitivity~~ FIXED and verified downstream: pin `c81ed0f`
+  full-gate green with `Repl.readFile` returned to the nested-assignment
+  try shape (kept nested as the standing proof; tui-smoke pins the catch
+  edge via an unreadable-file send). Upstream found the filing had teeth:
+  two shapes that compiled elsewhere routed errors PAST the catch.
+  Val-bound forms elsewhere are now taste, not necessity.
 - FYI from upstream 2026-08-05: F104 (`29cf82e`) fixed
   `sgo.makeChan/makeSlice/makeMap` in ctor/function-argument position;
   we never dropped the bind-to-val convention, so nothing to unwind —

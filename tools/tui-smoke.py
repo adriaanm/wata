@@ -45,7 +45,8 @@ BOB_SCRIPT = """send @alice:localhost {ogg}
 quit
 """
 
-ALICE_SCRIPT = """wait 3000
+ALICE_SCRIPT = """send 9 /nonexistent-tui-smoke.ogg
+wait 3000
 snap
 msgs 1
 play 1 1
@@ -236,6 +237,9 @@ def run(tmp):
     c.line(alice, lambda l: '"user_id":"@alice:localhost"' in l,
            "alice: raw whoami body is not alice's")
 
+    c.line(alice, lambda l: l == "send failed: cannot read /nonexistent-tui-smoke.ogg",
+           "alice: unreadable-file send did not fail through the catch "
+           "(TRY-STMT-NESTED-THROWING-SHAPES downstream pin)")
     c.line(alice, lambda l: l == "bye", "alice: no `bye` (quit did not run)")
     return c.failed, bob, alice
 
