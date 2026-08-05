@@ -2,9 +2,13 @@
 
 Status: **accepted, on hold**
 
-Held 2026-08-05: the approach depends on a phone
-scanning the device's screen, and there is no phone client yet. The design stands;
-it waits on that. Plan 0008 (Apple clients) is where the scanner would come from.
+Held 2026-08-05: the approach depends on a phone acting on the device's
+QR, and there was no surface for that. Re-pointed same day: the QR now
+encodes an ADMIN-PAGE URL (`/admin#enroll/<nodeId>/<nonce>`), so the
+stock camera app + a browser is enough — no phone client needed. The
+server half (pending-enrolment store, approval, live allowlist-add) is
+plan 0021 milestone B; the device half (first-boot keypair mint, the QR
+screen) stays here and unblocks once 0021-B lands.
 
 ## The problem
 

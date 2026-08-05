@@ -1,6 +1,12 @@
 # 0017 — the minimal phone client: a web app the server serves
 
-Status: proposed
+Status: abandoned (2026-08-05) — superseded by plan 0021. Ruling: the
+phone client should be NATIVE (plan 0008's direction, not urgent), so a
+web phone client is the wrong floor; the parts of this plan that were
+really administration — the enrolment approval page and the
+serve-HTTP-alongside-iroh listener — moved into plan 0021 (the admin
+web interface). The inbound media-normalization idea returns only if a
+client that records non-Ogg ever exists.
 
 ## Problem
 
