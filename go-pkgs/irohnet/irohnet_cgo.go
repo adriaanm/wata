@@ -568,6 +568,8 @@ func NewHTTPClient(path string) (*http.Client, error) {
 
 // Serve runs handler over an iroh listener built from the config at path —
 // the whole server side: no TCP port exists. Blocks like ListenAndServe.
+// Requests reach the handler with NodeIDHeader set to the connection's
+// authenticated remote node id (any inbound copy stripped first — nodeid.go).
 func Serve(path string, handler http.Handler) error {
 	cfg, e := LoadConfig(path)
 	if e != nil {
@@ -581,6 +583,6 @@ func Serve(path string, handler http.Handler) error {
 	for _, a := range l.addrs {
 		fmt.Printf("irohnet: addr %s\n", a)
 	}
-	srv := &http.Server{Handler: handler}
+	srv := &http.Server{Handler: trustedNodeID(handler)}
 	return srv.Serve(l)
 }

@@ -100,6 +100,33 @@ func TestHTTPOverIroh(t *testing.T) {
 	}
 }
 
+// The trusted header end to end (plan 0027): a request over the iroh bridge
+// reaches the handler carrying NodeIDHeader == the CLIENT's node id — the one
+// the accept gate verified — even when the client sends a forged copy. This
+// is what device-login authenticates on, so the assertion is exact equality
+// with the key the client actually dialed with, not mere presence.
+func TestTrustedNodeIDOverIroh(t *testing.T) {
+	client, l, cliID := pair(t, true)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/whoami", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get(NodeIDHeader)))
+	})
+	// the same wrapping Serve installs (irohnet_cgo.go).
+	go func() { http.Serve(l, trustedNodeID(mux)) }()
+
+	req, _ := http.NewRequest("GET", "http://wata.iroh/whoami", nil)
+	req.Header.Set(NodeIDHeader, "forged-by-the-peer")
+	resp, e := client.Do(req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != cliID {
+		t.Fatalf("handler saw %q, want the dialing client's node id %q", body, cliID)
+	}
+}
+
 func TestAllowlistRefusedAtAccept(t *testing.T) {
 	client, l, _ := pair(t, false)
 	go func() { http.Serve(l, http.NewServeMux()) }()
