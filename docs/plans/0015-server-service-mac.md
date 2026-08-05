@@ -87,7 +87,15 @@ Why each piece:
 `tools/server-service.py selftest` green (runs unprivileged, exercises
 package → install → boot → serve → journal). The real `sudo just
 server-install` on this mac is a human step; `just server-status` after it is
-the acceptance check, recorded in the commit that closes the queue item.
+the acceptance check.
+
+Acceptance recorded 2026-08-05: installed and serving on this mac —
+`/versions` answers on `:8008`, persistence ON with the journal appearing in
+`data/` on first login, log writing under `log/`. The first install caught
+what the no-sudo selftest cannot: a root install left the layout root-owned
+while the daemon runs as the installing user, so launchd could not open the
+log and the job sat loaded-but-dead. `install` now chowns the prefix to
+`SUDO_USER`; the plist and newsyslog conf stay system files.
 
 ## Out of scope
 
