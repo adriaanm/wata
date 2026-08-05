@@ -245,7 +245,7 @@ object Outbox:
 
   def publish(c: MatrixClient): Unit =
     val ok = c.events.trySend(event())
-    ()
+    Runtime.publishTopic(c, EvOutboxDirty())   // the handle's pump (handle.scala)
 
   // ---- enqueue --------------------------------------------------------------------
 

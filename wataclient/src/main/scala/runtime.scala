@@ -134,6 +134,11 @@ case class MatrixClient(
   retry: sgo.Chan[Boolean],
   audioEnabled: Boolean,
   audioCmds: sgo.Chan[AudioCmd],
+  /** the handle's dirty-topic pump (handle.scala): a BOUNDED channel the
+   *  runtime only ever `trySend`s to, so a shell that stopped listening — or
+   *  an app like `wata-fb` that polls the cells instead and never listens at
+   *  all — can neither block a loop nor grow a queue. */
+  topics: sgo.Chan[Event],
   /** where a failed send is kept (outbox.scala). Another capability trait, so
    *  the core stays filesystem-free: the app hands in a store over its config
    *  directory, or `MemOutbox` when it has nowhere to write. */
@@ -178,6 +183,7 @@ object Runtime:
     val stop = sgo.makeChan[Boolean]()            // close-signalled stop
     val retry = sgo.makeChan[Boolean](1)          // the retry-now poke
     val audioCmds = sgo.makeChan[AudioCmd](16)
+    val topics = sgo.makeChan[Event](TOPIC_QUEUE)  // the handle's dirty flags
     resetSession()
     // the queue is loaded HERE, before either loop exists: an entry that
     // outlived the last process is already pending when the first sync round
@@ -187,16 +193,23 @@ object Runtime:
     if !ob.persistent() then MemSlots.reset()
     Outbox.reset(ob)
     MatrixClient(cfg, http, clock, actions, events, snaps, stop, retry, audioEnabled,
-      audioCmds, ob)
+      audioCmds, topics, ob)
 
   /** the action queue's capacity — also the bound on how many queued actions
    *  the shutdown poke may discard to make room for the poison pill. */
   val ACTION_QUEUE: Int = 64
 
+  /** the dirty-topic queue's capacity. Small on purpose: the events carry no
+   *  data, a consumer answers them by reading the current state, and only the
+   *  LAST event of a topic has to survive — so slack past a handful buys
+   *  nothing and staleness costs nothing. */
+  val TOPIC_QUEUE: Int = 16
+
   /** the module cells a fresh client starts from (single-client-per-process:
    *  the host drivers run several sequential sessions in one process). */
   def resetSession(): Unit =
     closedC.set(false)
+    connC.set(Disconnected())
     lastAuthC.set(AuthCreds("", ""))
     loginsC.set(0)
     backfillQC.set(Nil)
@@ -263,6 +276,29 @@ object Runtime:
     val ok = c.events.trySend(EvPlaybackError(true))
     ()
 
+  // ---- publication: the UI-event queue, the health cell, the dirty topics ------
+
+  /** the connection state changed: the queued `EvConn` the polling consumers
+   *  drain, the health CELL a handle reads on demand, and the dirty flag a
+   *  pushed consumer wakes on. One call, so the three can never disagree. */
+  def emitConn(c: MatrixClient, s: ConnectionState): Unit =
+    connC.set(s)
+    c.events.send(EvConn(s))
+    publishTopic(c, EvConnDirty())
+
+  /** publish a dirty flag to the handle's pump — `trySend` ONLY. A full queue
+   *  means the consumer is behind; dropping is correct, because the event
+   *  carries no data and the next one of that topic supersedes it. Nothing in
+   *  the runtime may wait on a consumer. */
+  def publishTopic(c: MatrixClient, e: Event): Unit =
+    val ok = c.topics.trySend(e)
+    ()
+
+  /** the connection state the sync loop last published (handle.scala's
+   *  `connection()`); a polling consumer reads the same thing out of the
+   *  `EvConn` stream. */
+  def connection(): ConnectionState = connC.get()
+
   /** poke the login/backoff sleep: it ends its current sleep slice, the caller
    *  resets its backoff to 1s, and the next attempt happens now. The boot
    *  screen's OK key. Non-blocking — the cell holds one poke and a second one
@@ -286,13 +322,13 @@ object Runtime:
     while run do
       if isStopped(c) then run = false
       else
-        c.events.send(EvConn(Connecting()))
+        emitConn(c, Connecting())
         val o = loginOrResume(c)
         if o.creds.accessToken != "" then
           runSession(c, o.creds)
           retryMs = 1000L                // a session that ended relogs in promptly
         else
-          c.events.send(EvConn(loginFailState(o)))
+          emitConn(c, loginFailState(o))
           if o.rejected then retryMs = 60000L   // rejection: straight to the ceiling
           if backoffSleep(c, retryMs) then retryMs = 1000L
           else retryMs = nextBackoff(retryMs)
@@ -306,7 +342,7 @@ object Runtime:
    *  rounds until stop or an auth failure ends it. */
   def runSession(c: MatrixClient, creds: AuthCreds): Unit =
     lastAuthC.set(creds)
-    c.events.send(EvConn(Connected()))
+    emitConn(c, Connected())
     SyncEngine.reset()
     backfillQC.set(Nil)
     SyncEngine.setSelfUser(creds.userId)
@@ -402,12 +438,12 @@ object Runtime:
           lastAuthC.set(AuthCreds("", ""))   // actions fail fast until the relogin lands
           run = false
         else if resp.status != 200 then
-          c.events.send(EvConn(ConnError()))
+          emitConn(c, ConnError())
           if backoffSleep(c, retryMs) then retryMs = 1000L
           else retryMs = nextBackoff(retryMs)
         else
           val j = MatrixHttp.parseOrNull(resp.body)
-          if isNullJ(j) then c.events.send(EvConn(ConnError())) // parse fail: report error, keep looping
+          if isNullJ(j) then emitConn(c, ConnError()) // parse fail: report error, keep looping
           else
             processRound(c, hs, selfUid, j)
             retryMs = 1000L
@@ -562,8 +598,9 @@ object Runtime:
     val snap = SyncEngine.buildSnapshot()
     sgo.selectOrDefault(c.snaps)((old: StateSnapshot) => ())(())
     c.snaps.send(snap)
-    c.events.send(EvConn(Syncing()))
+    emitConn(c, Syncing())
     c.events.send(EvSnapshot())
+    publishTopic(c, EvSnapshotDirty())   // the handle's pump (handle.scala)
 
   // ---- the action loop -----------------------------------------------------------
 
@@ -675,6 +712,10 @@ object Runtime:
   /** has `stopClient` run? The teardown is reachable twice (disconnect + quit)
    *  and `close` on an already-closed channel panics. */
   private val closedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  /** the connection state last published (`emitConn`): written by the sync
+   *  loop, read by whoever asks — the handle's `connection()`. A cell rather
+   *  than a queue, because health is a CURRENT value, not a history. */
+  private val connC: sgo.Atomic[ConnectionState] = sgo.atomic(Disconnected())
   /** the credentials the last login/resume produced (the app persists them as
    *  a `Session`; a caller reads this AFTER the supervised scope has joined). */
   def lastAuth: AuthCreds = lastAuthC.get()

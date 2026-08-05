@@ -126,6 +126,21 @@ blocks + git log; each entry cites where it was recorded.*
   cross-unit val reads inside one module (filed 2026-08-05,
   `CROSS-MODULE-VAL-READ`; plan 0022). Worked around with
   `Outbox.cap()`; inline `Outbox.CAP` again when it lands.
+- A lambda inside a CLASS method (not an object) emits Go that does not
+  compile: the lifted closure becomes a METHOD on the class while the call
+  site emits an unqualified top-level call (`undefined: runDetached__anonfun_1`),
+  and the `selectValue`-adapter twin emits a top-level `func` whose body says
+  `self.` (`undefined: self`) (filed 2026-08-05,
+  `CLASS-METHOD-LAMBDA-LIFT-MISMATCH`; plan 0025). Worked around by keeping
+  every lambda out of class methods — `Handle`'s methods delegate to
+  `ClientHandle`, `FbSpawner.runDetached` to `FbCaps.spawnScope`; inline them
+  again when it lands.
+- No `sgo` spelling for an unstructured goroutine: `go.spawn` is the only one,
+  and `wataclient` may not name the `go` facade (its portability tripwire), so
+  a library cannot put its own `supervised` scope on a goroutine (filed
+  2026-08-05, `SGO-DETACHED-SPAWN`; plan 0025). Worked around with the
+  `Spawner` capability trait, injected like `HttpDo`/`Clock`; delete `Spawner`
+  and every app-side impl when an `sgo.spawn` lands.
 - DATA-10 (`StringBuilder` as a parameter) prints the right restriction
   message and then crashes `sgolaBackend` with an unhandled exception
   (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —

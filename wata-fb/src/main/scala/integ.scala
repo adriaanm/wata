@@ -52,6 +52,7 @@ object Integ:
       else if name == "auth-rejected" then ok = s16()
       else if name == "admin-rename" then ok = s17()
       else if name == "outbox-restart" then ok = s18()
+      else if name == "client-handle" then ok = s19()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -944,6 +945,111 @@ object Integ:
       i += 1
 
   def hasDropped(key: String): Boolean = keyIn(Outbox.droppedKeys(), key)
+
+  // ---- the client handle: a shell that owns its own loop (plan 0025) ---------
+
+  /** THE HANDLE, end to end. Every other scenario runs the client the way
+   *  `wata-fb` does — inside a `supervised` scope the driver never leaves. This
+   *  one runs it the way a phone shell has to: `ClientHandle.start` returns
+   *  immediately, the client lives on its own goroutine, and the driver
+   *  observes it from outside through pushed dirty flags.
+   *
+   *    1. start -> `EvConnDirty` arrives and `connection()` reads live.
+   *    2. bob sends a voice message OUT OF BAND (a direct HTTP send with his
+   *       own token — no second client runtime): `EvSnapshotDirty` arrives and
+   *       `snapshot()` shows the message.
+   *    3. DROP SOUNDNESS: the driver sleeps through several sync rounds
+   *       without draining, so the bounded topic queue overflows and events are
+   *       dropped. The snapshot it then reads is still the true one, and a
+   *       SECOND out-of-band message still pushes an event — a full queue is a
+   *       missed notification, never a missed state or a wedged pump.
+   *    4. stop + join: the goroutine really exits, proved by starting a SECOND
+   *       handle in the same process (the runtime's module cells are the
+   *       engine's — a leaked goroutine would still be writing them). */
+  def s19(): Boolean =
+    val btok = directToken("bob")
+    if btok == "" then false
+    else
+      val h = ClientHandle.start(cfg("alice"), FbCaps.httpDo(), FbCaps.clock(),
+        FbCaps.spawner())
+      val ok = handleSession(h, btok)
+      val gone = ClientHandle.stopAndJoin(h, 20000L)
+      if !(ok && gone) then false
+      else
+        // the restart: nothing of the first client is left running
+        val h2 = ClientHandle.start(cfg("alice"), FbCaps.httpDo(), FbCaps.clock(),
+          FbCaps.spawner())
+        val live = waitLive(h2, 20000L)
+        val gone2 = ClientHandle.stopAndJoin(h2, 20000L)
+        live && gone2
+
+  def handleSession(h: Handle, btok: String): Boolean =
+    if !waitLive(h, 20000L) then false
+    else if !sendFromBob(btok, 910L, 1) then false
+    else if !waitSnapshotTopic(h, (s: StateSnapshot) =>
+      lastDursMatch(s, "@bob:localhost", 910L :: Nil), 30000L) then false
+    else dropSoundness(h, btok)
+
+  /** the conn topic that reports a LIVE client: the flag says "read the state",
+   *  and the state is what is asserted. */
+  def waitLive(h: Handle, timeoutMs: Long): Boolean =
+    val deadline = FbCaps.clock().nowUnixMillis() + timeoutMs
+    var ok = false
+    var run = true
+    while run do
+      if connLive(h.connection()) then
+        ok = true
+        run = false
+      else if FbCaps.clock().nowUnixMillis() >= deadline then run = false
+      else drop1(h.waitEvent(200L))
+    ok
+
+  def connLive(s: ConnectionState): Boolean = s match
+    case _: Connected => true
+    case _: Syncing   => true
+    case _            => false
+
+  /** wait for a snapshot topic whose snapshot satisfies `pred`. Other topics
+   *  are read and discarded — they are flags, and the state is the answer. */
+  def waitSnapshotTopic(h: Handle, pred: StateSnapshot => Boolean, timeoutMs: Long): Boolean =
+    val deadline = FbCaps.clock().nowUnixMillis() + timeoutMs
+    var ok = false
+    var run = true
+    while run do
+      if FbCaps.clock().nowUnixMillis() >= deadline then run = false
+      else
+        h.waitEvent(500L) match
+          case e: Some[Event] =>
+            if isSnapshotTopic(e.value) && pred(h.snapshot()) then
+              ok = true
+              run = false
+          case None => ()
+    ok
+
+  def isSnapshotTopic(e: Event): Boolean = e match
+    case _: EvSnapshotDirty => true
+    case _                  => false
+
+  def drop1(o: Option[Event]): Unit = ()
+
+  /** bob speaks without a client: upload + send over his own token, the same
+   *  request pair a live client makes. `txn` must DIFFER per send — a Matrix
+   *  transaction id is per-access-token, so a repeated one is treated as a
+   *  retry of the first message and the second never appears. */
+  def sendFromBob(btok: String, durMs: Long, txn: Int): Boolean =
+    Outbox.sendOnce(directHs(btok), "", "@alice:localhost", fakeOgg(), durMs, txn) ==
+      Outbox.DELIVERED
+
+  /** sleep through several rounds with nobody draining — the 16-slot topic
+   *  queue fills and the runtime's `trySend`s start failing, which is the
+   *  designed behavior — then check that nothing was actually lost: the
+   *  snapshot is current, and the pump still delivers the next change. */
+  def dropSoundness(h: Handle, btok: String): Boolean =
+    FbCaps.clock().sleepMs(6000L)
+    if !lastDursMatch(h.snapshot(), "@bob:localhost", 910L :: Nil) then false
+    else if !sendFromBob(btok, 920L, 2) then false
+    else waitSnapshotTopic(h, (s: StateSnapshot) =>
+      lastDursMatch(s, "@bob:localhost", 910L :: 920L :: Nil), 30000L)
 
   def keyIn(xs: List[String], k: String): Boolean = xs match
     case h :: t => if h == k then true else keyIn(t, k)
