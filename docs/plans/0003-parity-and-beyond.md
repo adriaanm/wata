@@ -192,8 +192,13 @@ handoffs written yet — it stays queued polish):
   `fetch_image_from_partition` path already exists and works (the MPP
   backlight fix proved it); the work is a wata 160×128 frame in LK's
   splash format replacing the stock logo.
-- **cmdline** (`bq268-alpine`): `boot.img` is assembled there, so
-  `quiet` + fbcon logo suppression are its mkbootimg `--cmdline` change.
+- **cmdline** (`bq268-alpine`): DONE 2026-08-05 — the live boot
+  partition's header cmdline now carries `quiet logo.nologo
+  vt.global_cursor_default=0` (patched in place, backup kept; alpine
+  `ae0aa01` has the method and the carry-forward note for future
+  boot.img assemblies). Boot is dark-to-wata together with the tty1
+  flip (alpine `be06c0e`, gate consciously lifted by owner — power
+  actions still unverified on hardware).
 - **the last gap** — kernel-to-wata handoff — is already covered by the
   tty1 flip spec (`wata-fb-early-boot.md` there) plus the calm boot
   presentation below; wata itself needs nothing new beyond supplying
