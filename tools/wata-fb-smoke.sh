@@ -34,6 +34,16 @@ PNGOUT="$("$FB_EMIT/$FB_BIN" pngtest)" || { echo "wata-fb pngtest run failed"; e
 printf '%s\n' "$PNGOUT" | sed 's/^/   /'
 printf '%s\n' "$PNGOUT" | grep -qF "pngtest: PASS" || { echo "wata-fb: pngtest did not PASS"; exit 1; }
 
+# -- (1c) the Gio blit pipeline (plan 0023 M2): the RGB565->RGBA conversion and
+# the integer nearest-neighbour scaler that go-pkgs/gioshell blits the panel
+# with. Pure Go, no window and no GPU — this is the assertion that the window
+# path cannot touch frame CONTENT, so it belongs in the gate even though the
+# window itself does not (`just phone-blit` runs the GPU-backed draw-path test).
+echo "-- wata-fb (1c): gioshell blit pipeline (go test) --"
+( cd "$WATA/go-pkgs/gioshell" && go test ./... ) \
+  || { echo "go-pkgs/gioshell tests failed"; exit 1; }
+echo "   blit pipeline OK"
+
 echo "-- wata-fb (2/2): cross build armv7-musl (cgo opus + tinyalsa) --"
 if ! command -v zig >/dev/null 2>&1; then
   echo "   SKIP: zig not installed (cross-cgo needs the C cross-toolchain; no test needs the device)"

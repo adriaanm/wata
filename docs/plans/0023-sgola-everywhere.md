@@ -38,13 +38,19 @@ a sgola inbox ticket, like the rsc.io/qr dep proof before it. It lives in
 and REPORT.md is the answer — the binds hold, and the two tickets are
 `NO-LIB-EMIT-FOR-RUNTIME-LIBS` and `INLINK-DEP-SEARCH-PARENT-ONLY`.
 
-**M2 — the blit shell: the phone is a bigger BQ268.** A Gio app that
-runs the real `wata-fb` frame loop (via the `UiDevice` seam) and
-blits the 160×128 buffer as a scaled texture, touch zones mapped to
-the five keys. The entire existing UI — goldens and all — ships on a
-phone with no new UI code. Silly on purpose, useful for real: a
-parent has a working client while the rest matures. Android falls out
-of the same Gio build.
+**M2 — the blit shell: the phone is a bigger BQ268.** DONE on the
+desktop leg (2026-08-05; `go-pkgs/gioshell` + `GioDevice`, `just
+phone-blit`, design: docs/design/wata-fb.md "The window shell (Gio)").
+A Gio app runs the real `wata-fb` frame loop through the `UiDevice`
+seam and blits the 160×128 buffer as an integer-scaled
+nearest-neighbour texture, five touch zones mapped to the five keys.
+The entire existing UI — goldens and all — ships with no new UI code.
+Silly on purpose, useful for real: a parent has a working client while
+the rest matures. Gio came in as an ordinary fetched Go dependency
+(gioui.org v0.10.1) behind the `gioshell` build tag, so no other build
+grew a window toolkit. Phone PACKAGING (gogio, iOS/Android) is not
+done — the same Gio source is what would be packaged, and audio stays
+a no-op until M3.
 
 **M3 — the bindings generator.** A DarwinKit-style codegen pass over
 Apple's machine-readable framework metadata, scoped to what wata
@@ -74,7 +80,9 @@ defines what the server must send.
 - M1: `tools/phone-spike/` (bind wrapper package + the Swift shell +
   a driver script); no product-tree changes.
 - M2: `go-pkgs/gioshell/` (plain Go, ordinary fetched Gio dep — the
-  external-deps door is open), a `UiDevice` impl, `tools/` packaging.
+  external-deps door is open), `wata-fb/src/main/scala/gio.scala` +
+  `gioshell.scala` (the `UiDevice` impl and its facade),
+  `tools/phone-blit.py`.
 - M3: `tools/bindgen/` (the generator), `go-pkgs/appleptt/` etc.
   (generated, committed, regeneration scripted).
 - M4: `wataui/` (a new Sgola library module: the view ADTs, the
@@ -85,8 +93,11 @@ defines what the server must send.
 
 - M1: scripted — bind succeeds, shell logs in, one message syncs;
   the report is the deliverable (plus any sgola tickets).
-- M2: the existing fb-ui goldens ARE the oracle (same frames through
-  the blit path); a manual on-phone smoke.
+- M2: the blit may not touch frame CONTENT — pure-function tests over
+  the RGB565 widening and the integer scaler (in `just fb-smoke`),
+  plus a GPU-backed headless render of the real view compared against
+  the source frame (`just phone-blit`). `just phone-blit --frames N`
+  is the unattended window check; clicking is the owner's.
 - M3: PTT hello on hardware; generated code `go vet`-clean.
 - M4: golden-per-applet equivalence during fb adoption; the UIKit
   backend gets its own screenshot harness when it exists.

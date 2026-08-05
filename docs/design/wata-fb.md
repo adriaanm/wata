@@ -101,12 +101,13 @@ sleep. It is deliberately NOT `Shareable`: a `UiDevice` never crosses a
 goroutine boundary, which is what lets the real implementation hold the
 mmap'd framebuffer slice as a plain field.
 
-Three implementations:
+Four implementations:
 
 | impl | file | edges |
 |---|---|---|
 | `FbUiDevice` | `ui.scala` | the real thing: `Evdev.poll` over `/dev/input/event{0,1,2}`, `FbTest.present` into the mmap'd `/dev/fb0`, `Led.*` over sysfs. |
 | `SimDevice` | `sim.scala` | a terminal: ANSI truecolor half-blocks out, raw stdin in, LEDs as colored cells in a status row. |
+| `GioDevice` | `gio.scala` | a window: the frame blitted as an integer-scaled texture, touch buttons and desktop keys in, LEDs as two dots in the chrome — see below. |
 | `ScriptDevice` | `uiscript.scala` | deterministic: input from a script's injection cell, no display (the driver encodes the pixel buffer itself at a checkpoint). |
 
 One sgola shape to know: `pollInput` returns a `KeyBatch`, a
@@ -866,6 +867,7 @@ All of these are subcommands dispatched from `main.scala`:
 | `--selftest [echo\|play\|all]` | `selftest.scala` | on-device audio-thread selftest described above. |
 | `login\|voicesend\|voiceplay\|audiosoak ...` | `devcli.scala` | scripted, non-interactive actions against a live server: provision/login a user, record-and-send a clip, sync-and-play the newest clip, or run a long record/send/sync/download/play soak loop (intended to run under `GODEBUG=gctrace=1` to watch GC pressure — `devcli.scala:105`). |
 | `sim [base] [user] [pass] [--once]` | `sim.scala` | the host simulator: the real frame loop drawn into a terminal — see below. |
+| `gio [base] [user] [pass] [--scale N] [--frames N]` | `gio.scala` | the window shell: the real frame loop blitted into a Gio window — see below. Needs a `-tags gioshell` build (`just phone-blit`). |
 | `uitest <script> <base> <user> <pass> <outdir>` (`-` in a credential slot = resume from the store) | `uiscript.scala` | one scripted, deterministic UI session with PNG checkpoints — see below. |
 | `ui [base] [user] [pass]` | `ui.scala` | the actual product: the full on-device client. |
 
@@ -1006,6 +1008,81 @@ element's two inputs (see "The connectivity element"), which is the only
 way to reach a bad-connection or device-interface frame from a host with
 a healthy loopback server. And a scenario's `users` key writes a
 `$WATA_USERS` accounts file, which is how a phase gets a third login.
+
+### The window shell (Gio)
+
+**`just phone-blit`** — the same frame loop again, this time in a
+desktop window, and the road to a phone client (plan 0023 milestone 2:
+"the phone is a bigger BQ268"). The window blits the 160x128 RGB565
+buffer as an integer-scaled, nearest-neighbour texture with a row of
+touch buttons under it — UP, DOWN, OK, BACK and a wide PTT — so the
+entire existing UI, goldens and all, runs on a touchscreen with no new
+UI code. Android and iOS fall out of the same Gio build (packaging is
+not done yet).
+
+Everything Gio lives in the plain-Go module **`go-pkgs/gioshell`**,
+behind a primitive-typed facade (`go.gioshell`, `gioshell.scala`) in
+exactly the shape `go.audio` uses: bytes, ints and bools cross, nothing
+else. `GioDevice` (`gio.scala`) is then a nine-line `UiDevice`.
+
+**Two event loops, and which goroutine each owns.** Gio's `app.Main`
+must run on the process's main goroutine (macOS runs its window server
+there) and never returns, so `gio` is the one front end whose frame
+loop is NOT the main goroutine: `Gio.loop` forks the frame loop and
+then sits in `app.Main` forever. The device object stays inside that
+fork — `Gio.drive` builds it there — which is what keeps "a `UiDevice`
+never crosses a goroutine boundary" true, and is also what the fork's
+crossable-capture check demands. Only frame bytes and packed key ints
+cross, through the shell's own mutex and atomics. `present` copies the
+frame (the caller's buffer is reused by the very next frame) and wakes
+the window with `Invalidate`; `pollInput` drains a queue the window
+loop fills from pointer and key events; `frameSleep` paces as the sim
+does; the backlight calls are no-ops.
+
+This relies on the emitted `func main` and the body of `sgo.supervised`
+both running on the Go main goroutine. They do, and nothing about that
+is accidental — but it is a guarantee this backend now depends on
+(sgola ticket `MAIN-GOROUTINE-GUARANTEE`).
+
+Teardown crosses the same seam: the frame loop's quit edge (Back twice
+on contacts) ends in `gioshell.Done`, which exits the process because
+`app.Main` will not give the main goroutine back; closing the window
+sets the quit flag, waits for that teardown, and exits anyway.
+
+**Input.** A press inside a button zone sends the key down and the
+matching release sends it up, so PTT is a real press-and-hold — the
+same `KeyState` pair evdev delivers, with none of the terminal sim's
+repeat-gap inference. Desktop keys mirror `fb-sim`'s mapping: arrows =
+d-pad, Enter = OK, Esc/Backspace = back, Space = PTT, `z`/`x` =
+prev/next applet, `f` = F2.
+
+**The blit may not touch frame content**, and that is asserted rather
+than assumed. `Expand` (RGB565 → RGBA by bit replication, the same
+widening the PNG golden encoder uses) and `ScaleNearest` (each source
+pixel becomes an s×s block, no interpolation) are pure functions with
+plain-Go tests that `just fb-smoke` runs. On top of that, a
+GPU-backed test renders the real view through Gio's headless surface
+and reads the pixels back, so what the window actually draws is checked
+against the source frame, not just the arithmetic. `just phone-blit`
+runs that one (it needs a GPU context, though no display).
+
+**Audio does not work here.** The shell reuses `SimAudio`, the same
+no-op stand-in the terminal sim uses — there is no codec and no ALSA on
+a desktop — so a voice message records instantly and plays silently.
+The button row says so on screen.
+
+Gio is opt-in at the Go build tag `gioshell`: an ordinary `sgo build`
+(and therefore the armv7 device cross-build and the linux/amd64 smoke)
+compiles the package's window-free stub and grows no window toolkit,
+the same arrangement `go-pkgs/irohnet` uses for its real transport.
+`tools/phone-blit.py` does the tagged rebuild, boots a scratch
+`wata-server` unless given a `--base`, and opens the window;
+`--frames N` quits after N presented frames and asserts the window
+drew, which is as far as an unattended run can go — clicking is the
+owner's job. Gio needs a GUI session with an *active* display: a
+sleeping or locked screen is enough to stop the window appearing, and
+the shell says so on stderr after five frameless seconds instead of
+sitting there mute.
 
 ### Use-case coverage
 
@@ -1266,6 +1343,8 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
 | `integ.scala` | 831 | Live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename landing on a syncing client, and the outbox's queue/persist/drop/deliver cycle. |
 | `ui.scala` | 380 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
+| `gio.scala` | 129 | The window front end: `GioDevice` (present/LEDs/keys over the `go.gioshell` facade) and `Gio` (the forked frame loop, the packed-key decoding, the `--scale`/`--frames` flags). |
+| `gioshell.scala` | 63 | The `go.gioshell` facade for `go-pkgs/gioshell`. |
 | `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
 | `uiscript.scala` | 583 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
 

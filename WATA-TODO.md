@@ -98,6 +98,13 @@ blocks + git log; each entry cites where it was recorded.*
   we never dropped the bind-to-val convention, so nothing to unwind —
   the next repin simply makes the convention optional there.
 
+- The Gio window backend (plan 0023 M2) depends on the emitted `main` and
+  the body of `sgo.supervised` running on the Go MAIN goroutine — Gio's
+  `app.Main()` panics anywhere else and never returns, so the supervised
+  body ends in it. That holds today (`sgolaSupervised` runs its body
+  inline); filed 2026-08-05 as `MAIN-GOROUTINE-GUARANTEE` asking for it to
+  be stated and pinned rather than left an implementation detail. No
+  workaround exists if it ever changes.
 - `HashMap.foldLeft` with `B` = a generic `List[T]` leaves `B`
   unspecialized in the linker and emits an `any` the call site cannot
   use (filed 2026-08-05, `WATA-FOLD-LIST-B`). Worked around in

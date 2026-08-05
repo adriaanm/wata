@@ -179,6 +179,14 @@ iroh-lan-smoke:
 iroh-roam-smoke:
     tools/iroh-roam-smoke.py
 
+# the Gio blit shell (plan 0023 M2): the REAL wata-fb frame loop in a macOS
+# window — the 160x128 frame blitted as a scaled nearest-neighbour texture,
+# five touch buttons for the five keys. Boots its own scratch server; add
+# `--frames N` for the unattended sanity run. Needs a `-tags gioshell` build,
+# which it does itself. Not in ci (it opens a window).
+phone-blit *FLAGS:
+    tools/phone-blit.py {{FLAGS}}
+
 # the phone spike (plan 0023 M1): sgola-emitted wataclient through `gomobile
 # bind` into iOS + macOS xcframeworks, then a Swift shell logs in and syncs
 # against a scratch wata-server. Needs Xcode + gomobile/gobind; not in ci.
