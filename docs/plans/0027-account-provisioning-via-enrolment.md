@@ -1,6 +1,18 @@
 # 0027 — Account provisioning via enrolment
 
-Status: accepted
+Status: done
+
+Landed 2026-08-06. The one deliberate liberty: the plumbing gap was
+Go-only — the FFI already surfaced the remote id per accepted stream, so
+the trusted header is strip-and-inject in the listener bridge plus a
+strip on every TCP edge, no Rust change (and no in-tree
+wata-matrix-spec edit: that read-only TS reference has no dialect
+section; the server design doc specifies the endpoint). Everything else
+is as written below, gated by admin-smoke (the TCP negatives, the
+binding journal round-trip, the inline create) and tunnel-smoke (the
+zero-manual-steps arc in one credential-free client process). The field
+verification — a factory-clean handset after a QR scan — rides the next
+device deploy, which also rebuilds the arm staticlib.
 
 ## Problem
 
