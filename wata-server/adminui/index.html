@@ -65,7 +65,7 @@
     cannot reach this server itself. If the screen is too dim to scan, type the code printed
     under it instead; that one needs the handset to be on the family network.</p>
   <table id="enroll" class="hidden">
-    <thead><tr><th>node id</th><th>code</th><th>waiting</th><th></th></tr></thead>
+    <thead><tr><th>node id</th><th>code</th><th>waiting</th><th>account</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
   <form class="row" id="code-form">
@@ -74,6 +74,12 @@
            autocapitalize="off" spellcheck="false">
     <button type="submit">Find</button>
   </form>
+
+  <h2 id="enrolled-head" class="hidden">Enrolled handsets</h2>
+  <table id="enrolled" class="hidden">
+    <thead><tr><th>node id</th><th>account</th></tr></thead>
+    <tbody></tbody>
+  </table>
 
   <h2>Accounts</h2>
   <p class="muted">The <em>username</em> is the login and never changes; the
@@ -290,6 +296,8 @@ function short(id) {
 
 let lastPending = [];
 let lastAllowed = [];
+let lastUsers = [];
+let lastBindings = {};
 
 // Is this id already in the server's allowlist? A `"*"` entry admits every
 // peer, so it answers for any id — the same rule the server applies.
@@ -297,9 +305,37 @@ function isEnrolled(id) {
   return lastAllowed.includes("*") || lastAllowed.includes((id || "").toLowerCase());
 }
 
-function renderEnroll(pending, allowed) {
+// THE ACCOUNT AT APPROVE (plan 0027): approving a handset also says WHOSE it
+// is. The picker offers the roster AND takes a bare new name — the inline
+// create-and-bind: a new name becomes a passwordless account on the spot,
+// bound to this node id, whose only credential is the handset's own key. The
+// server answers device-login for the bound account the moment the handset's
+// next dial lands, so a QR scan plus this one click is the WHOLE onboarding.
+function accountPicker() {
+  const sel = document.createElement("select");
+  const head = document.createElement("option");
+  head.value = ""; head.textContent = "new account…";
+  sel.append(head);
+  for (const u of lastUsers) {
+    const o = document.createElement("option");
+    o.value = u.user;
+    o.textContent = u.user + (u.displayname && u.displayname !== u.user ? " (" + u.displayname + ")" : "");
+    sel.append(o);
+  }
+  const input = document.createElement("input");
+  input.placeholder = "name for this handset";
+  input.autocapitalize = "off"; input.spellcheck = false;
+  sel.addEventListener("change", () => { input.classList.toggle("hidden", sel.value !== ""); });
+  const chosen = () => sel.value || input.value.trim();
+  return { sel, input, chosen };
+}
+
+function renderEnroll(pending, allowed, users, bindings) {
   lastPending = pending;
   lastAllowed = (allowed || []).map((s) => String(s).toLowerCase());
+  lastUsers = users || [];
+  lastBindings = {};
+  for (const b of bindings || []) lastBindings[String(b.node_id).toLowerCase()] = b.user;
   const table = $("enroll");
   const tb = table.querySelector("tbody");
   const target = enrollTarget();
@@ -312,10 +348,17 @@ function renderEnroll(pending, allowed) {
     cell(tr, short(p.node_id)).className = "mono";
     cell(tr, p.nonce).className = "mono";
     cell(tr, ms(p.age_ms));
+    const pick = accountPicker();
+    const acct = document.createElement("td");
+    acct.append(pick.sel, pick.input);
+    tr.append(acct);
     const actions = document.createElement("td");
     actions.append(button("approve", async () => {
-      const r = await api("POST", "/_wata/v1/admin/enroll/" + p.node_id + "/approve");
-      say(r.live ? "approved " + short(p.node_id) : "approved " + short(p.node_id) +
+      const user = pick.chosen();
+      if (!user) { say("Pick an account, or type a name for this handset.", true); return; }
+      const r = await api("POST", "/_wata/v1/admin/enroll/" + p.node_id + "/approve", { user });
+      const who = r.user ? " for " + r.user : "";
+      say(r.live ? "approved " + short(p.node_id) + who : "approved " + short(p.node_id) + who +
         " — written to the allowlist file, but not applied live: " + (r.note || "no listener"),
         !r.live);
       await refresh();
@@ -329,6 +372,7 @@ function renderEnroll(pending, allowed) {
     if (target && target.nodeId === p.node_id) { tr.classList.add("target"); found = tr; }
     tb.append(tr);
   }
+  renderEnrolled();
   if (found) {
     found.scrollIntoView({ block: "center" });
   } else if (target && !validNodeId(target.nodeId)) {
@@ -354,12 +398,31 @@ function renderEnroll(pending, allowed) {
   }
 }
 
+// The enrolled table: every allowlisted handset and the account it is bound
+// to. "no account yet" marks a node approved without a binding — admitted to
+// the transport but refused a session until an account is picked.
+function renderEnrolled() {
+  const ids = lastAllowed.filter((id) => id !== "*");
+  $("enrolled-head").classList.toggle("hidden", ids.length === 0);
+  $("enrolled").classList.toggle("hidden", ids.length === 0);
+  const tb = $("enrolled").querySelector("tbody");
+  tb.textContent = "";
+  for (const id of ids) {
+    const tr = document.createElement("tr");
+    cell(tr, short(id)).className = "mono";
+    const who = lastBindings[id];
+    const td = cell(tr, who || "no account yet");
+    if (!who) td.className = "muted";
+    tb.append(tr);
+  }
+}
+
 async function refresh() {
   const s = await api("GET", "/_wata/v1/admin/status");
   renderStatus(s);
   renderUsers(s.users);
   const e = await api("GET", "/_wata/v1/admin/enroll");
-  renderEnroll(e.pending || [], e.allowlisted || []);
+  renderEnroll(e.pending || [], e.allowlisted || [], e.users || [], e.bindings || []);
 }
 
 // Exactly one of the three screens is up: first-run setup, the login form, or
@@ -426,7 +489,8 @@ $("code-form").addEventListener("submit", (e) => {
   location.hash = "#enroll/" + r.hit.node_id + "/" + r.hit.nonce;
   $("code-input").value = "";
   say("");
-  renderEnroll(lastPending);
+  renderEnroll(lastPending, lastAllowed, lastUsers, Object.entries(lastBindings)
+    .map(([node_id, user]) => ({ node_id, user })));
 });
 
 $("add-form").addEventListener("submit", async (e) => {
