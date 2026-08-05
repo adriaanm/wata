@@ -21,6 +21,8 @@
   #msg.err { color: #c0392b; }
   .hidden { display: none; }
   .muted { opacity: .6; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+  tr.target td { background: rgba(255, 196, 0, .22); }
 </style>
 </head>
 <body>
@@ -42,6 +44,14 @@
 
   <h2>Status</h2>
   <dl class="status" id="status"></dl>
+
+  <h2>Devices waiting to be approved</h2>
+  <p class="muted" id="enroll-empty">No device is waiting. A handset shows a QR code with its own
+    link; scanning it brings you back here with the device highlighted.</p>
+  <table id="enroll" class="hidden">
+    <thead><tr><th>node id</th><th>code</th><th>waiting</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
 
   <h2>Accounts</h2>
   <table id="users">
@@ -181,10 +191,64 @@ function renderUsers(users) {
   }
 }
 
+// The QR contract (plan 0021 / plan 0014): a handset that has minted its node
+// key shows http://<server>/admin#enroll/<nodeId>/<nonce>, so the stock camera
+// app lands the parent here with that device's row singled out. The fragment
+// never leaves the browser and grants nothing — it only says which row to
+// look at; approving is still a click behind the admin login.
+function enrollTarget() {
+  const m = /^#enroll\/([^/]+)(?:\/([^/]*))?$/.exec(location.hash || "");
+  return m ? { nodeId: m[1], nonce: m[2] || "" } : null;
+}
+
+function short(id) {
+  return id.length > 16 ? id.slice(0, 8) + "…" + id.slice(-6) : id;
+}
+
+function renderEnroll(pending) {
+  const table = $("enroll");
+  const tb = table.querySelector("tbody");
+  const target = enrollTarget();
+  tb.textContent = "";
+  table.classList.toggle("hidden", pending.length === 0);
+  $("enroll-empty").classList.toggle("hidden", pending.length > 0);
+  let found = null;
+  for (const p of pending) {
+    const tr = document.createElement("tr");
+    cell(tr, short(p.node_id)).className = "mono";
+    cell(tr, p.nonce).className = "mono";
+    cell(tr, ms(p.age_ms));
+    const actions = document.createElement("td");
+    actions.append(button("approve", async () => {
+      const r = await api("POST", "/_wata/v1/admin/enroll/" + p.node_id + "/approve");
+      say(r.live ? "approved " + short(p.node_id) : "approved " + short(p.node_id) +
+        " — written to the allowlist file, but not applied live: " + (r.note || "no listener"),
+        !r.live);
+      await refresh();
+    }));
+    actions.append(button("deny", async () => {
+      await api("POST", "/_wata/v1/admin/enroll/" + p.node_id + "/deny");
+      say("denied " + short(p.node_id));
+      await refresh();
+    }));
+    tr.append(actions);
+    if (target && target.nodeId === p.node_id) { tr.classList.add("target"); found = tr; }
+    tb.append(tr);
+  }
+  if (target && !found) {
+    say("Waiting for " + short(target.nodeId) + " to announce itself — keep the handset on its " +
+      "pairing screen, then reload.", false);
+  } else if (found) {
+    found.scrollIntoView({ block: "center" });
+  }
+}
+
 async function refresh() {
   const s = await api("GET", "/_wata/v1/admin/status");
   renderStatus(s);
   renderUsers(s.users);
+  const e = await api("GET", "/_wata/v1/admin/enroll");
+  renderEnroll(e.pending || []);
 }
 
 function signedIn(on) {

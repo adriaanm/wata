@@ -21,7 +21,15 @@ import sgo.{Mutex, mutex}
  *  POST   /_wata/v1/admin/users/{user}/displayname     {displayname}
  *  POST   /_wata/v1/admin/users/{user}/admin           {admin}
  *  DELETE /_wata/v1/admin/users/{user}
+ *  GET    /_wata/v1/admin/enroll
+ *  POST   /_wata/v1/admin/enroll/{nodeId}/approve
+ *  POST   /_wata/v1/admin/enroll/{nodeId}/deny
  *  }}}
+ *
+ *  The enrolment rows are enroll.scala's; only the routing lives here, since
+ *  the gate is what they have in common with the account routes. Their
+ *  unauthenticated counterpart, `POST /_wata/v1/enroll`, is deliberately NOT
+ *  under this prefix.
  *
  *  Every mutation applies IN MEMORY and rewrites `users.json` in the same
  *  transaction (`Config`), so a created account can log in immediately and the
@@ -77,6 +85,13 @@ object Admin:
     else if n == 4 && Router.seg(path, 3) == "users" then usersRoute(m, body)
     else if n == 5 && Router.seg(path, 3) == "users" then removeUser(a, r.pathValue("user"))
     else if n == 6 && Router.seg(path, 3) == "users" then userField(r.pathValue("user"), Router.seg(path, 5), body)
+    else if n == 4 && Router.seg(path, 3) == "enroll" then Right(Enroll.list())
+    else if n == 6 && Router.seg(path, 3) == "enroll" then enrollVerb(r.pathValue("nodeId"), Router.seg(path, 5))
+    else Left(MErr(404, M_UNRECOGNIZED(), "Unrecognized request"))
+
+  def enrollVerb(nodeId: String, verb: String): Either[MErr, Json] =
+    if verb == "approve" then Enroll.approve(nodeId)
+    else if verb == "deny" then Enroll.deny(nodeId)
     else Left(MErr(404, M_UNRECOGNIZED(), "Unrecognized request"))
 
   def usersRoute(m: String, body: String): Either[MErr, Json] =

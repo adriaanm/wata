@@ -1,5 +1,7 @@
 package go
 
+import language.experimental.saferExceptions
+
 /** `go.irohnet` — the APP-OWNED facade for the embedded iroh transport
  *  package `github.com/adriaanm/wata/go-pkgs/irohnet` (plan 0013). Lives in
  *  the wata-server module, not in core, exactly like wata-fb's `go.audio`:
@@ -20,3 +22,11 @@ package go
 object irohnet:
   /** `irohnet.Serve(configPath, handler)` — `error`-returning, blocking. */
   @go.name("Serve") def serve(cfgPath: String, handler: go.net.http.Handler): sgo.GoError = ???
+
+  /** `irohnet.Allow(nodeId)` — admit a node id on THIS process's live listener,
+   *  the enrolment approve path (plan 0021): the approved handset's next dial
+   *  is accepted with no restart. The durable half of the approval is the
+   *  config file's allowlist, which enroll.scala rewrites; this is only the
+   *  live apply, so its failure (no iroh listener in this process, a stub
+   *  build, a malformed id) is reported rather than fatal. */
+  @go.name("Allow") def allow(nodeId: String): Unit throws sgo.GoError = ???

@@ -14,7 +14,12 @@ Steps:
   3. provision two fresh node keys, allowlist the client's id on the server;
   4. boot wata-server with WATA_IROH_CONFIG, read its announce file;
   5. run integ scenarios (integ.scala) over iroh — a FRESH server per
-     scenario, exactly like tools/wataclient-integ.sh.
+     scenario, exactly like tools/wataclient-integ.sh;
+  6. the allowlist negative: a node the config never listed is refused at
+     accept, loudly;
+  7. enrolment (plan 0021 milestone B): that same refused node announces
+     itself, an admin approves it over the admin listener, and it is then
+     accepted by the same server process — no restart.
 
 Prints TUNNEL-SMOKE PASS / FAIL. Needs cargo (the Rust toolchain) on top of
 the repo's usual prerequisites — this recipe and fb-deploy's successors are
@@ -45,6 +50,9 @@ SCENARIOS = ["login-syncing", "voice-to-bob"]
 # mux over plain TCP, because no browser can dial iroh and /admin has to be
 # reachable. Checked once, against the first scenario's server.
 HTTP_PORT = int(os.environ.get("TUNNEL_SMOKE_HTTP_PORT") or random.randint(20000, 39999))
+# The enrolment leg (plan 0021 milestone B) drives the admin API of the
+# allowlist-negative server, which needs its own admin listener.
+ENROLL_PORT = int(os.environ.get("TUNNEL_SMOKE_ENROLL_PORT") or random.randint(20000, 39999))
 
 
 def run(cmd, env, cwd=None, **kw):
@@ -106,6 +114,96 @@ def dual_listener():
             time.sleep(0.1)
     print("tunnel-smoke: dual-listener /admin over TCP: FAIL (never answered)")
     return False
+
+
+# ---- the admin API, over the plain-TCP listener the iroh mode also serves ----
+def api(base, method, path, body=None, token=None):
+    """-> (status, parsed body). The enrolment leg's whole client."""
+    data = json.dumps(body).encode() if body is not None else None
+    r = urllib.request.Request(base + path, data=data, method=method)
+    if token:
+        r.add_header("Authorization", "Bearer " + token)
+    if data is not None:
+        r.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(r, timeout=20) as resp:
+            return resp.status, json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode() or "{}")
+        except ValueError:
+            return e.code, {}
+
+
+def await_admin(base):
+    for _ in range(100):
+        try:
+            urllib.request.urlopen(base + "/admin", timeout=1).read()
+            return True
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.1)
+    return False
+
+
+def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id):
+    """The approve loop end to end (plan 0021 milestone B): the node the
+    server just refused announces itself, an admin approves it through the
+    admin API, and the SAME key is then accepted — no server restart. The
+    durable half (the config file's allowlist) and the live half (the new
+    irohnet_server_allow FFI) are both asserted, since only the second one
+    can make this run pass without a restart.
+
+    Returns True when every check held."""
+    base = f"http://127.0.0.1:{ENROLL_PORT}"
+    good = True
+
+    def check(cond, what):
+        nonlocal good
+        print(f"tunnel-smoke: enrolment: {'PASS' if cond else 'FAIL'} — {what}")
+        if not cond:
+            good = False
+        return cond
+
+    if not check(await_admin(base), "the admin listener answers"):
+        return False
+    status, body = api(base, "POST", "/_wata/v1/enroll",
+                       {"nodeId": intruder_id, "nonce": "QR01"})
+    check(status == 200, f"the refused node announces itself, unauthenticated (saw {status} {body})")
+    _, login = api(base, "POST", "/_matrix/client/v3/login",
+                   {"identifier": {"type": "m.id.user", "user": "alice"}, "password": "testpass123"})
+    token = login.get("access_token")
+    if not check(bool(token), "the admin logs in"):
+        return False
+    _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
+    check(intruder_id in {p["node_id"] for p in listing.get("pending", [])},
+          "the announce shows up in the pending list")
+
+    # deny first, with a node nobody asked for: it must leave no trace.
+    api(base, "POST", "/_wata/v1/enroll", {"nodeId": spare_id, "nonce": "QR02"})
+    check(api(base, "POST", f"/_wata/v1/admin/enroll/{spare_id}/deny", None, token)[0] == 200,
+          "deny answers 200")
+    check(spare_id not in json.loads(srv_cfg.read_text())["allowlist"],
+          "the denied node never reaches the allowlist file")
+
+    status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{intruder_id}/approve", None, token)
+    check(status == 200, f"approve answers 200 (saw {status} {body})")
+    check(body.get("live") is True,
+          f"approve applied to the LIVE listener (note: {body.get('note')!r})")
+    check(intruder_id in json.loads(srv_cfg.read_text())["allowlist"],
+          "approve appended the node id to the server's iroh config allowlist")
+    _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
+    check(listing.get("pending") == [], "the approved row cleared")
+
+    # the point of the whole leg: the SAME key, the SAME server process.
+    r = subprocess.run(
+        [str(client_bin), "integ", "login-syncing", "http://wata.iroh"],
+        env={**env, "WATA_IROH_CONFIG": str(cli_cfg_dir)},
+        cwd=WATA, capture_output=True, text=True, timeout=60,
+    )
+    if not check("INTEG PASS" in r.stdout, "the approved node is accepted with NO server restart"):
+        print("---- approved-client output ----")
+        print(r.stdout + r.stderr)
+    return good
 
 
 def main():
@@ -224,7 +322,11 @@ def main():
             "allowlist": [cli_key["id"]],
             "announceFile": str(announce),
         }))
-        proc, log = start_server(str(server_bin), env, srv_cfg, sdir / "server.log")
+        spare_key = keygen(env, str(keygen_bin))
+        # this server also serves the admin listener (WATA_LISTEN): the
+        # enrolment leg approves the very node it is about to refuse.
+        proc, log = start_server(str(server_bin), env, srv_cfg, sdir / "server.log",
+                                 listen=f":{ENROLL_PORT}")
         try:
             for _ in range(100):
                 if announce.exists():
@@ -263,6 +365,11 @@ def main():
                 print("---- intruder output (refused, but not loud) ----")
                 print(combined)
                 fail("allowlist-negative: refusal was not loud (no 'not allowlisted' reason reached the client)")
+            # ---- 7. enrolment (plan 0021 M B): the refused node announces,
+            # an admin approves it, and it is admitted by the SAME process.
+            if refused and not enrol_leg(env, client_bin, bad_cfg, srv_cfg,
+                                         intruder_key["id"], spare_key["id"]):
+                ok = False
         finally:
             proc.send_signal(signal.SIGTERM)
             try:

@@ -16,7 +16,12 @@ of a pure function:
   * the server owns the file — create/rename/reset/remove apply IN MEMORY (a
     created account logs in with no restart, a removed account's token dies
     mid-session) AND land in `users.json`, which a reboot reads back;
-  * `/admin` answers 200 text/html.
+  * `/admin` answers 200 text/html;
+  * device enrolment (milestone B) — an UNauthenticated announce parks a node
+    id in memory and nothing else, the pending set is bounded by both an
+    expiry and a cap, approve appends the id to the allowlist file atomically
+    (and reports that the live apply is unavailable in this plain-TCP,
+    stub-transport process), deny drops the row without writing anything.
 
 The PBKDF2 derivation itself is oracled elsewhere: `wata-server selfcheck`
 prints the published test vectors and `tools/wata-smoke.sh` byte-compares them
@@ -40,6 +45,7 @@ WATA = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = int(os.environ.get("ADMIN_SMOKE_PORT") or random.randint(20000, 39999))
 BASE = f"http://127.0.0.1:{PORT}"
 
+NODE_A = "a" * 64          # a well-formed node id (64 lowercase hex)
 ADMIN_ROUTES = [
     ("GET", "/_wata/v1/admin/status", None),
     ("GET", "/_wata/v1/admin/users", None),
@@ -48,6 +54,9 @@ ADMIN_ROUTES = [
     ("POST", "/_wata/v1/admin/users/bob/displayname", {"displayname": "y"}),
     ("POST", "/_wata/v1/admin/users/bob/admin", {"admin": True}),
     ("DELETE", "/_wata/v1/admin/users/bob", None),
+    ("GET", "/_wata/v1/admin/enroll", None),
+    ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/approve", None),
+    ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/deny", None),
 ]
 
 failures = []
@@ -165,13 +174,32 @@ def hashed(entry):
     return entry.get("hash", "").startswith("pbkdf2-sha256$") and "password" not in entry
 
 
+def node_id(seed):
+    """a well-formed iroh node id (64 lowercase hex) derived from `seed`, so
+    every announce in this harness is distinguishable and reproducible."""
+    return f"{seed:064x}"
+
+
+def allowlist(path):
+    with open(path) as f:
+        return json.load(f)
+
+
 def run(server, env, tmp):
     users = os.path.join(tmp, "users.json")
     # Provisioned BY HAND, the way a human writes one: plaintext passwords.
     with open(users, "w") as f:
         json.dump([{"user": "alice", "password": "alicepw1", "displayname": "Alice", "admin": True},
                    {"user": "bob", "password": "bobpw123", "displayname": "Bob"}], f)
-    senv = dict(env, WATA_USERS=users, WATA_LOG=os.path.join(tmp, "journal.jsonl"))
+    # The durable allowlist enrolment approval appends to. In a real
+    # deployment this IS the iroh config (WATA_IROH_CONFIG); the override
+    # exists so the admin surface can be exercised without the process also
+    # having to serve over iroh (which it cannot in a stub-transport build).
+    iroh = os.path.join(tmp, "iroh.json")
+    with open(iroh, "w") as f:
+        json.dump({"secretKey": "0" * 64, "relay": "none", "allowlist": []}, f)
+    senv = dict(env, WATA_USERS=users, WATA_LOG=os.path.join(tmp, "journal.jsonl"),
+                WATA_ENROLL_ALLOWLIST=iroh)
     proc, log = start_server(server, os.path.join(tmp, "server1.log"), senv)
     try:
         first_boot(users)
@@ -181,6 +209,15 @@ def run(server, env, tmp):
         status_panel(atok)
         crud(atok, users)
         revoke(atok, users)
+        enrolment(atok, btok, iroh)
+    finally:
+        stop_server(proc, log)
+
+    # ---- bounded pending set: a short expiry and a small cap ------------------
+    proc, log = start_server(server, os.path.join(tmp, "server4.log"),
+                             dict(senv, WATA_ENROLL_MAX="3", WATA_ENROLL_EXPIRY_MS="1500"))
+    try:
+        bounded()
     finally:
         stop_server(proc, log)
 
@@ -321,6 +358,76 @@ def revoke(atok, users):
           "revoking admin answers 200")
     check(req("GET", "/_wata/v1/admin/status", None, btok)[0] == 403,
           "the demoted account is 403 again, on the SAME token")
+
+
+def pending(atok):
+    _, body, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    return {p["node_id"]: p for p in body["pending"]}
+
+
+def enrolment(atok, btok, iroh):
+    print("enrolment: the announce")
+    one, two, three = node_id(1), node_id(2), node_id(3)
+    status, body, _ = req("POST", "/_wata/v1/enroll", {"nodeId": one, "nonce": "AB12"})
+    check(status == 200, f"an announce needs NO token (saw {status} {body})")
+    check(req("POST", "/_wata/v1/enroll", {"nodeId": "not-a-node-id", "nonce": "AB12"})[0] == 400,
+          "a malformed node id is refused")
+    check(req("POST", "/_wata/v1/enroll", {"nodeId": one, "nonce": "bad nonce"})[0] == 400,
+          "a malformed nonce is refused")
+    check(req("POST", "/_wata/v1/enroll", {"nodeId": node_id(0xABCDEF).upper(), "nonce": "AB12"})[0] == 400,
+          "an uppercase-hex node id is refused (the allowlist form is lowercase)")
+    req("POST", "/_wata/v1/enroll", {"nodeId": one, "nonce": "CD34"})
+    req("POST", "/_wata/v1/enroll", {"nodeId": two, "nonce": "EF56"})
+
+    rows = pending(atok)
+    check(set(rows) == {one, two}, f"a re-announce refreshes its row rather than adding one ({len(rows)} rows)")
+    check(rows[one]["nonce"] == "CD34", "the row carries the latest nonce")
+    check(rows[one]["age_ms"] >= 0 and rows[one]["expires_in_ms"] > 0, "the row carries its age and its expiry")
+    check(req("GET", "/_wata/v1/admin/enroll", None, btok)[0] == 403,
+          "the pending list is admin-only")
+
+    print("enrolment: approve")
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{one}/approve", None, atok)
+    check(status == 200, f"approve answers 200 (saw {status} {body})")
+    check(body.get("node_id") == one, "approve names the node it approved")
+    check(body.get("live") is False and "stub build" in body.get("note", ""),
+          f"approve reports that the LIVE apply is unavailable here (saw {body.get('note')!r})")
+    cfg = allowlist(iroh)
+    check(cfg["allowlist"] == [one], f"the id is in the allowlist file (saw {cfg['allowlist']})")
+    check(cfg["secretKey"] == "0" * 64 and cfg["relay"] == "none",
+          "the rewrite preserves the rest of the config")
+    check(not os.path.exists(iroh + ".tmp"), "the atomic rewrite leaves no temp file behind")
+    check(one not in pending(atok), "the approved row leaves the pending list")
+    check(req("POST", f"/_wata/v1/admin/enroll/{one}/approve", None, atok)[0] == 404,
+          "approving the same node twice is 404 (it is no longer pending)")
+    check(req("POST", f"/_wata/v1/admin/enroll/{three}/approve", None, atok)[0] == 404,
+          "approving a node that never announced is 404")
+
+    print("enrolment: deny")
+    check(req("POST", f"/_wata/v1/admin/enroll/{two}/deny", None, atok)[0] == 200,
+          "deny answers 200")
+    check(two not in pending(atok), "the denied row leaves the pending list")
+    check(allowlist(iroh)["allowlist"] == [one], "deny writes nothing to the allowlist file")
+    check(req("POST", f"/_wata/v1/admin/enroll/{two}/deny", None, atok)[0] == 404,
+          "denying an unknown node is 404")
+    check(req("POST", "/_wata/v1/enroll", {"nodeId": two, "nonce": "GH78"})[0] == 200,
+          "a denied device may announce again")
+    req("POST", f"/_wata/v1/admin/enroll/{two}/deny", None, atok)
+
+
+def bounded():
+    print("enrolment: the pending set is bounded (max 3, expiry 1.5s)")
+    atok = login("alice", "alicepw1")
+    for i in range(40):
+        req("POST", "/_wata/v1/enroll", {"nodeId": node_id(100 + i), "nonce": f"N{i:03d}"})
+    rows = pending(atok)
+    check(len(rows) == 3, f"a 40-announce flood does not grow the set past the cap (saw {len(rows)})")
+    check(set(rows) == {node_id(137), node_id(138), node_id(139)},
+          "the cap evicts the OLDEST announces, keeping the newest")
+    time.sleep(1.8)
+    check(pending(atok) == {}, "every row is gone once its expiry passes")
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_id(139)}/approve", None, atok)[0] == 404,
+          "an expired announce cannot be approved")
 
 
 def after_reboot(users):

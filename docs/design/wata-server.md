@@ -7,7 +7,7 @@ compiles to Go source — see the repo root for the toolchain) and built as an
 `wata-server/go.mod`). There is no JVM at runtime: `sgo build` emits Go, which
 is compiled and run like any other Go program.
 
-The source lives entirely in `wata-server/src/main/scala/` — 25 files, ~5700
+The source lives entirely in `wata-server/src/main/scala/` — 26 files, ~6000
 lines:
 
 | file | lines | role |
@@ -32,11 +32,12 @@ lines:
 | `iolimit.scala` | 11 | app-owned facade: `io.LimitReader` (the request-body cap) |
 | `subtle.scala` | 12 | app-owned facade: `crypto/subtle` constant-time compare |
 | `pwhash.scala` | 222 | PBKDF2-HMAC-SHA256: the derivation, the stored-hash format, verification |
-| `adminapi.scala` | 254 | the admin surface: the admin gate, `/_wata/v1/admin/…` status + accounts CRUD |
+| `adminapi.scala` | 265 | the admin surface: the admin gate, `/_wata/v1/admin/…` status + accounts CRUD + enrolment routing |
+| `enroll.scala` | 296 | device enrolment: the unauthenticated announce, the bounded pending set, approve (allowlist file + live listener) / deny |
 | `osfile.scala` | 44 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove`/`Rename`/`Stat`, plus `io/fs.FileInfo` |
 | `gocrypto.scala` | 54 | app-owned facades: `hash.Hash`, `crypto/sha256`, `crypto/hmac`, base64 `StdEncoding` |
 | `webembed.scala` | 16 | app-owned `@go.bind` facade for `wata-server/adminui` (the `go:embed`ed admin page) |
-| `irohnet.scala` | 22 | app-owned `@go.bind` facade for `go-pkgs/irohnet` (the embedded iroh transport) |
+| `irohnet.scala` | 32 | app-owned `@go.bind` facade for `go-pkgs/irohnet` (the embedded iroh transport: `Serve`, `Allow`) |
 
 ## Serving transports
 
@@ -164,6 +165,9 @@ dispatches), so a new admin route cannot be added ungated by accident.
 | `POST /_wata/v1/admin/users/{user}/displayname` | rename |
 | `POST /_wata/v1/admin/users/{user}/admin` | grant/revoke the flag |
 | `DELETE /_wata/v1/admin/users/{user}` | remove the account |
+| `GET /_wata/v1/admin/enroll` | the devices waiting to be approved (see "Device enrolment") |
+| `POST /_wata/v1/admin/enroll/{nodeId}/approve` | allowlist that node id |
+| `POST /_wata/v1/admin/enroll/{nodeId}/deny` | drop the pending row |
 
 Two of them are more than a file edit. A **rename** also runs the store's
 profile fan-out (`Store.setDisplayName`), which rewrites the user's
@@ -204,6 +208,78 @@ reset, rename, remove → the token dead mid-session, the admin flag toggling on
 a live token, every mutation landing in `users.json`, a reboot reading it back,
 and `/admin` answering 200 `text/html`. `tools/tunnel-smoke.py` covers the
 same page over the iroh mode's TCP listener.
+
+## Device enrolment
+
+`enroll.scala` (plan 0021 milestone B; the server half of plan 0014). In iroh
+mode the listener's allowlist decides who is admitted — an unknown node id is
+closed at accept with `401 not allowlisted`, before any stream. Enrolment is
+how a new handset crosses that line without anyone editing a file over ssh.
+
+```
+POST /_wata/v1/enroll   {"nodeId": "<64 hex>", "nonce": "AB12"}   (no auth)
+```
+
+**The announce is unauthenticated, and inert.** A device outside the allowlist
+has no way to obtain a token, so requiring one would be circular; what makes
+that safe is that the announce grants nothing. It parks a `(nodeId, nonce)`
+pair in memory for a parent to look at, and only `approve` — behind the admin
+gate — turns a pending row into an allowlist entry.
+
+The pending set is bounded on both axes, so the open endpoint cannot be turned
+into a memory sink: entries expire (`WATA_ENROLL_EXPIRY_MS`, default 10
+minutes, pruned as the list is read rather than on a timer), the list is capped
+(`WATA_ENROLL_MAX`, default 8) with the **oldest** evicted, and a re-announce of
+the same node id refreshes its row rather than adding one — so a flood rotates
+within the cap instead of growing. Nothing is journaled; a restart drops the
+set, which is the right outcome for a ten-minute approval window. A node id is
+shape-checked at announce (64 lowercase hex, or the 52-character z-base-32
+spelling of the same key) because a junk id that reached the allowlist file
+would fail the *listener's* parse at the next boot — one bad announce would
+otherwise be able to stop the server from listening at all.
+
+**Approval is durable first, live second.**
+
+1. the node id is appended to the `allowlist` array of the iroh config
+   (`WATA_IROH_CONFIG`, or `WATA_ENROLL_ALLOWLIST` when a deployment — or the
+   admin smoke, which has no iroh transport — points enrolment at another
+   file). The rewrite is a temp file in the same directory plus a rename, mode
+   `0600` (the file also holds the node secret key), and it is **confirmed by
+   re-reading the file**, since the `os` facade drops write errors. A write
+   that cannot be confirmed answers `500` with the row left pending: a row that
+   vanished while nothing was granted is the one outcome nobody can debug.
+2. it is applied to the running listener through `irohnet.Allow` — one new FFI
+   (`irohnet_server_allow`, `go-pkgs/irohnet/rust/src/lib.rs`). The Rust side
+   keeps the allowlist in a shared `Gate` (an `Arc` holding the id set, the
+   `*`-admits-all flag, and the live connections it admitted) that the accept
+   loop consults per connection, so an id added after the listener was built
+   takes effect on the next dial. Its counterpart `irohnet_server_disallow`
+   drops an id **and** closes the connections it already holds.
+
+A live apply that fails — a plain-TCP deployment, or a build without the
+transport — still leaves a successful approval: the response carries
+`"live": false` and the reason, and the file is what the next boot reads. Deny
+removes the row and writes nothing; a denied device may announce again, which
+is what makes deny the safe answer to "I don't recognize this".
+
+**The QR contract.** The handset displays
+`http://<server>/admin#enroll/<nodeId>/<nonce>`, so a stock camera app lands
+the parent on the admin page with that row highlighted (the fragment never
+leaves the browser and grants nothing — it only says which row to look at). The
+nonce is a human-visible correlator — "this is the handset in my hand" — not a
+secret and not a credential. The device-side halves (first-boot keypair mint,
+the QR screen) stay in plan 0014.
+
+Gates: `tools/wata-admin-smoke.py` covers the announce, its validation, the
+dedupe, the cap and the expiry, the 401/403 gate, the atomic file write and
+its preservation of the rest of the config, and the deny path.
+`tools/tunnel-smoke.py` runs the loop end to end over real iroh — the node the
+server just refused announces itself, an admin approves it, and the **same
+key** is accepted by the **same process**, no restart.
+
+Not built: a revoke endpoint. The FFI half exists and is covered by the
+irohnet Go tests (`Listener.Disallow` closes live connections), but removing a
+node id from the allowlist file and from the interface is unclaimed work.
 
 ## Request lifecycle
 

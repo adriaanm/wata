@@ -25,6 +25,15 @@ type Listener struct{}
 // Listen — stub; see the darwin+iroh build.
 func Listen(cfg *Config) (*Listener, error) { return nil, errIrohStub }
 
+// Allow — stub; see the darwin+iroh build. The enrolment approve path calls
+// this to apply an allowlist addition to the live listener; without the real
+// transport there is no listener, and the durable config-file write (the
+// server's own job) is the whole of the approval.
+func Allow(nodeID string) error { return errIrohStub }
+
+// Disallow — stub; see the darwin+iroh build.
+func Disallow(nodeID string) error { return errIrohStub }
+
 // NewHTTPClient — stub; see the darwin+iroh build.
 func NewHTTPClient(path string) (*http.Client, error) { return nil, errIrohStub }
 

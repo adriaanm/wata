@@ -36,6 +36,8 @@ extern int32_t irohnet_server_id(uint64_t h, char* out, size_t cap);
 extern int32_t irohnet_server_addrs(uint64_t h, char* out, size_t cap);
 extern int32_t irohnet_server_accept(uint64_t h, uint64_t* out_stream, char* remote_out, size_t remote_cap,
                                      char* err_out, size_t err_cap);
+extern int32_t irohnet_server_allow(uint64_t h, const char* node_id, char* err_out, size_t err_cap);
+extern int32_t irohnet_server_disallow(uint64_t h, const char* node_id, char* err_out, size_t err_cap);
 extern void irohnet_server_close(uint64_t h);
 extern int32_t irohnet_client_new(const char* secret_hex, const char* peer_id, const char* peer_addrs_csv,
                                   const char* relay, uint64_t* out_handle, char* err_out, size_t err_cap);
@@ -242,7 +244,84 @@ func Listen(cfg *Config) (*Listener, error) {
 			return nil, fmt.Errorf("irohnet: announce: %w", e)
 		}
 	}
+	setActive(l)
 	return l, nil
+}
+
+// active is the listener this process is serving on, so the package-level
+// Allow/Disallow can reach it without threading a handle through the app: a
+// wata-server serves exactly one iroh listener (Serve builds it internally),
+// and its admin enrolment endpoints (plan 0021) need to mutate that
+// listener's allowlist from an HTTP handler.
+var (
+	activeMu sync.Mutex
+	active   *Listener
+)
+
+func setActive(l *Listener) {
+	activeMu.Lock()
+	defer activeMu.Unlock()
+	active = l
+}
+
+func activeListener() (*Listener, error) {
+	activeMu.Lock()
+	defer activeMu.Unlock()
+	if active == nil {
+		return nil, errors.New("irohnet: no iroh listener in this process")
+	}
+	return active, nil
+}
+
+// Allow adds a node id to this process's live listener allowlist — the
+// enrolment approval path. The durable copy of the decision is the config
+// file's allowlist (the caller owns that write); this is what makes the
+// approval take effect without a restart.
+func Allow(nodeID string) error {
+	l, e := activeListener()
+	if e != nil {
+		return e
+	}
+	return l.Allow(nodeID)
+}
+
+// Disallow removes a node id from this process's live listener allowlist and
+// closes the connections it already holds.
+func Disallow(nodeID string) error {
+	l, e := activeListener()
+	if e != nil {
+		return e
+	}
+	return l.Disallow(nodeID)
+}
+
+// Allow admits a node id from now on (idempotent). An id the endpoint layer
+// cannot parse is an error, not a silently ignored entry.
+func (l *Listener) Allow(nodeID string) error {
+	return l.gateOp(nodeID, false)
+}
+
+// Disallow stops admitting a node id and closes its live connections
+// (idempotent).
+func (l *Listener) Disallow(nodeID string) error {
+	return l.gateOp(nodeID, true)
+}
+
+func (l *Listener) gateOp(nodeID string, remove bool) error {
+	id := C.CString(nodeID)
+	defer C.free(unsafe.Pointer(id))
+	errBuf := make([]byte, errCap)
+	errPtr := (*C.char)(unsafe.Pointer(&errBuf[0]))
+	var ret C.int32_t
+	if remove {
+		ret = C.irohnet_server_disallow(l.h, id, errPtr, errCap)
+	} else {
+		ret = C.irohnet_server_allow(l.h, id, errPtr, errCap)
+	}
+	if ret != 0 {
+		return fmt.Errorf("irohnet: allowlist %s: %s", nodeID, cstr(errBuf))
+	}
+	return nil
 }
 
 // ID is the listener's node id (hex) — what peers provision.
@@ -262,8 +341,19 @@ func (l *Listener) Accept() (net.Conn, error) {
 }
 
 func (l *Listener) Close() error {
-	l.closeOnce.Do(func() { C.irohnet_server_close(l.h) })
+	l.closeOnce.Do(func() {
+		C.irohnet_server_close(l.h)
+		clearActive(l)
+	})
 	return nil
+}
+
+func clearActive(l *Listener) {
+	activeMu.Lock()
+	defer activeMu.Unlock()
+	if active == l {
+		active = nil
+	}
 }
 
 func (l *Listener) Addr() net.Addr { return Addr{ID: l.id} }

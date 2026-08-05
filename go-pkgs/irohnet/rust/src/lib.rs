@@ -22,7 +22,7 @@
 //!   -3    stream closed locally
 //!   -4    stream error (reset / connection lost)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::str::FromStr;
@@ -67,6 +67,62 @@ struct AcceptedStream {
 struct ServerState {
     endpoint: Endpoint,
     rx: tokio::sync::Mutex<mpsc::Receiver<AcceptedStream>>,
+    gate: Arc<Gate>,
+}
+
+/// The allowlist the accept loop enforces, plus the connections it has
+/// admitted — SHARED (Arc) between that loop and the mutating FFI calls, so an
+/// id added after the listener was built takes effect immediately instead of
+/// at the next restart. That is what device enrolment needs: a parent approves
+/// a handset in the admin interface (plan 0021 milestone B) and the handset's
+/// next dial is accepted, with the durable copy of the decision living in the
+/// server's iroh config file.
+///
+/// `allow_all` is fixed at creation (the single entry `*`); the id set and the
+/// live-connection table are behind plain `std::sync::Mutex`es — every access
+/// is a set/vec operation with no await inside, so a blocking mutex is the
+/// right one even on the tokio side.
+struct Gate {
+    allow_all: bool,
+    ids: Mutex<HashSet<EndpointId>>,
+    /// (token, remote id, connection) for every admitted, still-live
+    /// connection. The token is a local monotonic tag so removal never needs
+    /// connection equality.
+    conns: Mutex<Vec<(u64, EndpointId, Connection)>>,
+    next_conn: AtomicU64,
+}
+
+impl Gate {
+    fn admits(&self, id: &EndpointId) -> bool {
+        self.allow_all || self.ids.lock().unwrap().contains(id)
+    }
+
+    fn allow(&self, id: EndpointId) {
+        self.ids.lock().unwrap().insert(id);
+    }
+
+    /// Drop an id AND close the connections it already holds — a revoked
+    /// handset stops talking now, not at its next dial.
+    fn disallow(&self, id: &EndpointId) {
+        self.ids.lock().unwrap().remove(id);
+        let mut guard = self.conns.lock().unwrap();
+        for (_, cid, c) in guard.iter() {
+            if cid == id {
+                c.close(VarInt::from_u32(401), b"not allowlisted");
+            }
+        }
+        guard.retain(|(_, cid, _)| cid != id);
+    }
+
+    fn track(&self, id: EndpointId, c: Connection) -> u64 {
+        let token = self.next_conn.fetch_add(1, Ordering::SeqCst);
+        self.conns.lock().unwrap().push((token, id, c));
+        token
+    }
+
+    fn untrack(&self, token: u64) {
+        self.conns.lock().unwrap().retain(|(t, _, _)| *t != token);
+    }
 }
 
 struct ClientState {
@@ -356,12 +412,20 @@ pub extern "C" fn irohnet_server_new(
         }
     };
 
+    let gate = Arc::new(Gate {
+        allow_all,
+        ids: Mutex::new(allow.into_iter().collect()),
+        conns: Mutex::new(Vec::new()),
+        next_conn: AtomicU64::new(1),
+    });
+
     let (tx, rx) = mpsc::channel::<AcceptedStream>(16);
     let ep = endpoint.clone();
+    let accept_gate = gate.clone();
     rt().spawn(async move {
         while let Some(incoming) = ep.accept().await {
             let tx = tx.clone();
-            let allow = allow.clone();
+            let gate = accept_gate.clone();
             tokio::spawn(async move {
                 let conn = match incoming.accept() {
                     Ok(accepting) => match accepting.await {
@@ -371,11 +435,15 @@ pub extern "C" fn irohnet_server_new(
                     Err(_) => return,
                 };
                 let remote = conn.remote_id();
-                if !allow_all && !allow.contains(&remote) {
+                if !gate.admits(&remote) {
                     // the allowlist gate: refused at accept, before any stream.
+                    // Read off the SHARED gate, so an id approved since this
+                    // listener was built is admitted without a restart.
                     conn.close(VarInt::from_u32(401), b"not allowlisted");
                     return;
                 }
+                // tracked while live, so a later disallow can close it.
+                let token = gate.track(remote, conn.clone());
                 let remote_hex = remote.to_string();
                 loop {
                     match conn.accept_bi().await {
@@ -387,10 +455,14 @@ pub extern "C" fn irohnet_server_new(
                             };
                             if tx.send(item).await.is_err() {
                                 conn.close(VarInt::from_u32(0), b"listener closed");
+                                gate.untrack(token);
                                 return;
                             }
                         }
-                        Err(_) => return, // connection gone
+                        Err(_) => {
+                            gate.untrack(token);
+                            return; // connection gone
+                        }
                     }
                 }
             });
@@ -400,6 +472,7 @@ pub extern "C" fn irohnet_server_new(
     let h = register(Obj::Server(Arc::new(ServerState {
         endpoint,
         rx: tokio::sync::Mutex::new(rx),
+        gate,
     })));
     unsafe { *out_handle = h };
     0
@@ -466,6 +539,72 @@ pub extern "C" fn irohnet_server_accept(
         None => {
             put_str(err_out, err_cap, "server closed");
             -1
+        }
+    }
+}
+
+/// Add a node id to the RUNNING listener's allowlist (device enrolment
+/// approval, plan 0021): the next connection from that peer is admitted, with
+/// no restart. Idempotent. Returns 0, or -1 with `err_out` filled (unknown
+/// handle, or an id that is not a valid endpoint id — the same parse the
+/// config's allowlist goes through, so a junk id is refused here rather than
+/// silently poisoning the set).
+#[no_mangle]
+pub extern "C" fn irohnet_server_allow(
+    h: u64,
+    node_id: *const c_char,
+    err_out: *mut c_char,
+    err_cap: usize,
+) -> i32 {
+    match gate_and_id(h, node_id, err_out, err_cap) {
+        Some((gate, id)) => {
+            gate.allow(id);
+            0
+        }
+        None => -1,
+    }
+}
+
+/// Remove a node id from the running listener's allowlist AND close the
+/// connections it already holds (revocation, the counterpart of
+/// `irohnet_server_allow`): the peer's in-flight requests fail and its next
+/// dial is refused at accept like any unknown node. Idempotent.
+#[no_mangle]
+pub extern "C" fn irohnet_server_disallow(
+    h: u64,
+    node_id: *const c_char,
+    err_out: *mut c_char,
+    err_cap: usize,
+) -> i32 {
+    match gate_and_id(h, node_id, err_out, err_cap) {
+        Some((gate, id)) => {
+            gate.disallow(&id);
+            0
+        }
+        None => -1,
+    }
+}
+
+/// The shared half of the two mutators: resolve the handle and parse the id,
+/// reporting either failure through `err_out`.
+fn gate_and_id(
+    h: u64,
+    node_id: *const c_char,
+    err_out: *mut c_char,
+    err_cap: usize,
+) -> Option<(Arc<Gate>, EndpointId)> {
+    let srv = match get_server(h) {
+        Some(s) => s,
+        None => {
+            put_str(err_out, err_cap, "server closed");
+            return None;
+        }
+    };
+    match EndpointId::from_str(arg_str(node_id).trim()) {
+        Ok(id) => Some((srv.gate.clone(), id)),
+        Err(e) => {
+            put_str(err_out, err_cap, &format!("bad node id: {e:?}"));
+            None
         }
     }
 }

@@ -10,6 +10,13 @@ server half (pending-enrolment store, approval, live allowlist-add) is
 plan 0021 milestone B; the device half (first-boot keypair mint, the QR
 screen) stays here and unblocks once 0021-B lands.
 
+**The server half has landed** (2026-08-05, plan 0021 milestone B):
+`POST /_wata/v1/enroll`, the bounded pending set, the admin
+approve/deny surface and its page section, and the live allowlist-add
+FFI (`irohnet_server_allow`) — proven end to end by `just tunnel-smoke`,
+which approves a refused node and sees it admitted with no restart. This
+plan is unblocked on the device side.
+
 ## The problem
 
 Plan 0013 gives a device an iroh transport, but the identities are

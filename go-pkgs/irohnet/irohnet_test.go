@@ -122,6 +122,93 @@ func TestAllowlistRefusedAtAccept(t *testing.T) {
 	}
 }
 
+// The live allowlist (plan 0021 milestone B): a node the listener was built
+// without is refused, Allow admits it with NO restart, Disallow refuses it
+// again. Each leg dials with a FRESH client endpoint, because a refused
+// client caches the dead connection and answers its own dials from it for
+// REFUSAL_COOLDOWN (rust/src/lib.rs) — the recovery a real device gets is a
+// retry past that cooldown, or a restart, not an instant one.
+func TestLiveAllowlistAdd(t *testing.T) {
+	srvSecret, _, _ := GenKey()
+	_, otherID, _ := GenKey()
+	cliSecret, cliID, _ := GenKey()
+	dir := t.TempDir()
+	ann := filepath.Join(dir, "announce.json")
+	l, e := Listen(&Config{SecretKey: srvSecret, Relay: "none", Allowlist: []string{otherID}, AnnounceFile: ann})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer l.Close()
+	go func() { http.Serve(l, okMux()) }()
+
+	peerID, peerAddrs := announced(t, ann)
+	get := func() error {
+		d, e := NewDialer(&Config{SecretKey: cliSecret, Relay: "none", Peer: peerID, PeerAddrs: peerAddrs})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer d.Close()
+		c := &http.Client{Transport: &http.Transport{DialContext: d.DialContext}, Timeout: 10 * time.Second}
+		resp, e := c.Get("http://wata.iroh/")
+		if e != nil {
+			return e
+		}
+		resp.Body.Close()
+		return nil
+	}
+
+	if e := get(); e == nil || !strings.Contains(e.Error(), "not allowlisted") {
+		t.Fatalf("want a loud refusal before the approval, got %v", e)
+	}
+	if e := l.Allow("not-a-node-id"); e == nil {
+		t.Fatal("a malformed node id was accepted into the allowlist")
+	}
+	if e := l.Allow(cliID); e != nil {
+		t.Fatal(e)
+	}
+	if e := get(); e != nil {
+		t.Fatalf("request after Allow (no restart): %v", e)
+	}
+	if e := l.Allow(cliID); e != nil {
+		t.Fatalf("Allow is not idempotent: %v", e)
+	}
+	if e := l.Disallow(cliID); e != nil {
+		t.Fatal(e)
+	}
+	if e := get(); e == nil || !strings.Contains(e.Error(), "not allowlisted") {
+		t.Fatalf("want a loud refusal after Disallow, got %v", e)
+	}
+}
+
+func okMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	return mux
+}
+
+// the announce file as (node id, dialable v4 addrs).
+func announced(t *testing.T, path string) (string, []string) {
+	t.Helper()
+	raw, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var a struct {
+		ID    string   `json:"id"`
+		Addrs []string `json:"addrs"`
+	}
+	if e := json.Unmarshal(raw, &a); e != nil {
+		t.Fatal(e)
+	}
+	var v4 []string
+	for _, s := range a.Addrs {
+		if !strings.HasPrefix(s, "[") {
+			v4 = append(v4, s)
+		}
+	}
+	return a.ID, v4
+}
+
 func TestDeadlineInterruptsBlockedRead(t *testing.T) {
 	// raw conn pair: dial, then read with no server data and a deadline.
 	srvSecret, _, _ := GenKey()

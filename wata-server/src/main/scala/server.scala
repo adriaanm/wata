@@ -215,6 +215,14 @@ object Server:
     mux.handle("POST /_wata/v1/admin/users/{user}/password", h)
     mux.handle("POST /_wata/v1/admin/users/{user}/displayname", h)
     mux.handle("POST /_wata/v1/admin/users/{user}/admin", h)
+    // device enrolment (enroll.scala): the announce is UNAUTHENTICATED by
+    // design — a device outside the allowlist has no token to present — and
+    // grants nothing; the approve/deny pair behind the admin gate is what
+    // moves a node id into the allowlist.
+    mux.handle("POST /_wata/v1/enroll", h)
+    mux.handle("GET /_wata/v1/admin/enroll", h)
+    mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/approve", h)
+    mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/deny", h)
     // the fail-on-demand test hook (testhooks.scala): REGISTERED only under
     // WATA_TEST_HOOKS=1 — without the env var the path 404s like any other
     // unknown path, so the production surface is unchanged.

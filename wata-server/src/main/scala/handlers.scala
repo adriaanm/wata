@@ -35,6 +35,7 @@ object Router:
     else if isDmPath(path, n) then Dm.route(r)
     else if isFavoritePath(path, n) then Favorite.route(r)
     else if isAdminPath(path, n) then Admin.route(r, m, body)
+    else if isEnrollPath(path) then Enroll.announce(body)
     else if TestHooks.enabled && isTestFailPath(path) then TestHooks.route(body)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)
@@ -102,6 +103,11 @@ object Router:
    *  admin-gated, so a new one cannot be added ungated by accident. */
   def isAdminPath(path: String, n: scala.Int): Boolean =
     n >= 4 && seg(path, 0) == "_wata" && seg(path, 1) == "v1" && seg(path, 2) == "admin"
+
+  /** `/_wata/v1/enroll` — the device announce (enroll.scala). The ONE
+   *  unauthenticated wata route: a device with no allowlist entry has no way
+   *  to obtain a token, and the announce grants nothing by itself. */
+  def isEnrollPath(path: String): Boolean = path == "/_wata/v1/enroll"
 
   /** `/_wata/v1/test/fail` — dispatched only when `TestHooks.enabled`,
    *  mirroring its conditional registration (server.scala). */
