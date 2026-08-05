@@ -18,3 +18,8 @@ godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc
 # `godep` names a local dir, so an upstream package rides in through one.
 # Pure Go, no build tag.
 godep github.com/adriaanm/wata/go-pkgs/qr go-pkgs/qr
+# The Gio window (plan 0023 M2): the desktop/phone shell that hosts this same
+# frame loop. Gio compiles in only with the `gioshell` build tag (just
+# phone-blit); ordinary builds — including the armv7 device cross-build — ride
+# its window-free stub, so no build here grows a window toolkit by default.
+godep github.com/adriaanm/wata/go-pkgs/gioshell go-pkgs/gioshell

@@ -77,8 +77,16 @@ object Main:
     //                                              the deterministic scripted
     //                                              driver + PNG checkpoints
     //                                              (uiscript.scala)
+    //   wata-fb gio <base> <user> <pass> [--scale N] [--frames N]
+    //                                              the Gio window: the same
+    //                                              frame loop blitted as a
+    //                                              scaled texture with touch
+    //                                              buttons (gio.scala). Needs
+    //                                              a `-tags gioshell` build.
     else if args.length > 0 && args(0) == "sim" then
       Sim.run(args)
+    else if args.length > 0 && args(0) == "gio" then
+      Gio.run(args)
     else if args.length > 0 && args(0) == "uitest" then
       UiScript.run(args)
     else
