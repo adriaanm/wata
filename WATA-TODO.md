@@ -79,6 +79,28 @@ blocks + git log; each entry cites where it was recorded.*
   we never dropped the bind-to-val convention, so nothing to unwind —
   the next repin simply makes the convention optional there.
 
+- `HashMap.foldLeft` with `B` = a generic `List[T]` leaves `B`
+  unspecialized in the linker and emits an `any` the call site cannot
+  use (filed 2026-08-05, `WATA-FOLD-LIST-B`). Worked around in
+  `wata-server` with one-field wrapper case classes
+  (`model.scala` `IdList`/`MediaList`); drop them when it lands.
+- DATA-10 (`StringBuilder` as a parameter) prints the right restriction
+  message and then crashes `sgolaBackend` with an unhandled exception
+  (filed 2026-08-05, `WATA-DATA10-PLUGIN-CRASH`). Reporting path only —
+  nothing to unwind here.
+
+- OPEN (filed 2026-08-05 by the plan-0021 milestone-A implementation,
+  acked upstream at sgola `d30adec`, verdict A each, fixes to follow
+  with shas): WATA-DATA10-PLUGIN-CRASH, WATA-MAKESLICE-ARGPOS,
+  WATA-FOLD-LIST-B. Workarounds live in the milestone-A change;
+  details land with its review. Remove each workaround on its repin.
+- FYI from upstream 2026-08-05 (`4cbea19..d30adec`): several
+  template-body construction lifts landed, plus GEN-7 — a new registry
+  row RESTRICTING four construction shapes inside generic bodies
+  (facade-trait impls, @goexport classes, JDK exceptions as data,
+  instance-inner open classes; spec 06-expressions has the fragment).
+  Current wata code constructs all four at ground — unaffected today;
+  relevant when writing new generic code.
 - `go.Slice[T]` sub-slicing (blocked the Opus decoder consumer) —
   GRADUATION-BRIEF ch.D.
 - cgo cross-targets beyond linux/arm (a second device target) —
