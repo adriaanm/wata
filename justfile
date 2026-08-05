@@ -117,6 +117,13 @@ bindgen *FLAGS:
 bindgen-runtime:
     cd go-pkgs/appleptt && GOWORK=off go test -tags objcruntime ./...
 
+# Apple bindings: build the PushToTalk hello (plan 0026's hardware gate) —
+# hellopt/ as an ios/arm64 c-archive, linked with the ObjC shell into
+# out/WataHello.app. Unsigned by default; --sign/--install are the owner's legs
+# and need the restricted push-to-talk entitlement (tools/bindgen/hello/README).
+ptt-hello *FLAGS:
+    tools/bindgen/hello/build.py {{FLAGS}}
+
 # terminal client: two scripted REPL sessions against a fresh server (bob
 # sends a canned Ogg, alice snaps/plays/pokes). ~10s, so standalone, not in ci.
 tui-smoke:

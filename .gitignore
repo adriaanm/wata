@@ -109,3 +109,7 @@ inbox/
 
 # phone spike build products (xcframeworks, the Swift shell, server logs)
 tools/phone-spike/out/
+
+# the PushToTalk hello's build products and the owner's provisioning profile
+tools/bindgen/hello/out/
+tools/bindgen/hello/*.mobileprovision
