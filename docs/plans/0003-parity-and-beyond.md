@@ -186,6 +186,19 @@ the network/modem are up — the client already survives a dead server
 network" presentation of the existing connection state rather than an
 error surface. `[FB-BOOT-LOGO]`, `[FB-EARLY-BOOT]`.
 
+`[FB-BOOT-LOGO]` split ruled 2026-08-05 (recorded ahead of pickup; no
+handoffs written yet — it stays queued polish):
+- **aboot splash** (`bq268-aboot`): LK's `display_image_on_screen` /
+  `fetch_image_from_partition` path already exists and works (the MPP
+  backlight fix proved it); the work is a wata 160×128 frame in LK's
+  splash format replacing the stock logo.
+- **cmdline** (`bq268-alpine`): `boot.img` is assembled there, so
+  `quiet` + fbcon logo suppression are its mkbootimg `--cmdline` change.
+- **the last gap** — kernel-to-wata handoff — is already covered by the
+  tty1 flip spec (`wata-fb-early-boot.md` there) plus the calm boot
+  presentation below; wata itself needs nothing new beyond supplying
+  the logo frame asset.
+
 `[FB-EARLY-BOOT]` split ruled 2026-08-05: the init half is handed off to
 `bq268-alpine` (`docs/planning/wata-fb-early-boot.md` there — the tty1
 respawn flips from system-menu to wata-fb, respawn doubling as crash
