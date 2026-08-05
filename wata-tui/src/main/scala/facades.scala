@@ -37,11 +37,10 @@ object bufio:
  *  wata-fb's, but WITH ARGUMENTS: the player is `mpv <file>` or
  *  `ffplay -nodisp -autoexit <file>`.
  *
- *  Go's `exec.Command(name string, arg ...string)` is VARIADIC, and this
- *  dialect has no slice-spread lowering (`args...`), so the arity is bound
- *  explicitly: five bindings of the same `exec.Command`, picked by argument
- *  count at the call site (`Player.cmdFor`). Four extra arguments is past what
- *  any player invocation here needs. */
+ *  Go's `exec.Command(name string, arg ...string)` binds as a Scala varargs
+ *  param (toolchain `4cbea19`, VARIADIC-FACADE-BIND): pass args
+ *  individually, or spread an `Array[String]` with `xs*` — Array is the one
+ *  legal spread vehicle (Scala star-arg typing; already Go-slice-shaped). */
 @go.bind("os/exec")
 object exec:
   /** Facade class for Go `*exec.Cmd`. */
@@ -50,11 +49,7 @@ object exec:
      *  which is exactly the "the player failed" signal the REPL prints. */
     @go.name("Run") def run(): Unit throws sgo.GoError = ???
 
-  @go.name("Command") def command0(name: String): go.exec.Cmd = ???
-  @go.name("Command") def command1(name: String, a1: String): go.exec.Cmd = ???
-  @go.name("Command") def command2(name: String, a1: String, a2: String): go.exec.Cmd = ???
-  @go.name("Command") def command3(name: String, a1: String, a2: String, a3: String): go.exec.Cmd = ???
-  @go.name("Command") def command4(name: String, a1: String, a2: String, a3: String, a4: String): go.exec.Cmd = ???
+  @go.name("Command") def command(name: String, arg: String*): go.exec.Cmd = ???
 
   /** `exec.LookPath(file)` — `(string, error)`; errors when the name is not on
    *  `$PATH`. How the default player is chosen. */

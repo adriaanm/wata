@@ -47,10 +47,11 @@ blocks + git log; each entry cites where it was recorded.*
   full-gate green with `Repl.printConvs` returned to the exact recursive
   shape that crashed (kept recursive as the standing proof). Recursion is
   safe again; the while/var walks elsewhere are style, not necessity.
-- Facade gap (filed 2026-08-05; ruled A upstream, ticketed
-  VARIADIC-FACADE-BIND — terminal state is a Scala-varargs bind with
-  call-site spread): until then `exec.Command` stays five explicit
-  arities in `wata-tui/src/main/scala/facades.scala`.
+- ~~Variadic facade gap~~ FIXED and verified downstream: pin `4cbea19`
+  full-gate green with `exec.Command` collapsed to ONE varargs bind
+  (`arg: String*`; spread via `Array[String]` + `xs*`, the one legal
+  vehicle) — `command0..4` and the arity picker are gone from
+  `wata-tui`. That closes every consumer ticket wata has filed to date.
 - ~~Try-shape sensitivity~~ FIXED and verified downstream: pin `c81ed0f`
   full-gate green with `Repl.readFile` returned to the nested-assignment
   try shape (kept nested as the standing proof; tui-smoke pins the catch

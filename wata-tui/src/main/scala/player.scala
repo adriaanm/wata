@@ -37,13 +37,21 @@ object Player:
     catch case e: sgo.GoError => err = e.message
     err
 
-  /** `exec.Command` is variadic and this dialect has no slice spread, so the
-   *  arity is chosen here (facades.scala binds one overload each). */
+  /** spread through the varargs bind (toolchain `4cbea19`): an
+   *  `Array[String]` is the one legal `xs*` vehicle, so the List is copied
+   *  into one — arbitrary arg counts, no arity ceiling. */
   def cmdFor(name: String, a: List[String]): go.exec.Cmd =
     val n = Str.len(a)
-    if n == 0 then go.exec.command0(name)
-    else if n == 1 then go.exec.command1(name, Str.nth(a, 0))
-    else if n == 2 then go.exec.command2(name, Str.nth(a, 0), Str.nth(a, 1))
-    else if n == 3 then go.exec.command3(name, Str.nth(a, 0), Str.nth(a, 1), Str.nth(a, 2))
-    else go.exec.command4(name, Str.nth(a, 0), Str.nth(a, 1), Str.nth(a, 2), Str.nth(a, 3))
+    val arr = new Array[String](n)
+    var cur = a
+    var i = 0
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          arr(i) = h
+          i = i + 1
+          cur = t
+        case Nil => going = false
+    go.exec.command(name, arr*)
 
