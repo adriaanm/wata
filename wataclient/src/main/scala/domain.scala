@@ -31,6 +31,9 @@ case class ConnAuthRejected() extends ConnectionState
 sealed trait ConversationType
 case class DmConv() extends ConversationType
 case class FamilyConv() extends ConversationType
+/** a room the server stamped `net.wata.group`: family-shaped in every way
+ *  the UI cares about (no contact, PTT by roomId), named by the stamp. */
+case class GroupConv() extends ConversationType
 
 // ---- people ------------------------------------------------------------------
 case class User(id: String, displayName: String)
@@ -75,17 +78,20 @@ case class VoiceMessage(
   isFavorite: Boolean
 )
 
-/** a DM or family conversation. `hasContact == false` for the family thread;
- *  `roomId == ""` means "no DM room yet" — a family member nobody has messaged.
- *  The first send resolves the pair through the server's DM endpoint, which is
- *  what fills the room in. */
+/** a DM, family, or group conversation. `hasContact == false` for the family
+ *  and group threads; `roomId == ""` means "no DM room yet" — a family member
+ *  nobody has messaged. The first send resolves the pair through the server's
+ *  DM endpoint, which is what fills the room in. `name` is what the list
+ *  renders for a GROUP (the stamp's name); DMs are named by their contact and
+ *  the family thread by the snapshot's `Family`, so it is "" for both. */
 case class Conversation(
   roomId: String,
   convType: ConversationType,
   hasContact: Boolean,
   contact: Contact,
   messages: List[VoiceMessage],
-  unplayedCount: Int
+  unplayedCount: Int,
+  name: String
 )
 
 case class Family(id: String, name: String, members: List[Contact])
@@ -115,7 +121,9 @@ case class RoomState(
   receipts: List[ReceiptEntry],
   prevBatch: String,
   dmMembers: List[String],              // the `net.wata.dm` pair; empty = not a DM
-  favorites: List[String]               // event ids with a live `net.wata.favorite` slot
+  favorites: List[String],              // event ids with a live `net.wata.favorite` slot
+  isFamily: Boolean,                    // the `net.wata.family` stamp — THE family room
+  groupName: String                     // the `net.wata.group` stamp's name; "" = not a group
 )
 
 /** the immutable UI view, built by the engine. Optional `User`/`Family`

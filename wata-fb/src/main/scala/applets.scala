@@ -796,6 +796,7 @@ object WataLogic:
 
   def convName(snap: StateSnapshot, conv: Conversation): String =
     if isFamily(conv.convType) then familyName(snap)
+    else if isGroup(conv.convType) then conv.name
     else if conv.hasContact then conv.contact.user.displayName
     else "?"
 
@@ -806,6 +807,12 @@ object WataLogic:
 
   def isFamily(t: ConversationType): Boolean = t match
     case _: FamilyConv => true
+    case _: GroupConv  => false
+    case _: DmConv     => false
+
+  def isGroup(t: ConversationType): Boolean = t match
+    case _: GroupConv  => true
+    case _: FamilyConv => false
     case _: DmConv     => false
 
   /** duration mm:ss from ms. */

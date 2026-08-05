@@ -99,7 +99,7 @@ object SyncEngine:
 
   def emptyRoom(roomId: String): RoomState =
     RoomState(roomId, "", false, "", Nil, Nil,
-      Nil, Nil, "", Nil, Nil)
+      Nil, Nil, "", Nil, Nil, false, "")
 
   /** getOrCreateRoom: append a fresh RoomState if absent (insertion order). */
   def ensureRoom(roomId: String): Unit =
@@ -219,7 +219,7 @@ object SyncEngine:
     val r0 = roomOr(roomId, emptyRoom(roomId))
     if hasEid && !strListContains(r0.timelineEventIds, eid) then
       updateRoom(RoomState(r0.roomId, r0.name, r0.hasAlias, r0.alias, r0.members,
-        appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers, r0.favorites))
+        appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers, r0.favorites, r0.isFamily, r0.groupName))
       if WJson.strField(ev, "type", "") == "m.room.message" then extractVoiceBackfill(roomId, ev)
 
   // ---- json array helpers -----------------------------------------------------
@@ -346,6 +346,8 @@ object SyncEngine:
     if etype == "m.room.name" then { stateName(roomId, ev); evs0 }
     else if etype == "m.room.canonical_alias" then { stateAlias(roomId, ev); evs0 }
     else if etype == "net.wata.dm" then { stateDm(roomId, ev); evs0 }
+    else if etype == "net.wata.family" then { stateFamily(roomId); evs0 }
+    else if etype == "net.wata.group" then { stateGroup(roomId, ev); evs0 }
     else if etype == "net.wata.favorite" then { stateFavorite(roomId, ev); evs0 }
     else if etype == "m.room.member" then stateMember(roomId, ev, evs0)
     else evs0
@@ -361,7 +363,26 @@ object SyncEngine:
   def setDmMembers(roomId: String, members: List[String]): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, members, r.favorites))
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, members, r.favorites, r.isFamily, r.groupName))
+
+  /** the server's family stamp (`net.wata.family`, `{}`): THIS room is the
+   *  family room. The stamp is the identity — presence is the classification,
+   *  and alias-prefix matching is retired. */
+  def stateFamily(roomId: String): Unit =
+    val r = roomOr(roomId, emptyRoom(roomId))
+    updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites, true, r.groupName))
+
+  /** the server's group stamp (`net.wata.group`, `{"name": …}`): the room is
+   *  a group conversation, and the stamp's name is what the list shows. */
+  def stateGroup(roomId: String, ev: Json): Unit =
+    val nm = WJson.strField(WJson.objField(ev, "content"), "name", "")
+    if nm != "" then setGroupName(roomId, nm)
+
+  def setGroupName(roomId: String, nm: String): Unit =
+    val r = roomOr(roomId, emptyRoom(roomId))
+    updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites, r.isFamily, nm))
 
   /** the server's favorite marker (plan 0019): `state_key` is the favorited
    *  event's id, a non-empty content (`{"by": …}`) sets it and an EMPTY one
@@ -387,7 +408,7 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
       r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers,
-      withFav(r.favorites, eventId, on)))
+      withFav(r.favorites, eventId, on), r.isFamily, r.groupName))
 
   def withFav(fs: List[String], eventId: String, on: Boolean): List[String] =
     if on then addFav(fs, eventId) else dropStr(fs, eventId, Nil)
@@ -407,7 +428,7 @@ object SyncEngine:
     if WJson.hasStr(content, "name") then
       val r = roomOr(roomId, emptyRoom(roomId))
       updateRoom(RoomState(r.roomId, WJson.strField(content, "name", ""), r.hasAlias, r.alias,
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites, r.isFamily, r.groupName))
 
   /** canonical_alias: an alias string sets it; a PRESENT content without one
    *  CLEARS it; an absent content changes nothing. */
@@ -419,10 +440,10 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     if WJson.hasStr(content, "alias") then
       updateRoom(RoomState(r.roomId, r.name, true, WJson.strField(content, "alias", ""),
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites, r.isFamily, r.groupName))
     else
       updateRoom(RoomState(r.roomId, r.name, false, "",
-        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
+        r.members, r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites, r.isFamily, r.groupName))
 
   def stateMember(roomId: String, ev: Json, evs0: List[SyncEvent]): List[SyncEvent] =
     if !hasField(ev, "state_key") then evs0                 // no state_key: not a state event
@@ -439,7 +460,7 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     val newMembers = upsertMember(r.members, MemberInfo(uid, display, membership))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, newMembers,
-      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
+      r.timelineEventIds, r.voiceMessages, r.receipts, r.prevBatch, r.dmMembers, r.favorites, r.isFamily, r.groupName))
     MembershipChanged(roomId, uid, membership) :: evs0
 
   // ---- timeline -------------------------------------------------------------------
@@ -447,7 +468,7 @@ object SyncEngine:
   def setPrevBatch(roomId: String, pb: String): Unit =
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, r.receipts, pb, r.dmMembers, r.favorites))
+      r.timelineEventIds, r.voiceMessages, r.receipts, pb, r.dmMembers, r.favorites, r.isFamily, r.groupName))
 
   def timelineLoop(roomId: String, events: List[Json], evs0: List[SyncEvent]): List[SyncEvent] =
     var evs = evs0
@@ -469,7 +490,7 @@ object SyncEngine:
     else
       if hasEid then
         updateRoom(RoomState(r0.roomId, r0.name, r0.hasAlias, r0.alias, r0.members,
-          appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers, r0.favorites))
+          appendStr(r0.timelineEventIds, eid), r0.voiceMessages, r0.receipts, r0.prevBatch, r0.dmMembers, r0.favorites, r0.isFamily, r0.groupName))
       var evs = evs0
       if hasField(ev, "state_key") then evs = stateEvent(roomId, ev, evs)
       val etype = WJson.strField(ev, "type", "")
@@ -508,7 +529,7 @@ object SyncEngine:
       val vs = if backfill then insertVoiceByTs(r.voiceMessages, vm)
                else appendVoice(r.voiceMessages, vm)
       updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-        r.timelineEventIds, vs, r.receipts, r.prevBatch, r.dmMembers, r.favorites))
+        r.timelineEventIds, vs, r.receipts, r.prevBatch, r.dmMembers, r.favorites, r.isFamily, r.groupName))
 
   def appendVoice(vs: List[VoiceMessageRaw], v: VoiceMessageRaw): List[VoiceMessageRaw] =
     ListOps.reverse(v :: ListOps.reverse(vs))
@@ -545,7 +566,7 @@ object SyncEngine:
     val r = roomOr(roomId, emptyRoom(roomId))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
       r.timelineEventIds, dropVoice(r.voiceMessages, targetId, Nil),
-      r.receipts, r.prevBatch, r.dmMembers, r.favorites))
+      r.receipts, r.prevBatch, r.dmMembers, r.favorites, r.isFamily, r.groupName))
 
   def dropVoice(vs: List[VoiceMessageRaw], targetId: String, acc: List[VoiceMessageRaw]): List[VoiceMessageRaw] = vs match
     case h :: t => dropVoiceStep(h, t, targetId, acc)
@@ -606,7 +627,7 @@ object SyncEngine:
       case None => ReceiptEntry(eventId, Nil)
     val updated = ReceiptEntry(eventId, appendUserKeys(existing.userIds, users))
     updateRoom(RoomState(r.roomId, r.name, r.hasAlias, r.alias, r.members,
-      r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.dmMembers, r.favorites))
+      r.timelineEventIds, r.voiceMessages, upsertReceipt(r.receipts, updated), r.prevBatch, r.dmMembers, r.favorites, r.isFamily, r.groupName))
     ReceiptUpdated(roomId, eventId) :: evs0
 
   /** append every user key (no dedup — duplicates are appended as-is). */
@@ -628,17 +649,20 @@ object SyncEngine:
 
   // ============================ buildSnapshot ==================================
 
-  /** the UI view, derived from TWO things and nothing else: the rooms the
-   *  server classified as DMs (`net.wata.dm`), and the family roster. A DM room
-   *  IS the conversation with its peer; a roster member with no DM room yet
-   *  gets the roomless sentinel, and the first send resolves it. */
+  /** the UI view, derived from the rooms the server classified — by stamp,
+   *  never by inference: `net.wata.dm` rooms are the DM conversations,
+   *  `net.wata.group` rooms the group conversations, the `net.wata.family`
+   *  room carries the roster. A DM room IS the conversation with its peer; a
+   *  roster member with no DM room yet gets the roomless sentinel, and the
+   *  first send resolves it. List order: Family, then groups in room
+   *  (stamp-creation) order, then DMs, then the roomless roster rows. */
   def buildSnapshot(): StateSnapshot =
     var contacts: List[Contact] = Nil
     var conversations: List[Conversation] = Nil
     val dm = dmConvs(contacts, conversations)
     contacts = dm._1
     conversations = dm._2
-    // family room by "#family:" canonical alias (first match wins; conv PREPENDED)
+    conversations = prependGroupConvs(conversations)
     val fam = findFamily()
     val hasFamily = fam._1
     val family = fam._2
@@ -680,7 +704,7 @@ object SyncEngine:
     var contacts = contacts0
     if !contactExists(contacts, peerId) then contacts = appendContact(contacts, contact)
     val messages = buildMessages(r)
-    (contacts, appendConv(convs, Conversation(r.roomId, DmConv(), true, contact, messages, unplayedOf(messages))))
+    (contacts, appendConv(convs, Conversation(r.roomId, DmConv(), true, contact, messages, unplayedOf(messages), "")))
 
   /** the OTHER member of the room's stamped pair — "" when the room carries no
    *  stamp, or the pair does not name us (someone else's DM). */
@@ -788,7 +812,9 @@ object SyncEngine:
 
   // ---- family ---------------------------------------------------------------------
 
-  /** the FIRST room whose canonical alias starts with "#family:" -> (true, Family). */
+  /** the FIRST room carrying the server's `net.wata.family` stamp ->
+   *  (true, Family). The stamp is the classification; alias-prefix matching
+   *  is retired. */
   def findFamily(): (Boolean, Family) =
     var has = false
     var fam = Family("", "", Nil)
@@ -804,7 +830,7 @@ object SyncEngine:
         case Nil => going = false
     (has, fam)
 
-  def isFamilyRoom(r: RoomState): Boolean = r.hasAlias && r.alias.startsWith("#family:")
+  def isFamilyRoom(r: RoomState): Boolean = r.isFamily
 
   def familyOf(r: RoomState): Family =
     var nm = r.name                       // value-`if` in arg position is unsupported
@@ -833,7 +859,41 @@ object SyncEngine:
   def familyConv(famRoomId: String): Conversation =
     val r = roomOr(famRoomId, emptyRoom(famRoomId))
     val messages = buildMessages(r)
-    Conversation(r.roomId, FamilyConv(), false, Contact(User("", "")), messages, unplayedOf(messages))
+    Conversation(r.roomId, FamilyConv(), false, Contact(User("", "")), messages, unplayedOf(messages), "")
+
+  // ---- groups ---------------------------------------------------------------------
+
+  /** every `net.wata.group` room, prepended in room order (so groups sit
+   *  between the family thread and the DMs, oldest group first). */
+  def prependGroupConvs(convs0: List[Conversation]): List[Conversation] =
+    var acc: List[Conversation] = Nil          // room order, reversed by the cons
+    var cur = rooms
+    var going = true
+    while going do
+      cur match
+        case c: ::[RoomState] =>
+          if c.head.groupName != "" then acc = groupConv(c.head) :: acc
+          cur = c.tail
+        case Nil => going = false
+    prependAll(acc, convs0)
+
+  /** prepend a REVERSED batch: the result carries `acc` in original order. */
+  def prependAll(acc: List[Conversation], convs0: List[Conversation]): List[Conversation] =
+    var convs = convs0
+    var cur = acc
+    var going = true
+    while going do
+      cur match
+        case c: ::[Conversation] =>
+          convs = c.head :: convs
+          cur = c.tail
+        case Nil => going = false
+    convs
+
+  /** a group conversation: family-shaped (no contact), named by the stamp. */
+  def groupConv(r: RoomState): Conversation =
+    val messages = buildMessages(r)
+    Conversation(r.roomId, GroupConv(), false, Contact(User("", "")), messages, unplayedOf(messages), r.groupName)
 
   /** family members with no conversation yet get an empty-roomId DM (created on
    *  first send). */
@@ -851,7 +911,7 @@ object SyncEngine:
 
   def roomlessFamilyStep(member: Contact, convs: List[Conversation]): List[Conversation] =
     if peerHasConv(convs, member.user.id) then convs
-    else appendConv(convs, Conversation("", DmConv(), true, member, Nil, 0))
+    else appendConv(convs, Conversation("", DmConv(), true, member, Nil, 0, ""))
 
   // ---- self display name ------------------------------------------------------------
 

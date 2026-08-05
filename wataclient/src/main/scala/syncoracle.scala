@@ -1,4 +1,4 @@
-/** the sync-engine UNIT ORACLE: 16 scripted scenarios rendered as a
+/** the sync-engine UNIT ORACLE: 18 scripted scenarios rendered as a
  *  deterministic report. Each block resets the engine, drives it through
  *  `process()` with a hand-built sync response, and prints the resulting
  *  events/state/snapshot values. `tools/wataclient-sync.expected.txt` pins
@@ -83,7 +83,7 @@ object SyncOracle:
     n
 
   def nthConv(ss: StateSnapshot, n: Int): Conversation =
-    var result = Conversation("", DmConv(), false, Contact(User("", "")), Nil, 0)
+    var result = Conversation("", DmConv(), false, Contact(User("", "")), Nil, 0, "")
     var i = 0
     var cur = ss.conversations
     var going = true
@@ -124,6 +124,7 @@ object SyncOracle:
   def convTypeName(t: ConversationType): String = t match
     case _: DmConv     => "dm"
     case _: FamilyConv => "family"
+    case _: GroupConv  => "group"
 
   def famMemberCount(f: Family): Int =
     var n = 0
@@ -141,7 +142,7 @@ object SyncOracle:
 
   /** find the conversation whose contact is `uid` ("" roomId etc. read off it). */
   def convOfContact(ss: StateSnapshot, uid: String): Conversation =
-    var result = Conversation("<none>", DmConv(), false, Contact(User("", "")), Nil, 0)
+    var result = Conversation("<none>", DmConv(), false, Contact(User("", "")), Nil, 0, "")
     var cur = ss.conversations
     var going = true
     while going do
@@ -291,11 +292,11 @@ object SyncOracle:
     b.append("t08 not-ours: convs "); b.append(convCount(ss8))
     b.append(" contacts "); b.append(contactCount(ss8)); b.append('\n')
 
-    // -- 9. family room by #family: canonical alias -------------------------------------
+    // -- 9. family room by the net.wata.family stamp ------------------------------------
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js9 = "{\"next_batch\":\"b9\",\"rooms\":{\"join\":{\"!fam:test\":{\"state\":{\"events\":[" +
-      "{\"type\":\"m.room.canonical_alias\",\"state_key\":\"\",\"content\":{\"alias\":\"#family:test\"}}," +
+      "{\"type\":\"net.wata.family\",\"state_key\":\"\",\"content\":{}}," +
       "{\"type\":\"m.room.name\",\"state_key\":\"\",\"content\":{\"name\":\"Family\"}}," +
       "{\"type\":\"m.room.member\",\"state_key\":\"@alice:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Alice\"}}," +
       "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}" +
@@ -317,7 +318,7 @@ object SyncOracle:
     val js10 = "{\"next_batch\":\"b10\"," +
       "\"rooms\":{\"join\":{" +
       "\"!fam:test\":{\"state\":{\"events\":[" +
-      "{\"type\":\"m.room.canonical_alias\",\"state_key\":\"\",\"content\":{\"alias\":\"#family:test\"}}," +
+      "{\"type\":\"net.wata.family\",\"state_key\":\"\",\"content\":{}}," +
       "{\"type\":\"m.room.member\",\"state_key\":\"@alice:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Alice\"}}," +
       "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}," +
       "{\"type\":\"m.room.member\",\"state_key\":\"@charlie:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Charlie\"}}" +
@@ -339,7 +340,7 @@ object SyncOracle:
     SyncEngine.reset()
     SyncEngine.setSelfUser("@alice:test")
     val js11 = "{\"next_batch\":\"b11\",\"rooms\":{\"join\":{\"!fam:test\":{\"state\":{\"events\":[" +
-      "{\"type\":\"m.room.canonical_alias\",\"state_key\":\"\",\"content\":{\"alias\":\"#family:test\"}}," +
+      "{\"type\":\"net.wata.family\",\"state_key\":\"\",\"content\":{}}," +
       "{\"type\":\"m.room.member\",\"state_key\":\"@alice:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Alice\"}}" +
       "]}}}}}"
     SyncEngine.process(parse(js11))
@@ -441,5 +442,43 @@ object SyncOracle:
     SyncEngine.process(parse(js16b))
     val conv16b = nthConv(SyncEngine.buildSnapshot(), 0)
     b.append(" cleared "); b.append(boolStr(!firstMessage(conv16b).isFavorite)); b.append('\n')
+
+    // -- 17. the family STAMP classifies; a bare #family: alias no longer does -----------
+    SyncEngine.reset()
+    SyncEngine.setSelfUser("@alice:test")
+    val js17 = "{\"next_batch\":\"b17\",\"rooms\":{\"join\":{" +
+      "\"!aliasonly:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"m.room.canonical_alias\",\"state_key\":\"\",\"content\":{\"alias\":\"#family:test\"}}]}}}}}"
+    SyncEngine.process(parse(js17))
+    val ss17 = SyncEngine.buildSnapshot()
+    b.append("t17 alias-retired: has "); b.append(boolStr(ss17.hasFamily))
+    b.append(" convs "); b.append(convCount(ss17)); b.append('\n')
+
+    // -- 18. net.wata.group: a group conversation, named by the stamp, after Family ------
+    SyncEngine.reset()
+    SyncEngine.setSelfUser("@alice:test")
+    val js18 = "{\"next_batch\":\"b18\",\"rooms\":{\"join\":{" +
+      "\"!dmx:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}}," +
+      "\"!grp:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.group\",\"state_key\":\"\",\"content\":{\"name\":\"kids\"}}," +
+      "{\"type\":\"m.room.name\",\"state_key\":\"\",\"content\":{\"name\":\"kids\"}}]}," +
+      "\"timeline\":{\"events\":[{\"type\":\"m.room.message\",\"event_id\":\"$g1\",\"sender\":\"@bob:test\"," +
+      "\"origin_server_ts\":1700000002000," +
+      "\"content\":{\"msgtype\":\"m.audio\",\"url\":\"mxc://test/g1\",\"info\":{\"duration\":4000}}}]}}," +
+      "\"!fam:test\":{\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.family\",\"state_key\":\"\",\"content\":{}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@alice:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Alice\"}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\",\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}}}}}"
+    SyncEngine.process(parse(js18))
+    val ss18 = SyncEngine.buildSnapshot()
+    b.append("t18 group: convs "); b.append(convCount(ss18))
+    b.append(" c0 "); b.append(convTypeName(nthConv(ss18, 0).convType))
+    b.append(" c1 "); b.append(convTypeName(nthConv(ss18, 1).convType))
+    b.append(" c2 "); b.append(convTypeName(nthConv(ss18, 2).convType))
+    b.append(" gname \""); b.append(nthConv(ss18, 1).name)
+    b.append("\" gmsgs "); b.append(msgCount(nthConv(ss18, 1)))
+    b.append(" gunplayed "); b.append(nthConv(ss18, 1).unplayedCount); b.append('\n')
 
     b.toString

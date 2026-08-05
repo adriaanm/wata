@@ -18,3 +18,5 @@ t13 unplayed: n 2 m0 false
 t14 redact: msgs 1 first $msg2
 t15 persist: batch batch_after name Survived bob Bob
 t16 favorite: m0 true m1 false cleared true
+t17 alias-retired: has false convs 0
+t18 group: convs 3 c0 family c1 group c2 dm gname "kids" gmsgs 1 gunplayed 1

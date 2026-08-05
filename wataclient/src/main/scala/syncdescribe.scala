@@ -105,6 +105,11 @@ object SyncDescribe:
     b.append('"')
     b.append(" dm=")
     b.append(dmStr(r.dmMembers))
+    b.append(" fam=")
+    b.append(boolStr(r.isFamily))
+    b.append(" group=\"")
+    b.append(r.groupName)
+    b.append('"')
     b.append(" joined=")
     b.append(SyncEngine.joinedMemberCount(r))
     b.append('\n')
@@ -274,6 +279,9 @@ object SyncDescribe:
     b.append(" contact=\"")
     if c.hasContact then b.append(c.contact.user.id)
     b.append('"')
+    b.append(" name=\"")
+    b.append(c.name)
+    b.append('"')
     b.append(" unplayed=")
     b.append(c.unplayedCount)
     b.append('\n')
@@ -283,6 +291,7 @@ object SyncDescribe:
   def convTypeName(t: ConversationType): String = t match
     case _: DmConv     => "dm"
     case _: FamilyConv => "family"
+    case _: GroupConv  => "group"
 
   def describeConvMessages(ms: List[VoiceMessage]): String =
     val b = new StringBuilder

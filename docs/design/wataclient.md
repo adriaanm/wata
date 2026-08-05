@@ -302,7 +302,7 @@ Event emission order is deliberate and pinned by the fixture oracle
 timeline events, then receipt events, then `RoomUpdated` last for that
 room), then invited rooms the same way.
 
-### DM classification
+### Classification — by stamp, never by inference
 
 A room is a DM exactly when its state carries the server's `net.wata.dm`
 event, whose `content.members` pair says who it is with (`stateDm`). That
@@ -310,6 +310,16 @@ is the whole rule. The engine infers nothing from `is_direct` — a room
 carrying only that flag is not classified — and nothing is sticky, because
 a structural state event needs no stickiness: it either is in the room's
 state or it is not.
+
+Family and groups follow the same rule (plan 0018): THE family room is the
+room stamped `net.wata.family` (`stateFamily` sets `RoomState.isFamily`;
+alias-prefix matching is retired — a room whose only claim is a `#family:`
+alias is not classified), and a group is a room stamped `net.wata.group`,
+whose `content.name` names it (`stateGroup` sets `RoomState.groupName`).
+The server mints and members both — every account is joined to the family
+room at provisioning time, and `POST /_wata/v1/group` joins a group's
+members server-side — so the client's only job is to render what the
+stamps say.
 
 What this replaced is worth recording, since it was most of the module's
 historical brittleness: an `m.direct` ingest that rebuilt a
@@ -326,8 +336,9 @@ All of it is gone.
 derives the immutable `StateSnapshot` from the accumulated state on
 demand (it is not incrementally maintained). The derivation, in order:
 
-It derives from exactly two things: the rooms the server classified, and
-the family roster.
+It derives from the rooms the server classified — DM stamps, group stamps,
+the family stamp — and the family roster. List order: Family, then groups
+in room (stamp-creation) order, then DMs, then the roomless roster rows.
 
 1. **Conversations from the classified DM rooms** (`dmConvs`): each room
    whose `dmMembers` pair names *us* is the conversation with the other
@@ -336,17 +347,22 @@ the family roster.
    us is somebody else's DM and is skipped. If two rooms name the same
    peer — possible only for a room that lost the server's pair claim and
    stayed joined — the first in room order wins.
-2. **Family room** (`findFamily`): the first room whose canonical alias
-   starts with `"#family:"` becomes the family conversation, prepended at
+2. **Group conversations** (`prependGroupConvs`): every room with a
+   `groupName` becomes a `GroupConv` `Conversation` — family-shaped (no
+   contact, PTT by roomId), named by the stamp (`Conversation.name`, the
+   one conversation kind that carries its own name) — prepended between
+   the family thread and the DMs, oldest group first.
+3. **Family room** (`findFamily`): the first room stamped
+   `net.wata.family` becomes the family conversation, prepended at
    index 0. Its joined members (excluding self) become `Family.members`,
    and every one of them is a contact whether or not a DM room exists yet
    (`rosterContacts`).
-3. **Roomless family conversations** (`roomlessFamilyConvs`): a roster
+4. **Roomless family conversations** (`roomlessFamilyConvs`): a roster
    member with no DM conversation yet gets a placeholder `Conversation`
    with `roomId == ""`. The first send resolves the pair through the
    server's DM endpoint, which is what fills the room in (see
    `Runtime.resolveDmRoom`).
-4. **Self display name** (`resolveSelfDisplay`): the first room where self
+5. **Self display name** (`resolveSelfDisplay`): the first room where self
    has a display name that is more than the fallback below.
 
 **Names.** A display name belongs to the ACCOUNT — an admin sets it on the
@@ -405,7 +421,7 @@ snapshot are built from:
   `Connecting`, `Connected`, `Syncing`, `ConnError`, `ConnAuthRejected` —
   the server refusing these credentials, which is a different sentence on
   screen and a different backoff than a transport failure) and
-  `ConversationType` (`DmConv`, `FamilyConv`) are sealed families of empty
+  `ConversationType` (`DmConv`, `FamilyConv`, `GroupConv`) are sealed families of empty
   case classes rather than enums — there is no native enum construct in
   this language subset.
 - `User`/`Contact`/`VoiceMessage`/`Conversation`/`Family` are the

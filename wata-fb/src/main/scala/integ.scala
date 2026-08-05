@@ -175,6 +175,7 @@ object Integ:
 
   def isFamilyType(t: ConversationType): Boolean = t match
     case _: FamilyConv => true
+    case _: GroupConv  => false
     case _: DmConv     => false
 
   def msgCount(ms: List[VoiceMessage]): Int =

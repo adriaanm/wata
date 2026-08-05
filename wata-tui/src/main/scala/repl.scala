@@ -135,6 +135,7 @@ object Repl:
 
   def convKind(t: ConversationType): String = t match
     case _: FamilyConv => "family"
+    case _: GroupConv  => "group"
     case _: DmConv     => "dm"
 
   // ---- msgs --------------------------------------------------------------------
