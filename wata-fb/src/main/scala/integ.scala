@@ -54,6 +54,8 @@ object Integ:
       else if name == "outbox-restart" then ok = s18()
       else if name == "client-handle" then ok = s19()
       else if name == "refused-then-admitted" then ok = s20()
+      else if name == "group-room" then ok = s21()
+      else if name == "family-no-leave" then ok = s22()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -535,19 +537,15 @@ object Integ:
       val dl = MatrixHttp.downloadMedia(directHs(tok), mxc)
       dl.status == 200 && Bytes.fromRawString(dl.body) == fakeOgg()
 
-  /** family room — both members see a voice message: alias'd public room
-   *  created out-of-band, bob auto-joins his invite, marker 888 visible to
-   *  both. */
+  /** family room — SERVER-MINTED (plan 0018): nobody creates anything.
+   *  Both accounts are joined to the stamped room from boot, so alice's very
+   *  first snapshot already carries the family conversation; she sends
+   *  marker 888 into it and bob sees it. */
   def s09(): Boolean =
-    val tok = directToken("alice")
-    if tok == "" then false
-    else
-      val cr = MatrixHttp.createRoomWithAlias(directHs(tok), "family", "@bob:localhost")
-      if cr.status != 200 then false
-      else if !phase("alice")(c => aliceFamilySend(c, 888L)) then false
-      else phase("bob")(c => grabSelf(c) &&
-        Runtime.waitForSnapshot(c, s => familyReady(s), 30000L) &&
-        Runtime.waitForSnapshot(c, s => familyHasDur(s, 888L), 20000L))
+    if !phase("alice")(c => aliceFamilySend(c, 888L)) then false
+    else phase("bob")(c => grabSelf(c) &&
+      Runtime.waitForSnapshot(c, s => familyReady(s), 30000L) &&
+      Runtime.waitForSnapshot(c, s => familyHasDur(s, 888L), 20000L))
 
   def aliceFamilySend(c: MatrixClient, d: Long): Boolean =
     if !grabSelf(c) then false
@@ -1107,6 +1105,87 @@ object Integ:
       else if c.clock.nowUnixMillis() >= deadline then run = false
       else Runtime.retryNow(c)
     ok
+
+  // ---- canonical family + groups (plan 0018) ---------------------------------
+
+  /** GROUPS, end to end. alice mints "kids" with bob through the dialect
+   *  endpoint (a re-POST is the same room — the get-or-extend key is the
+   *  stamp's name), then her client shows a GROUP conversation named by the
+   *  stamp; she sends marker 999 into it and bob's client — joined
+   *  server-side, no invite, no accept — sees the group AND the message. */
+  def s21(): Boolean =
+    val atok = directToken("alice")
+    if atok == "" then false
+    else
+      val g1 = groupRoomId(atok, "{\"name\":\"kids\",\"members\":[\"bob\"]}")
+      val g2 = groupRoomId(atok, "{\"name\":\"kids\"}")
+      if g1 == "" || g1 != g2 then false
+      else if groupRoomId(atok, "{\"name\":\"kids\",\"members\":[\"nobody\"]}") != "" then false
+      else
+        val want = g1
+        if !phase("alice")(c => aliceGroupSend(c, want, 999L)) then false
+        else phase("bob")(c => grabSelf(c) &&
+          Runtime.waitForSnapshot(c, s => groupConvIs(s, "kids", want), 30000L) &&
+          Runtime.waitForSnapshot(c, s => groupHasDur(s, "kids", 999L), 20000L))
+
+  def aliceGroupSend(c: MatrixClient, roomId: String, d: Long): Boolean =
+    if !grabSelf(c) then false
+    else if !Runtime.waitForSnapshot(c, s => groupConvIs(s, "kids", roomId), 30000L) then false
+    else if !sendVoice(c, roomId, "", d) then false
+    else Runtime.waitForSnapshot(c, s => groupHasDur(s, "kids", d), 20000L)
+
+  /** the group conversation named `name` exists and is the expected room. */
+  def groupConvIs(s: StateSnapshot, name: String, roomId: String): Boolean =
+    findGroupConv(s.conversations, name) match
+      case cv: Some[Conversation] => cv.value.roomId == roomId
+      case None => false
+
+  def groupHasDur(s: StateSnapshot, name: String, d: Long): Boolean =
+    findGroupConv(s.conversations, name) match
+      case cv: Some[Conversation] => hasDurIn(cv.value.messages, d)
+      case None => false
+
+  def findGroupConv(cs: List[Conversation], name: String): Option[Conversation] = cs match
+    case h :: t => findGroupStep(h, t, name)
+    case Nil  => None
+
+  def findGroupStep(h: Conversation, t: List[Conversation], name: String): Option[Conversation] =
+    if isGroupType(h.convType) && h.name == name then Some(h) else findGroupConv(t, name)
+
+  def isGroupType(t: ConversationType): Boolean = t match
+    case _: GroupConv  => true
+    case _: FamilyConv => false
+    case _: DmConv     => false
+
+  /** `POST /_wata/v1/group` out of band; "" on any non-200. */
+  def groupRoomId(token: String, body: String): String =
+    val resp = MatrixHttp.request(directHs(token), "POST", "/_wata/v1/group",
+      "application/json", body)
+    if resp.status != 200 then "" else MatrixHttp.parseRoomId(resp.body)
+
+  /** NO-LEAVE: the family room refuses `POST /rooms/{id}/leave` with 403 —
+   *  the account list is the roster. An ordinary room still leaves fine (the
+   *  guard is the family stamp, not the verb). */
+  def s22(): Boolean =
+    val atok = directToken("alice")
+    if atok == "" then false
+    else
+      val fam = resolveAlias(atok, "%23family:localhost")
+      if fam == "" then false
+      else if leaveStatus(atok, fam) != 403 then false
+      else
+        val grp = groupRoomId(atok, "{\"name\":\"leavable\"}")
+        if grp == "" then false
+        else leaveStatus(atok, grp) == 200
+
+  def resolveAlias(token: String, encodedAlias: String): String =
+    val resp = MatrixHttp.request(directHs(token), "GET",
+      "/_matrix/client/v1/directory/room/" + encodedAlias, "application/json", "")
+    if resp.status != 200 then "" else MatrixHttp.parseRoomId(resp.body)
+
+  def leaveStatus(token: String, roomId: String): Int =
+    MatrixHttp.request(directHs(token), "POST",
+      "/_matrix/client/v3/rooms/" + roomId + "/leave", "application/json", "{}").status
 
   /** poll the transport's own verdict (`Enrol.refused()`, the boot screen's). */
   def waitRefused(c: MatrixClient, timeoutMs: Long): Boolean =
