@@ -20,7 +20,14 @@ frameworks can be *generated* rather than hand-written.
 One Sgola codebase reaches the phone in stages, each independently
 useful, each a real consumer proof for the compiler:
 
-**M1 — the gomobile spike.** `wataclient` (unchanged) through
+**M1 — the gomobile spike.** DONE (2026-08-05, `ec36369` + `46eb6ee`;
+report: `tools/phone-spike/REPORT.md`). The bind worked first try on
+ios/iossimulator and macos with zero wataclient changes; the macOS
+Swift shell logged in and synced. Two sgola tickets
+(NO-LIB-EMIT-FOR-RUNTIME-LIBS, INLINK-DEP-SEARCH-PARENT-ONLY) and one
+open design question for M2/M3: `Runtime.start` joins its supervised
+scope on exit, so a phone shell needs a real handle + event-pump shape
+rather than one blocking call. `wataclient` (unchanged) through
 `gomobile bind` into an xcframework; a throwaway ten-line Swift shell
 drives login + sync in the iOS simulator against the Mac server over
 TCP. Kills the central risk (does sgola-emitted Go survive gomobile's
