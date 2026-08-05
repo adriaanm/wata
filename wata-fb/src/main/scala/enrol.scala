@@ -101,9 +101,14 @@ object Enrol:
   def configured(): Boolean = go.sys.getenv(ENV_IROH) != ""
 
   /** has the transport refused this node id outright — the loud
-   *  `server refused: 401 not allowlisted` (go-pkgs/irohnet)? That is a
-   *  permanent state no retry can fix and the ONE case where the device has
-   *  something useful to show instead of "waiting for network": its QR. */
+   *  `server refused: 401 not allowlisted` (go-pkgs/irohnet)? That is the ONE
+   *  case where the device has something useful to show instead of "waiting
+   *  for network": its QR.
+   *
+   *  It is a state, not a verdict. The transport keeps redialing on the sync
+   *  loop's own cadence and clears the reason on the first dial that gets
+   *  through, so an approval that lands mid-session takes this screen down
+   *  without anyone restarting the app. */
   def refused(): Boolean =
     val forced = forceRefusedC.get()
     if forced >= 0 then forced == 1

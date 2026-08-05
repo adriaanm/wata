@@ -40,6 +40,12 @@
 //     reaches the HttpDo capability, which still folds it into
 //     HttpResponse(0, "") — the portable core never sees a Go error, but the
 //     reason is on stdout/stderr for whoever runs the process.
+//   - A refusal is loud but never TERMINAL. The refused connection is cached
+//     and answers dials locally for REFUSAL_COOLDOWN (rust/src/lib.rs), then
+//     one fresh handshake is attempted — so a node approved mid-session gets
+//     in on its next retries, without a new dialer or a restarted process
+//     (TestRefusedClientRedialsAfterAllow). The first dial that succeeds
+//     clears LastRefusal, which is what takes the device's enrolment QR down.
 package irohnet
 
 import (
@@ -174,11 +180,22 @@ func noteRefusal(reason string) {
 	refusal = reason
 }
 
+// clearRefusal drops the standing reason once a dial gets through. A refusal
+// is loud but never terminal: the enrolment flow's promise is "approve, and it
+// connects", so the moment a dial succeeds the QR screen that reads this must
+// yield to the ordinary boot flow. A refusal that outran the dial re-records
+// itself on the first read/write of the stream (Conn.errForRet).
+func clearRefusal() {
+	refusalMu.Lock()
+	defer refusalMu.Unlock()
+	refusal = ""
+}
+
 // LastRefusal is the most recent dial-failure reason seen by any dialer in
-// this process, or "" if none. Never cleared: having been refused once is a
-// standing fact about this node id. It does not need clearing: the screen that
-// reads it is only ever drawn before the link has been live once, so an
-// approval that lands mid-session retires it by succeeding.
+// this process, or "" if none — cleared by the first dial that succeeds. It is
+// the app edge's only signal for "this node is not enrolled" (the portable
+// core folds every transport error into HttpResponse(0, "")), so it has to
+// answer the CURRENT state, not the session's history.
 func LastRefusal() string {
 	refusalMu.Lock()
 	defer refusalMu.Unlock()

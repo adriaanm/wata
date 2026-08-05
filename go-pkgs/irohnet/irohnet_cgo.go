@@ -506,8 +506,19 @@ func (d *Dialer) DialContext(ctx context.Context, network, addr string) (net.Con
 		d.logDialError(reason)
 		return nil, fmt.Errorf("irohnet: dial %s: %s", d.peer, reason)
 	}
+	d.dialWorked()
 	return &Conn{h: sh, local: Addr{ID: "client"}, remote: Addr{ID: d.peer}, dialer: d,
 		opTimeout: opTimeoutMs()}, nil
+}
+
+// dialWorked retires the standing refusal (LastRefusal) and re-arms the
+// log-once dedupe, so a LATER refusal on the same dialer is printed again
+// rather than swallowed as a repeat.
+func (d *Dialer) dialWorked() {
+	d.logMu.Lock()
+	d.lastLogged = ""
+	d.logMu.Unlock()
+	clearRefusal()
 }
 
 // logDialError prints a dial failure once per distinct reason string. The

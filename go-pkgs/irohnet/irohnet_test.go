@@ -20,9 +20,10 @@ import (
 	"time"
 )
 
-// boot a server+client pair over loopback iroh; returns the client and the
-// listener (caller closes both via t.Cleanup registrations here).
-func pair(t *testing.T, allowClient bool) (*http.Client, *Listener) {
+// boot a server+client pair over loopback iroh; returns the client, the
+// listener and the CLIENT's node id (caller closes both via t.Cleanup
+// registrations here).
+func pair(t *testing.T, allowClient bool) (*http.Client, *Listener, string) {
 	t.Helper()
 	srvSecret, _, e := GenKey()
 	if e != nil {
@@ -69,11 +70,11 @@ func pair(t *testing.T, allowClient bool) (*http.Client, *Listener) {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { d.Close() })
-	return &http.Client{Transport: &http.Transport{DialContext: d.DialContext}}, l
+	return &http.Client{Transport: &http.Transport{DialContext: d.DialContext}}, l, cliID
 }
 
 func TestHTTPOverIroh(t *testing.T) {
-	client, l := pair(t, true)
+	client, l, _ := pair(t, true)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -100,7 +101,7 @@ func TestHTTPOverIroh(t *testing.T) {
 }
 
 func TestAllowlistRefusedAtAccept(t *testing.T) {
-	client, l := pair(t, false)
+	client, l, _ := pair(t, false)
 	go func() { http.Serve(l, http.NewServeMux()) }()
 	client.Timeout = 5 * time.Second
 	_, e := client.Get("http://wata.iroh/")
@@ -124,10 +125,11 @@ func TestAllowlistRefusedAtAccept(t *testing.T) {
 
 // The live allowlist (plan 0021 milestone B): a node the listener was built
 // without is refused, Allow admits it with NO restart, Disallow refuses it
-// again. Each leg dials with a FRESH client endpoint, because a refused
-// client caches the dead connection and answers its own dials from it for
-// REFUSAL_COOLDOWN (rust/src/lib.rs) — the recovery a real device gets is a
-// retry past that cooldown, or a restart, not an instant one.
+// again. Each leg dials with a FRESH client endpoint so the legs read as
+// separate decisions; a refused client caches the dead connection and answers
+// its own dials from it for REFUSAL_COOLDOWN (rust/src/lib.rs), so recovery on
+// the SAME dialer is a retry past that cooldown — which is what
+// TestRefusedClientRedialsAfterAllow pins.
 func TestLiveAllowlistAdd(t *testing.T) {
 	srvSecret, _, _ := GenKey()
 	_, otherID, _ := GenKey()
@@ -177,6 +179,56 @@ func TestLiveAllowlistAdd(t *testing.T) {
 	}
 	if e := get(); e == nil || !strings.Contains(e.Error(), "not allowlisted") {
 		t.Fatalf("want a loud refusal after Disallow, got %v", e)
+	}
+}
+
+// A REFUSAL IS LOUD BUT NEVER TERMINAL ([FB-REDIAL-AFTER-REFUSAL], plan 0014).
+// The same dialer that was refused has to get in the moment its id is
+// allowlisted — no new dialer, no restarted process — because that is the whole
+// promise of enrolment: a parent approves the handset in front of them and it
+// connects.
+//
+// The trap this pins is that dialling HARDER must not make it worse. A refused
+// client answers dials from its cached dead connection for REFUSAL_COOLDOWN
+// before attempting another handshake; while every one of those fast local
+// failures re-stamped the cooldown, a client retrying faster than it (the sync
+// loop plus a parent pressing OK) slid the window forever and never attempted
+// one — the hardware symptom, a device latched on "not allowlisted" until it
+// was restarted. So this dials FASTER than the cooldown throughout.
+func TestRefusedClientRedialsAfterAllow(t *testing.T) {
+	client, l, cliID := pair(t, false)
+	go func() { http.Serve(l, okMux()) }()
+	client.Timeout = 10 * time.Second
+
+	if _, e := client.Get("http://wata.iroh/"); e == nil || !strings.Contains(e.Error(), "not allowlisted") {
+		t.Fatalf("want a loud refusal before the approval, got %v", e)
+	}
+	if LastRefusal() == "" {
+		t.Fatal("the refusal did not reach the app edge (LastRefusal is empty)")
+	}
+	if e := l.Allow(cliID); e != nil {
+		t.Fatal(e)
+	}
+	deadline := time.Now().Add(45 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		resp, e := client.Get("http://wata.iroh/")
+		if e == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			last = nil
+			break
+		}
+		last = e
+		time.Sleep(200 * time.Millisecond) // faster than REFUSAL_COOLDOWN, on purpose
+	}
+	if last != nil {
+		t.Fatalf("the approved node never got in on the same dialer: %v", last)
+	}
+	// and the app edge's latch clears, or the handset keeps showing its QR
+	// over a working link.
+	if r := LastRefusal(); r != "" {
+		t.Fatalf("the refusal survived a successful dial: %q", r)
 	}
 }
 
@@ -315,7 +367,7 @@ func isTimeout(e error, nerr *net.Error) bool {
 }
 
 func TestEOFOnPeerClose(t *testing.T) {
-	client, l := pair(t, true)
+	client, l, _ := pair(t, true)
 	_ = client
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
@@ -337,7 +389,7 @@ func TestEOFOnPeerClose(t *testing.T) {
 // and the caller's backoff can do its job. Plan 0022.
 func TestHungPeerHitsPostDialDeadline(t *testing.T) {
 	t.Setenv("WATA_HTTP_TIMEOUT_MS", "500")
-	client, l := pair(t, true)
+	client, l, _ := pair(t, true)
 	// accept the stream and then sit on it — no response, ever.
 	go func() {
 		for {

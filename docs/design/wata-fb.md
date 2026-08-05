@@ -585,8 +585,23 @@ network), is in `docs/design/wata-server.md` under Device enrolment.
   edge exactly like `FbCaps.transportUnavailable()`. It is not an extra
   `ConnectionState`: `wataclient` cannot produce this verdict, so a case there
   would have to be synthesised at the app edge anyway. Being refused is not a
-  network problem and no amount of waiting fixes it, so the calm "waiting for
-  network" line gives way to the QR.
+  network problem, so the calm "waiting for network" line gives way to the QR.
+
+  **A refusal is loud but never terminal.** The transport keeps redialing on
+  the sync loop's ordinary cadence, and the first dial that gets through clears
+  `LastRefusal()` — so an approval a parent makes while the QR is on screen
+  takes that screen down by itself, with nothing restarted. That is the whole
+  promise of the enrolment flow, and it is where the first hardware enrolment
+  broke: a refused client answers dials from its cached dead connection for a
+  cooldown (`REFUSAL_COOLDOWN`, `go-pkgs/irohnet/rust/src/lib.rs`) before it
+  attempts another handshake, and while every one of those fast local failures
+  re-stamped the cooldown, a device that retried faster than it — the sync loop
+  plus the boot screen's OK key — slid the window forward forever and never
+  attempted one. Trying harder was what kept it out. Only a real handshake
+  stamps the cooldown now; the Go tests pin it
+  (`TestRefusedClientRedialsAfterAllow`, which dials faster than the cooldown
+  throughout), and `just tunnel-smoke`'s enrolment leg approves a client
+  process that is left RUNNING and refused.
 - **Settings -> Enroll**, offered whenever iroh is configured (`SettingsLogic`'s
   `ENROLL` row, `enrolOpen` in `SettingsState`). Back closes it; nothing else
   does, because a QR a stray keypress dismisses is a QR a parent has to go find

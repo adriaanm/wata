@@ -53,6 +53,7 @@ object Integ:
       else if name == "admin-rename" then ok = s17()
       else if name == "outbox-restart" then ok = s18()
       else if name == "client-handle" then ok = s19()
+      else if name == "refused-then-admitted" then ok = s20()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -1052,3 +1053,69 @@ object Integ:
   def keyIn(xs: List[String], k: String): Boolean = xs match
     case h :: t => if h == k then true else keyIn(t, k)
     case Nil    => false
+
+  // ---- the enrolment redial (plan 0014) --------------------------------------
+
+  /** REFUSED, THEN ADMITTED, IN ONE PROCESS. The iroh transport refuses this
+   *  node id (it is not in the server's allowlist), the driver says so on
+   *  stdout, and the harness — tools/tunnel-smoke.py's enrolment leg — approves
+   *  the node while this very process keeps running. The SAME client object
+   *  then has to reach a live session on its ordinary retry cadence: an
+   *  approval a parent just made must not need the handset restarted, which is
+   *  the whole promise of the enrolment flow.
+   *
+   *  It also pins the UI half: `Enrol.refused()` — what puts the QR screen on
+   *  the boot frame — must read false again once the link is up, or the handset
+   *  would sit on its QR over a working connection. */
+  def s20(): Boolean =
+    phase("alice")(c => admittedAfterRefusal(c))
+
+  def admittedAfterRefusal(c: MatrixClient): Boolean =
+    if !waitRefused(c, 30000L) then
+      println("integ: the transport was never refused — there is nothing to redial after")
+      false
+    else
+      println("INTEG REFUSED")     // the harness approves this node on this line
+      if !waitAdmitted(c, 90000L) then
+        println("integ: the approved node never got a session — the refusal latched")
+        false
+      else if !Runtime.waitForSnapshot(c, s => s.hasSelfUser, 20000L) then false
+      else if Enrol.refused() then
+        println("integ: the refusal survived a live session — the QR screen would stay up")
+        false
+      else true
+
+  /** wait for a live session while POKING the retry between slices — what the
+   *  boot screen's OK key does, and what a device with several loops of its own
+   *  produces anyway: dials that keep coming faster than any backoff.
+   *
+   *  That is the sharp end of the bug this pins. The transport answers a dial
+   *  from its cached refused connection for a cooldown before it will attempt
+   *  another handshake; while the cooldown was re-stamped on every one of those
+   *  fast local failures, a device that kept trying slid the window forward
+   *  forever and NEVER attempted one — trying harder was what kept it out. So a
+   *  poke must make admission sooner, never impossible. */
+  def waitAdmitted(c: MatrixClient, timeoutMs: Long): Boolean =
+    val deadline = c.clock.nowUnixMillis() + timeoutMs
+    var ok = false
+    var run = true
+    while run do
+      if Runtime.waitForConnection(c, Syncing(), 1000L) then
+        ok = true
+        run = false
+      else if c.clock.nowUnixMillis() >= deadline then run = false
+      else Runtime.retryNow(c)
+    ok
+
+  /** poll the transport's own verdict (`Enrol.refused()`, the boot screen's). */
+  def waitRefused(c: MatrixClient, timeoutMs: Long): Boolean =
+    val deadline = c.clock.nowUnixMillis() + timeoutMs
+    var out = false
+    var run = true
+    while run do
+      if Enrol.refused() then
+        out = true
+        run = false
+      else if c.clock.nowUnixMillis() >= deadline then run = false
+      else c.clock.sleepMs(50L)
+    out

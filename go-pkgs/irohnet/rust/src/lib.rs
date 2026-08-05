@@ -134,19 +134,27 @@ struct ClientState {
     /// dead connection is behind a fast local failure rather than a fresh
     /// dial.
     last_refusal: Mutex<Option<String>>,
-    /// When the cached connection was last seen refused. The dead connection
-    /// answers dials fast-and-locally only for REFUSAL_COOLDOWN after this;
-    /// past that, one fresh handshake is allowed — which is what lets a
-    /// client recover the moment its enrolment is approved (plan 0014's
+    /// When a HANDSHAKE was last refused. The dead connection answers dials
+    /// fast-and-locally only for REFUSAL_COOLDOWN after this; past that, one
+    /// fresh handshake is allowed — which is what lets a client recover the
+    /// moment its enrolment is approved (plan 0014's
     /// approve-while-the-device-retries loop), instead of staying locked out
     /// until process restart.
+    ///
+    /// ONLY a real handshake attempt writes it. Stamping it again on each
+    /// fast-local refusal slid the window forward every time anything dialled,
+    /// so a client whose loops retried faster than the cooldown never earned a
+    /// fresh handshake at all and stayed refused until the process restarted —
+    /// which is precisely what the first hardware enrolment hit: the admin
+    /// approved the device and the running app never noticed.
     refused_at: Mutex<Option<Instant>>,
 }
 
 /// How long a refusal answers dials from the cached dead connection before a
 /// fresh handshake is attempted. The sync loop's backoff paces dials anyway;
-/// this only bounds handshake work under a tight retry loop.
-const REFUSAL_COOLDOWN: Duration = Duration::from_secs(30);
+/// this only collapses a burst of them, so it is short: every second it adds is
+/// a second a parent waits after approving a handset.
+const REFUSAL_COOLDOWN: Duration = Duration::from_secs(5);
 
 struct StreamState {
     send: tokio::sync::Mutex<SendStream>,
@@ -721,7 +729,10 @@ pub extern "C" fn irohnet_client_dial(
                             .map(|t| t.elapsed() < REFUSAL_COOLDOWN)
                             .unwrap_or(false);
                         *cl.last_refusal.lock().unwrap() = Some(msg.clone());
-                        *cl.refused_at.lock().unwrap() = Some(Instant::now());
+                        // NOT refused_at: this failure was local, against a
+                        // connection already known dead. Re-stamping it here
+                        // would slide the cooldown forward on every dial and
+                        // the fresh handshake below would never come due.
                         if recent {
                             return Err(msg);
                         }
@@ -748,6 +759,13 @@ pub extern "C" fn irohnet_client_dial(
                 return Err(refusal.unwrap_or_else(|| format!("open_bi: {e:?}")));
             }
         };
+        // A handshake that got through retires the refusal: the peer's answer
+        // has changed (an enrolment was approved), and a stale "not
+        // allowlisted" would keep the device's QR screen up over a working
+        // link. A refusal that merely outran the dial re-records itself on the
+        // first read/write (record_stream_refusal_*).
+        *cl.last_refusal.lock().unwrap() = None;
+        *cl.refused_at.lock().unwrap() = None;
         *guard = Some(c);
         Ok::<(SendStream, RecvStream), String>(pair)
     };

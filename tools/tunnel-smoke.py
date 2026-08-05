@@ -19,9 +19,11 @@ Steps:
      irohnet.EnsureKey into a config that was deployed with no secret at all
      (plan 0014 milestone 1), the same call wata-fb makes on first boot — is
      refused at accept, loudly;
-  7. enrolment (plan 0021 milestone B): that same refused node announces
-     itself, an admin approves it over the admin listener, and it is then
-     accepted by the same server process — no restart.
+  7. enrolment (plan 0021 milestone B + plan 0014): that same refused node
+     announces itself, an admin approves it over the admin listener, and it is
+     then accepted — by the same SERVER process and, in the second half, by the
+     same CLIENT process, which is left running across the approval and has to
+     redial its way in on its own retry cadence.
 
 Prints TUNNEL-SMOKE PASS / FAIL. Needs cargo (the Rust toolchain) on top of
 the repo's usual prerequisites — this recipe and fb-deploy's successors are
@@ -159,13 +161,38 @@ def await_admin(base):
     return False
 
 
-def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id):
+def wait_for_line(log_path, needle, proc, timeout_s):
+    """Poll a running process's log until it prints `needle` (or it exits)."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if log_path.exists() and needle in log_path.read_text(errors="replace"):
+            return True
+        if proc.poll() is not None:
+            return log_path.exists() and needle in log_path.read_text(errors="replace")
+        time.sleep(0.2)
+    return False
+
+
+def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id, sdir):
     """The approve loop end to end (plan 0021 milestone B): the node the
     server just refused announces itself, an admin approves it through the
     admin API, and the SAME key is then accepted — no server restart. The
     durable half (the config file's allowlist) and the live half (the new
     irohnet_server_allow FFI) are both asserted, since only the second one
     can make this run pass without a restart.
+
+    THE CLIENT IS NOT RESTARTED EITHER (plan 0014, [FB-REDIAL-AFTER-REFUSAL]).
+    The approval lands while a `wata-fb integ refused-then-admitted` process is
+    running and refused; that process has to redial its way in on the sync
+    loop's own cadence and take its QR screen down (`Enrol.refused()` reads
+    false again). Approving against a client started AFTERWARDS proves only the
+    server half — the hardware repro is a handset a parent approves while it
+    sits there showing its code.
+
+    Once the id is in the allowlist, "already enrolled" has to be an ANSWER
+    rather than an empty pending list ([ADMIN-ENROLL-ALREADY-DONE]): the
+    re-announce a page performs on a reload — and on the refresh right after a
+    successful approve — must say so instead of reading as an expiry.
 
     Returns True when every check held."""
     base = f"http://127.0.0.1:{ENROLL_PORT}"
@@ -199,24 +226,54 @@ def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id):
     check(spare_id not in json.loads(srv_cfg.read_text())["allowlist"],
           "the denied node never reaches the allowlist file")
 
-    status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{intruder_id}/approve", None, token)
-    check(status == 200, f"approve answers 200 (saw {status} {body})")
-    check(body.get("live") is True,
-          f"approve applied to the LIVE listener (note: {body.get('note')!r})")
-    check(intruder_id in json.loads(srv_cfg.read_text())["allowlist"],
-          "approve appended the node id to the server's iroh config allowlist")
-    _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
-    check(listing.get("pending") == [], "the approved row cleared")
-
-    # the point of the whole leg: the SAME key, the SAME server process.
-    r = subprocess.run(
-        [str(client_bin), "integ", "login-syncing", "http://wata.iroh"],
+    # THE CLIENT IS ALREADY RUNNING when the approval lands: start it, wait for
+    # it to report the refusal it is sitting on, and only then approve.
+    log_path = sdir / "redial-client.log"
+    log = log_path.open("w")
+    proc = subprocess.Popen(
+        [str(client_bin), "integ", "refused-then-admitted", "http://wata.iroh"],
         env={**env, "WATA_IROH_CONFIG": str(cli_cfg_dir)},
-        cwd=WATA, capture_output=True, text=True, timeout=60,
+        cwd=WATA, stdout=log, stderr=subprocess.STDOUT, text=True,
     )
-    if not check("INTEG PASS" in r.stdout, "the approved node is accepted with NO server restart"):
-        print("---- approved-client output ----")
-        print(r.stdout + r.stderr)
+    try:
+        if not check(wait_for_line(log_path, "INTEG REFUSED", proc, 60),
+                     "the running client reports the refusal it is sitting on"):
+            print(log_path.read_text(errors="replace"))
+            return False
+
+        status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{intruder_id}/approve", None, token)
+        check(status == 200, f"approve answers 200 (saw {status} {body})")
+        check(body.get("live") is True,
+              f"approve applied to the LIVE listener (note: {body.get('note')!r})")
+        check(intruder_id in json.loads(srv_cfg.read_text())["allowlist"],
+              "approve appended the node id to the server's iroh config allowlist")
+        _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
+        check(listing.get("pending") == [], "the approved row cleared")
+        check(intruder_id in (listing.get("allowlisted") or []),
+              "the listing reports the approved id as allowlisted (the page's 'already enrolled')")
+        _, again = api(base, "POST", "/_wata/v1/enroll",
+                       {"nodeId": intruder_id, "nonce": "QR01"})
+        check(again.get("allowlisted") is True and again.get("pending") is False,
+              f"re-announcing an enrolled id answers 'already enrolled', not an expiry (saw {again})")
+        _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
+        check(listing.get("pending") == [],
+              "and it leaves no pending row behind — there is nothing left to decide")
+
+        # the point of the whole leg: the SAME key, the SAME server process,
+        # and the SAME client process that was refused a moment ago.
+        try:
+            proc.wait(timeout=240)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        out = log_path.read_text(errors="replace")
+        if not check("INTEG PASS" in out,
+                     "the approved node is admitted with NO restart — of the server OR the client"):
+            print("---- approved-client output ----")
+            print(out)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        log.close()
     return good
 
 
@@ -399,7 +456,7 @@ def main():
             # ---- 7. enrolment (plan 0021 M B): the refused node announces,
             # an admin approves it, and it is admitted by the SAME process.
             if refused and not enrol_leg(env, client_bin, bad_cfg, srv_cfg,
-                                         intruder_id, spare_key["id"]):
+                                         intruder_id, spare_key["id"], sdir):
                 ok = False
         finally:
             proc.send_signal(signal.SIGTERM)

@@ -199,11 +199,35 @@ Built, and green:
   deployed with no secret; `irohnet.EnsureKey`), and the leg asserts the
   mint wrote a 0600 file, preserved every other field, and is
   idempotent. That id is refused (loudly, `not allowlisted`), announces,
-  is approved, and is accepted by the same process with no restart.
+  is approved, and is accepted with no restart of the server AND none of
+  the client: the refused `wata-fb` process is left running across the
+  approval and has to redial its way in.
 - `just admin-smoke` — the endpoint sequence the page performs for a
-  scanned fragment nobody announced, and the prefix negative: a node-id
-  prefix is refused as an announce, as a 63-character near-miss, and as
-  an approve target, leaving no row behind.
+  scanned fragment nobody announced, the already-enrolled answer, and the
+  prefix negative: a node-id prefix is refused as an announce, as a
+  63-character near-miss, and as an approve target, leaving no row behind.
+
+## What the first hardware enrolment found
+
+Both are fixed; the surfaces are described in the design docs
+(`docs/design/wata-server.md` "Device enrolment", `docs/design/wata-fb.md`
+"Two ways in").
+
+- **"Already enrolled" had no answer.** An enrolled device has no pending
+  row, and neither does one whose announce expired, so the page reported
+  the expiry over both — including right after a SUCCESSFUL approve, whose
+  fragment re-run re-announces and gets no row back. The server now marks
+  it: the announce answers `"allowlisted": true` (and records nothing),
+  and the admin listing carries the allowlisted ids beside the pending
+  rows, which is also what lets the typed code — a prefix — say "that
+  device is already enrolled".
+- **A refused client never redialed.** The approval was live and the app
+  sat on its QR until it was restarted. The latch was the transport's
+  refusal cooldown re-stamping itself on every fast local failure, so a
+  device that kept retrying never earned the fresh handshake the cooldown
+  was supposed to allow — trying harder kept it out. Only a real handshake
+  stamps it now, the cooldown is 5s, and a dial that gets through clears
+  the refusal so the QR screen yields on its own.
 - `just fb-ui-tests enroll` — four goldens: the not-allowlisted boot
   frame, the Settings -> Enroll row, the QR opened from it, and the
   close. The QR's module grid was checked against the encoder's own
