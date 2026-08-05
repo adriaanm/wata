@@ -38,6 +38,12 @@ object Router:
     else if isAdminPath(path, n) then Admin.route(r, m, body)
     else if isEnrollPath(path) then Enroll.announce(body)
     else if isDeviceLoginPath(path) then DeviceLogin.route(r)
+    // the command mailbox (devicecmd.scala): the two literals BEFORE the
+    // `{userId}` shapes, mirroring the mux's specificity order.
+    else if DeviceCmd.isPollPath(path) then DeviceCmd.poll(r)
+    else if DeviceCmd.isReportPath(path) then DeviceCmd.report(r, body)
+    else if DeviceCmd.isReadReportPath(path, n) then DeviceCmd.readReport(r)
+    else if DeviceCmd.isQueuePath(path, n) then DeviceCmd.queue(r, body)
     else if TestHooks.enabled && isTestFailPath(path) then TestHooks.route(body)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)

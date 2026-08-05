@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests amd64-smoke tunnel-smoke
+ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests amd64-smoke tunnel-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -76,6 +76,11 @@ persist:
 # accounts CRUD against a live server, /admin
 admin-smoke:
     tools/wata-admin-smoke.py
+
+# homeserver: the device-command mailbox — admin gate, take-once long-poll
+# delivery, latest-wins reports, in-memory-only across a restart
+cmd-smoke:
+    tools/wata-cmd-smoke.py
 
 # device client: native build+run, armv7 cross-cgo build
 fb-smoke:

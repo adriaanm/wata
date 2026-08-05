@@ -236,6 +236,14 @@ object Server:
     // node id, delivered as the trusted header, is exchanged for a session;
     // any request without that header (every TCP-path request) is 403.
     mux.handle("POST /_wata/v1/device-login", h)
+    // the device-command mailbox (devicecmd.scala, plan 0020): queueing and
+    // report-reading are ADMIN-gated; poll/report authenticate as the
+    // device's account (trusted node-id header, else bearer token). The two
+    // literal patterns win over `{userId}` by mux specificity.
+    mux.handle("POST /_wata/v1/cmd/{userId}", h)
+    mux.handle("GET /_wata/v1/cmd/poll", h)
+    mux.handle("POST /_wata/v1/cmd/report", h)
+    mux.handle("GET /_wata/v1/cmd/{userId}/report", h)
     mux.handle("GET /_wata/v1/admin/enroll", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/approve", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/deny", h)

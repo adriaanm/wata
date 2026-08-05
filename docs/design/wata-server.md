@@ -7,7 +7,7 @@ compiles to Go source — see the repo root for the toolchain) and built as an
 `wata-server/go.mod`). There is no JVM at runtime: `sgo build` emits Go, which
 is compiled and run like any other Go program.
 
-The source lives entirely in `wata-server/src/main/scala/` — 26 files, ~6000
+The source lives entirely in `wata-server/src/main/scala/` — 27 files, ~6000
 lines:
 
 | file | lines | role |
@@ -36,6 +36,7 @@ lines:
 | `pwhash.scala` | 222 | PBKDF2-HMAC-SHA256: the derivation, the stored-hash format, verification |
 | `adminapi.scala` | 321 | the admin surface: the admin gate, the ungated first-run `mode`/`setup` pair, `/_wata/v1/admin/…` status + accounts CRUD + enrolment routing |
 | `enroll.scala` | 296 | device enrolment: the unauthenticated announce, the bounded pending set, approve (allowlist file + live listener) / deny |
+| `devicecmd.scala` | 290 | the device-command mailbox: per-user queues + latest-wins reports behind their own mutex, the four routes, the long-poll wait — in-memory only, never journaled |
 | `osfile.scala` | 44 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove`/`Rename`/`Stat`, plus `io/fs.FileInfo` |
 | `gocrypto.scala` | 54 | app-owned facades: `hash.Hash`, `crypto/sha256`, `crypto/hmac`, base64 `StdEncoding` |
 | `webembed.scala` | 16 | app-owned `@go.bind` facade for `wata-server/adminui` (the `go:embed`ed admin page) |
@@ -73,8 +74,9 @@ matching strip** (`irohnet.StripNodeID`, wrapped in `Server.serveTcp` — the
 strip half is untagged Go, so it is real in stub builds too). A handler that
 sees the header may therefore treat it as proof of key possession; a
 request without it arrived where peer identity cannot be proven.
-Device-login authenticates on exactly this, and plan 0020's command mailbox
-is meant to next.
+Device-login authenticates on exactly this, and the command mailbox's device
+side accepts it as one of its two credentials (see "The device-command
+mailbox").
 
 ## Scope
 
@@ -470,6 +472,63 @@ inline-created account**, and the **same key** is accepted by the **same
 server process** and by the **same client process**, which is left running
 across the approval, redials its way in, and reaches an authenticated sync
 as the bound account through device-login, no credential anywhere.
+
+## The device-command mailbox
+
+`devicecmd.scala` (plan 0020). Commanding a handset from the admin side —
+wifi provisioning today, any future remote-admin op on the same seam — rides
+a small dialect surface:
+
+| route | who | what it does |
+|---|---|---|
+| `POST /_wata/v1/cmd/{userId}` | ADMIN | queue `{"op": …, …}` for that user's device; the whole body is the command, `op` mandatory, everything else rides along as the op's arguments |
+| `GET /_wata/v1/cmd/poll?wait=<s>` | the device | take every command queued for the calling account, oldest first; with `wait` (capped at 60 s) an empty queue parks until a command lands or the timer fires |
+| `POST /_wata/v1/cmd/report` | the device | store `{"op": …, "result": …}` as the latest report for (account, op), stamped with a monotonic `seq` |
+| `GET /_wata/v1/cmd/{userId}/report?op=…` | ADMIN | the latest report — `{op, seq, result}` — or 404 while none |
+
+**In-memory only, never journaled.** Commands are transient, and `wifi_join`
+carries a PSK — the journal is append-only with no compaction, and a secret
+that outlives its use in a file is a defect. A restart drops queues and
+reports; the tui retries. (The PSK still crosses the wire: iroh is
+encrypted, plain LAN HTTP is inside the trust boundary — recorded, not
+solved, here.)
+
+**Auth.** Queueing and report-reading require the ADMIN flag
+(`Admin.requireAdmin` — pushing wifi credentials at a handset is an admin
+act; the tui logs in as an admin account). The device side authenticates as
+its own account by either of two credentials (`DeviceCmd.deviceUser`):
+
+- the trusted `X-Wata-Node-Id` header — its presence proves the iroh accept
+  gate verified the peer, and `Bindings.userFor` turns that transport proof
+  into the account whose queue this is. The BINDING is required, not just
+  the proof: the mailbox is addressed per account, so an
+  admitted-but-unbound node is 403. Over TCP this path is unreachable by
+  construction (both edges strip inbound copies of the header), which is
+  the whole TCP-refusal property — pinned in the smoke as "a forged header
+  without a token answers the ordinary 401".
+- an ordinary bearer token. The device's poller runs inside a logged-in
+  client session (device-login already exchanged the node id for a token),
+  and the tui can play the device in a harness — both arrive with a token,
+  over either transport, inside the same trust boundary every
+  token-authenticated route already accepts.
+
+**Delivery is take-once** — a poll clears the account's queue, there is no
+ack; a command lost to a dying device surfaces as the admin's report poll
+timing out, and the tui re-queues. **Reports are latest-wins per (user,
+op)**; the `seq` stamp is what makes the admin's wait skew-free (read the
+current seq, queue, poll until it moves — no cross-machine clock
+comparison). The long-poll reuses the store's waiter discipline
+(close-signalled channel, register-then-recheck) under the mailbox's own
+mutex and waiter list, so a mailbox wake never touches `/sync` pollers.
+
+The two ops that ship — `wifi_scan` and `wifi_join` — are the device's
+business, not the server's: the mailbox validates only the envelope. The
+device half is wata-fb's command poller (wata-fb.md), the admin half the
+tui's `wifi`/`join` flow (wata-tui.md). `tools/wata-cmd-smoke.py`
+(`just cmd-smoke`, in `just ci`) is the gate: the admin gate on all four
+routes, take-once delivery in queue order, the long-poll wake, latest-wins
+reports and their seq, the TCP-refused header path, and the
+in-memory-only property across a restart.
 
 ## Request lifecycle
 
@@ -1178,6 +1237,7 @@ acceptance check for that run.
 - **`power.scala`** — `Power`: the `m.room.power_levels` authorization table (send/state/redact/invite/kick/ban).
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
 - **`bindings.scala`** — `Bindings` (the journaled nodeId→user map an approval writes) and `DeviceLogin` (`POST /_wata/v1/device-login`: the trusted-header check, then a fresh session for the bound account).
+- **`devicecmd.scala`** — `DeviceCmd`: the device-command mailbox (queue / poll / report / read-report), the admin gate on the admin half, the two-credential device auth, and its own waiter list for the poll's long-poll.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
 - **`osfile.scala`** — `go.osfile`/`go.fsx`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove` for the blob store, `Rename` for the accounts file's atomic write, `Stat` for the sizes the status panel reports) plus `io/fs.FileInfo`; perms passed as literals, errors dropped except `Stat`'s.
