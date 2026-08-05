@@ -46,7 +46,6 @@ expect quitarm 0
 # the server is up by now: the same session logs in and proceeds.
 conn live
 wait syncing 1 6000
-family @bob:localhost
 wait convs 1 900
 advance 30
 checkpoint boot-recovered

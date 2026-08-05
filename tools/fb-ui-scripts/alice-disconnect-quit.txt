@@ -6,7 +6,6 @@
 #
 # Driven by `wata-fb uitest` (uiscript.scala) — see that file's header.
 
-family @bob:localhost
 wait syncing 1 900
 wait convs 1 900
 

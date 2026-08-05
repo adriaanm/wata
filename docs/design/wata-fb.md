@@ -923,7 +923,7 @@ All of these are subcommands dispatched from `main.scala`:
 | `oggforeign <fixture.ogg>` | `oggforeign.scala` | decodes a pinned Ogg fixture produced by a different (foreign) encoder and prints a report — the host-side half of the `OPUS_BUFFER_TOO_SMALL` regression guard described above; the actual on-device Opus decode is exercised separately by `go-pkgs/audio/foreign_decode_test.go`. |
 | `fbdump` | `fbtest.scala:41` | draws the deterministic test pattern into an in-memory buffer and writes a PNG to stdout — the host-side "golden frame" check, no real display involved. |
 | `fbsmoke` | `fbtest.scala:49` | on-device only: opens the real framebuffer, draws the pattern, blinks LEDs, and echoes evdev key presses for ~20s — a manual hardware smoke test. |
-| `integ <scenario> <baseUrl>` | `integ.scala` | the live scenarios (login, two-user sync, voice send/receive, read receipts, ordering, redaction, download-byte-equality, the family room, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename reaching a syncing client, and the outbox surviving an outage plus a restart) run against a live `wata-server`, each driven through `wataclient`'s real `Runtime`/action queue, printing `INTEG PASS/FAIL <scenario>`. |
+| `integ <scenario> <baseUrl>` | `integ.scala` | the live scenarios (login, two-user sync, voice send/receive, read receipts, ordering, redaction, download-byte-equality, the server-minted family room, groups, the no-leave rule, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename reaching a syncing client, and the outbox surviving an outage plus a restart) run against a live `wata-server`, each driven through `wataclient`'s real `Runtime`/action queue, printing `INTEG PASS/FAIL <scenario>`. |
 | `--selftest [echo\|play\|all]` | `selftest.scala` | on-device audio-thread selftest described above. |
 | `login\|voicesend\|voiceplay\|audiosoak ...` | `devcli.scala` | scripted, non-interactive actions against a live server: provision/login a user, record-and-send a clip, sync-and-play the newest clip, or run a long record/send/sync/download/play soak loop (intended to run under `GODEBUG=gctrace=1` to watch GC pressure — `devcli.scala:105`). |
 | `sim [base] [user] [pass] [--once]` | `sim.scala` | the host simulator: the real frame loop drawn into a terminal — see below. |
@@ -1022,15 +1022,16 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Seventeen scripted scenarios, each a fresh server and a sequence of
+Nineteen scripted scenarios, each a fresh server and a sequence of
 one-user phases:
 
 | scenario | what it pins |
 |---|---|
-| `voice-alice-to-bob` | the send path end to end: alice bootstraps the family room, holds PTT and sends; bob runs, auto-joins, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
+| `voice-alice-to-bob` | the send path end to end: the server-minted family room is there from boot (plan 0018 — no bootstrap phase exists anywhere in this suite), alice holds PTT and sends; bob runs, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
 | `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, redacts one by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, the starred row, and the played marks. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
+| `group-list` | plan 0018's list rendering: the `group` directive mints "kids" through `POST /_wata/v1/group` (server-stamped, both members joined server-side), and the goldens pin the roster `[Family, kids, Bob]` and the opened group view titled by the stamp's name. |
 | `dm-roundtrip` | the canonical-DM flow (plan 0007) rendered: alice selects bob's ROOMLESS roster row, the first PTT send resolves the room through `POST /_wata/v1/dm`, bob receives with an unplayed badge, receipts, plays, replies, and alice's second session pins the reply and the badge clearing. Goldens the roster before/after, both conversation views, and the badge lifecycle. |
-| `family-three` | a third account (per-scenario `$WATA_USERS`): all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
+| `family-three` | a third account (per-scenario `$WATA_USERS`), all three boot-joined by the server: all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
 | `badges-across-restart` | unplayed counts across a restart: bob sees family=1 / DM=2, resumes with no credentials, and the badge frame is byte-identical; playing out the DM clears only its own badge. |
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED` over a row that now carries the unsent mark, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm, and the send's retry is the OUTBOX's, not a second press. |
 | `outbox-restart` | a message survives an outage and a restart (plan 0022): with every upload answering 500, the send is queued and the row marked; a SECOND PROCESS resumes from the config store, finds the queue on disk beside it, and — once the hook is disarmed — delivers it on the next sync round, clearing the mark. Goldens the marked row, the cleared row with its badge, and the message in the conversation. |
@@ -1052,9 +1053,10 @@ already satisfies. `idle` runs frames with the real per-frame pause
 switched off: a timer expiring needs simulated time, not network
 progress, which is what makes the screensaver's half-minute of blanking
 cost the suite nothing. A phase whose credentials are `-` cannot
-also run the out-of-band `family` bootstrap, since that logs in
-directly and a resumed run has no password: bootstrap in one phase,
-resume in a later one. `failnext <n>` arms the server's
+also run the out-of-band `group` directive, since that logs in
+directly and a resumed run has no password: mint in one phase, resume
+in a later one. (There is no family bootstrap at all: the server mints
+the family room at boot with every account joined, plan 0018.) `failnext <n>` arms the server's
 `WATA_TEST_HOOKS=1` fail-on-demand counter (wata-server's testhooks.scala;
 the harness starts a scenario's server with the env var only when the
 scenario opts in, and probes the hook route on EVERY server so the
@@ -1401,12 +1403,12 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `diag.scala` | 371 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test and the goroutine that runs it off the frame loop, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
 | `netexec.scala` | 59 | The `go.exec` facade over `os/exec` (`Command` at one and three arities, `Run`, `Output`) and the `go.netif` facade over `net` — what `Diag` runs system-menu's shell lines and its interface reads through. |
 | `devcli.scala` | 288 | Non-interactive scripted actions against a live server: `login`, `voicesend`, `voiceplay`, `audiosoak`, each printing a greppable `PASS`/`FAIL` line. |
-| `integ.scala` | 831 | Live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the family room, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename landing on a syncing client, and the outbox's queue/persist/drop/deliver cycle. |
+| `integ.scala` | 831 | Live-server integration scenarios exercising cross-user sync, voice send/receive, receipts, ordering, redaction, byte-exact download, the server-minted family room, groups (get-or-extend + server-side joins), the family no-leave rule, session resume, canonical DMs, backfill, offline retry, auth rejection, an admin rename landing on a syncing client, and the outbox's queue/persist/drop/deliver cycle. |
 | `ui.scala` | 442 | The `UiDevice` seam and its real `FbUiDevice` impl, plus the product entry point: opens the framebuffer, wires the sync/action/audio threads together via `sgo.supervised`, and runs `frameStep` at ~30fps. |
 | `gio.scala` | 129 | The window front end: `GioDevice` (present/LEDs/keys over the `go.gioshell` facade) and `Gio` (the forked frame loop, the packed-key decoding, the `--scale`/`--frames` flags). |
 | `gioshell.scala` | 63 | The `go.gioshell` facade for `go-pkgs/gioshell`. |
 | `sim.scala` | 352 | The interactive host front end: `SimAudio` (the mailbox-protocol audio stand-in), `SimTerm` (RGB565 → ANSI truecolor half-blocks), `SimDevice` (raw-stdin keys, inferred PTT release). |
-| `uiscript.scala` | 673 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band family-room bootstrap. |
+| `uiscript.scala` | 673 | The deterministic scripted driver: virtual frame clock, script lexer and directives, live probes, PNG checkpoint dumps, and the out-of-band group mint. |
 
 ## Known gaps / debt observed while reading
 

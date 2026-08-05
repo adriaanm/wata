@@ -8,7 +8,6 @@
 # family row carries the UNSENT mark. The flash is the moment; the mark is
 # the durable trace, and it is what the next phase inherits.
 
-family @bob:localhost
 
 wait syncing 1 900
 wait convs 1 900

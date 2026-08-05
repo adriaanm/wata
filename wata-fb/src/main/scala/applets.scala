@@ -575,11 +575,14 @@ object WataLogic:
    *  frame's snapshot. Nothing here reads an atomic, a clock or the network. */
   def bodyConversation(s: WataState, snap: StateSnapshot): View =
     convAt(snap, s.convContactIdx) match
-      case c: Some[Conversation] => convBodyView(s, c.value)
+      case c: Some[Conversation] => convBodyView(s, c.value, snap)
       case None                  => VText(3, 6, "No conversation", Color.midGray)
 
-  def convBodyView(s: WataState, conv: Conversation): View =
-    val header = if conv.hasContact then conv.contact.user.displayName else "Chat"
+  def convBodyView(s: WataState, conv: Conversation, snap: StateSnapshot): View =
+    // the same name the list row shows: the contact, the family name, or the
+    // group's stamp name — "Chat" only when nothing knows better.
+    var header = convName(snap, conv)
+    if header == "" || header == "?" then header = "Chat"
     val n = msgCountList(conv.messages)
     var kids: List[Keyed] = Nil
     if n == 0 then

@@ -1,0 +1,22 @@
+# alice: the conversation list with a GROUP in it (plan 0018). The group is
+# minted out of band through POST /_wata/v1/group (the `group` directive, as
+# alice); the server stamps it and joins both members, so the list settles to
+# [Family, kids, Bob(roomless)] with no UI action.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
+# directive vocabulary.
+
+group kids bob
+
+wait syncing 1 900
+wait convs 3 900
+advance 30
+checkpoint group-list
+
+# down to the group row and open it: an empty group conversation view,
+# named by the stamp.
+tap down
+advance 10
+tap enter
+advance 30
+checkpoint group-open

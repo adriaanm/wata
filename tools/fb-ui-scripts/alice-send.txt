@@ -1,19 +1,15 @@
-# alice: bootstrap the family room with bob, hold PTT, send a voice message,
+# alice: hold PTT into the server-minted family room, send a voice message,
 # then step through to the settings applet.
 #
 # Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
 # directive vocabulary. Every checkpoint is taken from a SETTLED state: wait for
 # the thing, advance past every animation, then dump.
 
-# out-of-band room setup: `#family:localhost` with bob invited.
-family @bob:localhost
-
 wait syncing 1 900
-# alice's only conversation in this phase is the family room: the roomless DM
-# rows come from the family's JOINED members, and bob has not run yet — his
-# invite is still outstanding. So this phase talks into the family room, and
-# bob picks the message up there once his own phase auto-joins him.
-wait convs 1 900
+# the server minted the family room at boot with BOTH accounts joined, so the
+# roster is [Family, Bob(roomless)] before anyone runs. The selected row is
+# Family; this phase talks into it and bob's phase picks the message up there.
+wait convs 2 900
 advance 30
 checkpoint alice-contacts
 

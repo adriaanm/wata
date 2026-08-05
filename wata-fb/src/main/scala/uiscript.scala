@@ -29,12 +29,12 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  SCRIPT LANGUAGE — one directive per line, `#` comments and blank lines
  *  ignored:
  *
- *    family <peer> [peer ...]  create the `#family:` room out of band (a
- *                              direct login + createRoom + invites, bypassing
- *                              the UI): the bootstrap that gives every user a
- *                              conversation to talk in — the first peer rides
- *                              the createRoom invite, the rest are invited
- *                              one by one
+ *    group <name> [member ...] mint a group out of band (a direct login +
+ *                              POST /_wata/v1/group as the phase user): the
+ *                              server stamps the room and joins the members —
+ *                              no script creates the FAMILY room, because the
+ *                              server mints that at boot with every account
+ *                              joined (plan 0018)
  *    advance <n>               run n frames
  *    idle <n>                  run n frames with NO real pause between them —
  *                              a timer expiring needs simulated time, not
@@ -230,8 +230,8 @@ object UiScript:
       err = expect(nth(ts, 1), num(nth(ts, 2), 1))
     else if cmd == "checkpoint" then
       err = checkpoint(nth(ts, 1), px)
-    else if cmd == "family" then
-      err = family(restOf(ts))
+    else if cmd == "group" then
+      err = group(nth(ts, 1), restOf(restOf(ts)))
     else if cmd == "failnext" then
       err = failNext(num(nth(ts, 1), 1))
     else if cmd == "conn" then
@@ -434,47 +434,39 @@ object UiScript:
       catch case e: sgo.GoError => bad = "cannot write " + path + ": " + e.message
     bad
 
-  // ---- the family-room bootstrap ---------------------------------------------------
+  // ---- the group bootstrap ---------------------------------------------------------
 
-  /** create `#family:<server>` with the peers invited, by direct Matrix HTTP
-   *  outside the client runtime — the same out-of-band setup `integ.scala`'s
-   *  family scenario does. Every user then has the family conversation AND,
-   *  through the family roster, a roomless DM row for each joined member,
-   *  which is what gives the scripted UI something to select and send into.
-   *  The first peer rides the createRoom invite; any further peers are
-   *  invited one by one into the created room. */
-  def family(peers: List[String]): String = peers match
-    case first :: rest => familyCreate(first, rest)
-    case Nil => "family wants a peer user id"
-
-  def familyCreate(peerUserId: String, rest: List[String]): String =
-    var err = ""
-    val anon = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
-    val lr = MatrixHttp.login(anon, userC.get(), passC.get())
-    if lr.status != 200 then err = "family: login status " + lr.status
+  /** mint a group through the dialect endpoint, as the phase user, by direct
+   *  Matrix HTTP outside the client runtime (the same out-of-band shape
+   *  `integ.scala`'s group scenario uses). The FAMILY room needs no script
+   *  step: the server mints it at boot with every account joined. */
+  def group(name: String, members: List[String]): String =
+    if name == "" then "group wants a name"
     else
-      val tok = Matrix.parseLogin(MatrixHttp.parseOrNull(lr.body)).accessToken
-      if tok == "" then err = "family: no access token"
+      var err = ""
+      val anon = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
+      val lr = MatrixHttp.login(anon, userC.get(), passC.get())
+      if lr.status != 200 then err = "group: login status " + lr.status
       else
-        val hs = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), tok)
-        val cr = MatrixHttp.createRoomWithAlias(hs, "family", peerUserId)
-        if cr.status != 200 then err = "family: createRoom status " + cr.status
-        else err = inviteRest(hs, MatrixHttp.parseRoomId(cr.body), rest)
-    err
+        val tok = Matrix.parseLogin(MatrixHttp.parseOrNull(lr.body)).accessToken
+        if tok == "" then err = "group: no access token"
+        else
+          val hs = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), tok)
+          val resp = MatrixHttp.request(hs, "POST", "/_wata/v1/group",
+            "application/json", groupBody(name, members))
+          if resp.status != 200 then err = "group: status " + resp.status
+      err
 
-  /** invite each remaining peer into the freshly created family room. */
-  def inviteRest(hs: Hs, roomId: String, peers: List[String]): String =
-    if roomId == "" then "family: createRoom returned no room_id"
-    else peers match
-      case h :: t => inviteStep(hs, roomId, h, t)
-      case Nil => ""
+  def groupBody(name: String, members: List[String]): String =
+    "{\"name\":\"" + name + "\",\"members\":[" + quoteJoin(members) + "]}"
 
-  def inviteStep(hs: Hs, roomId: String, peer: String, t: List[String]): String =
-    val resp = MatrixHttp.request(hs, "POST",
-      "/_matrix/client/v3/rooms/" + roomId + "/invite", "application/json",
-      "{\"user_id\":\"" + peer + "\"}")
-    if resp.status != 200 then "family: invite " + peer + " status " + resp.status
-    else inviteRest(hs, roomId, t)
+  def quoteJoin(xs: List[String]): String = xs match
+    case h :: t => quoteJoinStep(h, t)
+    case Nil  => ""
+
+  def quoteJoinStep(h: String, t: List[String]): String = t match
+    case _ :: _ => "\"" + h + "\"," + quoteJoin(t)
+    case Nil  => "\"" + h + "\""
 
   /** arm the server's fail-on-demand hook (testhooks.scala, wata-server;
    *  registered only under WATA_TEST_HOOKS=1): the next `n` media

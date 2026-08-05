@@ -16,7 +16,6 @@
 
 # out-of-band room setup (HTTP only, no frames), so the post-connect frames
 # have a conversation to render.
-family @bob:localhost
 
 # no interface, nothing connected: the earliest frame of a cold boot.
 conn off

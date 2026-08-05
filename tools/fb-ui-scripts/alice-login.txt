@@ -5,7 +5,6 @@
 # directive vocabulary.
 
 # out-of-band room setup, so the resumed run has a conversation to render.
-family @bob:localhost
 
 wait syncing 1 900
 wait convs 1 900

@@ -6,7 +6,6 @@
 # A room, so the roster the wata applet under this menu was built from is a
 # real one (the settings frames are what these checkpoints pin, but the walk
 # starts from a synced client).
-family @bob:localhost
 
 wait syncing 1 900
 wait convs 1 900

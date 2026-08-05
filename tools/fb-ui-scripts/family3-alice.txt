@@ -1,9 +1,7 @@
-# family-three, phase 1: alice bootstraps `#family:localhost` with BOTH bob
-# and charlie invited (charlie exists because this scenario's server boots
-# from a three-user $WATA_USERS file), then sends the first clip into the
-# family room. No checkpoints — later phases pin the pixels.
-
-family @bob:localhost @charlie:localhost
+# family-three, phase 1: the server minted the family room at boot with all
+# three accounts joined (charlie exists because this scenario's server boots
+# from a three-user $WATA_USERS file); alice sends the first clip into it.
+# No checkpoints — later phases pin the pixels.
 
 wait syncing 1 900
 wait convs 1 900

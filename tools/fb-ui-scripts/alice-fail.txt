@@ -5,7 +5,6 @@
 # retry after each failure exercises the same path succeeding. One phase,
 # alice only: bob's invite stays outstanding, the family room is a target.
 
-family @bob:localhost
 
 wait syncing 1 900
 wait convs 1 900

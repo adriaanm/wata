@@ -101,9 +101,17 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0018: a group in the conversation list — the script mints
+        # "kids" through the dialect endpoint and pins the list rendering
+        # (Family, then the group, then the roomless DM row).
+        "name": "group-list",
+        "phases": [
+            ("alice", "alice-group.txt"),
+        ],
+    },
+    {
         "name": "dm-roundtrip",
         "phases": [
-            ("bob", "bob-family-bootstrap.txt"),
             ("alice", "alice-dm-send.txt"),
             ("bob", "bob-dm-roundtrip.txt"),
             ("alice", "alice-dm-verify.txt"),
@@ -122,7 +130,6 @@ SCENARIOS = [
     {
         "name": "badges-across-restart",
         "phases": [
-            ("bob", "bob-family-bootstrap.txt"),
             ("alice", "alice-badges-send.txt"),
             ("bob", "bob-badges-view.txt"),
             ("-", "bob-badges-resume.txt"),
