@@ -19,6 +19,13 @@ import language.experimental.saferExceptions
     fav <conv#> <msg#>       TOGGLE the server's favorite marker on that
                              message (plan 0019): a favorited voice message is
                              kept past the media-retention window
+ *    wifi <conv#|user>        the wifi panel (plan 0020): queue a wifi_scan
+ *                             for that user's handset through the server's
+ *                             command mailbox, wait for its report, print the
+ *                             networks numbered
+ *    join <net#>              prompt for the PSK (the next stdin line), queue
+ *                             wifi_join for the last `wifi` target, wait for
+ *                             its report, say what happened
  *    raw <METHOD> <path> [json]   an authenticated request straight at the
  *                             server; prints status, length, and the body
  *    wait <ms>                poll snapshots for that long, printing each
@@ -35,24 +42,34 @@ import language.experimental.saferExceptions
  *
  *  Everything runs on the MAIN goroutine inside the caller's supervised scope,
  *  so the listing cells below are touched by exactly one goroutine. */
+/** one row of a handset's wifi scan report (plan 0020). */
+case class WifiNet(ssid: String, signal: Long, secured: Boolean)
+
 object Repl:
 
   // `val`-held Atomic cells (single-goroutine; the module-state idiom).
   private val convsC: sgo.Atomic[List[Conversation]] = sgo.atomic(Nil)
   private val playSeqC: sgo.Atomic[Int] = sgo.atomic(0)
+  // the wifi panel's numbering base: the last `wifi` target and the networks
+  // its scan printed — what `join <n>` indexes into.
+  private val wifiUserC: sgo.Atomic[String] = sgo.atomic("")
+  private val wifiNetsC: sgo.Atomic[List[WifiNet]] = sgo.atomic(Nil)
 
   private def JSON = "application/json"
 
-  /** read commands until stdin ends or `quit`. */
+  /** read commands until stdin ends or `quit`. The scanner threads into
+   *  `exec` because `join` reads its PSK as the NEXT stdin line — a prompt,
+   *  not an argument, so a shoulder-surfable secret never sits in a shell
+   *  history line beside the command that used it. */
   def loop(c: MatrixClient): Unit =
     val sc = go.bufio.newScanner(go.osx.Stdin)
     var going = true
     while going do
       if !sc.scan() then going = false
-      else going = exec(c, sc.text())
+      else going = exec(c, sc, sc.text())
 
   /** false only for `quit`. */
-  def exec(c: MatrixClient, line: String): Boolean =
+  def exec(c: MatrixClient, sc: go.bufio.Scanner, line: String): Boolean =
     val ts = Str.splitWs(line)
     val cmd = Str.nth(ts, 0)
     var going = true
@@ -63,6 +80,8 @@ object Repl:
     else if cmd == "play" then play(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
     else if cmd == "mark" then mark(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
     else if cmd == "fav" then fav(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
+    else if cmd == "wifi" then wifi(c, Str.nth(ts, 1))
+    else if cmd == "join" then join(c, sc, Str.num(Str.nth(ts, 1), 0))
     else if cmd == "raw" then raw(c, Str.nth(ts, 1), Str.nth(ts, 2), Str.restLine(line, 3))
     else if cmd == "wait" then waitMs(c, Str.num(Str.nth(ts, 1), 1000))
     else if cmd == "quit" then
@@ -280,6 +299,156 @@ object Repl:
     val resp = MatrixHttp.setFavorite(hsOf(c), cv.roomId, m.id)
     if resp.status != 200 then println("fav failed: " + resp.status + " " + resp.body)
     else println("fav " + m.id + " " + Str.boolStr(MatrixHttp.parseFavorite(resp.body)))
+
+  // ---- wifi (plan 0020) -----------------------------------------------------------
+
+  /** the wifi panel over the server's command mailbox: queue `wifi_scan` for
+   *  the target's handset, wait for the device's report, print the networks
+   *  numbered. `join <n>` then picks one. The wait is skew-free: each report
+   *  carries a server-stamped `seq`, so "the answer to THIS scan" is "the
+   *  seq moved past what it was before the queue" — no clock comparison
+   *  between two machines. */
+  def wifi(c: MatrixClient, who: String): Unit =
+    val target = wifiTarget(who)
+    if target == "" then println("? wifi wants <conv#|user>")
+    else wifiScan(c, target)
+
+  /** a conversation number resolves to its contact; anything else is a user
+   *  id (bare localpart or full mxid — the server normalizes). */
+  def wifiTarget(who: String): String =
+    val n = Str.num(who, 0)
+    if n > 0 then wifiTargetConv(n) else who
+
+  def wifiTargetConv(n: scala.Int): String = convAt(n) match
+    case cv: Some[Conversation] => contactOf(cv.value)
+    case None                   => ""
+
+  def wifiScan(c: MatrixClient, target: String): Unit =
+    val hs = hsOf(c)
+    val before = reportSeq(hs, target, "wifi_scan")
+    val q = MatrixHttp.request(hs, "POST", cmdPath(target), JSON, "{\"op\":\"wifi_scan\"}")
+    if q.status != 200 then println("? wifi queue failed: " + q.status + " " + q.body)
+    else
+      println("wifi scan queued " + target)
+      wifiScanWait(c, target, before)
+
+  def wifiScanWait(c: MatrixClient, target: String, before: Long): Unit =
+    val rep = awaitReport(c, target, "wifi_scan", before, 60000L)
+    if !WJson.boolField(rep, "arrived") then println("wifi scan timed out")
+    else wifiScanResult(target, WJson.objField(rep, "result"))
+
+  def wifiScanResult(target: String, result: Json): Unit =
+    if !WJson.boolField(result, "ok") then
+      println("wifi scan failed: " + WJson.strField(result, "detail", ""))
+    else
+      wifiUserC.set(target)
+      val nets = netsOf(WJson.getField(result, "networks"))
+      wifiNetsC.set(nets)
+      printNets(nets, 1)
+      if Str.lenNets(nets) == 0 then println("no networks")
+
+  def netsOf(j: Option[Json]): List[WifiNet] = j match
+    case s: Some[Json] => netItems(s.value)
+    case None => Nil
+
+  def netItems(j: Json): List[WifiNet] = j match
+    case a: JArr => netList(a.items, Nil)
+    case _       => Nil
+
+  def netList(xs: List[Json], acc: List[WifiNet]): List[WifiNet] = xs match
+    case h :: t => netList(t, netOf(h) :: acc)
+    case Nil  => reverseNets(acc, Nil)
+
+  def reverseNets(xs: List[WifiNet], acc: List[WifiNet]): List[WifiNet] = xs match
+    case h :: t => reverseNets(t, h :: acc)
+    case Nil  => acc
+
+  def netOf(j: Json): WifiNet =
+    WifiNet(WJson.strField(j, "ssid", ""), WJson.longField(j, "signal", 0L),
+      WJson.boolField(j, "secured"))
+
+  def printNets(ns: List[WifiNet], i: scala.Int): Unit = ns match
+    case h :: t =>
+      println("net " + i + " " + h.ssid + " signal=" + go.strconv.formatInt(h.signal, 10)
+        + " secured=" + Str.boolStr(h.secured))
+      printNets(t, i + 1)
+    case Nil => ()
+
+  /** `join <n>`: prompt for the PSK — the NEXT stdin line, empty for an open
+   *  network — then queue `wifi_join` for the last `wifi` target and wait
+   *  for the device's verdict. */
+  def join(c: MatrixClient, sc: go.bufio.Scanner, n: scala.Int): Unit =
+    val target = wifiUserC.get()
+    if target == "" then println("? no wifi scan yet")
+    else netAt(n) match
+      case s: Some[WifiNet] => joinNet(c, sc, target, s.value)
+      case None => println("? no network " + n)
+
+  def netAt(n: scala.Int): Option[WifiNet] =
+    if n < 1 then None else Str.nthOfNet(wifiNetsC.get(), n - 1)
+
+  def joinNet(c: MatrixClient, sc: go.bufio.Scanner, target: String, net: WifiNet): Unit =
+    println("psk?")
+    var psk = ""
+    if sc.scan() then psk = sc.text()
+    val hs = hsOf(c)
+    val before = reportSeq(hs, target, "wifi_join")
+    val body = joinBody(net.ssid, psk)
+    val q = MatrixHttp.request(hs, "POST", cmdPath(target), JSON, body)
+    if q.status != 200 then println("? wifi queue failed: " + q.status + " " + q.body)
+    else
+      println("wifi join queued " + net.ssid)
+      joinWait(c, target, before)
+
+  def joinBody(ssid: String, psk: String): String =
+    var fs: List[(String, Json)] = Nil
+    fs = ("psk", JStr(psk)) :: fs
+    fs = ("ssid", JStr(ssid)) :: fs
+    fs = ("op", JStr("wifi_join")) :: fs
+    Json.write(JObj(fs))
+
+  def joinWait(c: MatrixClient, target: String, before: Long): Unit =
+    val rep = awaitReport(c, target, "wifi_join", before, 90000L)
+    if !WJson.boolField(rep, "arrived") then println("wifi join timed out")
+    else joinResult(WJson.objField(rep, "result"))
+
+  def joinResult(result: Json): Unit =
+    val detail = WJson.strField(result, "detail", "")
+    if WJson.boolField(result, "ok") then println("wifi join ok " + detail)
+    else println("wifi join failed: " + detail)
+
+  // -- mailbox plumbing --
+
+  def cmdPath(target: String): String = "/_wata/v1/cmd/" + target
+
+  /** the current report's seq for (target, op); 0 when none has ever
+   *  arrived. */
+  def reportSeq(hs: Hs, target: String, op: String): Long =
+    val r = MatrixHttp.request(hs, "GET", cmdPath(target) + "/report?op=" + op, JSON, "")
+    if r.status != 200 then 0L
+    else WJson.longField(MatrixHttp.parseOrNull(r.body), "seq", 0L)
+
+  /** poll the report every 500 ms until its seq moves past `before` or the
+   *  deadline passes. Answers `{"arrived": bool, "result": …}`. */
+  def awaitReport(c: MatrixClient, target: String, op: String, before: Long, timeoutMs: Long): Json =
+    val hs = hsOf(c)
+    val deadline = c.clock.nowUnixMillis() + timeoutMs
+    var out: List[(String, Json)] = Nil
+    out = ("arrived", JBool(false)) :: out
+    var run = true
+    while run do
+      if c.clock.nowUnixMillis() >= deadline then run = false
+      else
+        val r = MatrixHttp.request(hs, "GET", cmdPath(target) + "/report?op=" + op, JSON, "")
+        val j = MatrixHttp.parseOrNull(r.body)
+        if r.status == 200 && WJson.longField(j, "seq", 0L) > before then
+          var fs: List[(String, Json)] = Nil
+          fs = ("result", WJson.objField(j, "result")) :: fs
+          fs = ("arrived", JBool(true)) :: fs
+          out = fs
+          run = false
+        else c.clock.sleepMs(500L)
+    JObj(out)
 
   // ---- raw ----------------------------------------------------------------------
 

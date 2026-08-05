@@ -38,6 +38,8 @@ Startup prints one line: `ready <userId>`, or `login failed`.
 | `play <conv#> <msg#>` | download the Ogg, write it under `$WATA_TUI_TMPDIR` (default `/tmp`), hand it to the player, then send the read receipt |
 | `mark <conv#> <msg#>` | the read receipt only |
 | `fav <conv#> <msg#>` | TOGGLE the server's `net.wata.favorite` marker on that message (plan 0019), so the media retention sweep spares it; prints `fav <eventId> <true\|false>` — the state the toggle left behind — or `fav failed: <status> <body>` |
+| `wifi <conv#\|user>` | the wifi panel (plan 0020): queue a `wifi_scan` for that user's handset through the server's command mailbox, wait for its report, print the networks numbered (`net <n> <ssid> signal=<dBm> secured=<bool>`) |
+| `join <net#>` | prompt `psk?` and read the PSK as the NEXT stdin line (empty for an open network — a prompt, not an argument, so the secret never sits in a shell history line), queue `wifi_join` for the last `wifi` target, wait for the device's verdict: `wifi join ok <detail>` / `wifi join failed: <detail>` |
 | `raw <METHOD> <path> [json]` | an authenticated request straight at the server; prints `raw <status> <length>` then the body |
 | `wait <ms>` | poll snapshots for that long, printing `change convs=<n> unplayed=<n>` whenever the summary moves, then `waited <ms>` |
 | `quit` | wind the client down and exit (`bye`) |
@@ -45,7 +47,13 @@ Startup prints one line: `ready <userId>`, or `login failed`.
 Every rejection is prefixed `?`. Numbered references index the **last
 `snap`**: `snap` stashes the conversation list it printed, and
 `msgs`/`play`/`mark`/`fav` index into that list and into a conversation's own
-message order — which is exactly the order `msgs` prints. So a script's
+message order — which is exactly the order `msgs` prints. The wifi pair has
+its own numbering base the same way: `wifi` stashes its target and the
+network list it printed, and `join` indexes that. The wait between queue and
+report is skew-free — each report carries a server-stamped `seq`
+(wata-server.md, "The device-command mailbox"), and the tui polls until the
+seq moves past what it read before queueing, so a stale report from an
+earlier scan can never satisfy a new one. So a script's
 numbers are stable against whatever arrives mid-run, and `play` does not
 depend on `msgs` having been run first. Ids are printed alongside for
 `raw` use. Mic capture is out of scope: `send` takes an Ogg file.
@@ -91,13 +99,21 @@ Three facade details worth knowing before editing `facades.scala`:
 
 `tools/tui-smoke.py` (`just tui-smoke`) boots one fresh `wata-server` on a
 random port — pid-matched through `lsof`, the harness-isolation pattern
-described in [wata-fb.md](wata-fb.md) — and runs two tui sessions against
+described in [wata-fb.md](wata-fb.md) — and runs three tui sessions against
 it in sequence, since `wataclient`'s runtime is one client per process:
 
 1. **bob** sends `go-pkgs/audio/testdata/tui-foreign.ogg` to
    `@alice:localhost` and quits.
 2. **alice** runs `wait / snap / msgs 2 / play 2 1 / wait / snap / raw GET
    whoami / quit`.
+3. **alice again**, for the wifi panel: while a harness thread plays bob's
+   handset over the command mailbox (long-polls `/cmd/poll` with bob's
+   token, answers the scan with canned networks and the join with a
+   verdict), the session runs `join`-before-scan (refused), `wifi
+   @bob:localhost`, a bad `join 9`, and `join 1` with the PSK on the next
+   line. Asserted: the numbered network lines match the canned report
+   verbatim, the verdict line, and — on the device side — that the join
+   command arrived with the ssid and the exact PSK.
 
 It asserts on the printed lines: the first `snap` shows the server-minted
 family room at index 1 and bob's DM at index 2 with `msgs=1 unplayed=1`, `msgs` lists one unplayed message from bob with an

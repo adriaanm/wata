@@ -69,6 +69,27 @@ object Str:
   def nthMsgStep(h: VoiceMessage, t: List[VoiceMessage], i: scala.Int): Option[VoiceMessage] =
     if i == 0 then Some(h) else nthOfMsg(t, i - 1)
 
+  def nthOfNet(xs: List[WifiNet], i: scala.Int): Option[WifiNet] =
+    if i < 0 then None
+    else xs match
+      case h :: t => nthNetStep(h, t, i)
+      case Nil    => None
+
+  def nthNetStep(h: WifiNet, t: List[WifiNet], i: scala.Int): Option[WifiNet] =
+    if i == 0 then Some(h) else nthOfNet(t, i - 1)
+
+  def lenNets(xs: List[WifiNet]): scala.Int =
+    var n = 0
+    var cur = xs
+    var going = true
+    while going do
+      cur match
+        case _ :: t =>
+          n = n + 1
+          cur = t
+        case Nil => going = false
+    n
+
   def restOf(ts: List[String]): List[String] = ts match
     case _ :: t => t
     case Nil    => Nil

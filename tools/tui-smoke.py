@@ -16,12 +16,14 @@ proves the receipt the play sent turned the message played server-side.
 Hermetic — no device, no network beyond localhost.
 """
 
+import json
 import os
 import random
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -44,6 +46,24 @@ cp "$1" "$TUI_SMOKE_PLAYED"
 BOB_SCRIPT = """send @alice:localhost {ogg}
 quit
 """
+
+# The wifi panel (plan 0020): a `join` before any scan is refused; the scan
+# lists the canned networks the fake device reports; a bad network number is
+# refused without eating the PSK line; the join prompts for the PSK on the
+# NEXT line and reports the device's verdict.
+WIFI_SCRIPT = """join 1
+wifi @bob:localhost
+join 9
+join 1
+secretpsk
+quit
+"""
+
+# What the fake device answers a wifi_scan with.
+WIFI_NETWORKS = [
+    {"ssid": "HomeNet", "signal": -45, "secured": True},
+    {"ssid": "CafeOpen", "signal": -70, "secured": False},
+]
 
 ALICE_SCRIPT = """send 9 /nonexistent-tui-smoke.ogg
 wait 3000
@@ -150,6 +170,46 @@ class Checks:
         self.ok(any(pred(ln) for ln in lines), what)
 
 
+# ---- the fake device (plan 0020) -----------------------------------------------
+def http_json(method, path, body=None, token=None, timeout=20):
+    data = json.dumps(body).encode() if body is not None else None
+    r = urllib.request.Request(BASE + path, data=data, method=method)
+    if token:
+        r.add_header("Authorization", "Bearer " + token)
+    if data is not None:
+        r.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+
+
+def device_player(token, seen, stop):
+    """Play bob's handset over plain HTTP: long-poll the command mailbox,
+    answer a wifi_scan with the canned networks and a wifi_join with a
+    success verdict, recording what arrived for the harness to assert."""
+    deadline = time.monotonic() + 90
+    while not stop.is_set() and time.monotonic() < deadline:
+        st, j = http_json("GET", "/_wata/v1/cmd/poll?wait=5", token=token, timeout=15)
+        if st != 200:
+            time.sleep(0.5)
+            continue
+        for cmd in j.get("cmds", []):
+            seen.append(cmd)
+            if cmd.get("op") == "wifi_scan":
+                http_json("POST", "/_wata/v1/cmd/report",
+                          {"op": "wifi_scan",
+                           "result": {"ok": True, "networks": WIFI_NETWORKS}},
+                          token=token)
+            elif cmd.get("op") == "wifi_join":
+                http_json("POST", "/_wata/v1/cmd/report",
+                          {"op": "wifi_join",
+                           "result": {"ok": True, "detail": "joined"}},
+                          token=token)
+                return
+
+
 def field(line, key):
     """`key=value` out of a printed line, or None."""
     for tok in line.split():
@@ -172,6 +232,20 @@ def run(tmp):
     try:
         bob = session(tui, "bob", BOB_SCRIPT.format(ogg=FIXTURE), env, tmp)
         alice = session(tui, "alice", ALICE_SCRIPT, env, tmp)
+        # the wifi panel: the harness plays bob's handset over the command
+        # mailbox while a third tui session (alice, the admin) drives the flow.
+        st, j = http_json("POST", "/_matrix/client/v3/login",
+                          {"type": "m.login.password", "user": "bob", "password": PASSWORD})
+        if st != 200:
+            return ["wifi: bob login failed"], bob, alice
+        seen, stop = [], threading.Event()
+        dev = threading.Thread(target=device_player, args=(j["access_token"], seen, stop))
+        dev.start()
+        try:
+            wifi = session(tui, "alice", WIFI_SCRIPT, env, tmp)
+        finally:
+            stop.set()
+            dev.join(timeout=30)
     finally:
         stop_server(proc, log)
 
@@ -244,7 +318,23 @@ def run(tmp):
            "alice: unreadable-file send did not fail through the catch "
            "(TRY-STMT-NESTED-THROWING-SHAPES downstream pin)")
     c.line(alice, lambda l: l == "bye", "alice: no `bye` (quit did not run)")
-    return c.failed, bob, alice
+
+    # ---- the wifi panel (plan 0020) --------------------------------------------
+    c.line(wifi, lambda l: l == "? no wifi scan yet", "wifi: join before scan not refused")
+    c.line(wifi, lambda l: l == "wifi scan queued @bob:localhost", "wifi: no scan-queued line")
+    nets = [l for l in wifi if l.startswith("net ")]
+    c.ok(nets == ["net 1 HomeNet signal=-45 secured=true",
+                  "net 2 CafeOpen signal=-70 secured=false"],
+         f"wifi: network listing differs from the fake device's report: {nets!r}")
+    c.line(wifi, lambda l: l == "? no network 9", "wifi: bad network number not refused")
+    c.line(wifi, lambda l: l == "psk?", "wifi: join never prompted for the PSK")
+    c.line(wifi, lambda l: l == "wifi join queued HomeNet", "wifi: no join-queued line")
+    c.line(wifi, lambda l: l == "wifi join ok joined", "wifi: no join verdict line")
+    joins = [cmd for cmd in seen if cmd.get("op") == "wifi_join"]
+    c.ok(len(joins) == 1 and joins[0].get("ssid") == "HomeNet"
+         and joins[0].get("psk") == "secretpsk",
+         f"wifi: the device did not receive the join command intact: {joins!r}")
+    return c.failed, bob, alice + wifi
 
 
 def main():
