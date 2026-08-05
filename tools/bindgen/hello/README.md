@@ -30,21 +30,16 @@ Running it is the owner's leg, below.
 
 ## What the owner has to do
 
-1. **Get the entitlement.** `com.apple.developer.push-to-talk` is
-   *restricted*: Apple grants it per team, on request, at
-   <https://developer.apple.com/contact/request/push-to-talk/>. Until that is
-   granted, no profile can carry it and the app will not launch — there is no
-   way around this and no simulator substitute (PushToTalk does not function
-   in the simulator).
-
-2. **Make an App ID and a profile.** In the developer portal, create the App
-   ID `com.adriaanm.watahello` (override with `WATA_BUNDLE_ID`) with the
+1. **Make an App ID and a profile.** Push to Talk is a standard Xcode
+   capability — no request form; enabling it on the App ID is enough. In the
+   developer portal, create the App ID
+   `com.adriaanm.watahello` (override with `WATA_BUNDLE_ID`) with the
    Push to Talk capability, then a development provisioning profile for it and
    the target device. Download it to
    `tools/bindgen/hello/WataHello.mobileprovision` (or point `WATA_PROFILE` at
    it). Team `YAURQZ84XZ` (override with `WATA_TEAM_ID`).
 
-3. **Build, sign, install** with the phone attached:
+2. **Build, sign, install** with the phone attached:
 
    ```
    just ptt-hello --install
@@ -60,7 +55,7 @@ Running it is the owner's leg, below.
    If `devicectl` is awkward, dragging `out/WataHello.app` onto the device in
    Xcode's Devices window does the same thing.
 
-4. **Run it.** On the phone:
+3. **Run it.** On the phone:
    - the app boots a channel manager at launch (the framework requires that);
    - **Join** → iOS shows the system push-to-talk banner for "wata hello";
    - **HOLD TO TALK** → the banner turns to transmitting, the log shows
