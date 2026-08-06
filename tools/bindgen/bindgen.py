@@ -109,6 +109,23 @@ class Enum:
 
 
 @dataclass
+class StructField:
+    name: str
+    type: dict
+    bitfield: bool = False
+    doc: str = ""
+
+
+@dataclass
+class Struct:
+    name: str  # the typedef name declarations use (NSRange)
+    record: str  # the record spelling clang desugars to (struct _NSRange)
+    fields: list[StructField] = field(default_factory=list)
+    union: bool = False
+    doc: str = ""
+
+
+@dataclass
 class Target:
     package: str
     out: str
@@ -119,6 +136,7 @@ class Target:
     protocols: list[str]
     enums: list[str]
     opaque: list[str]
+    structs: list[str] = field(default_factory=list)
     frameworks: list[str] = field(default_factory=list)
 
     @staticmethod
@@ -133,6 +151,7 @@ class Target:
             protocols=sorted(d.get("protocols", [])),
             enums=sorted(d.get("enums", [])),
             opaque=sorted(d.get("opaque", [])),
+            structs=sorted(d.get("structs", [])),
             frameworks=d.get("frameworks", []),
         )
 
@@ -363,6 +382,55 @@ def parse_protocol(node: dict, docs: DocIndex) -> Protocol:
     return proto
 
 
+def collect_struct(nodes: list[dict], name: str, docs: DocIndex) -> Struct | None:
+    """The record declaration behind the struct name declarations use.
+
+    Two shapes in the SDK headers: `typedef struct _NSRange {…} NSRange;`
+    (a named record; the typedef's underlying type spells its name) and
+    `typedef struct {…} NSOperatingSystemVersion;` (an anonymous record,
+    which clang dumps immediately before the typedef that names it).
+    A bare `struct name {…}` without a typedef is also accepted.
+    """
+    records: dict[str, dict] = {}
+    last_anon: dict | None = None
+    typedef: dict | None = None
+    for n in nodes:
+        if n.get("kind") == "RecordDecl" and n.get("completeDefinition"):
+            if n.get("name"):
+                records[n["name"]] = n
+            else:
+                last_anon = n
+        if n.get("kind") == "TypedefDecl" and n.get("name") == name and typedef is None:
+            under = (n.get("type") or {}).get("qualType", "")
+            if under.startswith(("struct ", "union ")):
+                typedef = n
+                record_node = records.get(under.split(" ", 1)[1]) or last_anon
+                record_spelling = under
+    if typedef is None:
+        record_node = records.get(name)
+        record_spelling = f"struct {name}"
+    if record_node is None:
+        return None
+    st = Struct(
+        name=name,
+        record=record_spelling,
+        union=record_node.get("tagUsed") == "union",
+        doc=_doc_for(typedef or record_node, docs) or _doc_for(record_node, docs),
+    )
+    for c in _children(record_node):
+        if c.get("kind") != "FieldDecl":
+            continue
+        st.fields.append(
+            StructField(
+                name=c.get("name") or "",
+                type=c.get("type", {}),
+                bitfield=bool(c.get("isBitfield")),
+                doc=_doc_for(c, docs),
+            )
+        )
+    return st
+
+
 def parse_enum(node: dict, docs: DocIndex) -> Enum:
     under = (node.get("fixedUnderlyingType") or {}).get("desugaredQualType", "int")
     enum = Enum(name=node["name"], underlying=under, doc=_doc_for(node, docs))
@@ -400,16 +468,26 @@ def _const_value(node: dict) -> int | None:
 def load(target: Target, umbrella: Path, docs: DocIndex) -> dict:
     """Run clang once per allowlisted name and build the IR."""
     sysroot = sdk_path(target.sdk)
-    ir: dict = {"package": target.package, "classes": [], "protocols": [], "enums": [], "opaque": []}
+    ir: dict = {
+        "package": target.package,
+        "classes": [], "protocols": [], "enums": [], "opaque": [], "structs": [],
+    }
     wanted = {
         "class": target.classes + target.opaque,
         "protocol": target.protocols,
         "enum": target.enums,
+        "struct": target.structs,
     }
     for kind, names in wanted.items():
         for name in names:
             nodes = ast_dump(umbrella, sysroot, target.triple, name)
             stamp_files(nodes)
+            if kind == "struct":
+                st = collect_struct(nodes, name, docs)
+                if st is None:
+                    raise SystemExit(f"bindgen: struct {name!r} not found in the {target.sdk} SDK")
+                ir["structs"].append(_asdict(st))
+                continue
             if kind == "class":
                 cls = collect_class(nodes, name, docs)
                 if not cls.methods and not cls.props and name not in target.opaque:
@@ -453,7 +531,7 @@ def _asdict(obj) -> dict:
     return dataclasses.asdict(obj)
 
 
-def _from_ir(ir: dict) -> tuple[list[Class], list[Protocol], list[Enum], list[Class]]:
+def _from_ir(ir: dict) -> tuple[list[Class], list[Protocol], list[Enum], list[Class], list[Struct]]:
     def cls(d: dict) -> Class:
         return Class(
             name=d["name"],
@@ -488,7 +566,17 @@ def _from_ir(ir: dict) -> tuple[list[Class], list[Protocol], list[Enum], list[Cl
         for d in ir.get("enums", [])
     ]
     opaque = [cls(d) for d in ir.get("opaque", [])]
-    return classes, protos, enums, opaque
+    structs = [
+        Struct(
+            name=d["name"],
+            record=d["record"],
+            union=d.get("union", False),
+            doc=d.get("doc", ""),
+            fields=[StructField(**f) for f in d.get("fields", [])],
+        )
+        for d in ir.get("structs", [])
+    ]
+    return classes, protos, enums, opaque, structs
 
 
 # ── the type mapper ───────────────────────────────────────────────────────────
@@ -539,6 +627,7 @@ class GoType:
     from_objc: str = "{}"  # Go expression template: ABI value -> wrapper value
     is_void: bool = False
     is_error_out: bool = False
+    is_struct: bool = False  # a C struct passed/returned by value
     needs_objcrt: bool = False
     block: "BlockType | None" = None
 
@@ -559,10 +648,21 @@ VOID = GoType(go="", abi="", is_void=True)
 
 
 class Mapper:
-    def __init__(self, classes: set[str], enums: dict[str, str], opaque: set[str]):
+    def __init__(
+        self,
+        classes: set[str],
+        enums: dict[str, str],
+        opaque: set[str],
+        structs: dict[str, str] | None = None,
+        bad_structs: dict[str, tuple[str, str]] | None = None,
+    ):
         self.classes = classes
         self.enums = enums  # name -> Go underlying type
         self.opaque = opaque
+        # Both keyed by every spelling a use site shows: the typedef name
+        # (NSRange) and the desugared record (struct _NSRange).
+        self.structs = structs or {}  # spelling -> Go type name
+        self.bad_structs = bad_structs or {}  # spelling -> (name, reason)
 
     def known_class(self, name: str) -> bool:
         return name in self.classes or name in self.opaque
@@ -596,6 +696,14 @@ class Mapper:
             return GoType(go="objc.Class", abi="objc.Class")
         if q == "SEL":
             return GoType(go="objc.SEL", abi="objc.SEL")
+
+        for cand in (q, d):
+            if cand in self.structs:
+                name = self.structs[cand]
+                return GoType(go=name, abi=name, is_struct=True)
+            if cand in self.bad_structs:
+                name, reason = self.bad_structs[cand]
+                raise Unmappable(f"struct {name} is refused: {reason}")
 
         for cand in (q, d, q.removeprefix("enum "), d.removeprefix("enum ")):
             if cand in self.enums:
@@ -635,6 +743,16 @@ class Mapper:
                 go, abi = PRIMITIVES[cand]
                 return GoType(go=go, abi=abi)
 
+        for cand in (d, q):
+            if cand.endswith("*"):
+                continue
+            if cand.startswith("struct "):
+                raise Unmappable(
+                    f"{cand} passed by value is not on the allowlist (add it to structs)"
+                )
+            if cand.startswith("union "):
+                raise Unmappable(f"{cand} passed by value (Go cannot express a C union)")
+
         raise Unmappable(f"no Go mapping for {t.get('qualType', '?')!r}")
 
     def wrapper(self, name: str) -> GoType:
@@ -650,6 +768,10 @@ class Mapper:
         params = [self.map(a, self_class=self_class) for a in args]
         if any(p.block for p in params) or ret.block:
             raise Unmappable("nested block")
+        if any(p.is_struct for p in params) or ret.is_struct:
+            # Both block directions ride on purego callbacks, which reject
+            # struct arguments; a by-value struct cannot cross a block yet.
+            raise Unmappable("struct in a block signature")
         go = "func(" + ", ".join(p.go for p in params) + ")"
         if not ret.is_void:
             go += " " + ret.go
@@ -683,9 +805,13 @@ RESERVED = {
 }
 
 
+def cap(name: str) -> str:
+    return name[:1].upper() + name[1:]
+
+
 def go_name(sel: str) -> str:
     parts = [p for p in sel.split(":") if p]
-    return "".join(p[:1].upper() + p[1:] for p in parts)
+    return "".join(cap(p) for p in parts)
 
 
 def sel_var(sel: str) -> str:
@@ -731,16 +857,90 @@ class Emitter:
     def __init__(self, ir: dict, provenance: str = ""):
         self.package = ir["package"]
         self.provenance = provenance
-        self.classes, self.protocols, self.enums, self.opaque = _from_ir(ir)
+        self.classes, self.protocols, self.enums, self.opaque, structs = _from_ir(ir)
         self.refusals: list[Refusal] = []
         self.selectors: dict[str, str] = {}
         self.blocks: dict[str, list[GoType]] = {}  # handle type name -> block params
         enum_types = {e.name: PRIMITIVES.get(e.underlying, ("int", "int"))[0] for e in self.enums}
+        good, bad = self._validate_structs(structs)
+        self.structs = good  # Go type name -> (Struct, [(go field, go type)])
         self.m = Mapper(
             classes={c.name for c in self.classes},
             enums=enum_types,
             opaque={c.name for c in self.opaque},
+            structs={sp: st.name for st, _ in good.values() for sp in (st.name, st.record)},
+            bad_structs={
+                sp: (st.name, reason) for st, reason in bad for sp in (st.name, st.record)
+            },
         )
+
+    def _validate_structs(
+        self, structs: list[Struct]
+    ) -> tuple[dict[str, tuple[Struct, list[tuple[str, str]]]], list[tuple[Struct, str]]]:
+        """Split the allowlisted structs into mappable and refused.
+
+        A struct maps when every field is a mappable primitive or another
+        allowlisted (and itself mappable) struct — that is what purego's
+        AAPCS64 classification can carry. Bitfields, unions and array fields
+        have no Go spelling with the same layout, so the struct is refused
+        once and every declaration using it points at that reason. Nesting
+        order is free (the allowlist is sorted), hence the fixed point.
+        """
+        good: dict[str, tuple[Struct, list[tuple[str, str]]]] = {}
+        bad: list[tuple[Struct, str]] = []
+        clean = Mapper(classes=set(), enums={}, opaque=set()).clean
+        spellings: dict[str, str] = {}  # use-site spelling -> Go type name
+
+        def field_type(f: StructField) -> str | None:
+            q = clean(f.type.get("qualType", ""))
+            d = clean(f.type.get("desugaredQualType", "") or q)
+            for cand in (q, d):
+                if cand in spellings:
+                    return spellings[cand]
+            for cand in (q, d, TYPEDEFS.get(q, ""), TYPEDEFS.get(d, "")):
+                if cand in PRIMITIVES and PRIMITIVES[cand][0]:
+                    return PRIMITIVES[cand][0]
+            return None
+
+        def hard_reason(st: Struct) -> str | None:
+            if st.union:
+                return "a C union has no Go spelling"
+            if not st.fields:
+                return "no fields (an opaque record cannot cross by value)"
+            for f in st.fields:
+                if f.bitfield:
+                    return f"field {f.name} is a bitfield"
+                if "[" in f.type.get("qualType", ""):
+                    return f"field {f.name} is an array"
+            return None
+
+        pending = list(structs)
+        while pending:
+            progress = False
+            still: list[Struct] = []
+            for st in pending:
+                reason = hard_reason(st)
+                if reason:
+                    bad.append((st, reason))
+                    progress = True
+                    continue
+                fields = [(cap(f.name), field_type(f)) for f in st.fields]
+                if all(t for _, t in fields):
+                    good[st.name] = (st, [(n, t) for n, t in fields if t])
+                    spellings[st.name] = st.name
+                    spellings[st.record] = st.name
+                    progress = True
+                else:
+                    still.append(st)
+            pending = still
+            if not progress:
+                break
+        for st in pending:  # fields that never resolved: name the first one
+            f = next(f for f in st.fields if field_type(f) is None)
+            bad.append((st, f"field {f.name} ({f.type.get('qualType', '?')}) has no Go mapping"))
+        for st, reason in bad:
+            self.refusals.append(Refusal(st.name, f"struct {st.name}", reason))
+        return good, bad
 
     # -- helpers
 
@@ -791,6 +991,30 @@ class Emitter:
                     body.append(f"\t{name} {e.name} = {val}")
                 body.append(")")
                 body.append("")
+        if not body:
+            return ""
+        return self.header([]) + "\n".join(body) + "\n"
+
+    # -- structs
+
+    def emit_structs(self) -> str:
+        """One Go struct per mappable allowlisted C struct, layout order kept.
+
+        The field order and widths are the ABI: purego classifies the Go
+        struct exactly as AAPCS64 classifies the C one, so the declaration
+        must mirror the record. No imports — these are plain value types.
+        """
+        body: list[str] = []
+        for name in sorted(self.structs):
+            st, fields = self.structs[name]
+            body += godoc(name, st.doc, f"is the C struct {st.name} ({st.record}), by value.")
+            body.append(f"type {name} struct {{")
+            for (goname, gotype), f in zip(fields, st.fields):
+                for ln in f.doc.splitlines():
+                    body.append(f"\t// {ln}")
+                body.append(f"\t{goname} {gotype}")
+            body.append("}")
+            body.append("")
         if not body:
             return ""
         return self.header([]) + "\n".join(body) + "\n"
@@ -1025,6 +1249,14 @@ class Emitter:
                     Refusal(proto.name, meth.sel, "callback returning a block")
                 )
                 continue
+            if any(t.is_struct for t in sig["types"]):
+                self.refusals.append(
+                    Refusal(
+                        proto.name, meth.sel,
+                        "struct in a callback signature (purego callbacks cannot carry structs)",
+                    )
+                )
+                continue
             try:
                 sig["params"] = [
                     (n, self.incoming_block(t) if t.block else t) for n, t in sig["params"]
@@ -1136,6 +1368,9 @@ class Emitter:
             files[proto.name.lower() + ".go"] = self.emit_protocol(proto)
         if self.blocks:
             files["blocks.go"] = self.emit_blocks()
+        structs = self.emit_structs()
+        if structs:
+            files["structs.go"] = structs
         enums = self.emit_enums()
         if enums:
             files["enums.go"] = enums

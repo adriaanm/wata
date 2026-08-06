@@ -33,7 +33,7 @@
           "kind": "ObjCPropertyDecl",
           "name": "frame",
           "wataDoc": "A struct-valued property is refused.",
-          "type": {"qualType": "CGRect"},
+          "type": {"qualType": "CGRect", "desugaredQualType": "struct CGRect"},
           "readonly": true
         },
         {

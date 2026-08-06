@@ -6,4 +6,4 @@ Every allowlisted declaration this generator could not express in Go,
 with the reason. This is the worklist: a refusal is either a mapping the
 generator should learn or a decl the allowlist should stop asking for.
 
-- `WFChannel` `@property frame` — no Go mapping for 'CGRect'
+- `WFChannel` `@property frame` — struct CGRect passed by value is not on the allowlist (add it to structs)

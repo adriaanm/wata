@@ -37,6 +37,14 @@ def ir_from_fixture(path: Path) -> dict:
         ir[key] = [B._asdict(B.collect_class(nodes, name, docs)) for name in names]
     ir["protocols"] = [B._asdict(B.parse_protocol(n, docs)) for n in spec.get("protocols", [])]
     ir["enums"] = [B._asdict(B.parse_enum(n, docs)) for n in spec.get("enums", [])]
+    struct_nodes = spec.get("structs", [])
+    B.stamp_files(struct_nodes)
+    ir["structs"] = []
+    for name in spec.get("structNames", []):
+        st = B.collect_struct(struct_nodes, name, docs)
+        if st is None:
+            raise AssertionError(f"fixture struct {name!r} not found")
+        ir["structs"].append(B._asdict(st))
     return ir
 
 
@@ -136,7 +144,38 @@ class Refusals(unittest.TestCase):
         self.assertEqual(B.handle_name(params), "IncomingBlockFloat64StringIDWFThing")
 
     def test_struct_property(self) -> None:
-        self.assertIn("CGRect", self.refusals("property")["@property frame"])
+        r = self.refusals("property")["@property frame"]
+        self.assertIn("CGRect", r)
+        self.assertIn("add it to structs", r)
+
+    def test_struct_by_value_is_mapped(self) -> None:
+        """An allowlisted struct becomes a Go struct used in signatures."""
+        r = self.refusals("struct_by_value")
+        self.assertNotIn("rangeOfSize:", r)
+        self.assertNotIn("boxAt:", r)
+        self.assertNotIn("@property contentSize", r)
+        files, _ = generate(FIXTURES / "struct_by_value.json")
+        structs = files["structs.go"]
+        self.assertIn("type WFRange struct {", structs)
+        self.assertIn("Location uint", structs)
+        self.assertIn("Width  float64", structs)
+        self.assertIn("Size  WFSize", structs)  # nested allowlisted struct
+        geom = files["wfgeom.go"]
+        self.assertIn("func (o WFGeom) RangeOfSize(size WFSize) WFRange {", geom)
+        self.assertIn("return objc.Send[WFRange](o.ID, selRangeOfSize, size)", geom)
+        self.assertIn("func (o WFGeom) SetContentSize(v WFSize) {", geom)
+
+    def test_struct_refused_shapes(self) -> None:
+        """Bitfields, unions and arrays refuse the struct once; every use
+        points at that reason; un-allowlisted structs name the fix."""
+        r = self.refusals("struct_by_value")
+        self.assertEqual(r["struct WFBits"], "field flags is a bitfield")
+        self.assertEqual(r["struct WFMix"], "a C union has no Go spelling")
+        self.assertEqual(r["struct WFArr"], "field m is an array")
+        self.assertEqual(r["applyBits:"], "struct WFBits is refused: field flags is a bitfield")
+        self.assertIn("add it to structs", r["applyRect:"])
+        self.assertEqual(r["enumerateRanges:"], "struct in a block signature")
+        self.assertIn("callback signature", r["geom:didResize:"])
 
     def test_unavailable_is_not_a_refusal(self) -> None:
         """NS_UNAVAILABLE says the method is not callable: skip it, silently."""
@@ -200,6 +239,24 @@ class TypeMapping(unittest.TestCase):
         self.assertEqual(t.go, "func(WFThing, error)")
         self.assertEqual(self.m.map("BOOL (^)(NSString *)").go, "func(string) bool")
         self.assertEqual(self.m.map("void (^)(void)").go, "func()")
+
+    def test_struct_spellings(self) -> None:
+        m = B.Mapper(
+            classes=set(), enums={}, opaque=set(),
+            structs={"NSRange": "NSRange", "struct _NSRange": "NSRange"},
+            bad_structs={"WFBits": ("WFBits", "field flags is a bitfield")},
+        )
+        for spelling in ("NSRange", "struct _NSRange"):
+            t = m.map(spelling)
+            self.assertEqual((t.go, t.abi, t.is_struct), ("NSRange", "NSRange", True))
+        got = m.map({"qualType": "NSRange", "desugaredQualType": "struct _NSRange"})
+        self.assertEqual(got.go, "NSRange")
+        with self.assertRaises(B.Unmappable) as caught:
+            m.map("WFBits")
+        self.assertIn("bitfield", str(caught.exception))
+        with self.assertRaises(B.Unmappable) as caught:
+            m.map({"qualType": "CGPoint", "desugaredQualType": "struct CGPoint"})
+        self.assertIn("add it to structs", str(caught.exception))
 
     def test_unknown_class_is_refused(self) -> None:
         with self.assertRaises(B.Unmappable) as caught:

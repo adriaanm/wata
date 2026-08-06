@@ -18,9 +18,15 @@ A fixture file is:
   "classes":   [ <ObjCInterfaceDecl node>, ... ],
   "opaque":    [ <ObjCInterfaceDecl node>, ... ],
   "protocols": [ <ObjCProtocolDecl node>, ... ],
-  "enums":     [ <EnumDecl node>, ... ]
+  "enums":     [ <EnumDecl node>, ... ],
+  "structNames": [ "WFRange", ... ],
+  "structs":   [ <RecordDecl / TypedefDecl nodes>, ... ]
 }
 ```
+
+`structs` holds the record and typedef nodes as clang dumps them (a named
+record, or an anonymous one immediately before its typedef); `structNames`
+is the allowlist the loader resolves against them.
 
 `wataDoc` on a node stands in for the doc comment the loader would have read
 out of the header, so fixtures need no headers. Doc extraction itself is tested

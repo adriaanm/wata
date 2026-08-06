@@ -73,6 +73,21 @@ wrapper, `NS_ENUM`/`NS_OPTIONS`→a named Go integer type with its constants, an
 blocks→Go funcs in both directions (`objc.NewBlock` on the way in, a Go call on
 the way out).
 
+**Structs by value.** A C struct named in the target's `structs` list becomes a
+Go struct in `structs.go` — fields in layout order, mapped with the primitive
+table (`NSUInteger`→`uint`, `CGFloat`→`float64`), nesting allowed between
+allowlisted structs — and is used directly in method and property signatures.
+No dispatch machinery is behind it: `objc.Send[T]` routes through
+`purego.RegisterFunc`, which classifies struct arguments and returns per
+AAPCS64 on arm64 (registers ≤ 16 bytes, the x8 indirect result above, larger
+arguments by reference), and `ID.Send`'s variadic arguments are flattened into
+fixed register-classified arguments — both proven against the live runtime in
+both return conventions (plan 0029). arm64-only, deliberately: amd64 would
+need the `objc_msgSend_stret` split. The loader resolves a name to its record
+whether the header says `typedef struct _NSRange {…} NSRange` or names an
+anonymous record only by its typedef, and the mapper recognizes both the
+typedef and the desugared record spelling at use sites.
+
 **Protocols are a struct of func fields**, not a Go interface:
 
 ```go
@@ -110,11 +125,14 @@ Anything the mapper cannot express is refused **per declaration, with a
 reason**, and written to `REFUSALS.md` beside the generated code. Refusing is
 not failing: the class still binds, the other methods still work. The refusal
 list is the worklist — each line is either a mapping the generator should learn
-or an allowlist entry that should go away. Shapes refused today: struct
-parameters and returns (`NSRange`, `NSOperatingSystemVersion`), raw pointer
-pairs (`void *` + length), enums not on the allowlist, classes not on the
-allowlist, nested blocks, a non-trailing `NSError **`, an incoming block with
-a non-void return, and a callback returning a block.
+or an allowlist entry that should go away. Shapes refused today: structs not
+on the allowlist ("add it to structs" — the message names the fix), structs
+with a bitfield, union or array field (refused once, per struct; every
+declaration using one points at that reason), a struct anywhere in a block
+signature or a protocol callback (purego callbacks cannot carry structs), raw
+pointer pairs (`void *` + length), enums not on the allowlist, classes not on
+the allowlist, nested blocks, a non-trailing `NSError **`, an incoming block
+with a non-void return, and a callback returning a block.
 
 `NS_UNAVAILABLE` and deprecated declarations are skipped silently: the SDK is
 saying "not callable", which is not a gap.

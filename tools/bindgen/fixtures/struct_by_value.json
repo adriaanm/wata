@@ -1,0 +1,212 @@
+{
+  "package": "fixture",
+  "structNames": ["WFRange", "WFSize", "WFBox", "WFBits", "WFMix", "WFArr"],
+  "structs": [
+    {
+      "kind": "RecordDecl",
+      "name": "_WFRange",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {"kind": "FieldDecl", "name": "location", "wataDoc": "Where the range starts.",
+         "type": {"qualType": "NSUInteger", "desugaredQualType": "unsigned long"}},
+        {"kind": "FieldDecl", "name": "length",
+         "type": {"qualType": "NSUInteger", "desugaredQualType": "unsigned long"}}
+      ]
+    },
+    {
+      "kind": "TypedefDecl", "name": "WFRange", "wataDoc": "A named record behind a typedef.",
+      "type": {"qualType": "struct _WFRange"}
+    },
+    {
+      "kind": "RecordDecl",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {"kind": "FieldDecl", "name": "width",
+         "type": {"qualType": "double"}},
+        {"kind": "FieldDecl", "name": "height",
+         "type": {"qualType": "double"}}
+      ]
+    },
+    {
+      "kind": "TypedefDecl", "name": "WFSize", "wataDoc": "An anonymous record named only by its typedef.",
+      "type": {"qualType": "struct WFSize"}
+    },
+    {
+      "kind": "RecordDecl",
+      "name": "_WFBox",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {"kind": "FieldDecl", "name": "size",
+         "type": {"qualType": "WFSize", "desugaredQualType": "struct WFSize"}},
+        {"kind": "FieldDecl", "name": "depth",
+         "type": {"qualType": "NSInteger", "desugaredQualType": "long"}}
+      ]
+    },
+    {
+      "kind": "TypedefDecl", "name": "WFBox",
+      "type": {"qualType": "struct _WFBox"}
+    },
+    {
+      "kind": "RecordDecl",
+      "name": "_WFBits",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {"kind": "FieldDecl", "name": "flags", "isBitfield": true,
+         "type": {"qualType": "unsigned int"}}
+      ]
+    },
+    {
+      "kind": "TypedefDecl", "name": "WFBits",
+      "type": {"qualType": "struct _WFBits"}
+    },
+    {
+      "kind": "RecordDecl",
+      "name": "_WFMix",
+      "tagUsed": "union",
+      "completeDefinition": true,
+      "inner": [
+        {"kind": "FieldDecl", "name": "i", "type": {"qualType": "int"}},
+        {"kind": "FieldDecl", "name": "f", "type": {"qualType": "float"}}
+      ]
+    },
+    {
+      "kind": "TypedefDecl", "name": "WFMix",
+      "type": {"qualType": "union _WFMix"}
+    },
+    {
+      "kind": "RecordDecl",
+      "name": "_WFArr",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {"kind": "FieldDecl", "name": "m",
+         "type": {"qualType": "double[4]"}}
+      ]
+    },
+    {
+      "kind": "TypedefDecl", "name": "WFArr",
+      "type": {"qualType": "struct _WFArr"}
+    }
+  ],
+  "classes": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "WFGeom",
+      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"},
+      "inner": [
+        {
+          "kind": "ObjCPropertyDecl",
+          "name": "contentSize",
+          "wataDoc": "A struct-valued read/write property.",
+          "type": {"qualType": "WFSize", "desugaredQualType": "struct WFSize"}
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "rangeOfSize:",
+          "wataDoc": "A struct argument and a struct return.",
+          "returnType": {"qualType": "WFRange", "desugaredQualType": "struct _WFRange"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "size",
+             "type": {"qualType": "WFSize", "desugaredQualType": "struct WFSize"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "boxAt:",
+          "wataDoc": "A nested struct returned by value (24 bytes: indirect on arm64).",
+          "returnType": {"qualType": "WFBox", "desugaredQualType": "struct _WFBox"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "index",
+             "type": {"qualType": "NSUInteger", "desugaredQualType": "unsigned long"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "applyBits:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "bits",
+             "type": {"qualType": "WFBits", "desugaredQualType": "struct _WFBits"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "applyMix:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "mix",
+             "type": {"qualType": "WFMix", "desugaredQualType": "union _WFMix"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "applyArr:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "arr",
+             "type": {"qualType": "WFArr", "desugaredQualType": "struct _WFArr"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "applyRect:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "rect",
+             "type": {"qualType": "CGRect", "desugaredQualType": "struct CGRect"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "enumerateRanges:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "block",
+             "type": {"qualType": "void (^)(WFRange)"}}
+          ]
+        }
+      ]
+    }
+  ],
+  "protocols": [
+    {
+      "kind": "ObjCProtocolDecl",
+      "name": "WFGeomDelegate",
+      "inner": [
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "geomDidFinish:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "geom",
+             "type": {"qualType": "WFGeom *", "desugaredQualType": "WFGeom *"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "geom:didResize:",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "geom",
+             "type": {"qualType": "WFGeom *", "desugaredQualType": "WFGeom *"}},
+            {"kind": "ParmVarDecl", "name": "size",
+             "type": {"qualType": "WFSize", "desugaredQualType": "struct WFSize"}}
+          ]
+        }
+      ]
+    }
+  ]
+}
