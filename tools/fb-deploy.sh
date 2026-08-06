@@ -14,11 +14,15 @@
 #   BQ268_HOST=192.168.1.9 tools/fb-deploy.sh fbsmoke
 #
 # IROH MODE (plan 0014). Setting BQ268_IROH_PEER provisions the device's iroh
-# config at /etc/wata/iroh.json — server node id, relay, and the admin base URL
-# the enrolment QR encodes — and runs this deploy against it:
+# config at /etc/wata/iroh.json — server node id and relay — and runs this
+# deploy against it:
 #
-#   BQ268_IROH_PEER=<server node id> WATA_ADMIN_URL=http://192.168.1.4:8008 \
-#     tools/fb-deploy.sh
+#   BQ268_IROH_PEER=<server node id> tools/fb-deploy.sh
+#
+# The enrolment QR then points at http://wata.local:8008, the Bonjour name the
+# server install publishes (server-service.py). Set WATA_ADMIN_URL to pin a
+# different admin base URL instead (it is baked into the config AND exported
+# for the run).
 #
 # The file carries NO secret: the handset mints its own key into it on first
 # boot (irohnet.EnsureKey) and only its public node id ever leaves. An existing
@@ -66,13 +70,17 @@ fi
 
 RUN_ENV=""
 if [ -n "${BQ268_IROH_PEER:-}" ]; then
-  : "${WATA_ADMIN_URL:?BQ268_IROH_PEER needs WATA_ADMIN_URL (the base URL the enrolment QR encodes)}"
   REMOTE_IROH="/etc/wata/iroh.json"
+  IROH_JSON="{\"peer\":\"$BQ268_IROH_PEER\",\"relay\":\"${BQ268_IROH_RELAY:-n0}\"}"
+  RUN_ENV="env WATA_IROH_CONFIG=$REMOTE_IROH"
+  if [ -n "${WATA_ADMIN_URL:-}" ]; then
+    IROH_JSON="{\"peer\":\"$BQ268_IROH_PEER\",\"relay\":\"${BQ268_IROH_RELAY:-n0}\",\"adminUrl\":\"$WATA_ADMIN_URL\"}"
+    RUN_ENV="$RUN_ENV WATA_ADMIN_URL=$WATA_ADMIN_URL"
+  fi
   echo "== fb-deploy: iroh mode -> $REMOTE_IROH (no secret; the device mints its own) =="
   ssh "root@$HOST" "mkdir -p /etc/wata; [ -f $REMOTE_IROH ] || printf '%s\n' \
-    '{\"peer\":\"$BQ268_IROH_PEER\",\"relay\":\"${BQ268_IROH_RELAY:-n0}\",\"adminUrl\":\"$WATA_ADMIN_URL\"}' \
+    '$IROH_JSON' \
     > $REMOTE_IROH; chmod 600 $REMOTE_IROH; cat $REMOTE_IROH"
-  RUN_ENV="env WATA_IROH_CONFIG=$REMOTE_IROH WATA_ADMIN_URL=$WATA_ADMIN_URL"
 fi
 
 echo "== fb-deploy: remount /dev/shm exec + run ($REMOTE $FB_CMD) =="

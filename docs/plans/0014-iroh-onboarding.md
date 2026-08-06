@@ -154,6 +154,19 @@ itself — see "The handset flip" below.
    admin interface announcing on the fragment, per the ruling above.
 4. **The typed-code fallback** — DONE, with a scope limit; see below.
 
+**The admin URL is a name, not an address** (owner ruling 2026-08-06,
+after a field run where the QR carried a stale LAN IP): the QR and the
+announce default to `http://wata.local:8008`, the Bonjour/mDNS name a
+real `server-service.py install` publishes by setting the server
+machine's `LocalHostName` (config-overridable: `--mdns-name`,
+`--no-mdns`). The iroh config's `adminUrl` and `WATA_ADMIN_URL` remain
+as overrides — that is how harnesses pin the goldened QR. A stable
+public name (wa-ta.net) is deferred to the hosted tier. Caveat recorded
+in `docs/design/wata-fb.md`: the handset's own resolver may not resolve
+`.local`, which costs only the device-side courtesy announce (the page
+announces from the scanned fragment); the typed-code fallback then needs
+an explicit `adminUrl` or an mDNS-resolving device network.
+
 ### The fallback, and what it can honestly do
 
 The QR screen also prints `<nonce>-<first 8 hex of the node id>`, and

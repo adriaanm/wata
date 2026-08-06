@@ -5,9 +5,9 @@ import language.experimental.saferExceptions
  *  `wataui` BODY (plan 0024) and a body reads its arguments and nothing else,
  *  so the reads live in `Enrol.snap` and the drawing in `Enrol.body`.
  *
- *  `side` is 0 when there is no block to draw, which covers both "nothing is
- *  configured" and "the encoder refused"; `err`/`sub1`/`sub2` are then the
- *  centered lines that say which. `code` is empty for the unconfigured cases —
+ *  `side` is 0 when there is no block to draw, which covers both "no device
+ *  key" and "the encoder refused"; `err`/`sub1`/`sub2` are then the
+ *  centered lines that say which. `code` is empty for the no-key case —
  *  a code that selects a pending row is worth nothing on a device with no
  *  identity to be pending. */
 case class EnrolSnap(
@@ -38,15 +38,16 @@ case class EnrolSnap(
  *    "peer":      "<the family server's node id>",   baked at deploy time
  *    "relay":     "n0",                              baked at deploy time
  *    "peerAddrs": ["192.168.1.4:52011"],             optional, LAN only
- *    "adminUrl":  "http://192.168.1.4:8008",         baked at deploy time
+ *    "adminUrl":  "http://192.168.1.4:8008",         optional override
  *    "secretKey": "<minted on first boot>"           NEVER deployed
  *  }
  *  }}}
  *
- *  `adminUrl` is the base URL of the admin interface, and it is CONFIG: the
- *  device cannot derive an address a parent's phone can reach (it does not
- *  know the server's LAN address, let alone a domain). `WATA_ADMIN_URL`
- *  overrides the field, which is how a harness pins it.
+ *  `adminUrl` overrides the admin interface's base URL; without it the device
+ *  uses `DEFAULT_ADMIN_URL` — `http://wata.local:8008`, the Bonjour/mDNS name
+ *  the server's install publishes. A concrete address baked at deploy time
+ *  goes stale with the server's DHCP lease, while the mDNS name follows the
+ *  machine. `WATA_ADMIN_URL` overrides both, which is how a harness pins it.
  *
  *  THE QR encodes `<adminUrl>/admin#enroll/<nodeId>/<nonce>`, so the stock
  *  camera app lands the parent on the admin page with this device's row
@@ -70,6 +71,12 @@ object Enrol:
   val ENV_IROH = "WATA_IROH_CONFIG"
   /** the admin base URL, overriding the config file's `adminUrl`. */
   val ENV_ADMIN_URL = "WATA_ADMIN_URL"
+  /** where the QR and the announce point when nothing overrides them: the
+   *  Bonjour/mDNS name the server's install publishes (owner ruling on plan
+   *  0014). A parent's phone resolves `.local` natively; the device's own
+   *  resolver may not, which costs only the courtesy announce — the page
+   *  announces for it. */
+  val DEFAULT_ADMIN_URL = "http://wata.local:8008"
 
   /** the announce is a courtesy, not a dependency: a short bound, one attempt,
    *  and a failure is a line on stdout. Blocking the frame loop for longer
@@ -201,9 +208,9 @@ object Enrol:
   // ---- the admin URL -----------------------------------------------------------------
 
   /** the admin interface's base URL: `WATA_ADMIN_URL`, else the iroh config's
-   *  `adminUrl`. Never derived — the device does not know an address a phone
-   *  on the family's wifi can reach, and guessing one produces a QR that leads
-   *  nowhere. Empty means the screen says so instead of encoding a dead link. */
+   *  `adminUrl`, else `DEFAULT_ADMIN_URL` — never a guessed concrete address,
+   *  and never empty, so the QR always encodes somewhere a phone on the
+   *  family's network can land. */
   def adminUrl(): String =
     if !urlTriedC.get() then
       urlTriedC.set(true)
@@ -211,8 +218,10 @@ object Enrol:
     urlC.get()
 
   def resolveUrl(): String =
-    val env = go.sys.getenv(ENV_ADMIN_URL)
-    if env != "" then env else WJson.strField(configJson(), "adminUrl", "")
+    var out = go.sys.getenv(ENV_ADMIN_URL)
+    if out == "" then out = WJson.strField(configJson(), "adminUrl", "")
+    if out == "" then out = DEFAULT_ADMIN_URL
+    out
 
   def configJson(): Json =
     var out: Json = JNull()
@@ -313,14 +322,11 @@ object Enrol:
     val u = url()
     if u == "" then unconfigured(hint) else encoded(u, hint)
 
-  /** nothing to encode: say WHICH half is missing, since the two have
-   *  completely different fixes (a deployment that forgot `adminUrl` vs a
-   *  config the device cannot mint a key into). */
+  /** nothing to encode — only reachable when the device could not mint its
+   *  key (the admin URL always resolves, `DEFAULT_ADMIN_URL` being the
+   *  floor). */
   def unconfigured(hint: String): EnrolSnap =
-    val none = Bytes.empty
-    if nodeId() == "" then
-      EnrolSnap(none, 0, "", hint, "no device key", WataLogic.clip(shortErr(), 26), "")
-    else EnrolSnap(none, 0, "", hint, "no admin URL", "set adminUrl in", "the iroh config")
+    EnrolSnap(Bytes.empty, 0, "", hint, "no device key", WataLogic.clip(shortErr(), 26), "")
 
   /** the encoder refusing the text (a payload too long for any version) is a
    *  deployment error — an admin URL nobody can scan — and the screen says so

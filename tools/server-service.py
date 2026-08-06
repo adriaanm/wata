@@ -50,6 +50,10 @@ WATA = Path(__file__).resolve().parent.parent
 STAGE_DIR = WATA / ".service-stage"
 LABEL = "net.wata.server"
 DEFAULT_LISTEN = ":8008"
+# The Bonjour name an install publishes: handsets' enrolment QRs default to
+# http://wata.local:8008 (wata-fb's DEFAULT_ADMIN_URL), so the machine serving
+# the admin page must answer that name. See ensure_mdns.
+DEFAULT_MDNS = "wata"
 
 # NOTE: no accounts file is written by an install. `WATA_USERS` names a path
 # that does not exist yet, which puts the server in SETUP MODE: browse
@@ -212,7 +216,33 @@ def latest_stage() -> tuple[str, Path]:
     return stage.name, stage
 
 
-def do_install(layout: Layout, iroh: bool):
+def local_hostname() -> str:
+    r = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def ensure_mdns(name: str):
+    """Publish the server's Bonjour/mDNS name — `<name>.local` — by setting the
+    machine's LocalHostName. mDNSResponder then answers the name with whatever
+    address the machine currently holds, which is what makes the handsets'
+    default enrolment URL (http://wata.local:8008) DHCP-proof where a baked IP
+    goes stale. `--mdns-name` overrides the name (handsets then need
+    WATA_ADMIN_URL / the iroh config's adminUrl pinned to match); `--no-mdns`
+    leaves the machine's name alone entirely."""
+    current = local_hostname()
+    if current == name:
+        print(f"server-service: Bonjour name already published — {name}.local")
+        return
+    r = subprocess.run(["scutil", "--set", "LocalHostName", name],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"server-service: scutil --set LocalHostName {name} failed: {r.stderr.strip()}")
+    print(f"server-service: Bonjour name published — {name}.local "
+          f"(LocalHostName was {current or 'unset'}); handsets' enrolment QRs "
+          f"resolve http://{name}.local:{DEFAULT_LISTEN.lstrip(':')} here")
+
+
+def do_install(layout: Layout, iroh: bool, mdns_name: str | None = None):
     if layout.real:
         require_real_root("install")
         if iroh:
@@ -271,8 +301,13 @@ def do_install(layout: Layout, iroh: bool):
         if r.returncode != 0:
             sys.exit(f"server-service: launchctl bootstrap failed: {r.stderr.strip()}")
         print(f"server-service: {LABEL} bootstrapped")
+        if mdns_name:
+            ensure_mdns(mdns_name)
+        else:
+            print("server-service: --no-mdns — Bonjour name left alone; handsets need "
+                  "WATA_ADMIN_URL or the iroh config's adminUrl pinned")
     else:
-        print("server-service: --root install — launchctl/newsyslog left untouched")
+        print("server-service: --root install — launchctl/newsyslog/Bonjour left untouched")
 
 
 def chown_layout(prefix: Path, user: str):
@@ -286,7 +321,8 @@ def chown_layout(prefix: Path, user: str):
 
 
 def cmd_install(args):
-    do_install(Layout(args.root), args.iroh)
+    do_install(Layout(args.root), args.iroh,
+               None if args.no_mdns else args.mdns_name)
 
 
 # ---- uninstall ------------------------------------------------------------------
@@ -331,6 +367,10 @@ def cmd_status(args):
     if layout.real:
         r = subprocess.run(["launchctl", "print", f"system/{LABEL}"], capture_output=True, text=True)
         print(f"launchd    {'loaded' if r.returncode == 0 else 'not loaded'}")
+        name = local_hostname()
+        note = "" if name == DEFAULT_MDNS else \
+            "  (handsets' default QR URL is http://wata.local:8008 — pin WATA_ADMIN_URL if this differs)"
+        print(f"bonjour    {name + '.local' if name else 'unset'}{note}")
     else:
         print("launchd    n/a (--root)")
     return 0
@@ -578,6 +618,10 @@ def main():
     sp = sub.add_parser("install",
                         help="install the newest staged release + launchd daemon (run package first)")
     sp.add_argument("--iroh", action="store_true")
+    sp.add_argument("--mdns-name", default=DEFAULT_MDNS,
+                    help=f"Bonjour name to publish via scutil LocalHostName (default: {DEFAULT_MDNS}; "
+                          "handsets' enrolment QRs default to http://wata.local:8008)")
+    sp.add_argument("--no-mdns", action="store_true", help="leave the machine's Bonjour name alone")
     add_root(sp)
 
     sp = sub.add_parser("uninstall", help="bootout + remove the daemon files")

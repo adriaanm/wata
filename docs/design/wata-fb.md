@@ -549,7 +549,7 @@ config that names the family's server and carries **no secret**:
   "peer":      "<the family server's node id>",
   "relay":     "n0",
   "peerAddrs": ["192.168.1.4:52011"],
-  "adminUrl":  "http://192.168.1.4:8008"
+  "adminUrl":  "http://192.168.1.4:8008"   // optional override
 }
 ```
 
@@ -562,10 +562,18 @@ written will not become writable between two frames, and retrying inside the
 render path would turn a broken deployment into a stuttering one. Nothing
 secret ever crosses the gap; enrolment is the approval of a public id.
 
-`adminUrl` is the base URL the enrolment QR encodes, overridden by
-`WATA_ADMIN_URL`. It is **config, never derived**: the device does not know an
-address a parent's phone can reach, and a guessed one produces a QR that leads
-nowhere. With neither set, the screen says so instead of encoding a dead link.
+The base URL the enrolment QR (and the courtesy announce) points at defaults
+to **`http://wata.local:8008`** — the Bonjour/mDNS name the server's install
+publishes (`tools/server-service.py`; owner ruling on plan 0014). A concrete
+LAN address baked at deploy time goes stale with the server's DHCP lease,
+while the mDNS name follows the machine, and it is the *parent's phone* that
+must resolve it — phones resolve `.local` natively. The iroh config's
+`adminUrl` overrides the default (an unusual deployment), and `WATA_ADMIN_URL`
+overrides both (how a harness pins the goldened QR). One caveat: the device's
+own Go resolver may not resolve `.local` (no mDNS client on the handset), so
+under the default the device-side announce can silently fail — which costs
+only the typed-code fallback; the admin page announces on the device's behalf
+when the parent scans the QR.
 
 **The QR screen** (`Enrol.snap` + `Enrol.body`, a `wataui` body — plan 0024)
 encodes `<adminUrl>/admin#enroll/<nodeId>/<nonce>` — about 106 bytes, which
@@ -1480,15 +1488,16 @@ it is not part of `just ci`.
 `BQ268_IROH_PEER` is set:
 
 ```
-BQ268_IROH_PEER=<the server's node id> WATA_ADMIN_URL=http://192.168.1.4:8008 \
-  tools/fb-deploy.sh
+BQ268_IROH_PEER=<the server's node id> tools/fb-deploy.sh
 ```
 
-It writes `/etc/wata/iroh.json` (`0600`) with `peer`, `relay`
-(`BQ268_IROH_RELAY`, default `n0`) and `adminUrl` — **never a secretKey**, which
-the handset mints itself on first boot — leaves an existing file alone so a
-re-deploy cannot re-mint an enrolled identity, and runs the transient
-`/dev/shm` binary with `WATA_IROH_CONFIG` pointing at it.
+It writes `/etc/wata/iroh.json` (`0600`) with `peer` and `relay`
+(`BQ268_IROH_RELAY`, default `n0`) — **never a secretKey**, which the handset
+mints itself on first boot — leaves an existing file alone so a re-deploy
+cannot re-mint an enrolled identity, and runs the transient `/dev/shm` binary
+with `WATA_IROH_CONFIG` pointing at it. The enrolment QR then points at the
+default `http://wata.local:8008`; setting `WATA_ADMIN_URL` bakes an explicit
+`adminUrl` into the config and exports it for the run instead.
 
 That is a RUN, not an install. **Making iroh the handset's permanent transport
 is a deliberate on-hardware step**, done once per device, and these are the
@@ -1500,8 +1509,9 @@ exact commands:
    `irohnet: node <id>` line it prints.
 2. Provision the device config once, exactly as fb-deploy does:
    `ssh root@bq268 'mkdir -p /etc/wata && cat > /etc/wata/iroh.json'` with
-   `{"peer":"<server node id>","relay":"n0","adminUrl":"http://<server>:8008"}`,
-   then `chmod 600 /etc/wata/iroh.json`.
+   `{"peer":"<server node id>","relay":"n0"}`,
+   then `chmod 600 /etc/wata/iroh.json`. (Add an `"adminUrl"` field only when
+   the QR must point somewhere other than `http://wata.local:8008`.)
 3. Make the durable launcher pass it: `/opt/wata/start.sh` becomes
    `exec env WATA_IROH_CONFIG=/etc/wata/iroh.json /opt/wata/wata-fb ui`. The
    file lives in the `bq268-alpine` rootfs overlay, so a change that should

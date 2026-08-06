@@ -369,7 +369,10 @@ already enrolled" instead of "no waiting device matches".
 
 **The QR contract.** The handset displays
 `<adminUrl>/admin#enroll/<nodeId>/<nonce>`, so a stock camera app lands the
-parent on the admin page with that row highlighted. The nonce is a
+parent on the admin page with that row highlighted. The base URL defaults to
+`http://wata.local:8008` — the Bonjour name the server install publishes (see
+"Running as a service") — so a QR outlives the server's DHCP lease; the iroh
+config's `adminUrl` / `WATA_ADMIN_URL` override it. The nonce is a
 human-visible correlator — "this is the handset in my hand" — not a secret and
 not a credential. The device half (first-boot keypair mint, the QR screen, the
 typed code) is in `docs/design/wata-fb.md`.
@@ -1168,6 +1171,16 @@ listen-address mechanism, so the wrapper supplies it positionally. The
 shipped `wata.env`): the daemon plist relies on the `:8008` default, while
 `selftest` exports `WATA_LISTEN` to grab a free port without touching any
 file.
+
+**The Bonjour name.** A real `install` also publishes `wata.local` — the name
+the handsets' enrolment QRs default to (`http://wata.local:8008`,
+`docs/design/wata-fb.md`) — by setting the machine's mDNS `LocalHostName` via
+`scutil`. mDNSResponder then answers the name with whatever address the
+machine currently holds, which is what makes the QR DHCP-proof where a baked
+IP goes stale. `--mdns-name <name>` publishes a different name (handsets then
+need `adminUrl`/`WATA_ADMIN_URL` pinned to match) and `--no-mdns` leaves the
+machine's name alone; `status` reports the current name and flags a mismatch.
+A `--root` install never touches it.
 
 Restart-on-failure is `KeepAlive.SuccessfulExit=false` plus
 `ThrottleInterval` 10 — a crash loop retries forever but slowly; a clean
