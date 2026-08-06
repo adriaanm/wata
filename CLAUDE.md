@@ -13,10 +13,12 @@ readable Go source; no JVM at runtime. Wata is a plain downstream consumer
 of the sgola compiler — nothing in this repo is about the compiler's own
 development, and nothing here asserts anything about the compiler.
 
-The original TypeScript/Zig implementations live **in-tree** (`src/`,
-`test/`, `specs/`, `spec/`, `docs/planning/`, `scripts/`) as the reference
-and conformance oracle until the Sgola apps replace them; treat that tree
-as read-only from this branch except when a plan says otherwise. Roadmap:
+The original reference implementations (the TypeScript server/clients in
+`src/`, the Zig fbclient in `src/fbclient/`, the Kotlin Android app in
+`src/android/`, the jest conformance suite in `test/`, plus `specs/`,
+`scripts/`, and the node tooling) live **in git history only** — the last
+commit containing them is `27a2f75`. Their decision records and specs stay
+in `docs/` (including `docs/planning/`). Roadmap:
 [docs/plans/0003-parity-and-beyond.md](docs/plans/0003-parity-and-beyond.md).
 
 ## Siblings, device, and what may be committed
@@ -30,7 +32,7 @@ ADSP, red/green LEDs).
 Those two facts — the `~/g/bq268` layout and the host alias `bq268` — are
 the **only** local-environment specifics allowed in committed files.
 No other absolute paths, machine names, IPs, or usernames; parameterize
-via env vars (`BQ268_HOST`, `SGOLA_HOME`, `WATA_TS_REPO`) with defaults
+via env vars (`BQ268_HOST`, `SGOLA_HOME`) with defaults
 derived from those two facts. Public repos cross-reference by URL.
 
 Work that belongs in a sibling repo is not done from here: hand off a spec
@@ -250,12 +252,13 @@ justfile just gives it a name.
 | [WATA-TODO.md](WATA-TODO.md) | known debt |
 | [docs/plans/](docs/plans/) | plan docs, newest last |
 
-Reference material from the original implementation (in-tree, read-only):
+Reference material from the original implementation. The docs are in-tree;
+the code lives in git history — check out `27a2f75` to read it:
 
-| doc | what it covers |
+| ref | what it covers |
 |-----|----------------|
 | [docs/wata-matrix-spec.md](docs/wata-matrix-spec.md) | the Matrix C-S subset wata needs — the server requirements doc |
 | [docs/family-model.md](docs/family-model.md) | the product model: contacts, family channel, trust boundary |
-| [docs/planning/connectivity-iroh.md](docs/planning/connectivity-iroh.md) | the iroh transport decision + sidecar spike (`src/iroh-tunnel/`) |
-| [test/integration/](test/integration/) | the 83-test jest conformance oracle (`just conformance`) |
-| [src/fbclient/](src/fbclient/) | the Zig device client — the behavioral spec for `wata-fb` |
+| [docs/planning/connectivity-iroh.md](docs/planning/connectivity-iroh.md) | the iroh transport decision + sidecar spike (`src/iroh-tunnel/` at `27a2f75`) |
+| `test/integration/` at `27a2f75` | the jest conformance oracle the server was verified against (84/84 green before removal) |
+| `src/fbclient/` at `27a2f75` | the Zig device client — the behavioral spec `wata-fb` was ported from |

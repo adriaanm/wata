@@ -142,13 +142,6 @@ tui-smoke:
 tui *ARGS:
     cd wata-tui && ../tools/sgo run {{ARGS}}
 
-# Needs node_modules installed at $WATA_TS_REPO (default: this repo — the TS
-# reference tree is in-tree since the graft).
-#
-# conformance oracle: the original TypeScript wata's jest suite, this server
-conformance:
-    bash tools/wata-tests.sh
-
 # throughput and concurrency benchmarks
 bench:
     bash tools/wata-bench.sh
@@ -225,20 +218,4 @@ phone-blit *FLAGS:
 #   just phone-spike --only bind      # one stage
 phone-spike *FLAGS:
     tools/phone-spike/spike.py {{FLAGS}}
-# --- iroh-tunnel (connectivity spike; see docs/planning/connectivity-iroh.md) ---
-
-# Server side: run next to the homeserver. Prints a stable NodeID to provision
-# into clients, then tunnels accepted iroh connections to the local homeserver.
-tunnel-listen *FLAGS:
-    cd src/iroh-tunnel && cargo run --release -- listen --to 127.0.0.1:8008 {{FLAGS}}
-
-# Client side: listen on 127.0.0.1:8009 and tunnel to the given homeserver NodeID.
-# Point the client's homeserver URL at http://127.0.0.1:8009. Usage:
-#   just tunnel-connect <NodeID>
-tunnel-connect node *FLAGS:
-    cd src/iroh-tunnel && cargo run --release -- connect --node {{node}} --local 127.0.0.1:8009 {{FLAGS}}
-
-# Build the tunnel binary (release).
-tunnel-build:
-    cd src/iroh-tunnel && cargo build --release
 
