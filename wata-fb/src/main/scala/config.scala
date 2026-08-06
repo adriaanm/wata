@@ -232,9 +232,20 @@ object FbConfig:
    *  homeserver matches, so a base override naturally forces a fresh login. */
   def resolve(base: String, user: String, pass: String, timeoutMs: scala.Int): ClientConfig =
     val stored = load()
-    val b = pick(base, stored.homeserver)
+    val b = pick(base, pick(stored.homeserver, irohBase()))
     val u = pick(user, stored.username)
     ClientConfig(b, u, pick(pass, ""), timeoutMs, storedFor(b, u, stored))
+
+  /** under the iroh transport the homeserver is a label, not an address —
+   *  every request rides the tunnel regardless. A factory-clean device (no
+   *  stored session, no arguments, only the iroh config) must still boot:
+   *  it comes up transport-refused, enrols, and device-login writes the
+   *  first real session. `http://wata.iroh` is the spelling tunnel-smoke's
+   *  credential-free client drives with. */
+  def irohBase(): String =
+    var out = ""
+    if go.sys.getenv(Enrol.ENV_IROH) != "" then out = "http://wata.iroh"
+    out
 
   /** the stored session is only offered to the run it belongs to — same
    *  homeserver AND same username. Naming a different user explicitly is
