@@ -1,4 +1,4 @@
-/** the sync-engine UNIT ORACLE: 18 scripted scenarios rendered as a
+/** the sync-engine UNIT ORACLE: 19 scripted scenarios rendered as a
  *  deterministic report. Each block resets the engine, drives it through
  *  `process()` with a hand-built sync response, and prints the resulting
  *  events/state/snapshot values. `tools/wataclient-sync.expected.txt` pins
@@ -99,14 +99,14 @@ object SyncOracle:
   def firstMessage(c: Conversation): VoiceMessage =
     c.messages match
       case m :: _ => m
-      case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false, false)
+      case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false, false, false)
 
   /** the i-th message of a conversation (a zero-value message when short). */
   def nthMessage(c: Conversation, i: Int): VoiceMessage = nthMsgIn(c.messages, i)
 
   def nthMsgIn(ms: List[VoiceMessage], i: Int): VoiceMessage = ms match
     case h :: t => nthMsgStep(h, t, i)
-    case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false, false)
+    case Nil  => VoiceMessage("", User("", ""), "", 0L, 0L, false, false, false)
 
   def nthMsgStep(h: VoiceMessage, t: List[VoiceMessage], i: Int): VoiceMessage =
     if i <= 0 then h else nthMsgIn(t, i - 1)
@@ -369,6 +369,9 @@ object SyncOracle:
     b.append("t12 played: convs "); b.append(convCount(ss12))
     b.append(" msgs "); b.append(msgCount(conv12))
     b.append(" is_played "); b.append(boolStr(firstMessage(conv12).isPlayed))
+    // alice's receipt on BOB's message also sets played_by_peer: she is not
+    // its sender, and any non-sender listener counts.
+    b.append(" peer "); b.append(boolStr(firstMessage(conv12).playedByPeer))
     b.append(" unplayed "); b.append(conv12.unplayedCount); b.append('\n')
 
     // -- 13. unplayed count reflects messages without receipts ------------------------------
@@ -480,5 +483,34 @@ object SyncOracle:
     b.append(" gname \""); b.append(nthConv(ss18, 1).name)
     b.append("\" gmsgs "); b.append(msgCount(nthConv(ss18, 1)))
     b.append(" gunplayed "); b.append(nthConv(ss18, 1).unplayedCount); b.append('\n')
+
+    // -- 19. played_by_peer is sender-relative: own receipt never sets it -----------------
+    // Alice's OWN message: her receipt (posted on viewing her own conversation)
+    // leaves played_by_peer false; bob's receipt flips it. is_played meanwhile
+    // tracks only alice's receipt — the two flags answer different questions.
+    SyncEngine.reset()
+    SyncEngine.setSelfUser("@alice:test")
+    val js19 = "{\"next_batch\":\"b19\"," +
+      "\"rooms\":{\"join\":{\"!dm1:test\":{" +
+      "\"state\":{\"events\":[" +
+      "{\"type\":\"net.wata.dm\",\"state_key\":\"\",\"content\":{\"members\":[\"@alice:test\",\"@bob:test\"]}}," +
+      "{\"type\":\"m.room.member\",\"state_key\":\"@bob:test\"," +
+      "\"content\":{\"membership\":\"join\",\"displayname\":\"Bob\"}}]}," +
+      "\"timeline\":{\"events\":[{\"type\":\"m.room.message\",\"event_id\":\"$mine\",\"sender\":\"@alice:test\"," +
+      "\"origin_server_ts\":1700000000000," +
+      "\"content\":{\"msgtype\":\"m.audio\",\"url\":\"mxc://test/mine\",\"info\":{\"duration\":1500}}}]}," +
+      "\"ephemeral\":{\"events\":[{\"type\":\"m.receipt\",\"content\":{" +
+      "\"$mine\":{\"m.read\":{\"@alice:test\":{\"ts\":1700000001000}}}}}]}}}}}"
+    SyncEngine.process(parse(js19))
+    val conv19a = nthConv(SyncEngine.buildSnapshot(), 0)
+    b.append("t19 own-receipt: played "); b.append(boolStr(firstMessage(conv19a).isPlayed))
+    b.append(" peer "); b.append(boolStr(firstMessage(conv19a).playedByPeer))
+    val js19b = "{\"next_batch\":\"b19b\",\"rooms\":{\"join\":{\"!dm1:test\":{" +
+      "\"ephemeral\":{\"events\":[{\"type\":\"m.receipt\",\"content\":{" +
+      "\"$mine\":{\"m.read\":{\"@bob:test\":{\"ts\":1700000002000}}}}}]}}}}}"
+    SyncEngine.process(parse(js19b))
+    val conv19b = nthConv(SyncEngine.buildSnapshot(), 0)
+    b.append(" peer-receipt: peer "); b.append(boolStr(firstMessage(conv19b).playedByPeer))
+    b.append(" played "); b.append(boolStr(firstMessage(conv19b).isPlayed)); b.append('\n')
 
     b.toString

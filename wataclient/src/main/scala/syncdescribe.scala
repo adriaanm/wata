@@ -308,6 +308,8 @@ object SyncDescribe:
           b.append(c.head.durationMs.toInt)
           b.append(" played=")
           b.append(boolStr(c.head.isPlayed))
+          b.append(" peer=")
+          b.append(boolStr(c.head.playedByPeer))
           b.append(" fav=")
           b.append(boolStr(c.head.isFavorite))
           b.append('\n')

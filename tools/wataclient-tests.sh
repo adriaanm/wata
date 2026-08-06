@@ -51,7 +51,7 @@ if ! diff <("$FB" synctest) tools/wataclient-sync.expected.txt; then
   echo "wataclient-tests FAIL: sync-engine unit oracle diverged from expected"
   exit 1
 fi
-echo "   ok — 18 sync-engine scenarios byte-match the pinned expectations"
+echo "   ok — 19 sync-engine scenarios byte-match the pinned expectations"
 
 echo "== wataclient-tests: 3/5 sync-engine fixture oracle (wata-fb syncfix) =="
 # FIX stays repo-RELATIVE: the fixture paths echo into the oracle transcript

@@ -64,7 +64,7 @@ snapshot self="Alice W"
 contact @bob:localhost "Bob"
 conv "!nGOe5qa3sT8i:localhost" family contact="" name="" unplayed=0
 conv "!nPIUYzBkS3QZ:localhost" dm contact="@bob:localhost" name="" unplayed=1
-  msg $MO2t_dfrrPIX:localhost from "Alice" durMs 2640 played=false fav=false
+  msg $MO2t_dfrrPIX:localhost from "Alice" durMs 2640 played=false peer=false fav=false
 family !nGOe5qa3sT8i:localhost "Family" members=@bob:localhost
 == fixture wataclient/test-fixtures/alice__03-incr.json
 ev receipt_updated !nPIUYzBkS3QZ:localhost $MO2t_dfrrPIX:localhost
@@ -82,7 +82,7 @@ snapshot self="Alice W"
 contact @bob:localhost "Bob"
 conv "!nGOe5qa3sT8i:localhost" family contact="" name="" unplayed=0
 conv "!nPIUYzBkS3QZ:localhost" dm contact="@bob:localhost" name="" unplayed=1
-  msg $MO2t_dfrrPIX:localhost from "Alice" durMs 2640 played=false fav=false
+  msg $MO2t_dfrrPIX:localhost from "Alice" durMs 2640 played=false peer=true fav=false
 family !nGOe5qa3sT8i:localhost "Family" members=@bob:localhost
 ==== user @bob:localhost
 == fixture wataclient/test-fixtures/bob__01-initial.json
@@ -137,5 +137,5 @@ snapshot self="Bob B"
 contact @alice:localhost "Alice"
 conv "!nGOe5qa3sT8i:localhost" family contact="" name="" unplayed=0
 conv "!nPIUYzBkS3QZ:localhost" dm contact="@alice:localhost" name="" unplayed=0
-  msg $MO2t_dfrrPIX:localhost from "Alice" durMs 2640 played=true fav=false
+  msg $MO2t_dfrrPIX:localhost from "Alice" durMs 2640 played=true peer=true fav=false
 family !nGOe5qa3sT8i:localhost "Family" members=@alice:localhost

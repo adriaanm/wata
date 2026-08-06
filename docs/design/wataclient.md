@@ -384,9 +384,18 @@ on a 26-column screen and means nothing to a family. The same fallback is
 used everywhere a person is named: the member table the sync engine builds,
 DM contacts, message senders, self, and the tui's `display()`.
 
-`is_played` on a `VoiceMessage` (`isPlayed`, `syncengine.scala:756`) is
+`is_played` on a `VoiceMessage` (`isPlayed`, `syncengine.scala`) is
 computed as "self's user id appears in that event's receipt user-id list"
 — read receipts, not a separate read-marker.
+
+`playedByPeer` (`SyncEngine.playedByPeer`) is the companion flag a SENT
+message's second check renders: "a user other than the message's SENDER
+appears in that event's receipt list". Sender-relative, not
+self-relative — in a DM the non-sender is the peer, in the family/group
+thread any listener counts, and the sender's own receipt (posted when
+they view their own conversation, which is what makes `isPlayed`
+trivially true for own messages) never sets it. Both flags derive from
+the same `ReceiptEntry` list; they just ask it different questions.
 
 `isFavorite` is the room's `favorites` membership for that event id — the
 server's `net.wata.favorite` marker (plan 0019), which keeps the message
@@ -401,10 +410,11 @@ next sync round, so a starred row means the server has recorded it.
 These are not part of the engine's runtime behavior; they exist purely to
 pin the engine's behavior deterministically in CI.
 
-- **`syncoracle.scala`** (`SyncOracle`) is a self-contained set of 16
+- **`syncoracle.scala`** (`SyncOracle`) is a self-contained set of 19
   scripted scenarios (hand-built JSON sync responses covering empty syncs,
   joins, voice messages, DM classification, family rooms, dedup,
-  redactions, read receipts, etc.), each driving `SyncEngine.process` /
+  redactions, read receipts — including the sender-relative
+  `playedByPeer` rule — etc.), each driving `SyncEngine.process` /
   `buildSnapshot` directly and rendering the resulting event names, room
   state, and snapshot into a deterministic text report (`report()`). This
   report is diffed against a pinned expected-output file in CI.
@@ -615,7 +625,7 @@ checked against a separately pinned expected-output file in CI.
 | `session.scala` | 41 | `Session` record (stored login credentials) and its JSON (de)serialization. |
 | `syncdescribe.scala` | 306 | Renders engine state/events/snapshot as deterministic text, driven by real captured fixtures. |
 | `syncengine.scala` | 932 | The sync engine: `process()` (ingest) and `buildSnapshot()` (derive UI view). The core of the module. |
-| `syncoracle.scala` | 430 | 16 hand-scripted sync scenarios rendered as a deterministic text report, for CI pinning. |
+| `syncoracle.scala` | 460 | 19 hand-scripted sync scenarios rendered as a deterministic text report, for CI pinning. |
 | `wjson.scala` | 61 | Defaulting JSON field-read helpers used everywhere a sync/response body is parsed. |
 
 ## Backfill: the `limited` timeline gap

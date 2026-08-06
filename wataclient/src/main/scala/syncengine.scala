@@ -776,6 +776,7 @@ object SyncEngine:
     val senderName = Names.displayOr(displayInRoom(r, vm.sender), vm.sender)
     VoiceMessage(vm.eventId, User(vm.sender, senderName), vm.mxcUrl,
       vm.durationMs, vm.timestamp, isPlayed(r, vm.eventId),
+      playedByPeer(r, vm.eventId, vm.sender),
       strListContains(r.favorites, vm.eventId))
 
   /** is_played: the SELF user's id appears in the event's receipt list. */
@@ -784,6 +785,19 @@ object SyncEngine:
     else findReceipt(r.receipts, eventId) match
       case s: Some[ReceiptEntry] => strListContains(s.value.userIds, selfUserId)
       case None => false
+
+  /** played_by_peer: some user OTHER than the message's sender appears in the
+   *  event's receipt list. Sender-relative, not self-relative: the sender's
+   *  own receipt (posted when they view their own conversation) must never
+   *  read as "somebody heard it". */
+  def playedByPeer(r: RoomState, eventId: String, sender: String): Boolean =
+    findReceipt(r.receipts, eventId) match
+      case s: Some[ReceiptEntry] => hasOtherUser(s.value.userIds, sender)
+      case None => false
+
+  def hasOtherUser(userIds: List[String], sender: String): Boolean = userIds match
+    case h :: t => if h == sender then hasOtherUser(t, sender) else true
+    case Nil  => false
 
   def unplayedOf(messages: List[VoiceMessage]): Int =
     var n = 0

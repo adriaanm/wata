@@ -72,6 +72,12 @@ case class VoiceMessage(
   durationMs: Long,
   timestamp: Long,     // origin_server_ts (epoch ms)
   isPlayed: Boolean,
+  // a user OTHER THAN THE SENDER has an m.read receipt for this event — in a
+  // DM that is the peer, in the family/group thread any listener counts. The
+  // sender's own receipt never sets it. This is what a sent message's second
+  // check renders: check one is the timeline itself (the server has it),
+  // check two is somebody having played it.
+  playedByPeer: Boolean,
   // the server's `net.wata.favorite` marker for this event id: a favorited
   // message is kept past the media-retention window (plan 0019). Anyone's
   // favorite counts — retention is server-global — so this is not per-user.

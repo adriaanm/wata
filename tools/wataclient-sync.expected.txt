@@ -13,10 +13,11 @@ t09 family: has true name Family members 1 first Bob
 t09 convs: n 2 c0 family c1 dm c1room ""
 t10 roomless: convs 3 c0 family charlie room "" type dm msgs 0
 t11 self-skip: contacts 0 family-members 0 convs 1
-t12 played: convs 1 msgs 1 is_played true unplayed 0
+t12 played: convs 1 msgs 1 is_played true peer true unplayed 0
 t13 unplayed: n 2 m0 false
 t14 redact: msgs 1 first $msg2
 t15 persist: batch batch_after name Survived bob Bob
 t16 favorite: m0 true m1 false cleared true
 t17 alias-retired: has false convs 0
 t18 group: convs 3 c0 family c1 group c2 dm gname "kids" gmsgs 1 gunplayed 1
+t19 own-receipt: played true peer false peer-receipt: peer true played true
