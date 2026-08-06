@@ -12,13 +12,21 @@ import language.experimental.saferExceptions
  *  but no password, it is prompted from stdin). Startup prints exactly one
  *  line: `ready <userId>`, or `login failed`.
  *
- *  THE PUMP (one shape, two drivers). Each frame: drain the shell's key
- *  queue into `WataLogic.handleInput`, tick `WataLogic.update`, read the
- *  handle's snapshot/connection, run `WataLogic.body` — the SAME body the
+ *  THE PUMP (one shape, two drivers). Each frame: drain the runtime's
+ *  `UiEvent` queue, drain the shell's key queue into `WataLogic.handleInput`,
+ *  drain the audio thread's `AudioEvt` queue, tick `WataLogic.update`, read
+ *  the handle's snapshot/connection, run `WataLogic.body` — the SAME body the
  *  device runs — then diff against the last tree (`Diff.diff`) and hand the
  *  script to the shell as one wire message. Bodies and the diff stay on the
  *  pump goroutine; only the shell's apply touches AppKit (wata-mac.md's
  *  threading rule — macshell routes it to the right thread per mode).
+ *
+ *  AUDIO (plan 0033): the client is `Runtime.makeWithAudio` and each driver
+ *  forks wata-fb's OWN audio thread (`audiothread.scala`, symlinked in) into
+ *  a supervised scope, over `go-pkgs/macaudio` — the `go.audio` facade here
+ *  differs from wata-fb's only in its `@go.bind` path, an identity
+ *  `just facade-check` enforces. Each mailbox is drained exactly once per
+ *  frame; two drains on one channel eat each other's events (plan 0009).
  *
  *   - WINDOWED (default): `macshell.start` on the main goroutine (macshell's
  *     init pinned it to the main OS thread), the pump forked, then
@@ -72,13 +80,18 @@ object Main:
 
 /** one pump step's carried state: the wata applet state, the last tree the
  *  shell was handed (None before the first frame), the two-step quit's arm
- *  window, the frame clock, and whether a confirmed quit edge fired. */
+ *  window, the frame clock, whether a confirmed quit edge fired, and the
+ *  outbox marks the runtime's last `EvOutbox` published (wata-fb keeps these
+ *  in cells; the mac pump carries them, and they feed BOTH the `FrameCtx` and
+ *  `WataLogic.body`). */
 case class PumpSt(
   wata: WataState,
   last: Option[View],
   quitArm: scala.Double,
   lastMs: Long,
-  quit: Boolean
+  quit: Boolean,
+  unsent: List[String],
+  undelivered: List[String]
 )
 
 object Pump:
@@ -87,13 +100,21 @@ object Pump:
   val QUIT_ARM_S: scala.Double = 2.0
 
   def initial(clock: Clock): PumpSt =
-    PumpSt(WataLogic.initial(), None, 0.0, clock.nowUnixMillis(), false)
+    PumpSt(WataLogic.initial(), None, 0.0, clock.nowUnixMillis(), false, Nil, Nil)
 
   // ---- the two drivers ------------------------------------------------------
 
+  /** the client both drivers run: `makeWithAudio`, so the action loop's
+   *  `AcPlay` reaches the audio thread this app forks. No stored outbox — the
+   *  mac logs in from the environment every run and persists nothing (see
+   *  `stubs.scala`'s `FbConfig`), so an in-memory queue is the honest shape;
+   *  `ClientHandle.startClient` is the seam that takes a caller-built client. */
+  def startAudioClient(cfg: ClientConfig): Handle =
+    ClientHandle.startClient(Runtime.makeWithAudio(cfg, MacCaps.httpDo(), MacCaps.clock()))
+
   def runWindowed(cfg: ClientConfig, scale: scala.Int): Unit =
     go.macshell.start(scale, "Wata")
-    val h = ClientHandle.start(cfg, MacCaps.httpDo(), MacCaps.clock())
+    val h = startAudioClient(cfg)
     sgo.spawn(() => Pump.windowedPump(h))
     go.macshell.runApp() // never returns; quit leaves through macshell.terminate
 
@@ -103,11 +124,19 @@ object Pump:
     if Runtime.waitForConnection(h.client, Syncing(), 30000L) then
       println("ready " + Runtime.lastAuth.userId)
     else println("login failed") // keep pumping: the boot screen shows the state
-    val evts = sgo.makeChan[AudioEvt](16)
-    var st = initial(clock)
-    while !st.quit do
-      val took = h.waitEvent(FRAME_MS)
-      st = frame(h, clock, evts, st, false)
+    sgo.supervised {
+      val evts = sgo.makeChan[AudioEvt](16)
+      // hoist the command Chan out of the fork — the body needs only the
+      // channel (a synchronizer), not the whole client record. Same idiom as
+      // wata-fb's `Ui.loopWithDevice`.
+      val audioCmds = h.client.audioCmds
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      var st = initial(clock)
+      while !st.quit do
+        val took = h.waitEvent(FRAME_MS)
+        st = frame(h, clock, evts, st, false)
+      audioCmds.send(AcQuit()) // the fork's only exit; the scope joins it
+    }
     h.stop()
     val joined = ClientHandle.join(h, 5000L)
     go.macshell.terminate()
@@ -115,10 +144,16 @@ object Pump:
   def runHeadless(cfg: ClientConfig, scale: scala.Int, sc: go.bufio.Scanner): Unit =
     go.macshell.startHeadless(scale)
     NetStatus.reset()
-    val h = ClientHandle.start(cfg, MacCaps.httpDo(), MacCaps.clock())
+    val h = startAudioClient(cfg)
     if Runtime.waitForConnection(h.client, Syncing(), 30000L) then
       println("ready " + Runtime.lastAuth.userId)
-      repl(h, sc)
+      sgo.supervised {
+        val evts = sgo.makeChan[AudioEvt](16)
+        val audioCmds = h.client.audioCmds
+        sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+        repl(h, sc, evts)
+        audioCmds.send(AcQuit())
+      }
     else println("login failed")
     h.stop()
     val joined = ClientHandle.join(h, 5000L)
@@ -126,9 +161,8 @@ object Pump:
 
   // ---- the headless command loop -------------------------------------------
 
-  def repl(h: Handle, sc: go.bufio.Scanner): Unit =
+  def repl(h: Handle, sc: go.bufio.Scanner, evts: sgo.Chan[AudioEvt]): Unit =
     val clock = MacCaps.clock()
-    val evts = sgo.makeChan[AudioEvt](16)
     var st = initial(clock)
     var going = true
     while going do
@@ -194,26 +228,88 @@ object Pump:
 
   // ---- one frame ------------------------------------------------------------
 
-  /** one frame: keys -> input, tick, body, diff, apply. `verbose` prints the
-   *  applied script (headless). */
+  /** one frame: UI events -> flash/outbox, keys -> input, audio events, tick,
+   *  body, diff, apply. `verbose` prints the applied script (headless). */
   def frame(h: Handle, clock: Clock, evts: sgo.Chan[AudioEvt], st0: PumpSt, verbose: Boolean): PumpSt =
     val nowMs = clock.nowUnixMillis()
     val dt = clampDt(nowMs - st0.lastMs).toDouble / 1000.0
+    var st = PumpSt(st0.wata, st0.last, st0.quitArm, nowMs, st0.quit, st0.unsent, st0.undelivered)
+    st = drainUiEvents(h, st)
     val snap = h.snapshot()
     val conn = h.connection()
     val net = NetStatus.poll(conn)
     val ctx = FrameCtx(snap, conn, net, h.client, h.client.audioCmds, evts,
-      Nil, Nil, st0.quitArm > 0.0)
-    var st = PumpSt(st0.wata, st0.last, st0.quitArm, nowMs, st0.quit)
+      st.unsent, st.undelivered, st.quitArm > 0.0)
     st = applyKeys(st, ctx)
+    st = drainAudio(st, ctx)
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
-      st.lastMs, st.quit)
-    val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0, Nil, Nil,
+      st.lastMs, st.quit, st.unsent, st.undelivered)
+    val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
+      st.unsent, st.undelivered,
       NetStatus.everLive(), FbCaps.transportUnavailable(), None, false)
     st.last match
       case old: Some[View] => patchTo(old.value, v, verbose)
       case None            => setTree(v, verbose)
-    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit)
+    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered)
+
+  // ---- the two mailbox drains ------------------------------------------------
+
+  /** the runtime's `UiEvent` queue, ONCE per frame. `EvConn` needs nothing
+   *  here — `h.connection()` already carries it, and the mac has no LEDs and
+   *  no config store to react with; `EvSnapshot` is picked up by
+   *  `h.snapshot()`. What is left is the send/play flash and the outbox
+   *  marks, which wata-fb keeps in cells and this pump carries in `PumpSt`. */
+  def drainUiEvents(h: Handle, st0: PumpSt): PumpSt =
+    var st = st0
+    var run = true
+    while run do
+      Runtime.pollEvent(h.client) match
+        case e: Some[UiEvent] => st = onUiEvent(st, e.value)
+        case None => run = false
+    st
+
+  def onUiEvent(st: PumpSt, e: UiEvent): PumpSt = e match
+    case _: EvSendComplete =>
+      withWata(st, WataLogic.notifySend(st.wata, false))
+    case _: EvSendFailed =>
+      withWata(st, WataLogic.notifySend(st.wata, true))
+    case pe: EvPlaybackError =>
+      withWata(st, WataLogic.notifyPlayError(st.wata, pe.fetchFailed))
+    case ob: EvOutbox =>
+      PumpSt(st.wata, st.last, st.quitArm, st.lastMs, st.quit, ob.unsent, ob.undelivered)
+    case _ => st // EvConn -> h.connection(), EvSnapshot -> h.snapshot()
+
+  /** the audio thread's `AudioEvt` queue, ONCE per frame, before the applet
+   *  tick — plan 0009: two drains on one channel eat each other's events, so
+   *  there is exactly this one. wata-fb's `Shell.routeAudio` splits echo
+   *  events off to the settings applet; nothing here drives the echo test
+   *  (the settings applet compiles in but is never active), so the four
+   *  `AeEcho*` events — the set `Shell.isEchoEvt` names — are dropped, and
+   *  everything else goes to `WataLogic.onAudioEvent`. */
+  def drainAudio(st0: PumpSt, ctx: FrameCtx): PumpSt =
+    var st = st0
+    var run = true
+    while run do
+      ctx.audioEvts.tryReceive() match
+        case e: Some[AudioEvt] => st = onAudioEvt(st, e.value, ctx)
+        case None => run = false
+    st
+
+  def onAudioEvt(st: PumpSt, e: AudioEvt, ctx: FrameCtx): PumpSt =
+    if isEchoEvt(e) then st
+    else withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
+
+  /** the same predicate `Shell.isEchoEvt` names, restated here because the
+   *  mac's `Shell` stub carries only the key predicates. */
+  def isEchoEvt(e: AudioEvt): Boolean = e match
+    case _: AeEchoRecording => true
+    case _: AeEchoPlaying   => true
+    case _: AeEchoDone      => true
+    case _: AeEchoError     => true
+    case _                  => false
+
+  def withWata(st: PumpSt, w: WataState): PumpSt =
+    PumpSt(w, st.last, st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered)
 
   def clampDt(raw: Long): Long =
     if raw < 0L then 0L else if raw > 1000L then 1000L else raw
@@ -290,7 +386,8 @@ object Pump:
     var arm = st.quitArm
     if edge && arm > 0.0 then quit = true
     if edge then arm = QUIT_ARM_S
-    PumpSt(WataLogic.handleInput(st.wata, ev.key, ev.state, ctx), st.last, arm, st.lastMs, quit)
+    PumpSt(WataLogic.handleInput(st.wata, ev.key, ev.state, ctx), st.last, arm, st.lastMs, quit,
+      st.unsent, st.undelivered)
 
   def isQuitEdge(s: WataState, ev: KeyEvent): Boolean =
     Shell.isPressed(ev.state) && Shell.isBackKey(ev.key) && isContacts(s.view)

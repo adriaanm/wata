@@ -17,3 +17,8 @@ optreport
 godep github.com/adriaanm/wata/go-pkgs/macshell go-pkgs/macshell
 godep github.com/adriaanm/wata/go-pkgs/nativeui go-pkgs/nativeui
 godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt
+# The macOS audio backend (plan 0033): the same Go API go-pkgs/audio presents,
+# over AudioToolbox + AVFAudio through purego — which is what lets
+# audiothread.scala be wata-fb's own file, symlinked. It rides appleptt too
+# (already replaced above), so no further godep of its own.
+godep github.com/adriaanm/wata/go-pkgs/macaudio go-pkgs/macaudio

@@ -5,8 +5,9 @@ The macOS client (plan 0032): every wata screen is already a pure
 NSView tree on a scaled 160×128 stage, and `wata-mac/` is the Sgola app
 that drives it — the SAME `WataLogic` bodies and input logic the device
 runs, a frame pump over `ClientHandle`, and `go-pkgs/macshell` as the
-AppKit shell. TCP transport only (`IROH-APPLE` is its own queue item),
-no audio yet (`MAC-AUDIO`).
+AppKit shell. Audio is real (plan 0033): the device's own audio thread
+over a macOS backend. TCP transport only (`IROH-APPLE` is its own queue
+item).
 
 ## The layers
 
@@ -15,6 +16,7 @@ no audio yet (`MAC-AUDIO`).
 | `go-pkgs/appleptt/appkit` | generated AppKit bindings (bindgen target `appkit`; see [bindgen.md](bindgen.md) for what was refused and why it shaped the backend) |
 | `go-pkgs/nativeui` | plain Go: the algebra mirror, the retained interpreter (`Stage`), pixels, glyphs, the key table + the synthesized key view, the dispatch seam |
 | `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam |
+| `go-pkgs/macaudio` | plain Go, no cgo: the Opus codec (AudioToolbox's C AudioConverter over purego) and the capture/playback engine (AVFAudio), presenting `go-pkgs/audio`'s API |
 | `wata-mac/` | the Sgola module: caps, the frame pump, the wire encoder, the headless command loop |
 
 ## Running it
@@ -83,10 +85,65 @@ goroutine; only the shell's apply touches AppKit.
   through the real translation table, `quit` winds down. This is what
   `tools/mac-smoke.py` drives, tui-smoke style.
 
-The pump does not drain the runtime's `UiEvent` queue (send/play flash,
-outbox marks) — the handle surface has no outbox read yet, so
-`unsent`/`undelivered` are `Nil` and the flash states never fire. That
-debt lands with `MAC-AUDIO`, which needs the event drain anyway.
+Each frame drains TWO mailboxes, both in `frame` so the windowed and the
+headless driver get them identically:
+
+- the runtime's **`UiEvent`** queue, first: `EvSendComplete`/`EvSendFailed`
+  → `WataLogic.notifySend`, `EvPlaybackError` → `WataLogic.notifyPlayError`,
+  `EvOutbox` → the pump-carried `unsent`/`undelivered` (`PumpSt` fields,
+  where wata-fb uses cells), which feed BOTH the `FrameCtx` and
+  `WataLogic.body`. `EvConn` and `EvSnapshot` need nothing here —
+  `h.connection()` and `h.snapshot()` already carry them, and the mac has no
+  LEDs and no config store to react with.
+- the audio thread's **`AudioEvt`** queue, after the key drain and before
+  `WataLogic.update`, exactly ONCE (plan 0009: two drains on one channel eat
+  each other's events). Echo events — the four `AeEcho*` that
+  `Shell.isEchoEvt` names — are dropped, because nothing here drives the
+  settings applet's echo test; everything else goes to
+  `WataLogic.onAudioEvent`. The predicate is restated in `main.scala`
+  because the mac's `Shell` stub carries only the key predicates.
+
+## Audio (plan 0033)
+
+The mac runs **wata-fb's own audio thread**: `audiothread.scala` is one of
+the symlinked sources, like the screens. What differs is the Go package
+under it — `go-pkgs/macaudio` instead of `go-pkgs/audio` — and the seam is
+the `@go.bind` path on `wata-mac/src/main/scala/audio.scala`, whose
+declarations are otherwise identical to wata-fb's `audio.scala`.
+
+- **`just facade-check` is what makes the symlink safe.** Nothing in either
+  compiler run notices a facade drifting: a member only one side declares
+  breaks the other module only if the shared thread happens to call it, and
+  a changed signature can keep compiling while meaning something else. The
+  check (`tools/facade-check.py`, pure text, in `ci`) compares the two files'
+  declarations with comments, blank lines and the `@go.bind` line ignored —
+  the comments describe two different backends on purpose.
+- **Client construction:** `Runtime.makeWithAudio` + `ClientHandle.startClient`
+  (`Pump.startAudioClient`), not `ClientHandle.start`'s headless constructor —
+  that is what wires the action loop's `AcPlay` to a thread. In-memory outbox:
+  the mac logs in from the environment every run and persists nothing, so
+  `makeWithAudioStored` would need a store this app does not have.
+- **The thread is forked into a `sgo.supervised` scope** around each driver's
+  loop, with the command channel hoisted out of the fork (the body needs the
+  synchronizer, not the client record) and `AcQuit` sent on the way out — the
+  same shape as `Ui.loopWithDevice`. Both drivers do it; the headless one
+  wraps the command REPL.
+- **Recording and playback must not overlap.** `macaudio.OpenCapture`
+  restarts the shared AVAudioEngine to attach the input tap, which would cut
+  a playback in progress. The audio thread dispatches commands strictly
+  sequentially — one `AudioCmd` at a time out of `cmds.recv()`, and
+  record/play sessions run to completion inside `dispatch` — so it holds.
+  It is now a load-bearing property of that thread rather than an accident:
+  a future thread that overlapped the two would break macOS audio while
+  leaving the device unaffected.
+- **`WATA_MAC_AUDIO=fake`** (read once in `SetupMixer`) replaces the
+  microphone with a clock-paced 440Hz tone and the speaker with a clock, and
+  nothing else — codec, period sizes, Ogg framing, mailbox protocol and every
+  UI state stay real. That is what lets `mac-smoke` record, encode, upload,
+  sync, decode and play unattended: a mic tap needs a TCC grant a CI-shaped
+  run does not have.
+- The settings applet's echo test compiles in and is never driven, so
+  `AcEchoTest` never reaches the thread.
 
 ## The retained interpreter (`nativeui.Stage`)
 
@@ -183,6 +240,14 @@ debt lands with `MAC-AUDIO`, which needs the event drain anyway.
   sends a voice message MID-SESSION and the smoke asserts the printed
   differ script is EXACTLY the unplayed-badge insert into the family
   row — then the key path (real kVK codes through the real table) opens
-  the conversation and the native tree shows the message row.
+  the conversation and the native tree shows the message row. Then the two
+  AUDIO legs under `WATA_MAC_AUDIO=fake`: OK plays bob's message (the differ
+  prints the play triangle then the played check) and PTT records one (the
+  overlay counts up, alice's own row and the SENT flash appear, and a fresh
+  bob session reads the ~1.2s message back off the server).
+- `just macaudio-tests` (macOS-only, not in ci): go-pkgs/macaudio's own
+  codec and fake-backend tests.
+- `just facade-check` (in ci): the two `go.audio` facades declare the same
+  thing.
 - The owner's leg: `just mac` against a live server — look at it,
-  keyboard only.
+  keyboard only, and actually talk to a handset.

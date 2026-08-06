@@ -15,7 +15,17 @@ way tui-smoke drives the tui. The smoke asserts three layers at once:
     badge inserted into the family row, nothing else;
   - the key path (`key <name> press/release` feeds macOS virtual key codes
     through nativeui's real translation table) opens the conversation, whose
-    native tree then shows bob's message row.
+    native tree then shows bob's message row;
+  - AUDIO, both directions (plan 0033), under `WATA_MAC_AUDIO=fake`: OK plays
+    bob's message — the differ shows the play triangle and then the played
+    check — and PTT records one, which the differ shows as the recording
+    overlay counting up and then alice's own row plus the SENT flash, and
+    which a fresh bob session then reads back off the server.
+
+The fake backend replaces the microphone and the speaker and NOTHING else:
+the Opus codec, the period sizes, the Ogg framing, the mailbox protocol and
+every UI state are the real ones, so an unattended run needs no TCC grant and
+makes no noise while still exercising the whole path.
 
 Hermetic — no device, no window, no network beyond localhost. macOS only.
 """
@@ -115,7 +125,7 @@ class MacSession:
     def __init__(self, binary, env):
         senv = dict(env, WATA_MAC_HS=BASE, WATA_MAC_USER="alice",
                     WATA_MAC_PASS=PASSWORD, WATA_MAC_HEADLESS="1",
-                    WATA_MAC_SCALE="1")
+                    WATA_MAC_SCALE="1", WATA_MAC_AUDIO="fake")
         self.proc = subprocess.Popen([binary], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True,
@@ -266,6 +276,71 @@ def run(tmp):
                "tree 3: no message row sender")
         c.line(t3, lambda l: l.strip() == 'NSTextField 0 7 144 8 "OK play hold=fav red=del"',
                "tree 3: no conversation footer")
+
+        # ---- audio: PLAY (plan 0033) -----------------------------------------
+        # OK on the selected message really plays it: the runtime fetches the
+        # ogg, the action loop hands `AcPlay` to the audio thread this client
+        # forks, the thread decodes every Opus frame and plays the pcm against
+        # the fake backend's clock, and `AePlaybackDone` returns through the
+        # ONE audio drain. Both edges are differ patches on the row's mark
+        # glyph: the play triangle (0x90 = 144) the instant OK is released,
+        # then the played check (0x80 = 128). Seeing the second one is also
+        # the end-to-end proof of the runtime's `UiEvent`/audio drains, since
+        # nothing else moves that glyph.
+        sess.cmd("key enter press", lambda l: l == "key ok")
+        sess.cmd("key enter release", lambda l: l == "key ok")
+        played = sess.cmd("wait 8000", lambda l: l == "waited 8000")
+        pp = [l for l in played if l.startswith("patch ")]
+        c.ok(pp[:1] == ['patch set [0.1.0.1] glyph(0,17,144,0)'],
+             f"play: want the play-triangle patch first, got {pp!r}")
+        c.line(pp, lambda l: l == 'patch set [0.1.0.1] glyph(0,17,128,0)',
+               f"play: no played-check patch after it, got {pp!r}")
+        t4 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
+        c.line(t4, lambda l: l.strip() == 'NSTextField 0 103 6 8 "✓"',
+               "tree 4: no played check on the message row")
+
+        # ---- audio: RECORD ----------------------------------------------------
+        # PTT (space) holds the microphone open: `AcRecordStart` reaches the
+        # audio thread, the fake capture yields real periods on a real clock,
+        # both 960-sample subframes of each are Opus-encoded, and release
+        # (`AcRecordStop`) frames them as Ogg and uploads. The recording
+        # overlay is the frame-by-frame proof it is running.
+        sess.cmd("key space press", lambda l: l == "key ok")
+        held = sess.cmd("wait 1200", lambda l: l == "waited 1200")
+        hp = [l for l in held if l.startswith("patch ")]
+        c.ok(hp[:1] == ['patch insert [] 1 rec:group[bar:rect(0,104,160,24,63488) '
+                        'time:text(9,14,"REC 0.0s",65535)]'],
+             f"record: want the recording overlay inserted first, got {hp[:1]!r}")
+        c.line(hp, lambda l: l == 'patch set [1.1] text(9,14,"REC 1.0s",65535)',
+               "record: the overlay's elapsed time never reached 1.0s")
+        t5 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
+        c.line(t5, lambda l: l.strip() == 'NSBox 0 0 160 24',
+               "tree 5: no recording bar while PTT is held")
+        c.line(t5, lambda l: re.fullmatch(r'NSTextField 54 7 48 8 "REC 1\.\ds"', l.strip()),
+               "tree 5: no recording elapsed-time label")
+
+        sess.cmd("key space release", lambda l: l == "key ok")
+        sent = sess.cmd("wait 8000", lambda l: l == "waited 8000")
+        sp = [l for l in sent if l.startswith("patch ")]
+        c.ok(sp[:1] == ['patch delete [] 1'],
+             f"send: the recording overlay was not removed first, got {sp[:1]!r}")
+        c.line(sp, lambda l: re.fullmatch(
+            r'patch insert \[0\.1\] 1 \$\S+:group\[mark:glyph\(0,25,128,2016\) '
+            r'dur:text\(2,3,"0:01",2016\) sender:text\(7,3,"Alice",2016\)\]', l),
+            f"send: no own message row for the ~1.2s recording, got {sp!r}")
+        c.line(sp, lambda l: l == 'patch insert [] 1 flash:group[msg:text(8,9,"SENT",2016)]',
+               f"send: no SENT flash (EvSendComplete never reached the pump), got {sp!r}")
+
+        # and it is really on the server: a fresh bob session sees alice's
+        # voice message in the family room, with the duration she recorded.
+        benv = dict(env, WATA_TUI_HS=BASE, WATA_TUI_USER="bob", WATA_TUI_PASS=PASSWORD)
+        bob2 = subprocess.run([tui_bin], input="snap\nmsgs 1\nquit\n",
+                              capture_output=True, text=True, env=benv, timeout=120)
+        b2 = (bob2.stdout + bob2.stderr).splitlines()
+        c.line(b2, lambda l: l.startswith("conv 1 family ") and " msgs=2 " in l,
+               f"bob2: the family room does not hold two messages, got {b2!r}")
+        c.line(b2, lambda l: re.match(r'msg \d+ @alice:localhost dur=1\d\d\d ', l),
+               f"bob2: no ~1s voice message from alice, got {b2!r}")
     except TimeoutError as e:
         c.failed.append(str(e))
     finally:

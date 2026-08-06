@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests amd64-smoke tunnel-smoke
+ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check amd64-smoke tunnel-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -141,6 +141,12 @@ nativeui-tests:
 # mic grant and no speaker are involved. Needs macOS; not in ci.
 macaudio-tests:
     cd go-pkgs/macaudio && GOWORK=off go test ./...
+
+# the facades a SYMLINKED source binds must declare the same thing: wata-fb's
+# and wata-mac's `go.audio` (plan 0033), compared declaration by declaration
+# with comments and the @go.bind path ignored. Pure text — in ci.
+facade-check:
+    tools/facade-check.py
 
 # Apple bindings: the struct-callback spike — ObjC methods whose C signatures
 # carry structs (CGRect/NSRange/...) dispatched into Go callbacks, both on the

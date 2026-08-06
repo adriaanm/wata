@@ -1,6 +1,6 @@
 # 0033 — audio for wata-mac: one audio thread, two backends
 
-Status: proposed
+Status: done
 
 ## The problem
 
