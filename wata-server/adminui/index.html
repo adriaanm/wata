@@ -284,8 +284,12 @@ function matchCode(pending, allowed, text) {
   // a handset that is already done reads as a failure. The allowlisted ids come
   // back with the pending list for exactly this: matched on the prefix alone,
   // since the nonce belongs to a row that is gone.
-  if (allowed.some((id) => id.toLowerCase().startsWith(prefix)))
-    return { done: "That device is already enrolled — nothing left to do." };
+  const enr = allowed.find((id) => id.toLowerCase().startsWith(prefix));
+  if (enr) {
+    const who = lastBindings[enr.toLowerCase()];
+    return { done: "That device is already enrolled" + (who ? " — bound to " + who : "") +
+      "; nothing left to do." };
+  }
   return { error: "No waiting device matches that code. The handset has to reach this server " +
     "to announce itself — put it on the family wifi, or scan its QR instead." };
 }
@@ -357,9 +361,14 @@ function renderEnroll(pending, allowed, users, bindings) {
       const user = pick.chosen();
       if (!user) { say("Pick an account, or type a name for this handset.", true); return; }
       const r = await api("POST", "/_wata/v1/admin/enroll/" + p.node_id + "/approve", { user });
-      const who = r.user ? " for " + r.user : "";
-      say(r.live ? "approved " + short(p.node_id) + who : "approved " + short(p.node_id) + who +
-        " — written to the allowlist file, but not applied live: " + (r.note || "no listener"),
+      // The success line states the OUTCOME, not just the verb: the owner read
+      // a terse "approved <id>" as something going wrong. Bound account and
+      // what happens next, in words; the not-applied-live case keeps its
+      // warning styling on top of the same statement.
+      const who = r.user ? " — bound to " + r.user : "";
+      const done = "approved " + short(p.node_id) + who + "; the handset will connect itself.";
+      say(r.live ? done : done +
+        " Written to the allowlist file, but not applied live: " + (r.note || "no listener"),
         !r.live);
       await refresh();
     }));
@@ -382,10 +391,15 @@ function renderEnroll(pending, allowed, users, bindings) {
     // row because this handset is IN the allowlist. It covers a reload of the
     // fragment AND the refresh that follows a successful approve (the row is
     // gone, the id is allowlisted, and re-announcing would answer no row) — so
-    // it is a calm statement of success, not an error. A warning already on
-    // screen (an approval that did not apply live) outranks it.
-    if (!msgIsError)
-      say(short(target.nodeId) + " is already enrolled — this handset is done.");
+    // it is a calm statement of success naming the bound account, not an
+    // error. A warning already on screen (an approval that did not apply
+    // live) outranks it.
+    if (!msgIsError) {
+      const who = lastBindings[String(target.nodeId).toLowerCase()];
+      say(short(target.nodeId) + (who
+        ? " is already enrolled — bound to " + who + "; this handset is done."
+        : " is already enrolled, but bound to no account yet."));
+    }
   } else if (target && !announced.has(target.nodeId)) {
     // the page-side announce: post it, then come straight back through refresh
     // so the row this parent just created is the one highlighted.

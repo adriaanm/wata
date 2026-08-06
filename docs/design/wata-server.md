@@ -359,13 +359,20 @@ it, in the two places a page can be holding an id:
 
 The file is the source of truth and `approve` writes it before it answers, so
 the refresh that follows an approval sees the id there. A `"*"` entry admits
-every peer and answers for any id. The page reads the marker in three places: a
-scanned fragment whose id is allowlisted says "already enrolled — this handset
-is done" (calm, not an error, and it never re-announces); the same line covers
-the post-approve refresh, except when a warning is already up (an approval that
-did not apply live outranks it); and the typed code, which carries only a
-prefix, matches that prefix against the listed ids to answer "that device is
-already enrolled" instead of "no waiting device matches".
+every peer and answers for any id. The page's copy states **outcomes, not
+verbs** — a parent watching this page after a successful approve once read it
+as an error, so every success line says what happened and what happens next:
+the approve action reports "approved `<id>` — bound to `<user>`; the handset
+will connect itself" (the not-applied-live case keeps its warning styling on
+top of the same statement). The page reads the allowlisted marker in three
+places, each naming the bound account from `bindings`: a scanned fragment
+whose id is allowlisted says "already enrolled — bound to `<user>`; this
+handset is done" (calm, not an error, and it never re-announces); the same
+line covers the post-approve refresh, except when a warning is already up (an
+approval that did not apply live outranks it); and the typed code, which
+carries only a prefix, matches that prefix against the listed ids to answer
+"that device is already enrolled — bound to `<user>`" instead of "no waiting
+device matches".
 
 **The QR contract.** The handset displays
 `<adminUrl>/admin#enroll/<nodeId>/<nonce>`, so a stock camera app lands the

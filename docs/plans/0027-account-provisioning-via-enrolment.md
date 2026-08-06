@@ -104,6 +104,15 @@ binds — was considered and rejected as heavier than the risk warrants.)
 - Field: re-run tonight's flow on the real handset with a factory-clean
   config — the acceptance test is *zero manual steps after the QR scan*.
 
+## Field follow-ups (2026-08-06)
+
+- **The approve page states outcomes, not verbs.** The owner read a terse
+  successful approve as an error. The page now says "approved `<id>` —
+  bound to `<user>`; the handset will connect itself", and every
+  already-enrolled line (scanned fragment, post-approve refresh, typed
+  code) names the bound account. Copy details:
+  `docs/design/wata-server.md`, Device enrolment.
+
 ## Out of scope
 
 - Re-keying / moving a handset between accounts (unbind + re-enrol covers it).
