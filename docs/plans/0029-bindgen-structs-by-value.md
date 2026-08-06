@@ -1,6 +1,11 @@
 # 0029 — bindgen: C structs passed and returned by value
 
-Status: accepted
+Status: done — landed over three commits (generator + fixtures, allowlist +
+regeneration + runtime proofs, closure); `just bindgen-tests`, `just bindgen`,
+`just bindgen-runtime` and the full `just ci` gate all exit 0. Both return
+conventions are proven against the live runtime with field values pinned in
+both directions; the NSRange / NSOperatingSystemVersion lines are off
+`go-pkgs/appleptt/foundation/REFUSALS.md`.
 
 ## Problem
 
