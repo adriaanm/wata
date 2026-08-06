@@ -14,6 +14,7 @@
 package foundation
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +90,59 @@ func TestBytesRoundTripThroughNSData(t *testing.T) {
 	}
 	if !data.IsEqualToData(NSData{objcrt.NSData(want)}) {
 		t.Error("-[NSData isEqualToData:] says the copies differ")
+	}
+}
+
+// ── structs by value: both AAPCS64 return conventions ────────────────────────
+
+// TestStructReturnInRegisters — NSRange is 16 bytes, so -[NSData
+// rangeOfData:options:range:] returns it in x0/x1 and takes one by value in
+// registers. Field values are pinned in both directions: the returned
+// location/length are exact, and the range *argument* observably narrows the
+// search (and, through subdataWithRange:, selects exact bytes).
+func TestStructReturnInRegisters(t *testing.T) {
+	haystack := NSData{objcrt.NSData([]byte("wata hello wata"))}
+	needle := NSData{objcrt.NSData([]byte("wata"))}
+	full := NSRange{Location: 0, Length: 15}
+
+	if r := haystack.RangeOfDataOptionsRange(needle, 0, full); r != (NSRange{Location: 0, Length: 4}) {
+		t.Errorf("first hit = %+v, want {0 4}", r)
+	}
+	// The struct argument narrows the search past the first hit.
+	if r := haystack.RangeOfDataOptionsRange(needle, 0, NSRange{Location: 1, Length: 14}); r != (NSRange{Location: 11, Length: 4}) {
+		t.Errorf("narrowed hit = %+v, want {11 4}", r)
+	}
+	notFound := ^uint(0) >> 1 // NSNotFound = NSIntegerMax
+	if r := haystack.RangeOfDataOptionsRange(NSData{objcrt.NSData([]byte("zzz"))}, 0, full); r.Location != notFound || r.Length != 0 {
+		t.Errorf("miss = %+v, want {NSNotFound 0}", r)
+	}
+	if got := objcrt.GoBytes(haystack.SubdataWithRange(NSRange{Location: 5, Length: 5}).ID); string(got) != "hello" {
+		t.Errorf("subdataWithRange:{5 5} = %q, want %q", got, "hello")
+	}
+}
+
+// TestStructReturnIndirect — NSOperatingSystemVersion is 24 bytes, above the
+// 16-byte register limit, so operatingSystemVersion returns it indirectly
+// through x8; isOperatingSystemAtLeastVersion: takes the same struct by value
+// as an argument (by reference per AAPCS64, being over 16 bytes). The version
+// string cross-check pins the field *order* (a major/patch swap would break it).
+func TestStructReturnIndirect(t *testing.T) {
+	info := GetNSProcessInfoClass().ProcessInfo()
+	v := info.OperatingSystemVersion()
+	if v.MajorVersion < 11 {
+		t.Fatalf("operatingSystemVersion = %+v: majorVersion is not a macOS version", v)
+	}
+	dotted := fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion)
+	if s := info.OperatingSystemVersionString(); !strings.Contains(s, dotted) {
+		t.Errorf("version string %q does not contain %q", s, dotted)
+	}
+	if !info.IsOperatingSystemAtLeastVersion(v) {
+		t.Error("isOperatingSystemAtLeastVersion: says the OS is older than itself")
+	}
+	next := v
+	next.MajorVersion++
+	if info.IsOperatingSystemAtLeastVersion(next) {
+		t.Errorf("isOperatingSystemAtLeastVersion:%+v says yes on a %d system", next, v.MajorVersion)
 	}
 }
 

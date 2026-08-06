@@ -80,6 +80,16 @@ func (o NSData) IsEqualToData(other NSData) bool {
 	return objc.Send[bool](o.ID, selIsEqualToData, other.ID)
 }
 
+// RangeOfDataOptionsRange calls -[NSData rangeOfData:options:range:].
+func (o NSData) RangeOfDataOptionsRange(dataToFind NSData, mask NSDataSearchOptions, searchRange NSRange) NSRange {
+	return objc.Send[NSRange](o.ID, selRangeOfDataOptionsRange, dataToFind.ID, uint(mask), searchRange)
+}
+
+// SubdataWithRange calls -[NSData subdataWithRange:].
+func (o NSData) SubdataWithRange(range_ NSRange) NSData {
+	return NSData{o.ID.Send(selSubdataWithRange, range_)}
+}
+
 // WriteToFileAtomically calls -[NSData writeToFile:atomically:].
 func (o NSData) WriteToFileAtomically(path string, useAuxiliaryFile bool) bool {
 	return objc.Send[bool](o.ID, selWriteToFileAtomically, objcrt.NSString(path), useAuxiliaryFile)

@@ -87,6 +87,11 @@ func (o NSProcessInfo) MacCatalystApp() bool {
 	return objc.Send[bool](o.ID, selMacCatalystApp)
 }
 
+// OperatingSystemVersion reads the NSProcessInfo property operatingSystemVersion.
+func (o NSProcessInfo) OperatingSystemVersion() NSOperatingSystemVersion {
+	return objc.Send[NSOperatingSystemVersion](o.ID, selOperatingSystemVersion)
+}
+
 // OperatingSystemVersionString — Human readable, localized; appropriate for displaying to user or using in bug emails and such; NOT appropriate for parsing
 func (o NSProcessInfo) OperatingSystemVersionString() string {
 	return objcrt.GoString(o.ID.Send(selOperatingSystemVersionString))
@@ -156,6 +161,11 @@ func (o NSProcessInfo) EnableSuddenTermination() {
 // EndActivity calls -[NSProcessInfo endActivity:].
 func (o NSProcessInfo) EndActivity(activity objc.ID) {
 	o.ID.Send(selEndActivity, activity)
+}
+
+// IsOperatingSystemAtLeastVersion calls -[NSProcessInfo isOperatingSystemAtLeastVersion:].
+func (o NSProcessInfo) IsOperatingSystemAtLeastVersion(version NSOperatingSystemVersion) bool {
+	return objc.Send[bool](o.ID, selIsOperatingSystemAtLeastVersion, version)
 }
 
 // OperatingSystem calls -[NSProcessInfo operatingSystem].

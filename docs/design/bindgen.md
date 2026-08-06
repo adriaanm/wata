@@ -201,7 +201,12 @@ pinned — in `objcrt`), and `NSURLSession` handing
 `didReceiveResponse:completionHandler:`'s completion block to a generated
 delegate, where the Go side stores the handle, returns, calls it later from
 another goroutine, and `didReceiveData:` observably delivers the payload —
-the exact shape of the PushToTalk incoming-push path.
+the exact shape of the PushToTalk incoming-push path — and structs by value in
+both AAPCS64 return conventions: `-[NSData rangeOfData:options:range:]` (a
+16-byte NSRange in x0/x1, with NSRange arguments observably narrowing the
+search) and `NSProcessInfo.operatingSystemVersion` (24 bytes through the x8
+indirect result, cross-checked against `isOperatingSystemAtLeastVersion:`
+taking the same struct by value), field values pinned in both directions.
 
 ## The allowlist today
 
@@ -214,7 +219,9 @@ protocols; seven PT enums; `NSData`, `NSDictionary`, `UIImage`,
 `foundation` (macOS SDK): `NSProcessInfo`, `NSNotification`,
 `NSNotificationCenter`, `NSXMLParser`, `NSUUID`, `NSData`, `NSURLSession`;
 the `NSXMLParserDelegate` and `NSURLSessionDataDelegate` protocols (the
-latter exists to drive the incoming-block handle against a live framework).
+latter exists to drive the incoming-block handle against a live framework);
+the `NSRange` and `NSOperatingSystemVersion` structs (which drive the
+by-value ABI against a live framework).
 It exists to make the runtime leg testable without a phone, and it is a real
 second consumer of the generator.
 

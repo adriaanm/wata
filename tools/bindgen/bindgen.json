@@ -64,7 +64,12 @@
         "NSXMLParserError",
         "NSDataReadingOptions",
         "NSDataWritingOptions",
+        "NSDataSearchOptions",
         "NSURLSessionResponseDisposition"
+      ],
+      "structs": [
+        "NSRange",
+        "NSOperatingSystemVersion"
       ],
       "opaque": [
         "NSArray",

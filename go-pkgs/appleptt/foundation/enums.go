@@ -21,6 +21,14 @@ const (
 	NSUncachedRead            NSDataReadingOptions = 2
 )
 
+// NSDataSearchOptions is the ObjC enum NSDataSearchOptions (unsigned long).
+type NSDataSearchOptions uint
+
+const (
+	NSDataSearchBackwards NSDataSearchOptions = 1
+	NSDataSearchAnchored  NSDataSearchOptions = 2
+)
+
 // NSDataWritingOptions is the ObjC enum NSDataWritingOptions (unsigned long).
 type NSDataWritingOptions uint
 
