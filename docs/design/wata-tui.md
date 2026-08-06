@@ -38,7 +38,7 @@ Startup prints one line: `ready <userId>`, or `login failed`.
 | command | does |
 |---|---|
 | `snap` | the current `StateSnapshot`: `conn`, `self`, one `contact` line each, one `conv` line each with message and unplayed counts |
-| `msgs <conv#>` | that conversation's voice messages: sender, duration, `origin_server_ts`, played flag, event id, mxc url |
+| `msgs <conv#>` | that conversation's voice messages: sender, duration, `origin_server_ts`, played flag, `peer=` (a non-sender has receipted it — the sent-message second check, [wataclient.md](wataclient.md)'s `playedByPeer`), event id, mxc url |
 | `send <conv#\|user> <file.ogg>` | upload the file and send it as `m.audio`; a non-numeric target is a user id whose DM room the server resolves |
 | `play <conv#> <msg#>` | download the Ogg, write it under `$WATA_TUI_TMPDIR` (default `/tmp`), hand it to the player, then send the read receipt |
 | `mark <conv#> <msg#>` | the read receipt only |

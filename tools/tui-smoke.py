@@ -278,6 +278,9 @@ def run(tmp):
     if msgs:
         c.ok(msgs[0].startswith("msg 1 @bob:localhost"), f"alice: msg sender: {msgs[0]!r}")
         c.ok(field(msgs[0], "played") == "false", f"alice: msg already played: {msgs[0]!r}")
+        # nobody but bob has touched his message yet, and a sender's own
+        # receipt never counts as a peer's.
+        c.ok(field(msgs[0], "peer") == "false", f"alice: msg already peer-played: {msgs[0]!r}")
         c.ok((field(msgs[0], "mxc") or "").startswith("mxc://"),
              f"alice: msg has no mxc url: {msgs[0]!r}")
 

@@ -182,6 +182,7 @@ object Repl:
       " dur=" + go.strconv.formatInt(m.durationMs, 10) +
       " ts=" + go.strconv.formatInt(m.timestamp, 10) +
       " played=" + Str.boolStr(m.isPlayed) +
+      " peer=" + Str.boolStr(m.playedByPeer) +
       " id=" + m.id + " mxc=" + m.mxcUrl
 
   def msgAt(cv: Conversation, n: scala.Int): Option[VoiceMessage] =
