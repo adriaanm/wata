@@ -26,6 +26,12 @@ type WFSessionDelegate struct {
 	SessionDidJoinReason func(session WFSession, name string, reason WFJoinReason)
 	// -[WFSessionDelegate session:failedWithError:]
 	SessionFailedWithError func(session WFSession, error_ error)
+	// A callback handed a block: the block is copied into a handle that outlives the call.
+	// -[WFSessionDelegate session:handle:]
+	SessionHandle func(session WFSession, done IncomingBlockVoid)
+	// An incoming block with arguments: the handle's Call is typed.
+	// -[WFSessionDelegate session:progress:]
+	SessionProgress func(session WFSession, report IncomingBlockFloat64String)
 }
 
 // NewWFSessionDelegate synthesizes an ObjC object conforming to WFSessionDelegate
@@ -54,6 +60,22 @@ func NewWFSessionDelegate(d WFSessionDelegate) objc.ID {
 			Sel: "session:failedWithError:",
 			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 objc.ID) {
 				d.SessionFailedWithError(WFSession{a0}, objcrt.GoError(a1))
+			},
+		})
+	}
+	if d.SessionHandle != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "session:handle:",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 objc.Block) {
+				d.SessionHandle(WFSession{a0}, IncomingBlockVoid{objcrt.CopyBlock(a1)})
+			},
+		})
+	}
+	if d.SessionProgress != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "session:progress:",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 objc.Block) {
+				d.SessionProgress(WFSession{a0}, IncomingBlockFloat64String{objcrt.CopyBlock(a1)})
 			},
 		})
 	}

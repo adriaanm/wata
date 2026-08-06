@@ -700,6 +700,22 @@ def arg_name(name: str, i: int) -> str:
     return n
 
 
+def handle_name(params: list[GoType]) -> str:
+    """The name of the per-signature incoming-block handle type.
+
+    Derived from the Go parameter types, so one signature is one type and two
+    callbacks sharing a signature share the handle: `void (^)(void)` is
+    IncomingBlockVoid, `void (^)(double, NSString *)` IncomingBlockFloat64String.
+    """
+    if not params:
+        return "IncomingBlockVoid"
+    parts = []
+    for t in params:
+        n = t.go.split(".")[-1]  # objc.ID -> ID
+        parts.append(n[:1].upper() + n[1:])
+    return "IncomingBlock" + "".join(parts)
+
+
 def godoc(name: str, doc: str, fallback: str) -> list[str]:
     lines = [f"// {name} {fallback}"] if not doc else [f"// {name} — {doc.splitlines()[0]}"]
     if doc:
@@ -718,6 +734,7 @@ class Emitter:
         self.classes, self.protocols, self.enums, self.opaque = _from_ir(ir)
         self.refusals: list[Refusal] = []
         self.selectors: dict[str, str] = {}
+        self.blocks: dict[str, list[GoType]] = {}  # handle type name -> block params
         enum_types = {e.name: PRIMITIVES.get(e.underlying, ("int", "int"))[0] for e in self.enums}
         self.m = Mapper(
             classes={c.name for c in self.classes},
@@ -1003,11 +1020,19 @@ class Emitter:
                     Refusal(proto.name, meth.sel, "NSError ** out-parameter in a callback")
                 )
                 continue
-            if any(t.block for _, t in sig["params"]):
+            if sig["ret"].block:
                 self.refusals.append(
-                    Refusal(proto.name, meth.sel, "block parameter in a callback")
+                    Refusal(proto.name, meth.sel, "callback returning a block")
                 )
                 continue
+            try:
+                sig["params"] = [
+                    (n, self.incoming_block(t) if t.block else t) for n, t in sig["params"]
+                ]
+            except Unmappable as exc:
+                self.refusals.append(Refusal(proto.name, meth.sel, str(exc)))
+                continue
+            sig["types"] = [t for _, t in sig["params"]] + [sig["ret"]]
             for t in sig["types"]:
                 self._note_imports(t, imports)
             args = ", ".join(f"{n} {t.go}" for n, t in sig["params"])
@@ -1031,6 +1056,53 @@ class Emitter:
         )
         body.append("}")
         body.append("")
+        return self.header(sorted(imports)) + "\n".join(body).rstrip() + "\n"
+
+    def incoming_block(self, t: GoType) -> GoType:
+        """The handle type standing in for a block received by a callback.
+
+        The block would outlive the call, so the trampoline copies it
+        (objcrt.CopyBlock) into a per-signature handle type with a typed Call
+        and a Release. Only void-returning blocks are mapped: every completion
+        handler is one, and a non-void return would make Call's ABI story
+        bigger than anything needs yet.
+        """
+        b = t.block
+        assert b is not None
+        if not b.ret.is_void:
+            raise Unmappable("incoming block with a non-void return")
+        name = handle_name(b.params)
+        self.blocks[name] = b.params
+        return GoType(
+            go=name,
+            abi="objc.Block",
+            from_objc=name + "{{objcrt.CopyBlock({})}}",
+            needs_objcrt=True,
+        )
+
+    def emit_blocks(self) -> str:
+        imports = {OBJCRT}
+        body: list[str] = []
+        for name in sorted(self.blocks):
+            params = self.blocks[name]
+            for t in params:
+                self._note_imports(t, imports)
+                if t.go.startswith("objc."):
+                    imports.add(PUREGO_OBJC)
+            args = ", ".join(f"a{i} {t.go}" for i, t in enumerate(params))
+            call = ", ".join(t.into(f"a{i}") for i, t in enumerate(params))
+            body.append(f"// {name} is an ObjC block received by a callback, copied")
+            body.append("// (_Block_copy) so it can be invoked after the callback returns — from any")
+            body.append("// goroutine. Release it exactly once when done: a second Release, or a Call")
+            body.append("// after Release, panics. Call may repeat while the handle is live.")
+            body.append(f"type {name} struct{{ h *objcrt.BlockHandle }}")
+            body.append("")
+            body.append("// Call invokes the block through its own invoke pointer.")
+            body.append(f"func (b {name}) Call({args}) {{ b.h.Invoke({call}) }}")
+            body.append("")
+            body.append("// Release frees the copied block (_Block_release).")
+            body.append(f"func (b {name}) Release() {{ b.h.Release() }}")
+            body.append("")
         return self.header(sorted(imports)) + "\n".join(body).rstrip() + "\n"
 
     def install(self, proto: Protocol, meth: Method, sig: dict, name: str) -> list[str]:
@@ -1062,6 +1134,8 @@ class Emitter:
             files[cls.name.lower() + ".go"] = src
         for proto in sorted(self.protocols, key=lambda p: p.name):
             files[proto.name.lower() + ".go"] = self.emit_protocol(proto)
+        if self.blocks:
+            files["blocks.go"] = self.emit_blocks()
         enums = self.emit_enums()
         if enums:
             files["enums.go"] = enums

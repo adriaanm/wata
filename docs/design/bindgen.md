@@ -89,6 +89,17 @@ optional-method semantics — `-respondsToSelector:` answers NO — and an
 interface could not express that. It also lets one unmappable callback be
 refused without taking the whole protocol down with it.
 
+**A block the callback receives** (a completion handler the framework hands
+the app — the PushToTalk incoming-push path) maps to a per-signature handle
+type emitted into `blocks.go` — `IncomingBlockVoid`,
+`IncomingBlockFloat64String`, … named from the Go parameter types and shared
+by every callback with that signature. The trampoline copies the block
+(`objcrt.CopyBlock`, before user code runs), so the handle is callable after
+the callback returns, from any goroutine; `Call` is typed with the usual
+conversions per argument, `Release` frees the copy — exactly once, see
+`BlockHandle` below. Only void-returning blocks are mapped; a non-void
+return, a nested block, or an unmappable block parameter stays refused.
+
 **Opaque classes.** A class named in `opaque` gets a wrapper type with no
 methods, so signatures mentioning it map. `classes` versus `opaque` is the
 knob that keeps the allowlist small without refusing half the methods.
@@ -102,8 +113,8 @@ list is the worklist — each line is either a mapping the generator should lear
 or an allowlist entry that should go away. Shapes refused today: struct
 parameters and returns (`NSRange`, `NSOperatingSystemVersion`), raw pointer
 pairs (`void *` + length), enums not on the allowlist, classes not on the
-allowlist, nested blocks, a non-trailing `NSError **`, and blocks in a protocol
-callback (the block would outlive the call).
+allowlist, nested blocks, a non-trailing `NSError **`, an incoming block with
+a non-void return, and a callback returning a block.
 
 `NS_UNAVAILABLE` and deprecated declarations are skipped silently: the SDK is
 saying "not callable", which is not a gap.

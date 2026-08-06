@@ -104,8 +104,36 @@ class Refusals(unittest.TestCase):
     def test_nested_block(self) -> None:
         self.assertEqual(self.refusals("block_param")["runNested:"], "nested block")
 
-    def test_block_in_callback(self) -> None:
-        self.assertIn("session:handle:", self.refusals("protocol"))
+    def test_block_in_callback_is_mapped(self) -> None:
+        """A void-returning block parameter becomes an incoming-block handle."""
+        r = self.refusals("protocol")
+        self.assertNotIn("session:handle:", r)
+        self.assertNotIn("session:progress:", r)
+        files, _ = generate(FIXTURES / "protocol.json")
+        self.assertIn(
+            "SessionHandle func(session WFSession, done IncomingBlockVoid)",
+            files["wfsessiondelegate.go"],
+        )
+        self.assertIn("IncomingBlockVoid{objcrt.CopyBlock(a1)}", files["wfsessiondelegate.go"])
+        blocks = files["blocks.go"]
+        self.assertIn("type IncomingBlockVoid struct{ h *objcrt.BlockHandle }", blocks)
+        self.assertIn("func (b IncomingBlockVoid) Call()", blocks)
+        self.assertIn("func (b IncomingBlockVoid) Release()", blocks)
+        self.assertIn("func (b IncomingBlockFloat64String) Call(a0 float64, a1 string)", blocks)
+        self.assertIn("b.h.Invoke(a0, objcrt.NSString(a1))", blocks)
+
+    def test_incoming_block_with_return_is_refused(self) -> None:
+        r = self.refusals("protocol")
+        self.assertEqual(r["session:validate:"], "incoming block with a non-void return")
+
+    def test_nested_block_in_callback_is_refused(self) -> None:
+        self.assertEqual(self.refusals("protocol")["session:transform:"], "nested block")
+
+    def test_handle_names(self) -> None:
+        m = B.Mapper(classes={"WFThing"}, enums={}, opaque=set())
+        self.assertEqual(B.handle_name([]), "IncomingBlockVoid")
+        params = [m.map("double"), m.map("NSString *"), m.map("id"), m.map("WFThing *")]
+        self.assertEqual(B.handle_name(params), "IncomingBlockFloat64StringIDWFThing")
 
     def test_struct_property(self) -> None:
         self.assertIn("CGRect", self.refusals("property")["@property frame"])

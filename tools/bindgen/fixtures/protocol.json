@@ -68,7 +68,7 @@
         {
           "kind": "ObjCMethodDecl",
           "name": "session:handle:",
-          "wataDoc": "A callback taking a block is refused: the block would outlive the call.",
+          "wataDoc": "A callback handed a block: the block is copied into a handle that outlives the call.",
           "returnType": {"qualType": "void"},
           "instance": true,
           "inner": [
@@ -83,6 +83,72 @@
               "type": {
                 "desugaredQualType": "void (^)(void)",
                 "qualType": "void (^ _Nonnull)(void)"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "session:progress:",
+          "wataDoc": "An incoming block with arguments: the handle's Call is typed.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "session",
+              "type": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "report",
+              "type": {
+                "desugaredQualType": "void (^)(double, NSString *)",
+                "qualType": "void (^ _Nonnull)(double, NSString * _Nonnull)"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "session:validate:",
+          "wataDoc": "An incoming block with a non-void return stays refused.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "session",
+              "type": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "check",
+              "type": {
+                "desugaredQualType": "BOOL (^)(void)",
+                "qualType": "BOOL (^ _Nonnull)(void)"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "session:transform:",
+          "wataDoc": "A nested block in a callback stays refused.",
+          "returnType": {"qualType": "void"},
+          "instance": true,
+          "inner": [
+            {
+              "kind": "ParmVarDecl",
+              "name": "session",
+              "type": {"desugaredQualType": "WFSession *", "qualType": "WFSession * _Nonnull"}
+            },
+            {
+              "kind": "ParmVarDecl",
+              "name": "apply",
+              "type": {
+                "desugaredQualType": "void (^)(void (^)(void))",
+                "qualType": "void (^ _Nonnull)(void (^ _Nonnull)(void))"
               }
             }
           ]

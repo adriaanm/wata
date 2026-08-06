@@ -6,4 +6,5 @@ Every allowlisted declaration this generator could not express in Go,
 with the reason. This is the worklist: a refusal is either a mapping the
 generator should learn or a decl the allowlist should stop asking for.
 
-- `WFSessionDelegate` `session:handle:` — block parameter in a callback
+- `WFSessionDelegate` `session:transform:` — nested block
+- `WFSessionDelegate` `session:validate:` — incoming block with a non-void return
