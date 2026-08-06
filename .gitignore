@@ -93,8 +93,10 @@ target/
 # cgo static-lib build products (mklibs.sh) + host check binary
 go-pkgs/audio/clib/
 go-pkgs/audio/audiocheck
-# pinned sgola toolchain clone (tools/toolchain.py sync)
-.toolchain/
+# pinned sgola toolchain clone (tools/toolchain.py sync) — no trailing
+# slash: a worktree carries it as a SYMLINK to the main checkout's clone,
+# and `dir/` matches only real directories
+.toolchain
 # tools/server-service.py package staging (build product)
 .service-stage/
 # python bytecode from tools/
