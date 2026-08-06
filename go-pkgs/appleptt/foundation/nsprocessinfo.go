@@ -69,22 +69,22 @@ func (o NSProcessInfo) HostName() string {
 
 // IOSAppOnMac reads the NSProcessInfo property iOSAppOnMac.
 func (o NSProcessInfo) IOSAppOnMac() bool {
-	return objc.Send[bool](o.ID, selIOSAppOnMac)
+	return objc.Send[bool](o.ID, selIsiOSAppOnMac)
 }
 
 // IOSAppOnVision reads the NSProcessInfo property iOSAppOnVision.
 func (o NSProcessInfo) IOSAppOnVision() bool {
-	return objc.Send[bool](o.ID, selIOSAppOnVision)
+	return objc.Send[bool](o.ID, selIsiOSAppOnVision)
 }
 
 // LowPowerModeEnabled reads the NSProcessInfo property lowPowerModeEnabled.
 func (o NSProcessInfo) LowPowerModeEnabled() bool {
-	return objc.Send[bool](o.ID, selLowPowerModeEnabled)
+	return objc.Send[bool](o.ID, selIsLowPowerModeEnabled)
 }
 
 // MacCatalystApp reads the NSProcessInfo property macCatalystApp.
 func (o NSProcessInfo) MacCatalystApp() bool {
-	return objc.Send[bool](o.ID, selMacCatalystApp)
+	return objc.Send[bool](o.ID, selIsMacCatalystApp)
 }
 
 // OperatingSystemVersion reads the NSProcessInfo property operatingSystemVersion.

@@ -14,7 +14,10 @@ import "github.com/ebitengine/purego/objc"
 var (
 	selActive        = objc.RegisterName("active")
 	selAlloc         = objc.RegisterName("alloc")
+	selIsHidden      = objc.RegisterName("isHidden")
+	selIsRunning     = objc.RegisterName("isRunning")
 	selName          = objc.RegisterName("name")
 	selSetActive     = objc.RegisterName("setActive:")
+	selSetHiddenFlag = objc.RegisterName("setHiddenFlag:")
 	selSharedChannel = objc.RegisterName("sharedChannel")
 )

@@ -1,49 +1,92 @@
 {
-  "package": "fixture",
-  "classes": [
+ "package": "fixture",
+ "classes": [
+  {
+   "kind": "ObjCInterfaceDecl",
+   "name": "WFChannel",
+   "super": {
+    "kind": "ObjCInterfaceDecl",
+    "name": "NSObject"
+   },
+   "inner": [
     {
-      "kind": "ObjCInterfaceDecl",
-      "name": "WFChannel",
-      "super": {"kind": "ObjCInterfaceDecl", "name": "NSObject"},
-      "inner": [
-        {
-          "kind": "ObjCPropertyDecl",
-          "name": "name",
-          "wataDoc": "What the channel is called.",
-          "type": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"},
-          "readonly": true,
-          "copy": true,
-          "nonatomic": true
-        },
-        {
-          "kind": "ObjCPropertyDecl",
-          "name": "active",
-          "type": {"qualType": "BOOL"},
-          "nonatomic": true
-        },
-        {
-          "kind": "ObjCPropertyDecl",
-          "name": "sharedChannel",
-          "wataDoc": "A class property: the accessor is on the metaclass.",
-          "type": {"desugaredQualType": "WFChannel *", "qualType": "WFChannel * _Nonnull"},
-          "readonly": true,
-          "class": true
-        },
-        {
-          "kind": "ObjCPropertyDecl",
-          "name": "frame",
-          "wataDoc": "A struct-valued property is refused.",
-          "type": {"qualType": "CGRect", "desugaredQualType": "struct CGRect"},
-          "readonly": true
-        },
-        {
-          "kind": "ObjCMethodDecl",
-          "isImplicit": true,
-          "name": "name",
-          "returnType": {"desugaredQualType": "NSString *", "qualType": "NSString * _Nonnull"},
-          "instance": true
-        }
-      ]
+     "kind": "ObjCPropertyDecl",
+     "name": "name",
+     "wataDoc": "What the channel is called.",
+     "type": {
+      "desugaredQualType": "NSString *",
+      "qualType": "NSString * _Nonnull"
+     },
+     "readonly": true,
+     "copy": true,
+     "nonatomic": true
+    },
+    {
+     "kind": "ObjCPropertyDecl",
+     "name": "active",
+     "type": {
+      "qualType": "BOOL"
+     },
+     "nonatomic": true
+    },
+    {
+     "kind": "ObjCPropertyDecl",
+     "name": "sharedChannel",
+     "wataDoc": "A class property: the accessor is on the metaclass.",
+     "type": {
+      "desugaredQualType": "WFChannel *",
+      "qualType": "WFChannel * _Nonnull"
+     },
+     "readonly": true,
+     "class": true
+    },
+    {
+     "kind": "ObjCPropertyDecl",
+     "name": "frame",
+     "wataDoc": "A struct-valued property is refused.",
+     "type": {
+      "qualType": "CGRect",
+      "desugaredQualType": "struct CGRect"
+     },
+     "readonly": true
+    },
+    {
+     "kind": "ObjCMethodDecl",
+     "isImplicit": true,
+     "name": "name",
+     "returnType": {
+      "desugaredQualType": "NSString *",
+      "qualType": "NSString * _Nonnull"
+     },
+     "instance": true
+    },
+    {
+     "kind": "ObjCPropertyDecl",
+     "name": "running",
+     "type": {
+      "qualType": "BOOL"
+     },
+     "readonly": true,
+     "nonatomic": true,
+     "getter": {
+      "name": "isRunning"
+     }
+    },
+    {
+     "kind": "ObjCPropertyDecl",
+     "name": "hidden",
+     "type": {
+      "qualType": "BOOL"
+     },
+     "nonatomic": true,
+     "getter": {
+      "name": "isHidden"
+     },
+     "setter": {
+      "name": "setHiddenFlag:"
+     }
     }
-  ]
+   ]
+  }
+ ]
 }

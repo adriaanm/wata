@@ -30,6 +30,7 @@ def ir_from_fixture(path: Path) -> dict:
     spec = json.loads(path.read_text())
     docs = B.DocIndex()
     ir: dict = {"package": spec.get("package", "fixture")}
+    ir["frameworks"] = spec.get("frameworks", [])
     for key in ("classes", "opaque"):
         nodes = spec.get(key, [])
         B.stamp_files(nodes)

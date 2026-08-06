@@ -82,6 +82,8 @@ class Prop:
     readonly: bool
     doc: str = ""
     on_class: bool = False  # @property (class, ...): an accessor on the metaclass
+    getter: str = ""  # @property (getter=isRunning): the real getter selector
+    setter: str = ""  # @property (setter=...): the real setter selector
 
 
 @dataclass
@@ -364,6 +366,8 @@ def collect_class(nodes: list[dict], name: str, docs: DocIndex) -> Class:
                         readonly=bool(c.get("readonly")),
                         doc=_doc_for(c, docs),
                         on_class=bool(c.get("class")),
+                        getter=(c.get("getter") or {}).get("name", ""),
+                        setter=(c.get("setter") or {}).get("name", ""),
                     )
                 )
     cls.methods.sort(key=lambda m: (not m.instance, m.sel))
@@ -470,6 +474,7 @@ def load(target: Target, umbrella: Path, docs: DocIndex) -> dict:
     sysroot = sdk_path(target.sdk)
     ir: dict = {
         "package": target.package,
+        "frameworks": target.frameworks,
         "classes": [], "protocols": [], "enums": [], "opaque": [], "structs": [],
     }
     wanted = {
@@ -856,6 +861,7 @@ def godoc(name: str, doc: str, fallback: str) -> list[str]:
 class Emitter:
     def __init__(self, ir: dict, provenance: str = ""):
         self.package = ir["package"]
+        self.frameworks = ir.get("frameworks", [])
         self.provenance = provenance
         self.classes, self.protocols, self.enums, self.opaque, structs = _from_ir(ir)
         self.refusals: list[Refusal] = []
@@ -1021,6 +1027,32 @@ class Emitter:
 
     # -- selectors
 
+    def emit_frameworks(self) -> str:
+        """A Dlopen init for the target's `frameworks` list.
+
+        objc.GetClass finds a class only in frameworks already loaded into the
+        process, and a pure-Go binary links none of them — a package whose
+        classes live outside Foundation (which objcrt loads) resolves every
+        class to nil until its framework is loaded. Opt-in per target: a
+        target without `frameworks` emits nothing and rides on objcrt.
+        """
+        if not self.frameworks:
+            return ""
+        body = [
+            "// The frameworks whose classes this package binds, loaded at package",
+            "// init: objc.GetClass sees only what is already in the process, and a",
+            "// pure-Go binary links no framework. Dlopen is idempotent and cheap.",
+            "func init() {",
+        ]
+        for fw in self.frameworks:
+            body.append(
+                f'\t_, _ = purego.Dlopen("/System/Library/Frameworks/{fw}.framework/{fw}",'
+            )
+            body.append("\t\tpurego.RTLD_GLOBAL|purego.RTLD_LAZY)")
+        body.append("}")
+        body.append("")
+        return self.header(["github.com/ebitengine/purego"]) + "\n".join(body) + "\n"
+
     def emit_selectors(self) -> str:
         if not self.selectors:
             return ""
@@ -1085,12 +1117,12 @@ class Emitter:
         kind = "class property" if p.on_class else "property"
         out += godoc(getter, p.doc, f"reads the {cls.name} {kind} {p.name}.")
         out.append(f"func ({recv}) {getter}() {t.go} {{")
-        out.append(f"\treturn {t.outof(self._send(t, target, self.sel(p.name), []))}")
+        out.append(f"\treturn {t.outof(self._send(t, target, self.sel(p.getter or p.name), []))}")
         out.append("}")
         out.append("")
         if not p.readonly:
             setter = "Set" + getter
-            sel = f"set{p.name[:1].upper()}{p.name[1:]}:"
+            sel = p.setter or f"set{p.name[:1].upper()}{p.name[1:]}:"
             taken.add(setter)
             out.append(f"// {setter} writes the {cls.name} {kind} {p.name}.")
             out.append(f"func ({recv}) {setter}(v {t.go}) {{")
@@ -1377,6 +1409,9 @@ class Emitter:
         sels = self.emit_selectors()
         if sels:
             files["selectors.go"] = sels
+        fws = self.emit_frameworks()
+        if fws:
+            files["frameworks.go"] = fws
         return {k: gofmt(v) for k, v in sorted(files.items())}
 
     def refusal_doc(self) -> str:

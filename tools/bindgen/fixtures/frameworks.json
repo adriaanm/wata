@@ -1,0 +1,12 @@
+{
+  "package": "fixture",
+  "frameworks": ["AVFAudio", "AudioToolbox"],
+  "opaque": [
+    {
+      "kind": "ObjCInterfaceDecl",
+      "name": "AVAudioTime",
+      "super": {"name": "NSObject"},
+      "inner": []
+    }
+  ]
+}

@@ -35,9 +35,24 @@ func (o WFChannel) SetActive(v bool) {
 	o.ID.Send(selSetActive, v)
 }
 
+// Hidden reads the WFChannel property hidden.
+func (o WFChannel) Hidden() bool {
+	return objc.Send[bool](o.ID, selIsHidden)
+}
+
+// SetHidden writes the WFChannel property hidden.
+func (o WFChannel) SetHidden(v bool) {
+	o.ID.Send(selSetHiddenFlag, v)
+}
+
 // Name — What the channel is called.
 func (o WFChannel) Name() string {
 	return objcrt.GoString(o.ID.Send(selName))
+}
+
+// Running reads the WFChannel property running.
+func (o WFChannel) Running() bool {
+	return objc.Send[bool](o.ID, selIsRunning)
 }
 
 // SharedChannel — A class property: the accessor is on the metaclass.

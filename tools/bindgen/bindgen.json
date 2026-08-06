@@ -40,6 +40,39 @@
       ]
     },
     {
+      "package": "avfaudio",
+      "out": "go-pkgs/appleptt/avfaudio",
+      "sdk": "macosx",
+      "triple": "arm64-apple-macos26.0",
+      "frameworks": ["AVFAudio"],
+      "imports": [
+        "Foundation/Foundation.h",
+        "AVFAudio/AVFAudio.h"
+      ],
+      "classes": [
+        "AVAudioEngine",
+        "AVAudioNode",
+        "AVAudioPlayerNode",
+        "AVAudioFormat",
+        "AVAudioPCMBuffer"
+      ],
+      "enums": [
+        "AVAudioCommonFormat"
+      ],
+      "opaque": [
+        "AVAudioInputNode",
+        "AVAudioOutputNode",
+        "AVAudioMixerNode",
+        "AVAudioTime",
+        "AVAudioChannelLayout",
+        "AVAudioConnectionPoint",
+        "AVAudioIONode",
+        "NSDictionary",
+        "NSArray",
+        "NSError"
+      ]
+    },
+    {
       "package": "foundation",
       "out": "go-pkgs/appleptt/foundation",
       "sdk": "macosx",
