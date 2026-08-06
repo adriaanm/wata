@@ -103,7 +103,19 @@ object FbConfig:
   /** the post-login write: the homeserver and username this run was configured
    *  with, plus the token and user id the sync loop actually got back. */
   def saveLogin(homeserver: String, username: String, creds: AuthCreds): Unit =
-    saveSession(Session(homeserver, username, creds.accessToken, creds.userId, ""))
+    saveSession(Session(homeserver, sessionUser(username, creds.userId),
+      creds.accessToken, creds.userId, ""))
+
+  /** the username the stored session carries. Device-login (plan 0027) is
+   *  configured with NO username — the node key is the credential — so the
+   *  localpart of the user id the server answered stands in; storing ""
+   *  would disagree with every username-keyed read (`storedFor`'s resume
+   *  match, any UI that names the account). A password login keeps the name
+   *  it was configured with. */
+  def sessionUser(username: String, userId: String): String =
+    var out = username
+    if out == "" then out = Names.localpart(userId)
+    out
 
   /** persist the settings applet's preferences, keeping the stored session. */
   def savePrefs(p: FbPrefs): Unit = writeStore(load(), p)

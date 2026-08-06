@@ -112,6 +112,10 @@ binds — was considered and rejected as heavier than the risk warrants.)
   already-enrolled line (scanned fragment, post-approve refresh, typed
   code) names the bound account. Copy details:
   `docs/design/wata-server.md`, Device enrolment.
+- **Device-login stored `username: ""`.** The session-save path wrote the
+  configured username, and device-login configures none;
+  `FbConfig.sessionUser` now derives the localpart from the answered
+  `user_id`. Detail: `docs/design/wata-fb.md`, the config store.
 
 ## Out of scope
 

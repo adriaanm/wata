@@ -999,7 +999,13 @@ app layer's decision. `config.scala` is that decision:
 - **When**: the session at `Ui.persistSession`, on the first
   `Connected` event of a session and only when `Runtime.lastAuth`
   carries a non-empty token — once per session, so a stale store is
-  never overwritten with nothing. The preferences at
+  never overwritten with nothing. The `username` written is the run's
+  configured one, except under device-login (plan 0027), which is
+  configured with no username at all: `FbConfig.sessionUser` then
+  derives the localpart from the `user_id` the server answered, so the
+  stored session and every username-keyed read (`storedFor`'s resume
+  match, any UI naming the account) agree instead of carrying `""`.
+  The preferences at
   `SettingsLogic.persisted`, which every settings keypress goes
   through, so a changed preference is on disk immediately and there is
   one place that decides when to write.
