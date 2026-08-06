@@ -149,10 +149,11 @@ facade-check:
     tools/facade-check.py
 
 # Apple bindings: the struct-callback spike — ObjC methods whose C signatures
-# carry structs (CGRect/NSRange/...) dispatched into Go callbacks, both on the
-# pinned purego (register decomposition) and on the v0.11 alpha (typed structs),
-# driven by NSInvocation and a real AppKit drawRect:. Needs macOS arm64; the
-# first run fetches modules. Not in ci.
+# carry structs (CGRect/NSRange/...) dispatched into Go callbacks, in both
+# shapes the pin supports: register decomposition (what the emitter specifies)
+# and v0.11's typed structs (what it could collapse to), driven by NSInvocation
+# and a real AppKit drawRect:. Needs macOS arm64; the first run fetches
+# modules. Not in ci.
 bindgen-structcb:
     cd tools/bindgen/spikes/structcb/decomp && GOWORK=off go test ./...
     cd tools/bindgen/spikes/structcb/upstream && GOWORK=off go test ./...

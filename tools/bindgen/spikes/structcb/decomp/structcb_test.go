@@ -1,7 +1,13 @@
-// Struct arguments into Go callbacks on the PINNED purego (v0.10.2), which
-// rejects reflect.Struct in NewCallback — by register decomposition: the
-// callback is declared with the scalar parameters AAPCS64 assigns to the
-// struct's registers, and the struct is reassembled in Go.
+// Struct arguments into Go callbacks BY REGISTER DECOMPOSITION: the callback
+// is declared with the scalar parameters AAPCS64 assigns to the struct's
+// registers, and the struct is reassembled in Go.
+//
+// This is the shape the generator emits. It was devised for purego v0.10.2,
+// whose NewCallback rejects reflect.Struct outright, and it is kept — and
+// tested here on the CURRENT pin, not the version that forced it — because
+// the generated trampolines still use it. The `upstream/` arm beside this one
+// covers v0.11's typed structs, which is what these would collapse to; both
+// work on the pin, so the collapse is a choice rather than a deadline.
 //
 // The caller side is real Foundation/AppKit machinery, not our own msgSend:
 // NSInvocation marshals arguments from the method's ObjC type encoding and

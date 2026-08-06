@@ -97,8 +97,10 @@ the ObjC type encoding, and AppKit itself calling a synthesized
 `drawRect:` — with field values pinned exactly). Two shapes work on
 arm64 darwin:
 
-- **On the pinned purego (v0.10.2), by register decomposition.**
-  `NewCallback` rejects struct parameters, but its arm64 callback path
+- **By register decomposition** (devised for v0.10.2, whose `NewCallback`
+  rejects struct parameters outright; still correct on the current pin
+  and still the shape specified for the emitter).
+  Its arm64 callback path
   spills F0–F7 and R0–R7 and assigns Go parameters from the float and
   integer register sequences independently — exactly AAPCS64's
   classification. So the trampoline declares the scalars the struct's
@@ -110,20 +112,29 @@ arm64 darwin:
   pointer to the caller's copy — one `uintptr`, copied eagerly. The ObjC
   method must be registered with the *true* struct type encoding
   (`class_addMethod` directly — the frameworks and NSInvocation read it),
-  never one derived from the decomposed Go signature. What v0.10.2 cannot
-  express at all: struct or CGFloat *returns* from a callback — the
-  result travels only through x0 — so rect- and height-returning
-  delegate methods stay refused until the pin moves.
-- **On purego v0.11 (alphas today), directly.** Upstream landed full
-  callback struct support — arguments and returns, including the x8
-  indirect return — for milestone v0.11.0 (issue #225); it is in the
-  v0.11.0 alphas and no stable release yet. There the callback takes the
-  generated struct types themselves, returns work in all three
-  conventions (GPR pair, d0–d3, x8), and a CGFloat return is spelled as
-  a one-field struct (an HFA of 1, returned in d0 — plain `float64`
-  returns are still rejected). When the pin reaches v0.11, the
-  decomposed trampolines collapse to typed ones; encodings and struct
-  types are shared by both shapes, so nothing is thrown away.
+  never one derived from the decomposed Go signature. What decomposition
+  cannot express at all: struct or CGFloat *returns* from a callback —
+  the result travels only through x0 — so rect- and height-returning
+  delegate methods are refused for as long as the emitter uses this
+  shape.
+- **On purego v0.11, directly** — the pin since the iOS spike
+  (`tools/ios-spike/REPORT.md`: v0.10.2 gates struct-by-value on
+  `GOOS=="darwin"`, so every `CGRect` panics under `GOOS=ios`).
+  Upstream landed full callback struct support — arguments and returns,
+  including the x8 indirect return — for milestone v0.11.0 (issue #225).
+  There the callback takes the generated struct types themselves,
+  returns work in all three conventions (GPR pair, d0–d3, x8), and a
+  CGFloat return is spelled as a one-field struct (an HFA of 1, returned
+  in d0 — plain `float64` returns are still rejected).
+
+Both shapes work on the current pin — the decomposition arm of
+`just bindgen-structcb` is tested there, not on the version that forced
+it — so **collapsing the decomposed trampolines to typed ones is now a
+choice, not a deadline** (`BINDGEN-TYPED-STRUCTS` in the queue). What
+the collapse would buy is the refusals above: struct and CGFloat returns
+become expressible, which is most of the remaining AppKit/UIKit delegate
+surface. Encodings and struct types are shared by both shapes, so
+nothing is thrown away either way.
 
 **Protocols are a struct of func fields**, not a Go interface:
 
@@ -187,9 +198,9 @@ or an allowlist entry that should go away. Shapes refused today: structs not
 on the allowlist ("add it to structs" — the message names the fix), structs
 with a bitfield, union or array field (refused once, per struct; every
 declaration using one points at that reason), a struct anywhere in a block
-signature or a protocol callback (the pinned purego's callbacks cannot carry
-structs; the register-decomposition mapping that lifts this is proven and
-specified above, waiting on the emitter), raw
+signature or a protocol callback (the register-decomposition mapping that
+lifts this is proven and specified above, waiting on the emitter; the pin
+now also supports typed structs directly), raw
 pointer pairs (`void *` + length), enums not on the allowlist, classes not on
 the allowlist, nested blocks, a non-trailing `NSError **`, an incoming block
 with a non-void return, and a callback returning a block.
