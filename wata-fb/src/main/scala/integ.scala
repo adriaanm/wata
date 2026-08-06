@@ -1087,7 +1087,7 @@ object Integ:
       false
     else
       println("INTEG REFUSED")     // the harness approves this node on this line
-      if !waitAdmitted(c, 90000L) then
+      if !waitAdmitted(c, admitTimeoutMs()) then
         println("integ: the approved node never got a session — the refusal latched, or device-login answered nothing")
         false
       else if !Runtime.waitForSnapshot(c, s => s.hasSelfUser, 20000L) then false
@@ -1102,6 +1102,13 @@ object Integ:
         println("integ: the provisioning arc never latched — the boot screen would say 'waiting for network' over an approval")
         false
       else true
+
+  /** how long the client keeps redialing after INTEG REFUSED before giving
+   *  up (default 90s — the prompt-approval smoke). WATA_INTEG_ADMIT_TIMEOUT_MS
+   *  raises it so an aged-refusal harness can hold the approval back for
+   *  minutes of wall clock while this process sits refused, then approve. */
+  def admitTimeoutMs(): Long =
+    FbCaps.parseMs(go.sys.getenv("WATA_INTEG_ADMIT_TIMEOUT_MS"), 90000L)
 
   /** the harness's pin on WHOSE session device-login answered; unset = any. */
   def expectedSelf(): Boolean =

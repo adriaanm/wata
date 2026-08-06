@@ -319,7 +319,9 @@ def main():
     if run([sys.executable, "mklib.py"], env, cwd=IROHNET).returncode != 0:
         fail("mklib.py failed")
     print("tunnel-smoke: irohnet glue tests (go test -tags iroh)…")
-    if run(["go", "test", "-tags", "iroh", "-count=1", "-timeout", "180s", "./"], env, cwd=IROHNET).returncode != 0:
+    # 360s: the suite includes the aged-refusal leg (aged_refusal_test.go),
+    # which holds a refused client open for a real minute before approving it.
+    if run(["go", "test", "-tags", "iroh", "-count=1", "-timeout", "360s", "./"], env, cwd=IROHNET).returncode != 0:
         fail("irohnet glue tests failed")
 
     # ---- 2. builds ---------------------------------------------------------
