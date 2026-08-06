@@ -10,7 +10,9 @@ package objcrt
 
 import (
 	"errors"
+	"reflect"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -160,6 +162,99 @@ func (e *ErrOut) Ptr() unsafe.Pointer { return unsafe.Pointer(&e.id) }
 
 // Err is the error the callee reported, or nil.
 func (e *ErrOut) Err() error { return GoError(e.id) }
+
+// BlockHandle is an ObjC block received in a callback, copied so it can be
+// invoked after the callback returns.
+//
+// The block pointer a delegate trampoline receives is only valid for the
+// duration of the call; CopyBlock (_Block_copy) is what lets the handle
+// outlive it. The generated bindings wrap a handle in a per-signature type
+// with a typed Call — Invoke is the untyped core under that.
+//
+// The contract, from any goroutine:
+//   - Invoke may be called any number of times while the handle is live
+//     (some ObjC blocks are legitimately repeat-callable; a completion
+//     handler is called once by convention, which the framework, not this
+//     type, defines).
+//   - Release must be called exactly once when done. A second Release
+//     panics; Invoke after Release panics — either would otherwise be a
+//     use-after-free on the ObjC heap.
+type BlockHandle struct {
+	mu    sync.RWMutex
+	block objc.Block // 0 once released
+}
+
+// CopyBlock copies (retains) an incoming block so it survives the callback
+// that delivered it. A nil (0) block yields a nil handle: calling through a
+// nil handle panics, which is the loud version of "the framework passed no
+// block".
+func CopyBlock(b objc.Block) *BlockHandle {
+	if b == 0 {
+		return nil
+	}
+	return &BlockHandle{block: b.Copy()}
+}
+
+// Invoke calls the block through its own invoke pointer.
+//
+// args are ABI values (objc.ID, integers, floats, bool) — the generated
+// per-signature Call methods do the Go-to-ObjC conversions. Per the ObjC
+// block convention the block pointer itself rides as argument 0, ahead of
+// args. purego.RegisterFunc builds the call, so floats are passed in FP
+// registers and the ABI holds for every mappable parameter kind. Blocks
+// with a non-void return are not mapped, so Invoke returns nothing.
+func (h *BlockHandle) Invoke(args ...any) {
+	if h == nil {
+		panic("objcrt: Invoke on a nil block handle (the callback received no block)")
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.block == 0 {
+		panic("objcrt: incoming block invoked after Release")
+	}
+	in := make([]reflect.Type, len(args)+1)
+	vals := make([]reflect.Value, len(args)+1)
+	in[0] = reflect.TypeOf(uintptr(0))
+	vals[0] = reflect.ValueOf(uintptr(h.block))
+	for i, a := range args {
+		in[i+1] = reflect.TypeOf(a)
+		vals[i+1] = reflect.ValueOf(a)
+	}
+	fn := reflect.New(reflect.FuncOf(in, nil, false))
+	purego.RegisterFunc(fn.Interface(), h.invokePtr())
+	fn.Elem().Call(vals)
+}
+
+// Release frees the copied block (_Block_release), exactly once.
+func (h *BlockHandle) Release() {
+	if h == nil {
+		panic("objcrt: Release on a nil block handle (the callback received no block)")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.block == 0 {
+		panic("objcrt: incoming block released twice")
+	}
+	h.block.Release()
+	h.block = 0
+}
+
+// blockLayout is the head of the ObjC block ABI's Block_literal
+// (https://clang.llvm.org/docs/Block-ABI-Apple.html): isa (8) + flags (4) +
+// reserved (4) put invoke at offset 16 on every 64-bit Apple platform.
+type blockLayout struct {
+	_      uintptr
+	_      uint32
+	_      uint32
+	invoke uintptr
+}
+
+// invokePtr reads the function pointer out of the block layout. The word
+// held in h.block is an ObjC heap pointer, never a Go pointer, so the
+// reinterpretation is invisible to (and safe from) the Go collector.
+func (h *BlockHandle) invokePtr() uintptr {
+	return (*blockLayout)(*(*unsafe.Pointer)(unsafe.Pointer(&h.block))).invoke
+}
 
 // Method is one selector of a synthesized delegate class.
 //

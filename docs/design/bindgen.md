@@ -112,8 +112,24 @@ saying "not callable", which is not a gap.
 
 Generated code contains no logic; it maps selectors onto `go-pkgs/appleptt/objcrt`:
 string/error/data bridging, `ErrOut` (the `NSError **` slot, which holds a
-`uintptr` so no Go pointer is ever visible to the callee), and `NewDelegate`.
-A bridging bug is fixed there, once, rather than in thousands of generated lines.
+`uintptr` so no Go pointer is ever visible to the callee), `NewDelegate`, and
+`BlockHandle` (a block received in a callback, below). A bridging bug is fixed
+there, once, rather than in thousands of generated lines.
+
+**BlockHandle — a block received in a callback.** The block pointer a delegate
+trampoline gets is only valid for the duration of the call; `objcrt.CopyBlock`
+runs at trampoline entry and `_Block_copy`s it, so the handle outlives the
+callback and is safe from any goroutine. `Invoke` calls through the block
+layout's own invoke pointer (offset 16: isa 8 + flags 4 + reserved 4), passing
+the block pointer itself as argument 0 — the ObjC block convention — via
+`purego.RegisterFunc`, so floats ride in FP registers. (purego's
+`objc.Block.Invoke` cannot do this: it looks the closure up in purego's own
+cache, which only holds Go-created blocks.) `Release` is `_Block_release`,
+exactly once: a second `Release` panics, `Invoke` after `Release` panics —
+either would otherwise be a use-after-free — while repeat `Invoke` on a live
+handle is allowed (how often a block may be called is the framework's
+contract, not this type's). `CopyBlock(0)` returns a nil handle, which panics
+if called through.
 
 Two rules the bridging assumes, both ordinary ObjC contracts:
 
