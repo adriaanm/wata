@@ -211,6 +211,88 @@ class Categories(unittest.TestCase):
         self.assertNotIn("somethingElse", self.sels)
 
 
+class AvailabilityDeprecation(unittest.TestCase):
+    """API_DEPRECATED expands to AvailabilityAttr nodes that look exactly like
+    API_AVAILABLE in the JSON dump; the macro name at the attribute's expansion
+    location is what tells them apart, read back out of the header."""
+
+    HEADER = "- (void)oldThing API_DEPRECATED(\"gone\", macos(10.0,10.14));\n"
+
+    def node(self, path: str, tok: str) -> dict:
+        off = self.HEADER.index(tok) + 1  # clang offsets are 1-based
+        return {
+            "kind": "ObjCMethodDecl",
+            "name": "oldThing",
+            "inner": [
+                {
+                    "kind": "AvailabilityAttr",
+                    "range": {
+                        "begin": {
+                            "expansionLoc": {"offset": off, "tokLen": len(tok), "file": path}
+                        }
+                    },
+                }
+            ],
+        }
+
+    def test_deprecated_macro_is_skipped(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".h", delete=False) as f:
+            f.write(self.HEADER)
+        self.assertTrue(B._skip(self.node(f.name, "API_DEPRECATED"), B.DocIndex()))
+
+    def test_plain_availability_is_kept(self) -> None:
+        import tempfile
+
+        header = "- (void)newThing API_AVAILABLE(macos(13.0));\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".h", delete=False) as f:
+            f.write(header)
+        node = self.node(f.name, "API_DEPRECATED")
+        loc = node["inner"][0]["range"]["begin"]["expansionLoc"]
+        loc["offset"] = header.index("API_AVAILABLE") + 1
+        loc["tokLen"] = len("API_AVAILABLE")
+        self.assertFalse(B._skip(node, B.DocIndex()))
+
+    def test_unreadable_file_is_kept(self) -> None:
+        self.assertFalse(B._skip(self.node("/nonexistent/x.h", "API_DEPRECATED"), B.DocIndex()))
+
+
+class SelectorCollisions(unittest.TestCase):
+    """Two selectors whose Go var names coincide (`setNeedsDisplay` vs
+    `setNeedsDisplay:`) would emit a package that does not compile; generation
+    must fail loudly instead of leaving that to go vet."""
+
+    def test_colliding_selector_vars_fail_loudly(self) -> None:
+        ir = {
+            "package": "fixture",
+            "classes": [
+                {
+                    "name": "WFOne",
+                    "super": "NSObject",
+                    "methods": [
+                        {"sel": "poke", "instance": True, "ret": {"qualType": "void"}, "params": []}
+                    ],
+                },
+                {
+                    "name": "WFTwo",
+                    "super": "NSObject",
+                    "methods": [
+                        {
+                            "sel": "poke:",
+                            "instance": True,
+                            "ret": {"qualType": "void"},
+                            "params": [{"name": "v", "type": {"qualType": "int"}}],
+                        }
+                    ],
+                },
+            ],
+        }
+        with self.assertRaises(SystemExit) as ctx:
+            B.Emitter(ir).run()
+        self.assertIn("poke", str(ctx.exception))
+
+
 class TypeMapping(unittest.TestCase):
     def setUp(self) -> None:
         self.m = B.Mapper(classes={"WFThing"}, enums={"WFReason": "int"}, opaque={"NSData"})

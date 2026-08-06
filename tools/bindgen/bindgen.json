@@ -73,6 +73,57 @@
       ]
     },
     {
+      "package": "appkit",
+      "out": "go-pkgs/appleptt/appkit",
+      "sdk": "macosx",
+      "triple": "arm64-apple-macos26.0",
+      "frameworks": ["AppKit"],
+      "imports": [
+        "Foundation/Foundation.h",
+        "AppKit/AppKit.h"
+      ],
+      "classes": [
+        "NSApplication",
+        "NSWindow",
+        "NSView",
+        "NSTextField",
+        "NSControl",
+        "NSImageView",
+        "NSColor",
+        "NSFont",
+        "NSImage",
+        "NSEvent",
+        "NSBox",
+        "NSArray",
+        "NSBitmapImageRep"
+      ],
+      "protocols": [
+        "NSWindowDelegate"
+      ],
+      "enums": [
+        "NSWindowStyleMask",
+        "NSBackingStoreType",
+        "NSWindowOrderingMode",
+        "NSBoxType",
+        "NSTitlePosition",
+        "NSImageScaling",
+        "NSEventType",
+        "NSEventModifierFlags",
+        "NSApplicationActivationPolicy"
+      ],
+      "structs": [
+        "CGPoint",
+        "CGSize",
+        "CGRect"
+      ],
+      "opaque": [
+        "NSData",
+        "NSDictionary",
+        "NSNotification",
+        "NSScreen"
+      ]
+    },
+    {
       "package": "foundation",
       "out": "go-pkgs/appleptt/foundation",
       "sdk": "macosx",

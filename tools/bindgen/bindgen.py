@@ -295,10 +295,37 @@ def _has(node: dict, kind: str) -> bool:
     return any(c.get("kind") == kind for c in _children(node))
 
 
-def _skip(node: dict) -> bool:
+def _skip(node: dict, docs: "DocIndex") -> bool:
     """Deprecated declarations are not worth binding; NS_UNAVAILABLE is handled
     separately, because a refusal there would be noise."""
-    return node.get("isImplicit") or _has(node, "DeprecatedAttr")
+    return bool(
+        node.get("isImplicit") or _has(node, "DeprecatedAttr") or _availability_deprecated(node, docs)
+    )
+
+
+def _availability_deprecated(node: dict, docs: DocIndex) -> bool:
+    """Is the declaration deprecated through an availability attribute?
+
+    API_DEPRECATED (and its NS_DEPRECATED relatives) expand to plain
+    AvailabilityAttr nodes, indistinguishable in the JSON dump from
+    API_AVAILABLE — the deprecation version is not printed. The macro name is,
+    though, at the attribute's expansion location in the header, so it is read
+    back out of the source the same way doc comments are. A node from a
+    fixture (no readable file) is simply not deprecated.
+    """
+    for c in _children(node):
+        if c.get("kind") != "AvailabilityAttr":
+            continue
+        begin = (c.get("range") or {}).get("begin") or {}
+        loc = begin.get("expansionLoc") or begin
+        off, toklen = loc.get("offset"), loc.get("tokLen")
+        path = loc.get("file") or node.get("wataFile", "")
+        if off is None or not toklen or not path:
+            continue
+        token = docs.text(path)[off - 1 : off - 1 + toklen]  # offsets are 1-based
+        if "DEPRECATED" in token:
+            return True
+    return False
 
 
 MANGLED = re.compile(r"^[+-]\[(\w+)[ (]")
@@ -351,7 +378,7 @@ def collect_class(nodes: list[dict], name: str, docs: DocIndex) -> Class:
         members = [node] if node.get("kind") == "ObjCMethodDecl" else _children(node)
         for c in members:
             kind = c.get("kind")
-            if kind == "ObjCMethodDecl" and not _skip(c):
+            if kind == "ObjCMethodDecl" and not _skip(c, docs):
                 key = (bool(c.get("instance")), c["name"])
                 if key in seen_methods:
                     continue
@@ -379,7 +406,7 @@ def parse_protocol(node: dict, docs: DocIndex) -> Protocol:
     proto = Protocol(name=node["name"], doc=_doc_for(node, docs))
     seen: set[str] = set()
     for c in _children(node):
-        if c.get("kind") == "ObjCMethodDecl" and not _skip(c) and c["name"] not in seen:
+        if c.get("kind") == "ObjCMethodDecl" and not _skip(c, docs) and c["name"] not in seen:
             seen.add(c["name"])
             proto.methods.append(_method(c, docs))
     proto.methods.sort(key=lambda m: m.sel)
@@ -1056,6 +1083,15 @@ class Emitter:
     def emit_selectors(self) -> str:
         if not self.selectors:
             return ""
+        by_var: dict[str, str] = {}
+        for s, var in self.selectors.items():
+            if var in by_var and by_var[var] != s:
+                raise SystemExit(
+                    f"bindgen: selectors {by_var[var]!r} and {s!r} both name the Go var "
+                    f"{var} — the generated package would not compile; drop one from the "
+                    "allowlist (or teach sel_var to tell them apart)"
+                )
+            by_var[var] = s
         body = ["// Selectors, registered once at package init.", "var ("]
         for s in sorted(self.selectors):
             body.append(f'\t{self.selectors[s]} = objc.RegisterName("{s}")')
