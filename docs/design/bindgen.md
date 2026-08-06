@@ -174,9 +174,16 @@ prove, against the live runtime: class properties and object/string/int/float
 returns, a string round trip through a setter, an object round trip through an
 initializer, bytes through `NSData`, a real `NSError **` failure with its
 domain and localized description, a Go closure invoked as a block by
-`NSNotificationCenter`, a Go function invoked by selector from Foundation, and
-a generated `NSXMLParserDelegate` whose five callbacks `NSXMLParser` drives in
-order with bridged arguments.
+`NSNotificationCenter`, a Go function invoked by selector from Foundation, a
+generated `NSXMLParserDelegate` whose five callbacks `NSXMLParser` drives in
+order with bridged arguments, and the incoming-block path both ways: the
+`BlockHandle` ABI itself (a hand-rolled block whose float/int/object
+arguments arrive intact through the invoke pointer, cross-goroutine, panics
+pinned — in `objcrt`), and `NSURLSession` handing
+`didReceiveResponse:completionHandler:`'s completion block to a generated
+delegate, where the Go side stores the handle, returns, calls it later from
+another goroutine, and `didReceiveData:` observably delivers the payload —
+the exact shape of the PushToTalk incoming-push path.
 
 ## The allowlist today
 
@@ -187,9 +194,11 @@ protocols; seven PT enums; `NSData`, `NSDictionary`, `UIImage`,
 `AVAudioSession` opaque.
 
 `foundation` (macOS SDK): `NSProcessInfo`, `NSNotification`,
-`NSNotificationCenter`, `NSXMLParser`, `NSUUID`, `NSData`; the
-`NSXMLParserDelegate` protocol. It exists to make the runtime leg testable
-without a phone, and it is a real second consumer of the generator.
+`NSNotificationCenter`, `NSXMLParser`, `NSUUID`, `NSData`, `NSURLSession`;
+the `NSXMLParserDelegate` and `NSURLSessionDataDelegate` protocols (the
+latter exists to drive the incoming-block handle against a live framework).
+It exists to make the runtime leg testable without a phone, and it is a real
+second consumer of the generator.
 
 Growing either one is a reviewed diff of `bindgen.json` plus regenerated
 output. `AVAudioEngine` and the UIKit views M4's backend will want are the next

@@ -53,15 +53,18 @@
         "NSNotificationCenter",
         "NSXMLParser",
         "NSUUID",
-        "NSData"
+        "NSData",
+        "NSURLSession"
       ],
       "protocols": [
-        "NSXMLParserDelegate"
+        "NSXMLParserDelegate",
+        "NSURLSessionDataDelegate"
       ],
       "enums": [
         "NSXMLParserError",
         "NSDataReadingOptions",
-        "NSDataWritingOptions"
+        "NSDataWritingOptions",
+        "NSURLSessionResponseDisposition"
       ],
       "opaque": [
         "NSArray",
@@ -70,7 +73,10 @@
         "NSURL",
         "NSInputStream",
         "NSSet",
-        "NSError"
+        "NSError",
+        "NSURLSessionConfiguration",
+        "NSURLSessionDataTask",
+        "NSURLResponse"
       ]
     }
   ]

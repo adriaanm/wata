@@ -16,6 +16,7 @@ package foundation
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adriaanm/wata/go-pkgs/appleptt/objcrt"
 	"github.com/ebitengine/purego/objc"
@@ -210,6 +211,71 @@ func TestGeneratedProtocolDelegate(t *testing.T) {
 	want := []string{"start-document", "start:greeting", "text:hello", "end:greeting", "end-document"}
 	if strings.Join(events, ",") != strings.Join(want, ",") {
 		t.Errorf("events = %v, want %v", events, want)
+	}
+}
+
+// TestIncomingBlockFromNSURLSession is the incoming-block story end to end,
+// with a real framework on the giving side: NSURLSession hands
+// `didReceiveResponse:completionHandler:`'s completion block to a generated
+// delegate, the Go side stores the handle and returns from the callback, a
+// *different* goroutine calls it later with NSURLSessionResponseAllow, and
+// the transfer observably proceeds — `didReceiveData:` delivers the payload.
+// This is exactly the shape of the PushToTalk incoming-push path, which only
+// exists on iOS hardware.
+func TestIncomingBlockFromNSURLSession(t *testing.T) {
+	payload := []byte("wata incoming-block payload")
+	path := t.TempDir() + "/payload.bin"
+	if ok, err := (NSData{objcrt.NSData(payload)}).WriteToFileOptionsError(path, NSDataWritingAtomic); !ok || err != nil {
+		t.Fatalf("writing the fixture file: ok=%v err=%v", ok, err)
+	}
+
+	handles := make(chan IncomingBlockNSURLSessionResponseDisposition, 1)
+	got := make(chan []byte, 8)
+	delegate := NewNSURLSessionDataDelegate(NSURLSessionDataDelegate{
+		URLSessionDataTaskDidReceiveResponseCompletionHandler: func(
+			_ NSURLSession, _ NSURLSessionDataTask, _ NSURLResponse,
+			completionHandler IncomingBlockNSURLSessionResponseDisposition) {
+			handles <- completionHandler // stored; called only after this callback returned
+		},
+		URLSessionDataTaskDidReceiveData: func(_ NSURLSession, _ NSURLSessionDataTask, d NSData) {
+			got <- objcrt.GoBytes(d.ID)
+		},
+	})
+
+	config := NSURLSessionConfiguration{objc.ID(objc.GetClass("NSURLSessionConfiguration")).
+		Send(objc.RegisterName("defaultSessionConfiguration"))}
+	session := GetNSURLSessionClass().
+		SessionWithConfigurationDelegateDelegateQueue(config, delegate, NSOperationQueue{})
+	defer session.FinishTasksAndInvalidate()
+
+	url := NSURL{objc.ID(objc.GetClass("NSURL")).
+		Send(objc.RegisterName("fileURLWithPath:"), objcrt.NSString(path))}
+	task := session.DataTaskWithURL(url)
+	task.ID.Send(objc.RegisterName("resume"))
+
+	var h IncomingBlockNSURLSessionResponseDisposition
+	select {
+	case h = <-handles:
+	case <-time.After(15 * time.Second):
+		t.Fatal("didReceiveResponse:completionHandler: never arrived")
+	}
+	// The delegate callback has returned; the copied block is all that keeps
+	// the completion alive. Call it from another goroutine, then release.
+	released := make(chan struct{})
+	go func() {
+		h.Call(NSURLSessionResponseAllow)
+		h.Release()
+		close(released)
+	}()
+	<-released
+
+	select {
+	case data := <-got:
+		if string(data) != string(payload) {
+			t.Errorf("didReceiveData delivered %q, want %q", data, payload)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("didReceiveData: never arrived after the completion block ran")
 	}
 }
 

@@ -36,6 +36,16 @@ const (
 	NSAtomicWrite                                                   NSDataWritingOptions = 1
 )
 
+// NSURLSessionResponseDisposition is the ObjC enum NSURLSessionResponseDisposition (long).
+type NSURLSessionResponseDisposition int
+
+const (
+	NSURLSessionResponseCancel         NSURLSessionResponseDisposition = 0
+	NSURLSessionResponseAllow          NSURLSessionResponseDisposition = 1
+	NSURLSessionResponseBecomeDownload NSURLSessionResponseDisposition = 2
+	NSURLSessionResponseBecomeStream   NSURLSessionResponseDisposition = 3
+)
+
 // NSXMLParserError is the ObjC enum NSXMLParserError (long).
 type NSXMLParserError int
 

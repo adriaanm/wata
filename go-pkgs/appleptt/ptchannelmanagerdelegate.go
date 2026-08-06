@@ -47,6 +47,8 @@ type PTChannelManagerDelegate struct {
 	ChannelManagerReceivedEphemeralPushToken func(channelManager PTChannelManager, pushToken NSData)
 	// -[PTChannelManagerDelegate incomingPushResultForChannelManager:channelUUID:pushPayload:]
 	IncomingPushResultForChannelManagerChannelUUIDPushPayload func(channelManager PTChannelManager, channelUUID NSUUID, pushPayload NSDictionary) PTPushResult
+	// -[PTChannelManagerDelegate incomingServiceUpdatePushForChannelManager:channelUUID:pushPayload:isHighPriority:remainingHighPriorityBudget:withCompletionHandler:]
+	IncomingServiceUpdatePushForChannelManagerChannelUUIDPushPayloadIsHighPriorityRemainingHighPriorityBudgetWithCompletionHandler func(channelManager PTChannelManager, channelUUID NSUUID, pushPayload NSDictionary, isHighPriority bool, remainingHighPriorityBudget int, completion IncomingBlockVoid)
 }
 
 // NewPTChannelManagerDelegate synthesizes an ObjC object conforming to PTChannelManagerDelegate
@@ -147,6 +149,14 @@ func NewPTChannelManagerDelegate(d PTChannelManagerDelegate) objc.ID {
 			Sel: "incomingPushResultForChannelManager:channelUUID:pushPayload:",
 			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 objc.ID, a2 objc.ID) objc.ID {
 				return d.IncomingPushResultForChannelManagerChannelUUIDPushPayload(PTChannelManager{a0}, NSUUID{a1}, NSDictionary{a2}).ID
+			},
+		})
+	}
+	if d.IncomingServiceUpdatePushForChannelManagerChannelUUIDPushPayloadIsHighPriorityRemainingHighPriorityBudgetWithCompletionHandler != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "incomingServiceUpdatePushForChannelManager:channelUUID:pushPayload:isHighPriority:remainingHighPriorityBudget:withCompletionHandler:",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 objc.ID, a2 objc.ID, a3 bool, a4 int, a5 objc.Block) {
+				d.IncomingServiceUpdatePushForChannelManagerChannelUUIDPushPayloadIsHighPriorityRemainingHighPriorityBudgetWithCompletionHandler(PTChannelManager{a0}, NSUUID{a1}, NSDictionary{a2}, a3, a4, IncomingBlockVoid{objcrt.CopyBlock(a5)})
 			},
 		})
 	}

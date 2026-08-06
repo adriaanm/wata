@@ -9,4 +9,3 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSUUID` `compare:` — no Go mapping for 'NSComparisonResult'
 - `NSUUID` `getUUIDBytes:` — no Go mapping for 'unsigned char * _Nonnull'
 - `NSUUID` `initWithUUIDBytes:` — no Go mapping for 'const unsigned char * _Nullable'
-- `PTChannelManagerDelegate` `incomingServiceUpdatePushForChannelManager:channelUUID:pushPayload:isHighPriority:remainingHighPriorityBudget:withCompletionHandler:` — block parameter in a callback

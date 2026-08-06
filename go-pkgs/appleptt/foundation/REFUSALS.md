@@ -32,6 +32,29 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSProcessInfo` `beginActivityWithOptions:reason:` — no Go mapping for 'NSActivityOptions'
 - `NSProcessInfo` `isOperatingSystemAtLeastVersion:` — no Go mapping for 'NSOperatingSystemVersion'
 - `NSProcessInfo` `performActivityWithOptions:reason:usingBlock:` — no Go mapping for 'NSActivityOptions'
+- `NSURLSession` `dataTaskWithRequest:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `dataTaskWithRequest:completionHandler:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `downloadTaskWithRequest:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `downloadTaskWithRequest:completionHandler:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `downloadTaskWithResumeData:` — NSURLSessionDownloadTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `downloadTaskWithResumeData:completionHandler:` — NSURLSessionDownloadTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `downloadTaskWithURL:` — NSURLSessionDownloadTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `downloadTaskWithURL:completionHandler:` — NSURLSessionDownloadTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `streamTaskWithHostName:port:` — NSURLSessionStreamTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `streamTaskWithNetService:` — NSNetService is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `uploadTaskWithRequest:fromData:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `uploadTaskWithRequest:fromData:completionHandler:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `uploadTaskWithRequest:fromFile:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `uploadTaskWithRequest:fromFile:completionHandler:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `uploadTaskWithResumeData:` — NSURLSessionUploadTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `uploadTaskWithResumeData:completionHandler:` — NSURLSessionUploadTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `uploadTaskWithStreamedRequest:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `webSocketTaskWithRequest:` — NSURLRequest is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `webSocketTaskWithURL:` — NSURLSessionWebSocketTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSession` `webSocketTaskWithURL:protocols:` — NSURLSessionWebSocketTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSessionDataDelegate` `URLSession:dataTask:didBecomeDownloadTask:` — NSURLSessionDownloadTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSessionDataDelegate` `URLSession:dataTask:didBecomeStreamTask:` — NSURLSessionStreamTask is not on the allowlist (add it to classes or opaque)
+- `NSURLSessionDataDelegate` `URLSession:dataTask:willCacheResponse:completionHandler:` — NSCachedURLResponse is not on the allowlist (add it to classes or opaque)
 - `NSUUID` `compare:` — no Go mapping for 'NSComparisonResult'
 - `NSUUID` `getUUIDBytes:` — no Go mapping for 'unsigned char * _Nonnull'
 - `NSUUID` `initWithUUIDBytes:` — no Go mapping for 'const unsigned char * _Nullable'
