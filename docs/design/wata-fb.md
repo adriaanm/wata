@@ -95,8 +95,8 @@ publish across the atomic cell.
 ### The `UiDevice` seam
 
 The frame loop's only contact with hardware is the `UiDevice` trait
-(`ui.scala`): **input poll, present, LEDs, button/panel backlight, and
-the frame pace**. Time is not part of it — the loop already takes a
+(`ui.scala`): **input poll, present, LEDs, button/panel backlight,
+unblank, and the frame pace**. Time is not part of it — the loop already takes a
 `Clock` capability from `wataclient`, and `UiDevice` owns only the one
 sleep. It is deliberately NOT `Shareable`: a `UiDevice` never crosses a
 goroutine boundary, which is what lets the real implementation hold the
@@ -894,6 +894,26 @@ brightness is user-configurable through the settings applet
 in `Ui.tickIdle` (`ui.scala:180`) turns the backlight and button
 backlight off after that timeout, restoring them on the next input
 (`Ui.wake`, `ui.scala:172`).
+
+**Kernel framebuffer blanking is a separate axis from the backlight**,
+and it is why an app that only restores the backlight can still face a
+white screen: the kernel's console-blank timer (or an explicit
+`FBIOBLANK`) puts the fbdev into a blanked state in which the ST7735S
+panel displays WHITE with the backlight on and writes into the mmap'd
+`/dev/fb0` never reach the glass — the app's frames are present in fb
+memory but invisible until some VT event unblanks (historically: the
+first keypress after boot). `Led.unblankFb` writes `0`
+(`FB_BLANK_UNBLANK`) to `/sys/class/graphics/fb0/blank` — the
+proven-on-device node; the `FBIOBLANK` ioctl reaches the same handler —
+through the same probed-once `writeSysfs` discipline as the LED nodes,
+so it is a silent no-op on hosts. `UiDevice.unblank()` exposes it
+behind the seam (host backends no-op), and it runs at the two edges
+where a blanked panel would otherwise swallow frames: device init in
+`Ui.loopWithDevice`, right after `/dev/fb0` is opened, and every
+screensaver wake (`Ui.wake`). The boot-side half — `consoleblank=0` on
+the kernel cmdline so the console-blank timer never arms between
+respawns — is bq268-alpine's (its
+`docs/planning/consoleblank-cmdline.md`).
 
 ## Session persistence
 

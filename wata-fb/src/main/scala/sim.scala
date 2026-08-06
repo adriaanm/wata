@@ -179,6 +179,7 @@ final class SimDevice(prev: go.Bytes) extends UiDevice:
   def present(px: go.Bytes): Unit = Sim.present(prev, px)
   def leds(green: Boolean, red: Boolean): Unit = Sim.setLeds(green, red)
   def backlight(level: scala.Int): Unit = ()          // no panel to dim
+  def unblank(): Unit = ()                            // no kernel fb to unblank
   def buttonBacklight(on: Boolean): Unit = ()
   def frameSleep(ms: Long): Unit = FbCaps.sleepMs(ms)
 

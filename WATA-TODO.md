@@ -27,6 +27,13 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## client / device
 
+- **Framebuffer unblank fix needs a device pass** (FB-FIRST-FRAME-WHITE,
+  2026-08-06): `Ui.loopWithDevice`/`Ui.wake` now write `0` to
+  `/sys/class/graphics/fb0/blank` (`Led.unblankFb`) so the first frame
+  and every screensaver wake land on an unblanked panel. Rides the next
+  `fb-deploy`; verify no white screen at boot and after idle wake. The
+  cmdline half (`consoleblank=0`) is handed to bq268-alpine
+  (`docs/planning/consoleblank-cmdline.md` there).
 - **Aged-refusal endpoint rebuild not yet on the device** (plan 0030,
   2026-08-06): the fix lives in the irohnet Rust staticlib; only the
   host lib (`clib/darwin`) was rebuilt. The armv7 lib rides the next

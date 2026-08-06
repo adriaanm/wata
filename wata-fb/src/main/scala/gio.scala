@@ -36,6 +36,7 @@ final class GioDevice() extends UiDevice:
   def present(px: go.Bytes): Unit = go.gioshell.present(px)
   def leds(green: Boolean, red: Boolean): Unit = go.gioshell.leds(green, red)
   def backlight(level: scala.Int): Unit = ()          // no panel to dim
+  def unblank(): Unit = ()                            // no kernel fb to unblank
   def buttonBacklight(on: Boolean): Unit = ()
   def frameSleep(ms: Long): Unit = FbCaps.sleepMs(ms)
 

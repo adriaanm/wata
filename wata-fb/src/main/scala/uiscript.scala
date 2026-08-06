@@ -110,6 +110,7 @@ final class ScriptDevice extends UiDevice:
   def present(px: go.Bytes): Unit = ()
   def leds(green: Boolean, red: Boolean): Unit = ()
   def backlight(level: scala.Int): Unit = ()
+  def unblank(): Unit = ()
   def buttonBacklight(on: Boolean): Unit = ()
   def frameSleep(ms: Long): Unit = FbCaps.sleepMs(UiScript.pace())
 

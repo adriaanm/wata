@@ -47,6 +47,11 @@ trait UiDevice:
   def leds(green: Boolean, red: Boolean): Unit
   /** panel backlight, 0..255 (0 = off). */
   def backlight(level: scala.Int): Unit
+  /** un-blank the display: the real device's kernel framebuffer blanks
+   *  independently of the backlight (a blanked ST7735S shows white with the
+   *  backlight on), so waking is backlight AND unblank; a host backend has no
+   *  blank state and no-ops. */
+  def unblank(): Unit
   /** keypad backlight. */
   def buttonBacklight(on: Boolean): Unit
   /** pace one frame. */
@@ -62,6 +67,7 @@ final class FbUiDevice(fds: List[scala.Int], mem: go.Bytes) extends UiDevice:
     Led.setGreenLed(green)
     Led.setRedLed(red)
   def backlight(level: scala.Int): Unit = Led.setBacklight(level)
+  def unblank(): Unit = Led.unblankFb()
   def buttonBacklight(on: Boolean): Unit = Led.setButtonBacklight(on)
   def frameSleep(ms: Long): Unit = FbCaps.sleepMs(ms)
 
@@ -193,8 +199,12 @@ object Ui:
     val fds = Evdev.open()
     println("ui: input devices open: " + Evdev.count(fds))
     val dev = FbUiDevice(fds, mem)
-    // device init: the STORED backlight level (resetCells has just restored
-    // the settings applet from the config store) + button LEDs on.
+    // device init: UNBLANK first — the kernel's console-blank timer may have
+    // blanked the panel before this respawn, and a blanked panel shows white
+    // and ignores fb writes (FB-FIRST-FRAME-WHITE) — then the STORED backlight
+    // level (resetCells has just restored the settings applet from the config
+    // store) + button LEDs on.
+    dev.unblank()
     dev.backlight(SettingsLogic.getBrightness(Shell.settingsState(stateV)))
     dev.buttonBacklight(true)
     val px = Draw.newBuffer()
@@ -359,6 +369,7 @@ object Ui:
 
   def wake(dev: UiDevice): Unit =
     if displayOff then
+      dev.unblank()
       dev.backlight(SettingsLogic.getBrightness(Shell.settingsState(stateV)))
       dev.buttonBacklight(true)
       offC.set(false)

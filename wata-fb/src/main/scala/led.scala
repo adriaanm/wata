@@ -18,6 +18,7 @@ object Led:
   val redStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
   val greenStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
   val buttonStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
+  val fbBlankStatusC: sgo.Atomic[scala.Int] = sgo.atomic(UNTRIED)
 
   def setBacklight(brightness: scala.Int): Unit =
     blStatusC.set(writeSysfs("/sys/class/leds/lcd-bl/brightness", brightness, blStatusC.get()))
@@ -27,6 +28,17 @@ object Led:
     greenStatusC.set(writeSysfs("/sys/class/leds/green/brightness", onValue(on), greenStatusC.get()))
   def setButtonBacklight(on: Boolean): Unit =
     buttonStatusC.set(writeSysfs("/sys/class/leds/button-backlight/brightness", onValue(on), buttonStatusC.get()))
+
+  /** UNBLANK the kernel framebuffer: write 0 (FB_BLANK_UNBLANK) to the fbcon
+   *  blank node. The kernel blanks the panel independently of the backlight —
+   *  a blanked ST7735S shows WHITE with the backlight on, and writes into the
+   *  mmap'd /dev/fb0 do not reach it — so the app must unblank at startup and
+   *  on every screensaver wake or its frames are invisible until a stray VT
+   *  event unblanks for it (the "white screen until first keypress" symptom).
+   *  The sysfs node is the proven-on-device path (the FBIOBLANK ioctl reaches
+   *  the same handler). */
+  def unblankFb(): Unit =
+    fbBlankStatusC.set(writeSysfs("/sys/class/graphics/fb0/blank", 0, fbBlankStatusC.get()))
 
   /** 255 when on, else 0. */
   def onValue(on: Boolean): scala.Int =
