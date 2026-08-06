@@ -189,6 +189,14 @@ documented in the package and in
 native hierarchy after `Apply` mirrors what `Patches.applyAll` says —
 on the real toolkit (`just nativeui-tests`, macOS-only).
 
+The `wata-mac` app is the arm's driver: its pump runs the same bodies
+the framebuffer runs, calls THIS module's `Diff.diff` each frame, and
+hands the script across the facade as one wire message
+(`wata-mac/src/main/scala/wire.scala` encoding, `go-pkgs/macshell`
+decoding into the Go mirror). So the differ's script vocabulary is now
+a cross-language contract, exercised end to end by `just mac-smoke`,
+which asserts the exact script a mid-session sync change produces.
+
 ## The oracle
 
 `oracle.scala`'s `DiffOracle.report()` is a deterministic report, driven

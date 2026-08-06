@@ -128,10 +128,12 @@ bindgen-runtime:
 
 # the retained AppKit backend (plan 0032): go-pkgs/nativeui's unit tests —
 # the native hierarchy mirrors wataui's applyAll for build-from-scratch and
-# patch scripts, the offscreen render probes, the dispatch seam, all headless.
+# patch scripts, the offscreen render probes, the dispatch seam, the key view,
+# all headless — plus go-pkgs/macshell's wire-grammar tests.
 # Needs macOS (like bindgen-runtime); not in ci.
 nativeui-tests:
     cd go-pkgs/nativeui && GOWORK=off go test ./...
+    cd go-pkgs/macshell && GOWORK=off go test ./...
 
 # Apple bindings: the struct-callback spike — ObjC methods whose C signatures
 # carry structs (CGRect/NSRange/...) dispatched into Go callbacks, both on the
@@ -153,6 +155,21 @@ ptt-hello *FLAGS:
 # sends a canned Ogg, alice snaps/plays/pokes). ~10s, so standalone, not in ci.
 tui-smoke:
     tools/tui-smoke.py
+
+# macOS client (plan 0032): build the wata-mac app
+mac-build:
+    cd wata-mac && ../tools/sgo build
+
+# macOS client: the real window against a live server (WATA_MAC_USER/PASS/HS
+# or args) — the owner's leg: look at it, keyboard only
+mac *ARGS:
+    cd wata-mac && ../tools/sgo run {{ARGS}}
+
+# macOS client: headless end-to-end against a fresh server — native hierarchy
+# asserted, a mid-session message patches exactly its rows, the key path opens
+# the conversation. ~30s, standalone like tui-smoke; macOS only, not in ci.
+mac-smoke:
+    tools/mac-smoke.py
 
 # terminal client: a REPL against a live server (WATA_TUI_USER/PASS/HS or args)
 tui *ARGS:

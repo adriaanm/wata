@@ -1,0 +1,6 @@
+# In-link libraries above the implicit prelude (core). wata-mac links json +
+# wataclient (order: json then wataclient, matching wata-fb's chain) + wataui,
+# whose differ drives the retained AppKit backend.
+json
+wataclient
+wataui

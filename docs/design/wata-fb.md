@@ -39,6 +39,15 @@ wata-fb builds two ways:
   and the vendored, prebuilt static libs under
   `go-pkgs/audio/clib/arm/` provide the real opus + tinyalsa objects.
 
+**Some of this module's sources are shared with `wata-mac`** (plan
+0032): the macOS client compiles `applets.scala`, `display.scala`,
+`paint.scala`, `netstatus.scala`, `input.scala` and `syscall.scala`
+through symlinks under `wata-mac/src/main/scala`, so the bodies stay
+one source across backends. An edit to those files is compiled by BOTH
+apps — a new device-only reference in them needs a stub in wata-mac's
+`stubs.scala` (its build fails loudly until it has one); see
+[wata-mac.md](wata-mac.md).
+
 ## Process structure
 
 `main.scala` is a flat command dispatcher (`object Main.main`,

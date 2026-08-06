@@ -1,0 +1,19 @@
+# sgo.build (schema: see the sgola tree's core/sgo.build). wata-mac is an APP
+# over core + json + wataclient + wataui: the macOS client (plan 0032). Its
+# device layer is the retained AppKit backend — go-pkgs/nativeui driven
+# through go-pkgs/macshell — and its SCREENS are wata-fb's own bodies: the
+# shared source files ride in as symlinks under src/main/scala (see
+# docs/design/wata-mac.md), so the fb goldens stay the semantic oracle here.
+mode app
+emitname wata-mac
+binname wata-mac
+gomod watamac
+optreport
+# The AppKit shell: window/headless stage, wire decode, key queue. It rides
+# nativeui + appleptt, which need their OWN godep lines — a `replace` in a
+# dependency's go.mod is ignored by Go once the emitted app is the main
+# module, so each local sibling must be replaced from the app's go.mod, and
+# a godep line is exactly that (require + local replace).
+godep github.com/adriaanm/wata/go-pkgs/macshell go-pkgs/macshell
+godep github.com/adriaanm/wata/go-pkgs/nativeui go-pkgs/nativeui
+godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt

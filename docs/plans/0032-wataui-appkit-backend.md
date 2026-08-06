@@ -1,7 +1,20 @@
 # 0032 — wataui backend 2: the AppKit leg, and the macOS walking skeleton
 
-Status: accepted (owner 2026-08-06: the scaled stage first, native layout
-as a later deliberate step)
+Status: done (2026-08-06). Chunk 1 built `go-pkgs/nativeui` + the
+`appkit` bindings; chunk 2 added the key view, `go-pkgs/macshell`, and
+the `wata-mac` module — which runs wata-fb's OWN bodies via symlinked
+sources plus off-device stubs, pumps `ClientHandle`'s events through
+`Diff.diff`, and hands each script across the facade as one wire
+message. Verified by `just nativeui-tests` and the scripted
+`just mac-smoke` (native hierarchy asserted, a mid-session message's
+exact patch script, the key path); ci green. Deviations from the
+sketch: VRect is NSBox (CGColorRef refused), the frame handoff is a
+wire encoding rather than a shared in-memory tree (the app and the
+backend live on opposite sides of the Sgola/Go facade), and the pump
+ticks on `waitEvent` with a frame-pace deadline rather than a bare
+recv (held-key timers need dt). Audio is `MAC-AUDIO`, iroh is
+`IROH-APPLE`; outbox marks/flash need a handle-side event drain and
+ride with `MAC-AUDIO`. Details: docs/design/wata-mac.md.
 
 ## Problem
 

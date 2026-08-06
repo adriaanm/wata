@@ -84,6 +84,7 @@ serve the compiler's own gate does not belong here.
 | `wata-server/`     | app — the Matrix client-server homeserver                                |
 | `wata-fb/`         | app — the device client (framebuffer display, input, audio, LEDs)        |
 | `wata-tui/`        | app — the terminal client and admin REPL (host-side, no device layer)    |
+| `wata-mac/`        | app — the macOS client: wata-fb's bodies on the retained AppKit backend  |
 | `wataclient/`      | library — the portable Matrix client core, linked by `wata-fb`            |
 | `wataui/`          | library — the declarative view algebra and differ, backend-free           |
 | `go-pkgs/audio/`   | plain Go cgo module — opus + tinyalsa, `wata-fb`'s device audio           |
@@ -247,6 +248,7 @@ justfile just gives it a name.
 | [docs/design/wataui.md](docs/design/wataui.md) | UI layer: the view algebra, the purity rule, the differ |
 | [docs/design/wata-fb.md](docs/design/wata-fb.md) | device client: display, input, audio, cross-build, deploy |
 | [docs/design/wata-tui.md](docs/design/wata-tui.md) | terminal client: the command REPL, the admin surface, its smoke |
+| [docs/design/wata-mac.md](docs/design/wata-mac.md) | macOS client: the retained AppKit backend, the shared bodies, its smoke |
 | [docs/design/bindgen.md](docs/design/bindgen.md) | Apple bindings: the generator, the allowlist, refusals, how they are verified |
 | [docs/design/wata-mac.md](docs/design/wata-mac.md) | macOS client: the retained AppKit backend (`go-pkgs/nativeui`), its layers and gotchas |
 | [justfile](justfile) | every repeatable operation, one recipe each (`just` to list) |
