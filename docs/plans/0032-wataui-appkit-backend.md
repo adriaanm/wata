@@ -1,6 +1,7 @@
 # 0032 — wataui backend 2: the AppKit leg, and the macOS walking skeleton
 
-Status: proposed
+Status: accepted (owner 2026-08-06: the scaled stage first, native layout
+as a later deliberate step)
 
 ## Problem
 
