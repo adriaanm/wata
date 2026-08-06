@@ -61,8 +61,7 @@ object Repl:
    *  `exec` because `join` reads its PSK as the NEXT stdin line — a prompt,
    *  not an argument, so a shoulder-surfable secret never sits in a shell
    *  history line beside the command that used it. */
-  def loop(c: MatrixClient): Unit =
-    val sc = go.bufio.newScanner(go.osx.Stdin)
+  def loop(c: MatrixClient, sc: go.bufio.Scanner): Unit =
     var going = true
     while going do
       if !sc.scan() then going = false

@@ -17,11 +17,16 @@ is in [../plans/0016-tui-port.md](../plans/0016-tui-port.md).
 
 ```
 WATA_TUI_USER=alice WATA_TUI_PASS=testpass123 just tui
-wata-tui <homeserver> <user> <password>
+wata-tui <homeserver> <user> [password]
 ```
 
 Login is from `WATA_TUI_HS` (default `http://127.0.0.1:8008`),
 `WATA_TUI_USER`, `WATA_TUI_PASS`, with positional arguments overriding.
+With a user but no password, the tui prompts `password?` and reads it as
+the next stdin line — the same rule as the wifi `join` PSK: a secret
+never sits in shell history or `ps` output. The prompt and the REPL
+share one stdin scanner (a second `bufio` scanner would buffer past its
+line and swallow piped commands).
 There is no stored session file — an admin tool logs in each run.
 `$WATA_IROH_CONFIG` swaps the transport for embedded iroh exactly as it
 does for `wata-fb` (plan 0013), so the tui is also a second iroh client.
