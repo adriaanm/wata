@@ -288,3 +288,11 @@ phone-spike *FLAGS:
 audio-spike *FLAGS:
     cd tools/audio-spike && go run . {{FLAGS}}
 
+# the iOS architecture spike (IOS-CLIENT-ASSEMBLY): one pure-Go binary driving
+# UIKit through purego — no Swift, no ObjC source, no Xcode project, no
+# gomobile — built, bundled by hand and run in the iOS simulator. Report:
+# tools/ios-spike/REPORT.md. Needs Xcode + an iOS simulator runtime; not in ci.
+#   just ios-spike --only run         # one stage
+ios-spike *FLAGS:
+    tools/ios-spike/spike.py {{FLAGS}}
+
