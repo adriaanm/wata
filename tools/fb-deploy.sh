@@ -43,6 +43,17 @@ FB_CMD="${1:-}"   # e.g. `fbsmoke`; empty = plain run
 
 echo "== fb-deploy: cross-build wata-fb (armv7-musl) =="
 ( cd "$WATA/wata-fb" && "$SGO" build --goos linux --goarch arm --goarm 7 --cgo --cc "$CC" )
+if [ -n "${BQ268_IROH_PEER:-}" ]; then
+  # The sgo cross-build produces the STUB transport; iroh mode needs the
+  # -tags iroh binary linked against a current arm staticlib (the clib is
+  # gitignored and goes stale whenever the FFI changes — a stale one either
+  # fails to link or, worse, deploys yesterday's transport). mklib is a
+  # cargo build: cached, cheap when nothing changed.
+  echo "== fb-deploy: iroh build (fresh arm staticlib, then -tags iroh) =="
+  python3 "$WATA/go-pkgs/irohnet/mklib.py" arm
+  ( cd "$(emitdir wata-fb)" && env GOWORK=off GOOS=linux GOARCH=arm GOARM=7 \
+      CGO_ENABLED=1 CC="$CC" go build -tags iroh -o "$BIN" . )
+fi
 ls -la "$BIN"; file "$BIN" || true
 
 echo "== fb-deploy: scp -> $HOST:$REMOTE =="
