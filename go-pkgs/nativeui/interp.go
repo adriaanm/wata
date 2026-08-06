@@ -94,6 +94,12 @@ func NewStage(scale int) *Stage {
 		}})
 	s.font = appkit.GetNSFontClass().MonospacedSystemFontOfSizeWeight(
 		cellFontPts*float64(scale), 0 /* NSFontWeightRegular */)
+	// The factory answer is AUTORELEASED, and the stage outlives the frame's
+	// pool (every apply runs in a pool of its own — wata-mac.md); retain it,
+	// or the second frame's label call dies on a freed font. Everything else
+	// the interpreter allocates is either owned (-alloc) or retained by its
+	// superview before the pool pops.
+	s.font.ID.Send(selRetain)
 	return s
 }
 
