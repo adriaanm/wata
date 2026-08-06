@@ -27,6 +27,12 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## client / device
 
+- **Aged-refusal endpoint rebuild not yet on the device** (plan 0030,
+  2026-08-06): the fix lives in the irohnet Rust staticlib; only the
+  host lib (`clib/darwin`) was rebuilt. The armv7 lib rides the next
+  `fb-deploy` (`mklib.py arm`) — until then a handset that wedges its
+  endpoint after a network move still needs the app restart. Field
+  re-verification of the healed arc happens then.
 - **Device-command mailbox: the node-id credential's positive leg is
   ungated.** cmd-smoke pins the negatives (forged header + no token →
   401; unbound node → 403) and the bearer-token path end to end, but no

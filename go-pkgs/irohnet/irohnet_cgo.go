@@ -44,6 +44,7 @@ extern int32_t irohnet_client_new(const char* secret_hex, const char* peer_id, c
 extern int32_t irohnet_client_dial(uint64_t h, int64_t timeout_ms, uint64_t* out_stream,
                                    char* err_out, size_t err_cap);
 extern int32_t irohnet_client_last_refusal(uint64_t h, char* out, size_t cap);
+extern int64_t irohnet_client_rebuilds(uint64_t h);
 extern void irohnet_client_close(uint64_t h);
 extern void irohnet_stream_set_deadlines(uint64_t h, int64_t read_ms, int64_t write_ms);
 extern int64_t irohnet_stream_read(uint64_t h, unsigned char* buf, size_t cap);
@@ -537,6 +538,16 @@ func (d *Dialer) logDialError(reason string) {
 	d.lastLogged = reason
 	noteRefusal(reason)
 	fmt.Printf("irohnet: dial %s failed: %s\n", d.peer, reason)
+}
+
+// Rebuilds reports how many times this dialer's endpoint was rebuilt by the
+// aged-failure heal (rust/src/lib.rs, maybe_rebuild_endpoint): a client whose
+// dials have failed for longer than IROHNET_REBUILD_HORIZON_MS (default 5
+// minutes; 0 disables) swaps in a fresh endpoint — same key, same peer, new
+// sockets and discovery/relay state — before its next handshake. The
+// aged-refusal gate asserts on this counter.
+func (d *Dialer) Rebuilds() int64 {
+	return int64(C.irohnet_client_rebuilds(d.h))
 }
 
 // Close shuts the client endpoint down (open conns die with it).

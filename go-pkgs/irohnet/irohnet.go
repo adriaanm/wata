@@ -46,6 +46,13 @@
 //     in on its next retries, without a new dialer or a restarted process
 //     (TestRefusedClientRedialsAfterAllow). The first dial that succeeds
 //     clears LastRefusal, which is what takes the device's enrolment QR down.
+//   - A failure run that AGES rebuilds the endpoint (plan 0030): when dials
+//     have kept failing for IROHNET_REBUILD_HORIZON_MS (default 5 min) with
+//     no bytes ever arriving, the next past-cooldown dial swaps in a freshly
+//     built endpoint — same key, same peer, new sockets/discovery/relay
+//     state. That is the in-process form of the app restart that healed the
+//     field's long-refused handset; Dialer.Rebuilds() counts it, the
+//     aged-refusal gate (aged_refusal_test.go) asserts on it.
 package irohnet
 
 import (

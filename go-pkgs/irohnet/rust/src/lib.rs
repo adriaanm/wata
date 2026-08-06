@@ -126,7 +126,13 @@ impl Gate {
 }
 
 struct ClientState {
-    endpoint: Endpoint,
+    /// Swappable: `maybe_rebuild_endpoint` replaces a long-refused client's
+    /// endpoint wholesale. Everything that dials clones the current one out of
+    /// the lock first.
+    endpoint: tokio::sync::Mutex<Endpoint>,
+    /// What `build_endpoint` needs to build a replacement.
+    secret_hex: String,
+    relay: String,
     peer: EndpointAddr,
     conn: tokio::sync::Mutex<Option<Connection>>,
     /// The last peer-initiated close seen on this client, so callers (and the
@@ -148,6 +154,49 @@ struct ClientState {
     /// which is precisely what the first hardware enrolment hit: the admin
     /// approved the device and the running app never noticed.
     refused_at: Mutex<Option<Instant>>,
+    /// When the CURRENT unbroken run of dial failures started (refusals or
+    /// transport failures — anything but a dial that got through); cleared by
+    /// the first successful dial. This is the age `maybe_rebuild_endpoint`
+    /// reads: a client that has failed for longer than `rebuild_horizon`
+    /// rebuilds its endpoint on the next past-cooldown dial.
+    fail_run_started: Mutex<Option<Instant>>,
+    /// When the endpoint was last rebuilt — rate-limits rebuilds to one per
+    /// horizon (the trigger would otherwise fire on every dial once the run
+    /// is old).
+    last_rebuild: Mutex<Option<Instant>>,
+    /// How many times this client rebuilt its endpoint (irohnet_client_rebuilds
+    /// — what the aged-refusal gate asserts on).
+    rebuilds: AtomicU64,
+    /// Resolved once at client creation: IROHNET_REBUILD_HORIZON_MS, default
+    /// 5 minutes, 0 = never rebuild (the pre-rebuild behavior — the gate's red
+    /// switch).
+    rebuild_horizon: Duration,
+}
+
+/// How long a client keeps failing before a dial is allowed to rebuild the
+/// endpoint. Field evidence (2026-08-06): a handset refused for 15+ minutes was
+/// never admitted after its approval until an app RESTART, which was an instant
+/// heal — while 16-minute aged-refusal runs against every layer this repo can
+/// exercise on one host (rust latch, iroh connection caching, the Go transport,
+/// the app loops; tools/tunnel-smoke.py + aged_refusal_test.go) recover within
+/// milliseconds of the approval. What a restart replaces and those runs cannot
+/// age is the ENDPOINT's network-facing state — sockets, discovery/resolver
+/// state, relay and path state across the device's network move. So a client
+/// whose dials have failed for this long swaps in a fresh endpoint (same key,
+/// same peer) and dials on: the restart, in process, scoped to the state that
+/// was stale. Five minutes is far above any transient blip and far below a
+/// parent's patience; IROHNET_REBUILD_HORIZON_MS compresses it for the gate
+/// (and 0 disables rebuilds outright — the old behavior, the gate's red run).
+const REBUILD_HORIZON_DEFAULT: Duration = Duration::from_secs(300);
+
+fn rebuild_horizon_from_env() -> Duration {
+    match std::env::var("IROHNET_REBUILD_HORIZON_MS") {
+        Ok(v) => match v.trim().parse::<u64>() {
+            Ok(ms) => Duration::from_millis(ms),
+            Err(_) => REBUILD_HORIZON_DEFAULT,
+        },
+        Err(_) => REBUILD_HORIZON_DEFAULT,
+    }
 }
 
 /// How long a refusal answers dials from the cached dead connection before a
@@ -246,6 +295,25 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// IROHNET_DEBUG=1 turns on stderr tracing of the dial/accept decision points
+/// — most importantly whether a given dial performed a REAL fresh QUIC
+/// handshake or was answered locally from the cached dead connection. That
+/// distinction is invisible in the app's own logs (the Go layer dedupes the
+/// refusal string), and it is the first question when a device sits refused:
+/// is it still actually asking the server, or replaying its own cache?
+fn dbg_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("IROHNET_DEBUG").map(|v| v == "1").unwrap_or(false))
+}
+
+macro_rules! dbg_log {
+    ($($arg:tt)*) => {
+        if dbg_on() {
+            eprintln!("irohnet-dbg[{}]: {}", now_ms() % 1_000_000, format!($($arg)*));
+        }
+    };
+}
+
 fn register_stream(send: SendStream, recv: RecvStream, client: Option<Arc<ClientState>>) -> u64 {
     let (tx, _rx) = watch::channel(());
     register(Obj::Stream(Arc::new(StreamState {
@@ -299,11 +367,36 @@ fn connect_refusal_message(e: &ConnectError) -> Option<String> {
 /// so the next dial (or the Go layer via irohnet_client_last_refusal) can
 /// report it — the stream I/O return-code protocol stays a plain RET_ERR,
 /// this is a side channel, not a protocol change.
+/// Note a REAL dial failure (a fresh handshake or its first stream I/O — never
+/// the fast-local cached answers): starts the failure run clock that
+/// `maybe_rebuild_endpoint` ages, if one is not already running.
+fn mark_dial_failed(cl: &ClientState) {
+    let mut run = cl.fail_run_started.lock().unwrap();
+    if run.is_none() {
+        *run = Some(Instant::now());
+    }
+}
+
+/// The failure run's honest end: bytes actually ARRIVED on a client stream —
+/// the peer answered. Neither a dial nor a write can end it: opening a stream
+/// is local-only and a write only buffers locally, so both "succeed" on every
+/// refused cycle.
+fn mark_io_worked(st: &StreamState) {
+    if let Some(client) = &st.client {
+        let mut run = client.fail_run_started.lock().unwrap();
+        if run.is_some() {
+            *run = None;
+        }
+    }
+}
+
 fn record_stream_refusal_read(st: &StreamState, e: &ReadError) {
     if let (Some(client), ReadError::ConnectionLost(ce)) = (&st.client, e) {
         if let Some(msg) = refusal_message(ce) {
+            dbg_log!("stream read: refusal recorded: {msg}");
             *client.last_refusal.lock().unwrap() = Some(msg);
             *client.refused_at.lock().unwrap() = Some(Instant::now());
+            mark_dial_failed(client);
         }
     }
 }
@@ -311,8 +404,10 @@ fn record_stream_refusal_read(st: &StreamState, e: &ReadError) {
 fn record_stream_refusal_write(st: &StreamState, e: &WriteError) {
     if let (Some(client), WriteError::ConnectionLost(ce)) = (&st.client, e) {
         if let Some(msg) = refusal_message(ce) {
+            dbg_log!("stream write: refusal recorded: {msg}");
             *client.last_refusal.lock().unwrap() = Some(msg);
             *client.refused_at.lock().unwrap() = Some(Instant::now());
+            mark_dial_failed(client);
         }
     }
 }
@@ -444,12 +539,14 @@ pub extern "C" fn irohnet_server_new(
                 };
                 let remote = conn.remote_id();
                 if !gate.admits(&remote) {
+                    dbg_log!("accept: refused {} (not allowlisted)", remote);
                     // the allowlist gate: refused at accept, before any stream.
                     // Read off the SHARED gate, so an id approved since this
                     // listener was built is admitted without a restart.
                     conn.close(VarInt::from_u32(401), b"not allowlisted");
                     return;
                 }
+                dbg_log!("accept: admitted {}", remote);
                 // tracked while live, so a later disallow can close it.
                 let token = gate.track(remote, conn.clone());
                 let remote_hex = remote.to_string();
@@ -673,11 +770,17 @@ pub extern "C" fn irohnet_client_new(
     match res {
         Ok(endpoint) => {
             let h = register(Obj::Client(Arc::new(ClientState {
-                endpoint,
+                endpoint: tokio::sync::Mutex::new(endpoint),
+                secret_hex: secret,
+                relay,
                 peer,
                 conn: tokio::sync::Mutex::new(None),
                 last_refusal: Mutex::new(None),
                 refused_at: Mutex::new(None),
+                fail_run_started: Mutex::new(None),
+                last_rebuild: Mutex::new(None),
+                rebuilds: AtomicU64::new(0),
+                rebuild_horizon: rebuild_horizon_from_env(),
             })));
             unsafe { *out_handle = h };
             0
@@ -685,6 +788,50 @@ pub extern "C" fn irohnet_client_new(
         Err(msg) => {
             put_str(err_out, err_cap, &msg);
             -1
+        }
+    }
+}
+
+/// The aged-failure heal: when this client's dials have been failing for
+/// longer than `rebuild_horizon` (and no rebuild happened within the last
+/// horizon), replace the endpoint with a freshly built one — same key, same
+/// peer, new sockets, new discovery/resolver/relay state. Called with the
+/// dial's `conn` lock held, right before a fresh handshake, so no stream can
+/// be racing onto the old endpoint's cached connection. The old endpoint is
+/// closed in the background. A rebuild that fails to bind leaves the old
+/// endpoint in place — worse off than before is not an option on a path that
+/// is already failing.
+async fn maybe_rebuild_endpoint(cl: &Arc<ClientState>) {
+    if cl.rebuild_horizon.is_zero() {
+        return; // disabled
+    }
+    let due = {
+        let run = cl.fail_run_started.lock().unwrap();
+        let aged = run.map(|t| t.elapsed() >= cl.rebuild_horizon).unwrap_or(false);
+        let recent = cl
+            .last_rebuild
+            .lock()
+            .unwrap()
+            .map(|t| t.elapsed() < cl.rebuild_horizon)
+            .unwrap_or(false);
+        aged && !recent
+    };
+    if !due {
+        return;
+    }
+    match build_endpoint(&cl.secret_hex, &cl.relay, false).await {
+        Ok(fresh) => {
+            let old = {
+                let mut guard = cl.endpoint.lock().await;
+                std::mem::replace(&mut *guard, fresh)
+            };
+            *cl.last_rebuild.lock().unwrap() = Some(Instant::now());
+            let n = cl.rebuilds.fetch_add(1, Ordering::SeqCst) + 1;
+            dbg_log!("dial: endpoint REBUILT (aged failure run; rebuild #{n})");
+            rt().spawn(async move { old.close().await });
+        }
+        Err(msg) => {
+            dbg_log!("dial: endpoint rebuild failed, keeping the old one: {msg}");
         }
     }
 }
@@ -734,20 +881,43 @@ pub extern "C" fn irohnet_client_dial(
                         // would slide the cooldown forward on every dial and
                         // the fresh handshake below would never come due.
                         if recent {
+                            dbg_log!("dial: cached refusal served locally (no handshake): {msg}");
                             return Err(msg);
                         }
                     }
+                    dbg_log!("dial: cached conn dead ({e:?}); redialing fresh");
                     *guard = None; // stale, or a refusal past cooldown; redial below
                 }
             }
         }
-        let c = cl.endpoint.connect(cl.peer.clone(), ALPN).await.map_err(|e| {
-            connect_refusal_message(&e).unwrap_or_else(|| format!("connect: {e:?}"))
-        })?;
+        // A failure run past the horizon earns a fresh ENDPOINT before the
+        // fresh handshake — see maybe_rebuild_endpoint.
+        maybe_rebuild_endpoint(&cl).await;
+        dbg_log!("dial: fresh handshake starting");
+        let ep = cl.endpoint.lock().await.clone();
+        let c = match ep.connect(cl.peer.clone(), ALPN).await {
+            Ok(c) => c,
+            Err(e) => {
+                let refusal = connect_refusal_message(&e);
+                let msg = refusal.clone().unwrap_or_else(|| format!("connect: {e:?}"));
+                dbg_log!("dial: fresh handshake FAILED: {msg}");
+                mark_dial_failed(&cl);
+                if refusal.is_none() {
+                    // The link is failing for a DIFFERENT reason now; a stale
+                    // "server refused" must not outlive it (errForRet would
+                    // replay it over any later stream error, and the device
+                    // would keep its QR screen up over an outage).
+                    *cl.last_refusal.lock().unwrap() = None;
+                }
+                return Err(msg);
+            }
+        };
         let pair = match c.open_bi().await {
             Ok(pair) => pair,
             Err(e) => {
                 let refusal = refusal_message(&e);
+                dbg_log!("dial: fresh handshake done, open_bi failed: {e:?}");
+                mark_dial_failed(&cl);
                 if let Some(m) = &refusal {
                     *cl.last_refusal.lock().unwrap() = Some(m.clone());
                     *cl.refused_at.lock().unwrap() = Some(Instant::now());
@@ -759,6 +929,7 @@ pub extern "C" fn irohnet_client_dial(
                 return Err(refusal.unwrap_or_else(|| format!("open_bi: {e:?}")));
             }
         };
+        dbg_log!("dial: fresh handshake + open_bi OK");
         // A handshake that got through retires the refusal: the peer's answer
         // has changed (an enrolment was approved), and a stale "not
         // allowlisted" would keep the device's QR screen up over a working
@@ -766,6 +937,11 @@ pub extern "C" fn irohnet_client_dial(
         // first read/write (record_stream_refusal_*).
         *cl.last_refusal.lock().unwrap() = None;
         *cl.refused_at.lock().unwrap() = None;
+        // NOT fail_run_started: opening a stream is local-only, so a dial
+        // "succeeds" against a connection the peer is already closing on
+        // every refused cycle — clearing the failure-run clock here would
+        // reset it each cycle and the rebuild horizon would never come due.
+        // The run ends when stream I/O actually completes (mark_io_worked).
         *guard = Some(c);
         Ok::<(SendStream, RecvStream), String>(pair)
     };
@@ -813,12 +989,23 @@ pub extern "C" fn irohnet_client_last_refusal(h: u64, out: *mut c_char, cap: usi
     }
 }
 
+/// How many times this client has rebuilt its endpoint (the aged-failure
+/// heal). Returns the count, or -1 for an unknown handle. What the
+/// aged-refusal gate asserts on.
+#[no_mangle]
+pub extern "C" fn irohnet_client_rebuilds(h: u64) -> i64 {
+    match get_client(h) {
+        Some(c) => c.rebuilds.load(Ordering::SeqCst) as i64,
+        None => -1,
+    }
+}
+
 /// Close the client endpoint (and its cached connection).
 #[no_mangle]
 pub extern "C" fn irohnet_client_close(h: u64) {
     if let Some(Obj::Client(c)) = remove(h) {
         rt().block_on(async {
-            c.endpoint.close().await;
+            c.endpoint.lock().await.close().await;
         });
     }
 }
@@ -867,7 +1054,10 @@ pub extern "C" fn irohnet_stream_read(h: u64, buf: *mut u8, cap: usize) -> i64 {
             tokio::select! {
                 r = recv.read(slice) => {
                     return match r {
-                        Ok(Some(n)) => n as i64,
+                        Ok(Some(n)) => {
+                            mark_io_worked(&st);
+                            n as i64
+                        }
                         Ok(None) => RET_EOF,
                         Err(e) => {
                             record_stream_refusal_read(&st, &e);
@@ -911,6 +1101,10 @@ pub extern "C" fn irohnet_stream_write(h: u64, buf: *const u8, len: usize) -> i6
             tokio::select! {
                 r = send.write(slice) => {
                     return match r {
+                        // NB: write success is NOT mark_io_worked — a QUIC
+                        // write only buffers locally, so it "succeeds" on a
+                        // dying connection just like open_bi does. Only a
+                        // read proves the peer answered.
                         Ok(n) => n as i64,
                         Err(e) => {
                             record_stream_refusal_write(&st, &e);

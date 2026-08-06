@@ -617,6 +617,14 @@ network), is in `docs/design/wata-server.md` under Device enrolment.
   (`TestRefusedClientRedialsAfterAllow`, which dials faster than the cooldown
   throughout), and `just tunnel-smoke`'s enrolment leg approves a client
   process that is left RUNNING and refused.
+  And a failure run that AGES rebuilds the transport's endpoint (plan 0030):
+  a handset whose dials have failed for five straight minutes with no bytes
+  ever arriving swaps in a fresh endpoint — new sockets, discovery, relay
+  state — before its next handshake, the in-process form of the app restart
+  that healed the field's long-refused handset after a network move. The
+  aged-refusal gate (`go-pkgs/irohnet/aged_refusal_test.go`, inside
+  tunnel-smoke) holds a client refused for a real minute and asserts both the
+  rebuild and the prompt admission after the approval.
   **After the approval: the provisioning arc** (plan 0027). A handset
   enrolled this way has no password — its session comes from
   `POST /_wata/v1/device-login`, which `wataclient` calls whenever the config
