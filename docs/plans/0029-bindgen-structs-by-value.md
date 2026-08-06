@@ -92,3 +92,11 @@ Structs in block signatures and protocol callbacks (needs struct support
 in purego's callback path); struct fields that are pointers or objects;
 growing the UIKit allowlist itself (M4 names its own types; this plan
 only removes the mapping obstacle).
+
+The callback direction was since spiked and proven
+(`tools/bindgen/spikes/structcb/`, `just bindgen-structcb`): register
+decomposition works on the pinned purego for all argument classes
+(HFA in v-regs even at 32 bytes, ≤16-byte composites in GPRs, larger by
+reference), and purego v0.11 (alphas; issue #225) takes struct arguments
+and returns in callbacks directly. The mapping the emitter must implement
+is specified in docs/design/bindgen.md ("Structs into callbacks").

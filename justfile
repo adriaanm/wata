@@ -126,6 +126,15 @@ bindgen *FLAGS:
 bindgen-runtime:
     cd go-pkgs/appleptt && GOWORK=off go test -tags objcruntime ./...
 
+# Apple bindings: the struct-callback spike — ObjC methods whose C signatures
+# carry structs (CGRect/NSRange/...) dispatched into Go callbacks, both on the
+# pinned purego (register decomposition) and on the v0.11 alpha (typed structs),
+# driven by NSInvocation and a real AppKit drawRect:. Needs macOS arm64; the
+# first run fetches modules. Not in ci.
+bindgen-structcb:
+    cd tools/bindgen/spikes/structcb/decomp && GOWORK=off go test ./...
+    cd tools/bindgen/spikes/structcb/upstream && GOWORK=off go test ./...
+
 # Apple bindings: build the PushToTalk hello (plan 0026's hardware gate) —
 # hellopt/ as an ios/arm64 c-archive, linked with the ObjC shell into
 # out/WataHello.app. Unsigned by default; --sign/--install are the owner's legs
