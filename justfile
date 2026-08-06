@@ -135,6 +135,13 @@ nativeui-tests:
     cd go-pkgs/nativeui && GOWORK=off go test ./...
     cd go-pkgs/macshell && GOWORK=off go test ./...
 
+# the macOS audio backend (plan 0033): go-pkgs/macaudio's unit tests — the
+# AudioToolbox opus round trip and the foreign-encoder fixture judged by tone
+# purity, and the capture/playback discipline under WATA_MAC_AUDIO=fake, so no
+# mic grant and no speaker are involved. Needs macOS; not in ci.
+macaudio-tests:
+    cd go-pkgs/macaudio && GOWORK=off go test ./...
+
 # Apple bindings: the struct-callback spike — ObjC methods whose C signatures
 # carry structs (CGRect/NSRange/...) dispatched into Go callbacks, both on the
 # pinned purego (register decomposition) and on the v0.11 alpha (typed structs),
