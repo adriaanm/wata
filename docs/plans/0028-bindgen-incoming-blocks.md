@@ -1,6 +1,10 @@
 # 0028 — bindgen: blocks received in protocol callbacks
 
-Status: accepted
+Status: done — landed over four commits (handle, mapping, regeneration,
+runtime proof); `just bindgen-tests`, `just bindgen`, `just bindgen-runtime`
+and the full `just ci` gate all exit 0. The PTT incoming-push refusal is off
+`go-pkgs/appleptt/REFUSALS.md`; what the phone must still prove is only that
+PushToTalk itself drives the callback (`PTT-HELLO-HARDWARE`).
 
 ## Problem
 
