@@ -791,12 +791,14 @@ client leaves behind: exactly two join/invite members with `is_direct` on a
 member event. Creation order is read off `roomIds` (newest-first, reversed),
 so no create-timestamp tracking was needed.
 
-**Conformance.** `just conformance` — the original TypeScript wata's jest
-suites run against this binary — is **84/84 green** with all of the above in
-place, including the suites that exercise DM creation, DM reuse, and "bob
+**Conformance.** The original TypeScript wata's jest suites, run against this
+binary, were **84/84 green** with all of the above in place — including the
+suites that exercise DM creation, DM reuse, and "bob
 should recognize DM room after joining (m.direct sync)". The compat
 projection is what holds them up; no suite had to be recorded as exercising
-the retired client-authored mechanism.
+the retired client-authored mechanism. The suite and its runner
+(`test/integration/`, `tools/wata-tests.sh`, `just conformance`) live in git
+history — last present at commit `27a2f75`.
 
 **Media** (`MediaItem`, model.scala) is file-backed whenever persistence is
 on: an upload writes the blob to `<dataDir>/media/<mediaId>` (`MediaFiles`,

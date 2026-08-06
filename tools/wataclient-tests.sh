@@ -22,7 +22,8 @@
 #      than the writer's own conventions. Byte-diffed against
 #      tools/wataclient-foreign.expected.txt. The decode half of the same
 #      class is go-pkgs/audio's linux/arm Go test over the same bytes.
-#      Regenerate the fixture with tools/tui-encode.mts and re-pin both.
+#      The fixture's generator (tools/tui-encode.mts, needed the retired TS
+#      tree) lives in git history at 27a2f75; the pinned bytes are the oracle.
 #
 #   tools/wataclient-tests.sh
 set -uo pipefail

@@ -401,7 +401,8 @@ Two row marks say what the client is doing with the user's own audio
   second adjacent `ICON_CHECK` appears when `VoiceMessage.playedByPeer`
   says a non-sender has receipted it. Two adjacent check glyphs rather
   than a new doubled glyph is the Zig reference's documented convention
-  (`src/fbclient/src/font.zig`: "draw two 0x80 glyphs adjacent"), and
+  (`src/fbclient/src/font.zig` in git history at `27a2f75`: "draw two
+  0x80 glyphs adjacent"), and
   reserving the second column even before the peer plays keeps the
   receipt's arrival from reflowing the row. The `uitest` probe `peer`
   counts peer-played messages in the open conversation; the
@@ -1043,12 +1044,10 @@ with ~50x headroom even at load average ~60, and a genuinely hung
 client still fails within one budget; on a `wait`/`waitmax` timeout the
 scripted driver appends the connection tag and the session's
 send-ok/send-fail/conn-error tallies (`Ui.sendOks` etc.), so a timeout
-log already classifies its cause. `wata-tests.sh` stays pinned to :8008
-because the read-only TS suites hardcode that URL per file; it cannot
-run concurrently across checkouts, and says so. Even single-checkout, a
-full multi-suite run has shown a rare one-off failure on that shared
-port (an auto-login case, green in isolation and on rerun) — rerun a
-red conformance leg once before treating it as real.
+log already classifies its cause. (The retired jest conformance runner,
+`wata-tests.sh` — in git history at `27a2f75` — was the one harness
+pinned to a fixed :8008, because the read-only TS suites hardcoded that
+URL per file.)
 
 ## The host simulator
 
@@ -1261,12 +1260,13 @@ a rediscovery):
 
 ## Parity with the Zig fbclient
 
-`src/fbclient/` (in-tree, read-only) is the behavioral spec for this
-module: it was feature-complete against the TUI before the Sgola port
-started. This table is the feature-by-feature comparison, derived by
-reading `src/fbclient/src/applets/wata.zig`, `applets/settings.zig`,
-`main.zig`, `shell.zig` and `config.zig` against `applets.scala`,
-`shell.scala` and `ui.scala`.
+The Zig fbclient (`src/fbclient/` in git history — last present at
+commit `27a2f75`) is the behavioral spec for this module: it was
+feature-complete against the TUI before the Sgola port started. This
+table is the feature-by-feature comparison, derived by reading
+`src/fbclient/src/applets/wata.zig`, `applets/settings.zig`,
+`main.zig`, `shell.zig` and `config.zig` (all at that commit) against
+`applets.scala`, `shell.scala` and `ui.scala`.
 
 **One divergence colors every row: panel orientation.** The Zig client
 draws a 128x160 PORTRAIT panel (`font.cols` 21, `font.rows` 19); this
