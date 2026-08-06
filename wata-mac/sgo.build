@@ -22,3 +22,9 @@ godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt
 # audiothread.scala be wata-fb's own file, symlinked. It rides appleptt too
 # (already replaced above), so no further godep of its own.
 godep github.com/adriaanm/wata/go-pkgs/macaudio go-pkgs/macaudio
+# The embedded iroh transport (plan 0034): WATA_IROH_CONFIG makes the mac an
+# iroh client, which is the case the mac exists for — a parent away from home,
+# behind a NAT, with no route to the family's Pi. The REAL cgo build is opt-in
+# (darwin + `-tags iroh`, `just mac-iroh-build`); the ordinary build rides the
+# pure-Go stub and needs no cargo.
+godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet

@@ -112,6 +112,13 @@ object Pump:
   def startAudioClient(cfg: ClientConfig): Handle =
     ClientHandle.startClient(Runtime.makeWithAudio(cfg, MacCaps.httpDo(), MacCaps.clock()))
 
+  /** how long startup waits for the first live sync before saying so. The
+   *  answer is only a PRINT — both drivers keep pumping either way — so
+   *  `WATA_MAC_CONNECT_MS` shortening it costs nothing but lets a harness
+   *  reach the boot screen of a transport that will never come up without
+   *  sitting out the full default. */
+  def connectMs(): Long = MacStr.num(go.sys.getenv("WATA_MAC_CONNECT_MS"), 30000).toLong
+
   def runWindowed(cfg: ClientConfig, scale: scala.Int): Unit =
     go.macshell.start(scale, "Wata")
     val h = startAudioClient(cfg)
@@ -121,7 +128,7 @@ object Pump:
   def windowedPump(h: Handle): Unit =
     val clock = MacCaps.clock()
     NetStatus.reset()
-    if Runtime.waitForConnection(h.client, Syncing(), 30000L) then
+    if Runtime.waitForConnection(h.client, Syncing(), connectMs()) then
       println("ready " + Runtime.lastAuth.userId)
     else println("login failed") // keep pumping: the boot screen shows the state
     sgo.supervised {
@@ -145,16 +152,20 @@ object Pump:
     go.macshell.startHeadless(scale)
     NetStatus.reset()
     val h = startAudioClient(cfg)
-    if Runtime.waitForConnection(h.client, Syncing(), 30000L) then
+    if Runtime.waitForConnection(h.client, Syncing(), connectMs()) then
       println("ready " + Runtime.lastAuth.userId)
-      sgo.supervised {
-        val evts = sgo.makeChan[AudioEvt](16)
-        val audioCmds = h.client.audioCmds
-        sgo.fork(AudioThread.mainLoop(audioCmds, evts))
-        repl(h, sc, evts)
-        audioCmds.send(AcQuit())
-      }
     else println("login failed")
+    // The REPL runs either way, as the windowed driver pumps either way: the
+    // boot screen IS the state, and an unbringable transport is exactly what a
+    // caller has to be able to look at (`transport unavailable`, not "waiting
+    // for network"). mac-iroh-smoke's negative reads it off `tree`.
+    sgo.supervised {
+      val evts = sgo.makeChan[AudioEvt](16)
+      val audioCmds = h.client.audioCmds
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      repl(h, sc, evts)
+      audioCmds.send(AcQuit())
+    }
     h.stop()
     val joined = ClientHandle.join(h, 5000L)
     println("bye")

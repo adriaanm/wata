@@ -120,12 +120,17 @@ def stop_server(proc, log):
 # ---- the interactive headless session ---------------------------------------
 class MacSession:
     """wata-mac headless, driven line by line: write a command, read until its
-    terminator. Every line the app prints is kept for the final assertions."""
+    terminator. Every line the app prints is kept for the final assertions.
 
-    def __init__(self, binary, env):
-        senv = dict(env, WATA_MAC_HS=BASE, WATA_MAC_USER="alice",
+    `hs` and `extra_env` are the seams tools/mac-iroh-smoke.py drives it
+    through: the same session object, aimed at a homeserver reached over the
+    iroh transport instead of localhost TCP."""
+
+    def __init__(self, binary, env, hs=None, extra_env=None):
+        senv = dict(env, WATA_MAC_HS=hs or BASE, WATA_MAC_USER="alice",
                     WATA_MAC_PASS=PASSWORD, WATA_MAC_HEADLESS="1",
-                    WATA_MAC_SCALE="1", WATA_MAC_AUDIO="fake")
+                    WATA_MAC_SCALE="1", WATA_MAC_AUDIO="fake",
+                    **(extra_env or {}))
         self.proc = subprocess.Popen([binary], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True,

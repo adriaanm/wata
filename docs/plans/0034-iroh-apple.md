@@ -1,6 +1,6 @@
 # 0034 — the iroh transport on Apple: wata-mac dials, and an iOS staticlib
 
-Status: proposed
+Status: done
 
 ## The problem
 
@@ -90,8 +90,8 @@ is explicitly NOT in this plan — it belongs with the consumer.
 ## How it is verified
 
 - **`just mac-iroh-smoke`** (macOS + cargo; not in ci, like `mac-smoke`):
-  one fresh `wata-server` over an embedded iroh listener with NO TCP wata
-  port, two provisioned node keys with the client's allowlisted, then
+  one fresh `wata-server` over an embedded iroh listener, two provisioned
+  node keys with the client's allowlisted, then
   headless `wata-mac-iroh` with `WATA_IROH_CONFIG` set. It asserts the
   native hierarchy shows the contact list — i.e. login, sync and media all
   completed over iroh — and then bob (a tui session over the same
@@ -108,6 +108,15 @@ is explicitly NOT in this plan — it belongs with the consumer.
 - **iOS**: `mklib.py ios` and `ios-sim` produce arm64 archives whose
   Mach-O platform is `ios` and `ios-simulator` respectively, asserted by
   the script itself. Nothing links or runs them.
+
+**Corrected during implementation** (the claim above as first written was
+wrong, and the record should say so rather than quietly reading right):
+"no TCP wata port" is not achievable — `serveIroh` ALWAYS brings up the
+plain-TCP admin listener (plan 0021), defaulting to `:8008`. The smoke
+therefore gives it a random free admin port and asserts the stronger,
+checkable thing instead: the clients are aimed at `http://wata.iroh`,
+and `wata.iroh` does not resolve, so a TCP fallback cannot silently
+rescue a broken iroh path — it can only fail.
 
 ## Out of scope
 

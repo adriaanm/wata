@@ -4,6 +4,18 @@ directives expect it (clib/<archdir>/libirohnet_ffi.a).
 
     ./mklib.py            # host (darwin): cargo build --release -> clib/darwin/
     ./mklib.py arm        # device (armv7 musl, the BQ268)     -> clib/linux_arm/
+    ./mklib.py ios        # iPhone   (aarch64-apple-ios)       -> clib/ios/
+    ./mklib.py ios-sim    # simulator(aarch64-apple-ios-sim)   -> clib/ios_sim/
+
+The two Apple cross-builds need no zig and no linker work — a staticlib is
+not linked here, and Xcode's clang is the C toolchain cargo picks up. NOTHING
+CONSUMES THEM YET (plan 0034 stops at the archive; the Go-side iOS cgo stanza
+belongs with the client that links it), so the only check they can carry is
+build provenance — which this script asserts itself: the archive's ARCH
+(`lipo -archs`) AND its Mach-O PLATFORM. The platform half is the one that
+matters: `aarch64-apple-ios` and `aarch64-apple-ios-sim` produce arm64
+archives that are indistinguishable by arch and NOT interchangeable, so an
+arch-only check passes a simulator lib on its way into a device build.
 
 clib/ is a build artifact (gitignored); re-run to regenerate. The iroh
 version is pinned by rust/Cargo.lock (committed) — every build is --locked.
@@ -94,14 +106,87 @@ def build_arm() -> Path:
     return RUST / "target" / RUST_TARGET / "release" / "libirohnet_ffi.a"
 
 
+# The Apple cross targets: (rust triple, clib subdir, expected arch, expected
+# Mach-O platform as `otool -l` spells it in LC_BUILD_VERSION).
+APPLE = {
+    "ios": ("aarch64-apple-ios", "ios", "arm64", "IOS"),
+    "ios-sim": ("aarch64-apple-ios-sim", "ios_sim", "arm64", "IOSSIMULATOR"),
+}
+
+
+def build_apple(name: str) -> Path:
+    triple, _, _, _ = APPLE[name]
+    if shutil.which("xcrun") is None:
+        sys.exit("[mklib] xcrun not found (the Apple cross-builds need the Xcode command line tools)")
+    cargo = rustup_which("cargo")
+    rustc = rustup_which("rustc")
+    installed = subprocess.run(
+        ["rustup", "target", "list", "--installed"], capture_output=True, text=True, check=True
+    ).stdout.split()
+    if triple not in installed:
+        subprocess.run(["rustup", "target", "add", triple], check=True)
+    subprocess.run(
+        [cargo, "build", "--release", "--locked", "--target", triple],
+        cwd=RUST, env={**os.environ, "RUSTC": rustc}, check=True,
+    )
+    return RUST / "target" / triple / "release" / "libirohnet_ffi.a"
+
+
+def archive_archs(lib: Path) -> set:
+    out = subprocess.run(["lipo", "-archs", str(lib)], capture_output=True, text=True, check=True)
+    return set(out.stdout.split())
+
+
+# LC_BUILD_VERSION platform values. otool prints the NUMBER on some toolchains
+# and the name on others, so both spellings are normalized to one name here.
+PLATFORM_NAMES = {
+    "1": "MACOS", "2": "IOS", "3": "TVOS", "4": "WATCHOS", "5": "BRIDGEOS",
+    "6": "MACCATALYST", "7": "IOSSIMULATOR", "8": "TVOSSIMULATOR",
+    "9": "WATCHOSSIMULATOR", "10": "DRIVERKIT", "11": "VISIONOS",
+    "12": "VISIONOSSIMULATOR",
+}
+
+
+def archive_platforms(lib: Path) -> set:
+    """the Mach-O platforms the archive's members were built for, out of their
+    LC_BUILD_VERSION load commands. `otool -l` walks every member; the platform
+    lines are all we keep. An archive built for one target reports exactly one
+    platform — anything else is the mix-up this check exists to catch."""
+    out = subprocess.run(["otool", "-l", str(lib)], capture_output=True, text=True, check=True)
+    plats = set()
+    for line in out.stdout.splitlines():
+        f = line.split()
+        if len(f) == 2 and f[0] == "platform":
+            plats.add(PLATFORM_NAMES.get(f[1], f[1].upper()))
+    return plats
+
+
+def assert_apple(name: str, lib: Path) -> None:
+    _, _, want_arch, want_plat = APPLE[name]
+    archs = archive_archs(lib)
+    if archs != {want_arch}:
+        sys.exit(f"[mklib] {name}: wrong architecture: want {{{want_arch}}}, got {archs or '{}'}")
+    plats = archive_platforms(lib)
+    if plats != {want_plat}:
+        # The failure worth designing against: a device build carrying
+        # simulator objects (or the reverse) has the RIGHT arch and links into
+        # the wrong product, so arch alone would call this green.
+        sys.exit(f"[mklib] {name}: wrong Mach-O platform: want {{{want_plat}}}, got {plats or '{}'}")
+    print(f"[mklib] {name}: arch {want_arch}, Mach-O platform {want_plat} — OK")
+
+
 def main() -> int:
     arch = sys.argv[1] if len(sys.argv) > 1 else "host"
     if arch == "host":
         lib, archdir = build_host(), "darwin"
     elif arch == "arm":
         lib, archdir = build_arm(), "linux_arm"
+    elif arch in APPLE:
+        lib = build_apple(arch)
+        assert_apple(arch, lib)
+        archdir = APPLE[arch][1]
     else:
-        sys.exit(f"[mklib] unknown arch {arch!r} (want: host | arm)")
+        sys.exit(f"[mklib] unknown arch {arch!r} (want: host | arm | ios | ios-sim)")
     out = HERE / "clib" / archdir
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(lib, out / lib.name)

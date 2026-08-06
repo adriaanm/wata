@@ -233,6 +233,21 @@ wifi service (a bare `ifconfig up` first can wedge the CAF driver's
 connect state machine, which only a reboot clears); the serial console
 wraps at 80 columns, so the driver runs it `stty -echo`.
 
+**The Apple leg** (plan 0034, 2026-08-06): wata-mac is an iroh client
+too, and the seam cost nothing to carry across — `WATA_IROH_CONFIG`, the
+same `go.irohnet` facade wata-tui declares, the same two-step
+`sgo build` → `go build -tags iroh`. What is NOT shared is the failure
+policy: the mac follows wata-fb and latches `transport unavailable`
+rather than downgrading to `DefaultClient` the way the tui does, because
+a GUI client that downgrades silently shows "waiting for network"
+forever. `just mac-iroh-smoke` is the gate (macOS + cargo, not in ci,
+like `mac-smoke`), including that negative. The staticlib also
+cross-builds for `aarch64-apple-ios` and `aarch64-apple-ios-sim`
+(`mklib.py ios` / `ios-sim`, ~17 MB each, arch AND Mach-O platform
+asserted by the script) — no zig and no linker work, since a staticlib
+is not linked there. Nothing consumes those two yet; they are
+build provenance for `IOS-CLIENT-ASSEMBLY`.
+
 **Fallback, explicit**: if milestone 1 shows iroh-ffi cannot honestly
 back `net.Conn` (stream semantics, callback model, or an unshippable
 lib size), the spike's sidecar returns as a bounded plan revision —

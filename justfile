@@ -184,6 +184,21 @@ mac *ARGS:
 mac-smoke:
     tools/mac-smoke.py
 
+# macOS client over embedded iroh (plan 0034): the same app, built with
+# `-tags iroh` over its emitted tree — the transport the client exists for, a
+# parent away from home. Needs cargo (mklib.py stages the Rust staticlib);
+# `just mac-build` stays cargo-free.
+mac-iroh-build:
+    tools/mac-iroh-build.py
+
+# macOS client over iroh, end to end: one wata-server with NO TCP port, the
+# headless mac dialing it over iroh (contact list, then bob's message
+# arriving), and the negative — a transport that cannot come up must show
+# `transport unavailable`, not `waiting for network`. Needs cargo; macOS only,
+# not in ci.
+mac-iroh-smoke:
+    tools/mac-iroh-smoke.py
+
 # terminal client: a REPL against a live server (WATA_TUI_USER/PASS/HS or args)
 tui *ARGS:
     cd wata-tui && ../tools/sgo run {{ARGS}}

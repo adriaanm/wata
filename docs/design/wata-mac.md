@@ -6,8 +6,10 @@ NSView tree on a scaled 160×128 stage, and `wata-mac/` is the Sgola app
 that drives it — the SAME `WataLogic` bodies and input logic the device
 runs, a frame pump over `ClientHandle`, and `go-pkgs/macshell` as the
 AppKit shell. Audio is real (plan 0033): the device's own audio thread
-over a macOS backend. TCP transport only (`IROH-APPLE` is its own queue
-item).
+over a macOS backend. Transport is plain TCP by default and embedded
+iroh when configured (plan 0034, below) — which is the case the mac
+exists for: a parent away from home, behind a NAT, with no route to the
+family's Pi.
 
 ## The layers
 
@@ -145,6 +147,58 @@ declarations are otherwise identical to wata-fb's `audio.scala`.
 - The settings applet's echo test compiles in and is never driven, so
   `AcEchoTest` never reaches the thread.
 
+## Transport (plan 0034)
+
+`WATA_IROH_CONFIG=<path>` swaps the `go.net.http.Client` under `HttpDo`
+for one whose connections are iroh bidirectional streams to the peer the
+config names (`MacCaps.httpDo`); unset is the plain `DefaultClient`.
+Nothing above the capability line knows, which is the whole seam —
+wata-tui's, copied. `wata-mac/src/main/scala/irohnet.scala` is the
+facade, held declaration-identical to wata-tui's by `just facade-check`
+(a second pair beside the audio one): both are the CLIENT surface over
+one Go package, and wata-fb's facade is deliberately not the reference
+because it also declares the handset's enrolment calls.
+
+- **The build is opt-in and the ordinary one stays cargo-free.**
+  `-tags iroh` is a SECOND `go build` over the emitted tree — it links
+  the cgo implementation and a ~13 MB Rust staticlib — so it is its own
+  recipe (`just mac-iroh-build` → `wata-mac/.sgo/wata-mac/wata-mac-iroh`)
+  and `just mac-build` never needs cargo. Without the tag the app links
+  irohnet's pure-Go stub, whose `NewHTTPClient` errors loudly; that is
+  not a broken build, it is the "configured but unavailable" state
+  below.
+- **A failed init LATCHES, it does not downgrade.** `MacCaps.irohClient`
+  follows wata-fb, not wata-tui. The tui downgrades to `DefaultClient`
+  and prints a line, which is fine for an operator reading scrollback; a
+  GUI client that does that sits on `waiting for network` forever
+  against a transport that was never coming up. So the failure sets
+  `MacCaps.transportDownC` and the boot screen says `transport
+  unavailable` / `check config` outright. `FbCaps.transportUnavailable`
+  in `stubs.scala` — once a hard-coded `false` — reads that cell, which
+  is what turns an existing wata-fb screen honest here.
+- **The cell is written at CLIENT CONSTRUCTION, and both drivers
+  construct on the goroutine that then pumps.** `Pump.startAudioClient`
+  calls `MacCaps.httpDo()` before the windowed driver forks its pump and
+  before the headless driver enters its REPL, so the single write
+  happens-before every frame's read; the `sgo.Atomic` is for the
+  windowed case, where the frame runs on a different goroutine than the
+  one that constructed.
+- **A failed login keeps pumping in BOTH drivers.** The windowed driver
+  always did (`login failed` then frames); the headless one used to skip
+  its REPL entirely, which made the boot screen — the only place the
+  transport verdict is visible — unobservable to a harness. It now runs
+  the same scope either way. `WATA_MAC_CONNECT_MS` bounds the startup
+  wait whose only effect is which of the two lines is printed.
+
+Running it against a real deployment (the client's node id allowlisted
+on the server, plan 0027 owns how it gets there):
+
+```
+just mac-iroh-build
+WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
+  wata-mac/.sgo/wata-mac/wata-mac-iroh http://wata.iroh
+```
+
 ## The retained interpreter (`nativeui.Stage`)
 
 - **The stage is the unit.** `NewStage(scale)` makes one container NSView
@@ -245,9 +299,21 @@ declarations are otherwise identical to wata-fb's `audio.scala`.
   prints the play triangle then the played check) and PTT records one (the
   overlay counts up, alice's own row and the SENT flash appear, and a fresh
   bob session reads the ~1.2s message back off the server).
+- `just mac-iroh-smoke` (~1min, macOS + cargo, not in ci): the same
+  headless client over the iroh transport — one wata-server in iroh mode,
+  three provisioned node keys, and a homeserver URL (`http://wata.iroh`)
+  whose host RESOLVES NOWHERE, asserted up front, so no fallback to TCP
+  can quietly rescue a broken iroh path. The contact list appearing is
+  the proof that login, sync and room state all crossed iroh; bob (a tui
+  session over the same transport) then sends a voice message and the
+  differ patches exactly the badge in. Its second half is the negative
+  that justifies the failure policy: `WATA_IROH_CONFIG` pointed at a
+  config that cannot produce a client must show `transport unavailable`
+  / `check config` and never `waiting for network`. Verified to be a real
+  oracle — restoring the old hard-coded `false` fails it.
 - `just macaudio-tests` (macOS-only, not in ci): go-pkgs/macaudio's own
   codec and fake-backend tests.
-- `just facade-check` (in ci): the two `go.audio` facades declare the same
-  thing.
+- `just facade-check` (in ci): the `go.audio` pair, and the `go.irohnet`
+  pair against wata-tui's.
 - The owner's leg: `just mac` against a live server — look at it,
   keyboard only, and actually talk to a handset.

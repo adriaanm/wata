@@ -26,10 +26,12 @@ object Shell:
     case KBack() => true
     case _       => false
 
-/** the enrolment screen's data — never shown here: enrolment is an iroh
- *  deployment's concern and the mac client is TCP-only until `IROH-APPLE`
- *  (wata-fb/enrol.scala is the real thing). `required()` answering false is
- *  what routes `WataLogic.bodyContacts` past the QR screen. */
+/** the enrolment screen's data — never shown here. The mac dials over iroh
+ *  (plan 0034), but it enrols the way a laptop does rather than the way a
+ *  handset does: its node id is allowlisted out of band, so there is no QR
+ *  screen to show (wata-fb/enrol.scala is the real thing; plan 0027 owns a
+ *  mac-shaped provisioning story). `required()` answering false is what
+ *  routes `WataLogic.bodyContacts` past the QR screen. */
 case class EnrolSnap(hint: String)
 
 object Enrol:
@@ -80,7 +82,11 @@ case class FbPrefs(brightness: scala.Int, timeoutIdx: scala.Int)
 object FbConfig:
   def savePrefs(p: FbPrefs): Unit = ()
 
-/** wata-fb's app-edge capability extras (caps.scala): the mac transport is
- *  plain TCP, never the "configured but unavailable" iroh stub state. */
+/** wata-fb's app-edge capability extras (caps.scala). Not a stub any more
+ *  (plan 0034): the mac dials over iroh when `WATA_IROH_CONFIG` is set, so
+ *  the same latch wata-fb keeps is real here and the boot screen names an
+ *  unbringable transport outright instead of blaming the network. It stays in
+ *  this file because the shared sources reach for `FbCaps` by that name;
+ *  `MacCaps` owns the cell, beside the client construction that writes it. */
 object FbCaps:
-  def transportUnavailable(): Boolean = false
+  def transportUnavailable(): Boolean = MacCaps.transportUnavailable()

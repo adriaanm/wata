@@ -38,6 +38,17 @@ PAIRS = [
         "wata-fb/src/main/scala/audio.scala",
         "wata-mac/src/main/scala/audio.scala",
     ),
+    # The iroh transport facade (plan 0034). Nothing symlinked binds this one:
+    # wata-tui and wata-mac each declare their own `go.irohnet` over the SAME
+    # Go package, and the pair is held identical so the client-side surface
+    # stays one surface — a signature that drifts on one side is a second,
+    # unreviewed contract against the same package. wata-fb's facade is
+    # deliberately NOT the reference: it declares the enrolment calls
+    # (EnsureKey, LastRefusal) that only a handset makes.
+    (
+        "wata-tui/src/main/scala/irohnet.scala",
+        "wata-mac/src/main/scala/irohnet.scala",
+    ),
 ]
 
 BLOCK = re.compile(r"/\*.*?\*/", re.S)

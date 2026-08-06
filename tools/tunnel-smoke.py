@@ -46,10 +46,10 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import irohkit  # noqa: E402
+from irohkit import IROHNET, WATA, IrohError  # noqa: E402
 from toolchain import build_env, prepare  # noqa: E402
 
-WATA = Path(__file__).resolve().parent.parent
-IROHNET = WATA / "go-pkgs" / "irohnet"
 # a fresh server per scenario, the wataclient-integ.sh discipline.
 SCENARIOS = ["login-syncing", "voice-to-bob"]
 # The DUAL LISTENER (plan 0021): in iroh mode the server also serves the same
@@ -71,45 +71,12 @@ def fail(msg):
     sys.exit(1)
 
 
-def sgo_build(env, module):
-    from toolchain import sgo_bin
-
-    r = run([str(sgo_bin()), "build"], env, cwd=WATA / module, capture_output=True, text=True)
-    if r.returncode != 0:
-        print(r.stdout + r.stderr)
-        fail(f"sgo build ({module}) failed")
-
-
-def keygen(env, keygen_bin):
-    out = run([keygen_bin], env, capture_output=True, text=True)
-    if out.returncode != 0:
-        fail(f"keygen failed: {out.stderr}")
-    return json.loads(out.stdout)
-
-
-def mint_into(env, keygen_bin, cfg_path):
-    """The DEVICE-MINTED identity (plan 0014 milestone 1): irohnet.EnsureKey
-    over a config that carries no secret. Same call wata-fb makes on first boot
-    — `irohnet-keygen -config` exists so this harness drives that code path
-    instead of hand-minting a key and pasting it into a file. Returns the node
-    id; the secret never leaves the config."""
-    out = run([keygen_bin, "-config", str(cfg_path)], env, capture_output=True, text=True)
-    if out.returncode != 0:
-        fail(f"EnsureKey failed: {out.stderr}")
-    return json.loads(out.stdout)["id"]
-
-
-def start_server(server_bin, env, cfg_path, log_path, listen=None):
-    log = open(log_path, "w")
-    extra = {"WATA_LISTEN": listen} if listen else {}
-    proc = subprocess.Popen(
-        [server_bin],
-        env={**env, "WATA_IROH_CONFIG": str(cfg_path), **extra},
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        cwd=WATA,
-    )
-    return proc, log
+# The provisioning and boot machinery is shared with tools/mac-iroh-smoke.py
+# (tools/irohkit.py): keys, config files, the two-step `-tags iroh` build, and
+# a server that announces itself. Only this file's verdict lines are local.
+keygen = irohkit.keygen
+mint_into = irohkit.mint_into
+start_server = irohkit.start_server
 
 
 def dual_listener():
@@ -316,8 +283,7 @@ def main():
 
     # ---- 1. the glue's own tests -------------------------------------------
     print("tunnel-smoke: staging the irohnet staticlib (cargo)…")
-    if run([sys.executable, "mklib.py"], env, cwd=IROHNET).returncode != 0:
-        fail("mklib.py failed")
+    irohkit.stage_staticlib(env)
     print("tunnel-smoke: irohnet glue tests (go test -tags iroh)…")
     # 360s: the suite includes the aged-refusal leg (aged_refusal_test.go),
     # which holds a refused client open for a real minute before approving it.
@@ -326,22 +292,9 @@ def main():
 
     # ---- 2. builds ---------------------------------------------------------
     print("tunnel-smoke: building wata-server + wata-fb (sgo, then -tags iroh)…")
-    sgo_build(env, "wata-server")
-    sgo_build(env, "wata-fb")
-    srv_emit = WATA / "wata-server" / ".sgo" / "wata-server"
-    fb_emit = WATA / "wata-fb" / ".sgo" / "wata-fb"
-    server_bin = srv_emit / "wata-server-iroh"
-    client_bin = fb_emit / "wata-fb-iroh"
-    keygen_bin = tmp / "irohnet-keygen"
-    for out, cwd, pkg in [
-        (server_bin, srv_emit, "."),
-        (client_bin, fb_emit, "."),
-        (keygen_bin, IROHNET, "./cmd/irohnet-keygen"),
-    ]:
-        r = run(["go", "build", "-tags", "iroh", "-o", str(out), pkg], env, cwd=cwd, capture_output=True, text=True)
-        if r.returncode != 0:
-            print(r.stdout + r.stderr)
-            fail(f"go build -tags iroh failed in {cwd}")
+    server_bin = irohkit.build_iroh_app(env, "wata-server")
+    client_bin = irohkit.build_iroh_app(env, "wata-fb")
+    keygen_bin = irohkit.build_keygen(env, tmp / "irohnet-keygen")
 
     # ---- 3. provisioning ---------------------------------------------------
     srv_key = keygen(env, str(keygen_bin))
@@ -517,4 +470,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except IrohError as e:
+        fail(str(e))
