@@ -114,11 +114,16 @@ reacting to the network change.
   answers a scan with canned results; the admin session's `wifi` flow
   is asserted line-by-line. On-device wifi_join is a hardware pass,
   recorded when it happens.
-- **Field 2026-08-06, the scan half on hardware**: owner ran `wifi alma`
-  from the tui against the live handset (real server, mailbox, fb
-  poller, real radio): `net 1 youbetcha signal=-52 secured=true` —
-  exactly the report shape the smoke pins, from a real scan. The join
-  half awaits its hardware run (WIFI-JOIN-DEVICE-PASS).
+- **Field 2026-08-06, both halves on hardware** (the plan's hardware
+  pass, complete). Scan: owner ran `wifi alma` from the tui against the
+  live handset (real server, mailbox, fb poller, real radio):
+  `net 1 youbetcha signal=-52 secured=true` — exactly the report shape
+  the smoke pins, from a real scan. Join: `join 1` with the PSK on
+  stdin came back
+  `wifi join ok wifi "youbetcha" saved (psk, priority 1); wpa_supplicant reconfigured`
+  — the tui → mailbox → poller → `/usr/local/bin/wifi-join` chain end
+  to end on the device, PSK never in an argv, and the handset stayed
+  associated through the reconfigure.
 
 ## Out of scope
 
