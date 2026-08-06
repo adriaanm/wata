@@ -184,7 +184,7 @@ func main() {
 		legForeign(*fixture)
 	}
 	if run("render") {
-		legRender()
+		legRender(*fixture)
 	}
 	if *only == "capture" {
 		legCapture(*captureSecs)

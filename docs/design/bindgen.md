@@ -119,6 +119,27 @@ return, a nested block, or an unmappable block parameter stays refused.
 methods, so signatures mentioning it map. `classes` versus `opaque` is the
 knob that keeps the allowlist small without refusing half the methods.
 
+**Framework loading.** `objc.GetClass` sees only frameworks already loaded
+into the process, and a pure-Go binary links none — a package whose classes
+live outside Foundation (which `objcrt`'s init loads) resolves every class
+to nil until its framework is loaded. A target naming `frameworks` emits
+`frameworks.go`, a package init that `Dlopen`s each
+`/System/Library/Frameworks/<name>.framework/<name>`. Opt-in per target;
+idempotent and cheap at runtime.
+
+**Property selectors honor `getter=`/`setter=`.** `@property (getter=
+isRunning) BOOL running` dispatches through `isRunning`, not `running` —
+sending the property name is an unrecognized-selector NSException on first
+touch. The loader carries the AST's custom getter/setter names; the Go
+method name still comes from the property name (`Running()`), only the
+selector changes.
+
+**Superclass members are not inherited.** A class binds only what its own
+interface and categories declare — `AVAudioPlayerNode` does not get
+`AVAudioNode`'s `installTapOnBus:…`. Allowlist the superclass as a full
+class and convert at the call site (`AVAudioNode{ID: player.ID}`); wrapper
+types are all `struct{ objc.ID }`, so the conversion is free.
+
 ## Refusals
 
 Anything the mapper cannot express is refused **per declaration, with a
@@ -225,9 +246,17 @@ by-value ABI against a live framework).
 It exists to make the runtime leg testable without a phone, and it is a real
 second consumer of the generator.
 
-Growing either one is a reviewed diff of `bindgen.json` plus regenerated
-output. `AVAudioEngine` and the UIKit views M4's backend will want are the next
-entries; neither is in yet.
+`avfaudio` (macOS SDK, `frameworks: ["AVFAudio"]`): `AVAudioEngine`,
+`AVAudioNode`, `AVAudioPlayerNode`, `AVAudioFormat`, `AVAudioPCMBuffer`;
+`AVAudioCommonFormat`; the input/output/mixer nodes, `AVAudioTime` and
+friends opaque. Proven against the live engine — render and mic capture —
+by the audio spike (`tools/audio-spike/REPORT.md`), which also settled the
+codec question: Opus rides AudioToolbox's C AudioConverter API over plain
+purego (`AVAudioConverter`'s input block *returns* an object, a refused
+shape), so the codec needs no generated bindings at all.
+
+Growing any target is a reviewed diff of `bindgen.json` plus regenerated
+output. The UIKit views M4's backend will want are the next entries.
 
 ## The landscape this design sits in
 

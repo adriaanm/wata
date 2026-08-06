@@ -68,6 +68,18 @@ ObjC runtime), `AVAudioEngine`/`AVAudioSession`,
 no Swift in the repo. Proven by a PTT hello (system PTT UI up, mic
 round-trip) before anything integrates.
 
+**M3 audio — DERISKED with no cgo** (2026-08-06, AUDIO-APPLE-DERISK;
+report: `tools/audio-spike/REPORT.md`, `just audio-spike`). AudioToolbox's
+built-in Opus codec handles wata's exact wire shape (48k mono, 20ms
+packets) through the C AudioConverter API over purego, decodes the repo's
+foreign TUI-encoded fixture at 0.9997 tone purity, and AVAudioEngine
+render + mic capture run through a new generated `avfaudio` package. The
+phone-spike's open cgo-under-gomobile question is dissolved: Apple audio
+is purego + generated bindings all the way down, and `go-pkgs/audio`'s
+cgo opus stays device-only. The spike forced two generator fixes
+(framework Dlopen emission, `getter=` selector honoring), both now in
+`docs/design/bindgen.md`.
+
 **M4 — the DSL.** The delicious part: a declarative UI layer in
 restricted Scala — views as ADTs, `body` as a pure function of state,
 a differ reconciling against a retained backend tree. **Backend 1 is

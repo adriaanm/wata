@@ -45,9 +45,9 @@ type audioBufferList struct {
 
 // AudioStreamPacketDescription — 16 bytes.
 type aspd struct {
-	StartOffset           int64
+	StartOffset            int64
 	VariableFramesInPacket uint32
-	DataByteSize          uint32
+	DataByteSize           uint32
 }
 
 func fourcc(s string) uint32 {
@@ -63,7 +63,7 @@ var (
 
 	kAudioFormatProperty_FormatInfo = fourcc("fmti")
 
-	kAudioConverterEncodeBitRate               = fourcc("brat")
+	kAudioConverterEncodeBitRate                   = fourcc("brat")
 	kAudioConverterPropertyMaximumOutputPacketSize = fourcc("xops")
 )
 
@@ -139,11 +139,11 @@ func opusASBD() (asbd, error) {
 // goroutine's thread, so a plain package-level source is race-free here.
 
 type packetSource struct {
-	packets   [][]byte // for the decoder: one opus packet per entry
-	pcm       []byte   // for the encoder: raw pcm16 bytes
-	pcmPos    int
-	bytesPerPacket int // encoder: bytes per PCM "packet" (= per frame)
-	desc      aspd     // scratch packet description handed back to the converter
+	packets        [][]byte // for the decoder: one opus packet per entry
+	pcm            []byte   // for the encoder: raw pcm16 bytes
+	pcmPos         int
+	bytesPerPacket int  // encoder: bytes per PCM "packet" (= per frame)
+	desc           aspd // scratch packet description handed back to the converter
 }
 
 var src *packetSource
@@ -190,7 +190,14 @@ var inputProc = purego.NewCallback(func(conv uintptr, ioNumberDataPackets *uint3
 // encodeOpus runs pcm16 through the AudioToolbox opus encoder; returns the
 // packets and the ASBD the converter settled on.
 func encodeOpus(pcm []byte, bitrate uint32) ([][]byte, asbd, error) {
+	return encodeOpusRate(pcm, bitrate, 48000)
+}
+
+// encodeOpusRate is encodeOpus with a caller-set input sample rate: the
+// converter's own SRC brings a non-48k capture rate to opus's 48k.
+func encodeOpusRate(pcm []byte, bitrate uint32, inRate float64) ([][]byte, asbd, error) {
 	in := pcm16ASBD()
+	in.SampleRate = inRate
 	out, err := opusASBD()
 	if err != nil {
 		return nil, out, err

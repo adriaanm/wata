@@ -219,3 +219,11 @@ phone-blit *FLAGS:
 phone-spike *FLAGS:
     tools/phone-spike/spike.py {{FLAGS}}
 
+# the Apple-audio derisk spike (AUDIO-APPLE-DERISK): AudioToolbox's built-in
+# Opus codec + AVAudioEngine render, all through purego/generated bindings —
+# no cgo. Unattended by default; `just audio-spike -only capture` is the
+# owner's mic leg (needs the terminal's mic TCC grant). Report:
+# tools/audio-spike/REPORT.md. macOS-only; not in ci (it plays audio).
+audio-spike *FLAGS:
+    cd tools/audio-spike && go run . {{FLAGS}}
+
