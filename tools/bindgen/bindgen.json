@@ -95,7 +95,8 @@
         "NSEvent",
         "NSBox",
         "NSArray",
-        "NSBitmapImageRep"
+        "NSBitmapImageRep",
+        "NSImageRep"
       ],
       "protocols": [
         "NSWindowDelegate"

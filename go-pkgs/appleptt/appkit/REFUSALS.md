@@ -178,8 +178,6 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSImage` `@property symbolConfiguration` — NSImageSymbolConfiguration is not on the allowlist (add it to classes or opaque)
 - `NSImage` `CGImageForProposedRect:context:hints:` — NSRect is not on the allowlist (add it to classes or opaque)
 - `NSImage` `TIFFRepresentationUsingCompression:factor:` — no Go mapping for 'NSTIFFCompression'
-- `NSImage` `addRepresentation:` — NSImageRep is not on the allowlist (add it to classes or opaque)
-- `NSImage` `bestRepresentationForDevice:` — NSImageRep is not on the allowlist (add it to classes or opaque)
 - `NSImage` `bestRepresentationForRect:context:hints:` — NSGraphicsContext is not on the allowlist (add it to classes or opaque)
 - `NSImage` `canInitWithPasteboard:` — NSPasteboard is not on the allowlist (add it to classes or opaque)
 - `NSImage` `compositeToPoint:fromRect:operation:` — no Go mapping for 'NSCompositingOperation'
@@ -189,7 +187,6 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSImage` `drawAtPoint:fromRect:operation:fraction:` — no Go mapping for 'NSCompositingOperation'
 - `NSImage` `drawInRect:fromRect:operation:fraction:` — no Go mapping for 'NSCompositingOperation'
 - `NSImage` `drawInRect:fromRect:operation:fraction:respectFlipped:hints:` — no Go mapping for 'NSCompositingOperation'
-- `NSImage` `drawRepresentation:inRect:` — NSImageRep is not on the allowlist (add it to classes or opaque)
 - `NSImage` `hitTestRect:withImageDestinationRect:context:hints:flipped:` — NSGraphicsContext is not on the allowlist (add it to classes or opaque)
 - `NSImage` `imageWithLocale:` — NSLocale is not on the allowlist (add it to classes or opaque)
 - `NSImage` `imageWithSize:flipped:drawingHandler:` — no Go mapping for 'NSRect'
@@ -201,8 +198,15 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSImage` `initWithContentsOfURL:` — NSURL is not on the allowlist (add it to classes or opaque)
 - `NSImage` `initWithIconRef:` — no Go mapping for 'IconRef _Nonnull'
 - `NSImage` `initWithPasteboard:` — NSPasteboard is not on the allowlist (add it to classes or opaque)
-- `NSImage` `lockFocusOnRepresentation:` — NSImageRep is not on the allowlist (add it to classes or opaque)
-- `NSImage` `removeRepresentation:` — NSImageRep is not on the allowlist (add it to classes or opaque)
+- `NSImageRep` `@property layoutDirection` — no Go mapping for 'NSImageLayoutDirection'
+- `NSImageRep` `CGImageForProposedRect:context:hints:` — NSRect is not on the allowlist (add it to classes or opaque)
+- `NSImageRep` `canInitWithPasteboard:` — NSPasteboard is not on the allowlist (add it to classes or opaque)
+- `NSImageRep` `drawInRect:fromRect:operation:fraction:respectFlipped:hints:` — no Go mapping for 'NSCompositingOperation'
+- `NSImageRep` `imageRepWithContentsOfURL:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSImageRep` `imageRepWithPasteboard:` — NSPasteboard is not on the allowlist (add it to classes or opaque)
+- `NSImageRep` `imageRepsWithContentsOfURL:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSImageRep` `imageRepsWithPasteboard:` — NSPasteboard is not on the allowlist (add it to classes or opaque)
+- `NSImageRep` `initWithCoder:` — NSCoder is not on the allowlist (add it to classes or opaque)
 - `NSImageView` `@property defaultPreferredImageDynamicRange` — no Go mapping for 'NSImageDynamicRange'
 - `NSImageView` `@property imageAlignment` — no Go mapping for 'NSImageAlignment'
 - `NSImageView` `@property imageDynamicRange` — no Go mapping for 'NSImageDynamicRange'

@@ -151,9 +151,19 @@ func (c NSImageClass) ImageUnfilteredTypes() NSArray {
 	return NSArray{objc.ID(c.Class).Send(selImageUnfilteredTypes)}
 }
 
+// AddRepresentation calls -[NSImage addRepresentation:].
+func (o NSImage) AddRepresentation(imageRep NSImageRep) {
+	o.ID.Send(selAddRepresentation, imageRep.ID)
+}
+
 // AddRepresentations calls -[NSImage addRepresentations:].
 func (o NSImage) AddRepresentations(imageReps NSArray) {
 	o.ID.Send(selAddRepresentations, imageReps.ID)
+}
+
+// BestRepresentationForDevice calls -[NSImage bestRepresentationForDevice:].
+func (o NSImage) BestRepresentationForDevice(deviceDescription NSDictionary) NSImageRep {
+	return NSImageRep{o.ID.Send(selBestRepresentationForDevice, deviceDescription.ID)}
 }
 
 // CacheDepthMatchesImageDepth calls -[NSImage cacheDepthMatchesImageDepth].
@@ -179,6 +189,11 @@ func (o NSImage) DissolveToPointFromRectFraction(point CGPoint, rect CGRect, fra
 // DrawInRect calls -[NSImage drawInRect:].
 func (o NSImage) DrawInRect(rect CGRect) {
 	o.ID.Send(selDrawInRect, rect)
+}
+
+// DrawRepresentationInRect calls -[NSImage drawRepresentation:inRect:].
+func (o NSImage) DrawRepresentationInRect(imageRep NSImageRep, rect CGRect) bool {
+	return objc.Send[bool](o.ID, selDrawRepresentationInRect, imageRep.ID, rect)
 }
 
 // InitByReferencingFile calls -[NSImage initByReferencingFile:].
@@ -236,6 +251,11 @@ func (o NSImage) LockFocusFlipped(flipped bool) {
 	o.ID.Send(selLockFocusFlipped, flipped)
 }
 
+// LockFocusOnRepresentation calls -[NSImage lockFocusOnRepresentation:].
+func (o NSImage) LockFocusOnRepresentation(imageRepresentation NSImageRep) {
+	o.ID.Send(selLockFocusOnRepresentation, imageRepresentation.ID)
+}
+
 // Name calls -[NSImage name].
 func (o NSImage) Name() string {
 	return objcrt.GoString(o.ID.Send(selName))
@@ -249,6 +269,11 @@ func (o NSImage) Recache() {
 // RecommendedLayerContentsScale calls -[NSImage recommendedLayerContentsScale:].
 func (o NSImage) RecommendedLayerContentsScale(preferredContentsScale float64) float64 {
 	return objc.Send[float64](o.ID, selRecommendedLayerContentsScale, preferredContentsScale)
+}
+
+// RemoveRepresentation calls -[NSImage removeRepresentation:].
+func (o NSImage) RemoveRepresentation(imageRep NSImageRep) {
+	o.ID.Send(selRemoveRepresentation, imageRep.ID)
 }
 
 // ScalesWhenResized calls -[NSImage scalesWhenResized].

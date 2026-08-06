@@ -175,6 +175,20 @@ lets the row carry ONE key: rows key on the thing they show (a message's
 event id, a conversation's room-or-contact id), and the highlight moves
 with its row for free.
 
+## The AppKit backend
+
+`go-pkgs/nativeui` (plain Go, plan 0032) is the retained arm the differ
+exists for: a Go-side mirror of the five constructors and the patch
+vocabulary (`view.go`, field-for-field with this module — a field added
+here must be mirrored there in the same change), and a `Stage` that
+builds an NSView tree from a view tree and applies patch scripts to it in
+script order. Its per-constructor element table, geometry (the scaled
+stage, the y flip, the 6x8 grid), glyph mapping and threading rule are
+documented in the package and in
+[wata-mac.md](wata-mac.md); its tests hold the retained invariant — the
+native hierarchy after `Apply` mirrors what `Patches.applyAll` says —
+on the real toolkit (`just nativeui-tests`, macOS-only).
+
 ## The oracle
 
 `oracle.scala`'s `DiffOracle.report()` is a deterministic report, driven

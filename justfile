@@ -126,6 +126,13 @@ bindgen *FLAGS:
 bindgen-runtime:
     cd go-pkgs/appleptt && GOWORK=off go test -tags objcruntime ./...
 
+# the retained AppKit backend (plan 0032): go-pkgs/nativeui's unit tests —
+# the native hierarchy mirrors wataui's applyAll for build-from-scratch and
+# patch scripts, the offscreen render probes, the dispatch seam, all headless.
+# Needs macOS (like bindgen-runtime); not in ci.
+nativeui-tests:
+    cd go-pkgs/nativeui && GOWORK=off go test ./...
+
 # Apple bindings: the struct-callback spike — ObjC methods whose C signatures
 # carry structs (CGRect/NSRange/...) dispatched into Go callbacks, both on the
 # pinned purego (register decomposition) and on the v0.11 alpha (typed structs),

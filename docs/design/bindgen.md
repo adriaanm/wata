@@ -295,8 +295,30 @@ codec question: Opus rides AudioToolbox's C AudioConverter API over plain
 purego (`AVAudioConverter`'s input block *returns* an object, a refused
 shape), so the codec needs no generated bindings at all.
 
+`appkit` (macOS SDK, `frameworks: ["AppKit"]`): the retained wataui
+backend's surface (plan 0032) — `NSApplication`, `NSWindow`, `NSView`,
+`NSTextField` plus `NSControl` (`stringValue`/`font` live on the
+superclass, and superclass members are not inherited), `NSImageView`,
+`NSColor`, `NSFont`, `NSImage`, `NSEvent`, `NSBox`, `NSArray` (hierarchy
+walks in tests), `NSBitmapImageRep` + `NSImageRep` (offscreen probes);
+the `NSWindowDelegate` protocol; the `CGPoint`/`CGSize`/`CGRect` structs;
+window/box/image/event enums. ~350 refusals, none load-bearing — two
+shaped what `go-pkgs/nativeui` does:
+
+- **CALayer/CGColorRef are out of reach** (a CoreFoundation struct
+  pointer, not an ObjC class), so "a layer-backed view with a background
+  color" is not expressible; `VRect` renders as an `NSBox`
+  (custom/borderless, `fillColor` is a plain `NSColor`) — which also
+  draws through `drawRect:`, so offscreen renders see it without a
+  presented layer tree.
+- **`NSBitmapImageRep.bitmapData` is a refused raw pointer**, so pixel
+  probes go through `colorAtX:y:` (an `NSColor` per probe — fine for a
+  handful of assertions, not a frame reader). Likewise images are built
+  from PNG bytes via `initWithData:` rather than raw bitmap planes
+  (`initWithBitmapDataPlanes:…` is a refused `unsigned char **`).
+
 Growing any target is a reviewed diff of `bindgen.json` plus regenerated
-output. The UIKit views M4's backend will want are the next entries.
+output. The UIKit views the iOS port will want are the next entries.
 
 ## The landscape this design sits in
 
