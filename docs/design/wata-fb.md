@@ -392,6 +392,21 @@ Two row marks say what the client is doing with the user's own audio
   find out — `WataLogic.enterConversation` sends `ActAckOutbox` for both
   spellings of the conversation's key (room id and contact id, since a
   send queued before the DM room existed is filed under the contact).
+- **The message row's check marks**, the left mark area
+  (`WataLogic.msgRowView`). A RECEIVED row keeps one mark column:
+  `ICON_CHECK` once self has played it, its text shifting one column when
+  the mark is there. An OWN row (sender == self) reserves TWO mark
+  columns and its text always starts at column 2: check one is drawn
+  always — the message is in the timeline, so the server has it — and a
+  second adjacent `ICON_CHECK` appears when `VoiceMessage.playedByPeer`
+  says a non-sender has receipted it. Two adjacent check glyphs rather
+  than a new doubled glyph is the Zig reference's documented convention
+  (`src/fbclient/src/font.zig`: "draw two 0x80 glyphs adjacent"), and
+  reserving the second column even before the peer plays keeps the
+  receipt's arrival from reflowing the row. The `uitest` probe `peer`
+  counts peer-played messages in the open conversation; the
+  `dm-roundtrip` scenario waits on it and the `dm-alice-reply` golden
+  shows the double check.
 - **The message row's play mark**, column 0: `ICON_PLAY` in place of the
   played check while `WataState.playing` holds, i.e. from the instant OK
   is RELEASED — before any byte has moved. A slow fetch is exactly when

@@ -11,9 +11,12 @@ checkpoint dm-alice-badge
 
 # open: receipts bob's reply (the latest). Alice's own first message was
 # receipted back in phase 2, so `played` reaches 2 and both rows render
-# played (gray + check mark).
+# played (gray + check mark). Both rows are also peer-played: bob receipted
+# alice's message in phase 3, and alice's receipt on bob's reply counts as a
+# non-sender receipt — so alice's own row shows the double check.
 tap enter
 wait played 2 2000
+wait peer 2 2000
 advance 30
 checkpoint dm-alice-reply
 

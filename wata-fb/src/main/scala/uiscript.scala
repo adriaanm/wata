@@ -80,7 +80,8 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
  *  msgs (messages in the conversation the wata applet is pointing at), played
- *  (of those, how many are marked played), favs (of those, how many carry the
+ *  (of those, how many are marked played), peer (of those, how many a
+ *  non-sender has receipted — the sent-message second check), favs (of those, how many carry the
  *  server's favorite marker), screenoff (1 while the screensaver has the panel blanked), sendfail /
  *  playfail (the session's failed-send / failed-play tallies — what a script
  *  waits on after provoking a failure with `failnext`), connerr (the
@@ -485,6 +486,7 @@ object UiScript:
     else if name == "convs" then WataLogic.convCount(Ui.frameSnap)
     else if name == "msgs" then WataLogic.msgCount(Ui.frameSnap, curConvIdx())
     else if name == "played" then playedCount(Ui.frameSnap, curConvIdx())
+    else if name == "peer" then peerCount(Ui.frameSnap, curConvIdx())
     else if name == "favs" then favCount(Ui.frameSnap, curConvIdx())
     else if name == "screenoff" then boolProbe(Ui.screenOff)
     else if name == "sendfail" then Ui.sendFails
@@ -566,6 +568,25 @@ object UiScript:
       cur match
         case h :: t =>
           if h.isPlayed then n = n + 1
+          cur = t
+        case Nil => going = false
+    n
+
+  /** messages in the pointed-at conversation somebody OTHER than their sender
+   *  has receipted — what a script waits on to see the second check land. */
+  def peerCount(snap: StateSnapshot, idx: scala.Int): scala.Int =
+    WataLogic.convAt(snap, idx) match
+      case c: Some[Conversation] => peerIn(c.value.messages)
+      case None => 0
+
+  def peerIn(ms: List[VoiceMessage]): scala.Int =
+    var n = 0
+    var cur = ms
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          if h.playedByPeer then n = n + 1
           cur = t
         case Nil => going = false
     n

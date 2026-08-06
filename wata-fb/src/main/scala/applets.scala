@@ -589,7 +589,7 @@ object WataLogic:
       kids = Keyed("empty", VText(3, 6, "No messages", Color.midGray)) ::
         (Keyed("footer", VText(0, FOOTER_ROW, "ESC back", Color.midGray)) :: Nil)
     else
-      kids = Keyed("rows", msgRowsView(s, conv, n)) ::
+      kids = Keyed("rows", msgRowsView(s, conv, n, selfIdOf(snap))) ::
         (Keyed("footer", VText(0, FOOTER_ROW, "OK play hold=fav red=del", Color.midGray)) :: Nil)
     VGroup(Keyed("header", VText(0, 0, clip(header, 20), Color.cyan)) :: kids)
 
@@ -597,7 +597,7 @@ object WataLogic:
    *  own identity, so a retained backend recognizes a row that scrolled rather
    *  than rewriting every row below it. A row index the list cannot answer for
    *  contributes nothing, highlight included. */
-  def msgRowsView(s: WataState, conv: Conversation, n: scala.Int): View =
+  def msgRowsView(s: WataState, conv: Conversation, n: scala.Int, selfId: String): View =
     val vis = visibleRows()
     val end = if n < s.msgScroll + vis then n else s.msgScroll + vis
     var acc: List[Keyed] = Nil
@@ -610,29 +610,45 @@ object WataLogic:
           val fg =
             if selected then Color.black
             else (if m.value.isPlayed then Color.midGray else Color.green)
-          acc = Keyed(m.value.id, msgRowView(m.value, row, fg, selected, selected && s.playing)) :: acc
+          val own = selfId != "" && m.value.sender.id == selfId
+          acc = Keyed(m.value.id, msgRowView(m.value, row, fg, selected, selected && s.playing, own)) :: acc
         case None => ()
       i += 1
     VGroup(ListOps.reverse(acc))
 
+  def selfIdOf(snap: StateSnapshot): String =
+    if snap.hasSelfUser then snap.selfUser.id else ""
+
   /** the row: the selection highlight FIRST — children paint in list order, so
-   *  the filled rectangle has to precede the text it sits behind — then a mark
-   *  in column 0 (the PLAY triangle while this row is the one being fetched and
-   *  played, else the played check), duration, sender, and a favorited row's
-   *  STAR in the last column, right-aligned so marking a message never shifts
-   *  the text. The play mark appears the instant OK is released, before the
-   *  download has even started: pressing a key must show something, and a slow
-   *  fetch is exactly when it matters. Both marks are custom glyphs (> 0x7F),
-   *  so they are `VGlyph`s rather than characters inside a `VText`. */
+   *  the filled rectangle has to precede the text it sits behind — then the
+   *  mark area, duration, sender, and a favorited row's STAR in the last
+   *  column, right-aligned so marking a message never shifts the text.
+   *
+   *  The mark area is column 0 for a RECEIVED row (the PLAY triangle while
+   *  this row is the one being fetched and played, else the played check) and
+   *  columns 0-1 for an OWN row: check one always — the message is in the
+   *  timeline, so the server has it — and a second adjacent check when a peer
+   *  has played it (`playedByPeer`). Two adjacent `ICON_CHECK` glyphs are the
+   *  Zig reference's documented double-check convention (`font.zig`: "draw
+   *  two 0x80 glyphs adjacent"), so no new glyph. An own row's text always
+   *  starts at column 2 — the second-check column is reserved even before the
+   *  peer plays it, so the receipt arriving never reflows the row; received
+   *  rows keep the old one-column shift. The play mark appears the instant OK
+   *  is released, before the download has even started: pressing a key must
+   *  show something, and a slow fetch is exactly when it matters. All marks
+   *  are custom glyphs (> 0x7F), so they are `VGlyph`s rather than characters
+   *  inside a `VText`. */
   def msgRowView(m: VoiceMessage, row: scala.Int, fg: scala.Int, selected: Boolean,
-      playing: Boolean): View =
+      playing: Boolean, own: Boolean): View =
     val y = 1 + row * Font.GLYPH_H
     var kids: List[Keyed] = Nil
     if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
     if playing then kids = Keyed("mark", VGlyph(0, y, Font.ICON_PLAY, fg)) :: kids
-    else if m.isPlayed then kids = Keyed("mark", VGlyph(0, y, Font.ICON_CHECK, fg)) :: kids
+    else if own || m.isPlayed then kids = Keyed("mark", VGlyph(0, y, Font.ICON_CHECK, fg)) :: kids
+    if own && m.playedByPeer then
+      kids = Keyed("mark2", VGlyph(Font.GLYPH_W, y, Font.ICON_CHECK, fg)) :: kids
     val dur = durStr(m.durationMs)
-    val col = if m.isPlayed || playing then 1 else 0
+    val col = if own then 2 else (if m.isPlayed || playing then 1 else 0)
     kids = Keyed("dur", VText(col, row, dur, fg)) :: kids
     kids = Keyed("sender", VText(col + dur.length + 1, row, clip(m.sender.displayName, 8), fg)) :: kids
     if m.isFavorite then
