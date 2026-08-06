@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
 APP = OUT / "WataHello.app"
 
-TEAM_ID = os.environ.get("WATA_TEAM_ID", "YAURQZ84XZ")
+TEAM_ID = os.environ.get("WATA_TEAM_ID", "")
 BUNDLE_ID = os.environ.get("WATA_BUNDLE_ID", "com.adriaanm.watahello")
 MIN_IOS = "16.0"
 
@@ -100,6 +100,11 @@ def app() -> None:
 
 def sign() -> None:
     """Embed the profile and codesign. The profile is the owner's to provide."""
+    if not TEAM_ID:
+        raise SystemExit(
+            "WATA_TEAM_ID is not set. The sign stage stamps the team into the\n"
+            "entitlements; find yours on developer.apple.com/account (Membership)."
+        )
     profile = Path(os.environ.get("WATA_PROFILE", HERE / "WataHello.mobileprovision"))
     if not profile.exists():
         raise SystemExit(

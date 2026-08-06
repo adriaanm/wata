@@ -37,7 +37,8 @@ Running it is the owner's leg, below.
    Push to Talk capability, then a development provisioning profile for it and
    the target device. Download it to
    `tools/bindgen/hello/WataHello.mobileprovision` (or point `WATA_PROFILE` at
-   it). Team `YAURQZ84XZ` (override with `WATA_TEAM_ID`).
+   it). Set `WATA_TEAM_ID` to the team the profile belongs to (the sign
+   stage refuses to run without it).
 
 2. **Build, sign, install** with the phone attached:
 
