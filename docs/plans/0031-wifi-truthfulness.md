@@ -1,7 +1,16 @@
 # 0031 — wifi truthfulness: settled scans, association verdicts, and a fallback test switch
 
-Status: accepted (owner rulings 2026-08-06, recorded per item below; the
-mechanism decisions here are this plan's)
+Status: done (2026-08-06; owner rulings recorded per item below, the
+mechanism decisions are this plan's)
+
+Outcome: landed as specified — the settle poll, the association verdict
+with the conf rollback, and `wifi_off` with its epoch-guarded restore
+timer all in `cmdpoller.scala`; the tui `wifi off` flow; the fake seam
+grown to drive both join verdicts and observe the restore
+(`integ-wifi-cli.py` state file + invocation log). Gates: integ
+`wifi-cmd` (both verdicts, the restore firing), `tui-smoke`, full ci.
+Device passes still owed (WATA-TODO.md): the auth-failed verdict against
+a real mistyped PSK, and `wifi_off` reporting over cellular.
 
 Plan 0020 built the wifi panel and proved it end to end on hardware.
 Field use the next day found the two places it reports something other

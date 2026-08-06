@@ -1218,17 +1218,21 @@ object Integ:
     MatrixHttp.request(directHs(token), "POST",
       "/_matrix/client/v3/rooms/" + roomId + "/leave", "application/json", "{}").status
 
-  /** THE COMMAND POLLER SEAM (plan 0020): bob's client runs the REAL
+  /** THE COMMAND POLLER SEAM (plans 0020/0031): bob's client runs the REAL
    *  `CmdPoller` loop against the fake wifi seam (`$WATA_WIFI_CLI` /
-   *  `$WATA_WIFI_JOIN`, set by the harness) while alice — a direct admin
-   *  token, no second client — queues a wifi_scan and a wifi_join through
-   *  the mailbox and waits on the reports. Asserted end to end: the parked
+   *  `$WATA_WIFI_JOIN` + the 0031 knobs, set by the harness) while alice —
+   *  a direct admin token, no second client — queues commands through the
+   *  mailbox and waits on the reports. Asserted end to end: the parked
    *  long-poll picks the commands up, the scan report carries the parsed
    *  networks (band dedupe keeping the stronger row, the hidden ssid
-   *  dropped, secured off the flags), the join verdict comes back ok — and
-   *  the fake helper's capture file proves the ssid arrived as the ONE argv
-   *  argument with the PSK on stdin, never argv. Plus the negative: the
-   *  device's own (non-admin) token cannot queue. */
+   *  dropped, secured off the flags), the join verdict is the ASSOCIATION
+   *  outcome both ways (ok "joined HomeNet" only once the fake associates;
+   *  a join to an ssid the fake never associates answers the auth-failed
+   *  verdict naming the network it is still on), the fake helper's capture
+   *  file proves the ssid arrived as the ONE argv argument with the PSK on
+   *  stdin never argv, and wifi_off reports ok after disabling with the
+   *  auto-restore firing (`enable_network` in the fake cli's log). Plus
+   *  the negative: the device's own (non-admin) token cannot queue. */
   def s23(): Boolean =
     phase("bob")(c => wifiCmdRun(c))
 
@@ -1244,21 +1248,42 @@ object Integ:
     val atok = directToken("alice")
     if atok == "" then false
     else if queueStatus(atok, "bob", "{\"op\":\"wifi_scan\"}") != 200 then false
-    else if !scanReportGood(cmdReportWait(c, atok, "wifi_scan", 30000L)) then false
+    else if !scanReportGood(cmdReportWait(c, atok, "wifi_scan", 0L, 30000L)) then false
     else if queueStatus(atok, "bob",
       "{\"op\":\"wifi_join\",\"ssid\":\"HomeNet\",\"psk\":\"hunter2 pass\"}") != 200 then false
-    else if !joinReportGood(cmdReportWait(c, atok, "wifi_join", 30000L)) then false
+    else if !joinReportGood(cmdReportWait(c, atok, "wifi_join", 0L, 30000L)) then false
     else if !captureGood() then false
+    else wifiCmdDrive2(c, atok)
+
+  /** the 0031 legs: the auth-failed join verdict, then wifi_off + restore. */
+  def wifiCmdDrive2(c: MatrixClient, atok: String): Boolean =
+    val seq1 = cmdReportSeq(atok, "wifi_join")
+    if seq1 == 0L then false
+    else if queueStatus(atok, "bob",
+      "{\"op\":\"wifi_join\",\"ssid\":\"Nope\",\"psk\":\"badpass\"}") != 200 then false
+    else if !joinFailGood(cmdReportWait(c, atok, "wifi_join", seq1, 30000L)) then false
+    else if queueStatus(atok, "bob", "{\"op\":\"wifi_off\",\"minutes\":1}") != 200 then false
+    else if !offReportGood(cmdReportWait(c, atok, "wifi_off", 0L, 30000L)) then false
+    else if !restoreFired(c, 8000L) then false
     else queueStatus(Runtime.lastAuth.accessToken, "alice", "{\"op\":\"wifi_scan\"}") == 403
 
   def queueStatus(token: String, user: String, body: String): Int =
     MatrixHttp.request(directHs(token), "POST", "/_wata/v1/cmd/" + user,
       "application/json", body).status
 
-  /** poll the admin's report endpoint until a report exists (the scenario's
-   *  server is fresh, so seq 0 -> any report is THE report); JNull on
+  /** the current report seq for (bob, op); 0 while none exists — what a
+   *  second command on the same op passes as `before` so the wait cannot
+   *  answer with the stale report. */
+  def cmdReportSeq(token: String, op: String): Long =
+    val r = MatrixHttp.request(directHs(token), "GET", "/_wata/v1/cmd/bob/report?op=" + op,
+      "application/json", "")
+    if r.status != 200 then 0L
+    else WJson.longField(MatrixHttp.parseOrNull(r.body), "seq", 0L)
+
+  /** poll the admin's report endpoint until a report with seq > `before`
+   *  exists (0 = any report is THE report, a fresh server); JNull on
    *  timeout. */
-  def cmdReportWait(c: MatrixClient, token: String, op: String, timeoutMs: Long): Json =
+  def cmdReportWait(c: MatrixClient, token: String, op: String, before: Long, timeoutMs: Long): Json =
     val hs = directHs(token)
     val deadline = c.clock.nowUnixMillis() + timeoutMs
     var out: Json = JNull()
@@ -1268,8 +1293,9 @@ object Integ:
       else
         val r = MatrixHttp.request(hs, "GET", "/_wata/v1/cmd/bob/report?op=" + op,
           "application/json", "")
-        if r.status == 200 then
-          out = WJson.objField(MatrixHttp.parseOrNull(r.body), "result")
+        val j = MatrixHttp.parseOrNull(r.body)
+        if r.status == 200 && WJson.longField(j, "seq", 0L) > before then
+          out = WJson.objField(j, "result")
           run = false
         else c.clock.sleepMs(200L)
     out
@@ -1307,6 +1333,40 @@ object Integ:
 
   def joinReportGood(result: Json): Boolean =
     WJson.boolField(result, "ok") && WJson.strField(result, "detail", "") == "joined HomeNet"
+
+  /** the auth-failed verdict, exact: not ok, and the detail names both the
+   *  target and the network the device is still on. */
+  def joinFailGood(result: Json): Boolean =
+    !WJson.boolField(result, "ok") &&
+      WJson.strField(result, "detail", "") == "auth failed for Nope, still on HomeNet"
+
+  def offReportGood(result: Json): Boolean =
+    WJson.boolField(result, "ok") &&
+      WJson.strField(result, "detail", "") == "wifi off for 1 min; auto-restore armed"
+
+  /** the auto-restore proof: poll the fake cli's invocation log until
+   *  `enable_network` shows up (the harness sets a 300ms restore window). */
+  def restoreFired(c: MatrixClient, timeoutMs: Long): Boolean =
+    val path = go.sys.getenv("WATA_WIFI_CLI_LOG")
+    if path == "" then false
+    else restorePoll(c, path, c.clock.nowUnixMillis() + timeoutMs)
+
+  def restorePoll(c: MatrixClient, path: String, deadline: Long): Boolean =
+    var out = false
+    var run = true
+    while run do
+      if logHas(path, "enable_network") then
+        out = true
+        run = false
+      else if c.clock.nowUnixMillis() >= deadline then run = false
+      else c.clock.sleepMs(200L)
+    out
+
+  def logHas(path: String, needle: String): Boolean =
+    var raw = ""
+    try raw = go.string(go.sys.readFile(path))
+    catch case e: sgo.GoError => raw = ""
+    raw.indexOf(needle) >= 0
 
   /** the fake helper's capture: the PSK came in on stdin verbatim, and no
    *  argv token carried it. */

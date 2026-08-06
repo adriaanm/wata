@@ -685,12 +685,19 @@ an epoch cell: `stop` bumps it and the loop exits after its in-flight poll
 returns (bounded by the 20 s wait, under the http capability's 30 s bound).
 A poll error backs off 3 s; an empty session waits 1 s for login.
 
-**The two wifi ops** (`WifiCmd`) shell out the way `Diag` does, behind a
-host-fakeable seam:
+**The three wifi ops** (`WifiCmd`, plans 0020/0031) shell out the way
+`Diag` does, behind a host-fakeable seam, and every report tells the
+truth about what the radio did:
 
-- `wifi_scan` — `<cli> scan` then `<cli> scan_results`, where `<cli>` is
-  `$WATA_WIFI_CLI`, else `wpa_cli -i wlan0` on the device, else the op
-  reports `{ok:false, detail:"not on device"}`. The tab-separated table is
+- `wifi_scan` — `<cli> scan`, then `<cli> scan_results` polled until it
+  SETTLES, where `<cli>` is `$WATA_WIFI_CLI`, else `wpa_cli -i wlan0` on
+  the device, else the op reports `{ok:false, detail:"not on device"}`.
+  The scan is asynchronous and an instant read answers the *previous*
+  cached sweep (a visible network went missing that way), so the poller
+  reads a baseline before triggering, then polls (500 ms) until the
+  output moves off it or `$WATA_WIFI_SETTLE_MS` (default 4000) passes —
+  a sweep identical to the cache costs the full window, which is
+  indistinguishable without event listening. The tab-separated table is
   parsed to `[{ssid, signal, secured}]`: duplicate ssids collapse to the
   strongest row (one answer per band), hidden (empty-ssid) rows drop, and
   `secured` reads off the flags column (WPA/WEP/RSN).
@@ -700,17 +707,44 @@ host-fakeable seam:
   argument and the PSK on the helper's STDIN — argv and the environment
   are world-readable in /proc, stdin is not (`exec.Cmd.Stdin` via the
   `go.exec` facade). A helper that is not there reports
-  `{ok:false, detail:"wifi-join helper missing"}` honestly; the join's
-  real outcome shows in the connectivity element either way.
+  `{ok:false, detail:"wifi-join helper missing"}` honestly. The helper's
+  exit 0 means CONFIG APPLIED, not joined: **the verdict is the
+  association outcome** (owner-ruled — a mistyped PSK once answered
+  "join ok" while the radio silently roamed to a fallback). The poller
+  probes `<cli> status` (per-line `key=value` match; a substring match
+  on `ssid=` would hit `bssid=`) until the target ssid shows
+  `wpa_state=COMPLETED` or `$WATA_WIFI_ASSOC_MS` (default 20000) passes,
+  then reports `joined <ssid>` / `auth failed for <ssid>, still on
+  <actual>` — ok is impossible without association. A bad join never
+  destroys a working credential: the live conf
+  (`/etc/wpa_supplicant/wpa_supplicant.conf`) is copied aside as opaque
+  bytes before the helper runs, restored + `reconfigure`d on a failed
+  association, deleted on success (no conf file — every dev host — makes
+  each leg a silent no-op).
+- `wifi_off {minutes}` — the cellular-fallback test switch: `<cli>
+  disable_network all` (runtime only — nothing calls `save_config`, so
+  persistent config is untouched and a reboot restores wifi), then an
+  in-process auto-restore timer (`enable_network all` + `reassociate`
+  after the window; default 10 min, clamped to 120;
+  `$WATA_WIFI_RESTORE_MS` shrinks it for the harness). A second
+  `wifi_off` re-arms via an epoch cell, never stacking restores. The
+  report goes out after the radio drops — it arriving over whatever
+  transport survives IS the test.
 
 The integ scenario `wifi-cmd` is the seam's oracle: the real poller loop
 against the fake cli/helper (`tools/integ-wifi-cli.py`,
-`tools/integ-wifi-join.py`), asserting the parked long-poll wakes, the
-parsed scan report (dedupe, hidden-row drop, secured flags), the join
-verdict, the capture file's proof that the PSK traveled by stdin and never
-argv — and that the device's own non-admin token cannot queue commands.
-On-device `wifi_join` against the real helper is a hardware pass, recorded
-when it happens.
+`tools/integ-wifi-join.py`, plus the harness knobs
+`WATA_WIFI_SETTLE_MS=0` / short `ASSOC_MS` / 300 ms `RESTORE_MS` and the
+fake association state file `$WATA_WIFI_STATE`), asserting the parked
+long-poll wakes, the parsed scan report (dedupe, hidden-row drop,
+secured flags), BOTH join verdicts (the fake associates only `HomeNet`,
+so a join to any other ssid drives the auth-failed arc), the capture
+file's proof that the PSK traveled by stdin and never argv, the wifi_off
+report plus the auto-restore firing (`enable_network` in the fake cli's
+`$WATA_WIFI_CLI_LOG`) — and that the device's own non-admin token cannot
+queue commands. On-device passes still owed: the join verdict against a
+real mistyped PSK, and `wifi_off` proving the report rides cellular
+(WATA-TODO.md).
 
 ### Quitting is two-step
 

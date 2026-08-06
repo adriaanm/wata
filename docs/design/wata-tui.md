@@ -44,6 +44,7 @@ Startup prints one line: `ready <userId>`, or `login failed`.
 | `mark <conv#> <msg#>` | the read receipt only |
 | `fav <conv#> <msg#>` | TOGGLE the server's `net.wata.favorite` marker on that message (plan 0019), so the media retention sweep spares it; prints `fav <eventId> <true\|false>` — the state the toggle left behind — or `fav failed: <status> <body>` |
 | `wifi <conv#\|user>` | the wifi panel (plan 0020): queue a `wifi_scan` for that user's handset through the server's command mailbox, wait for its report, print the networks numbered (`net <n> <ssid> signal=<dBm> secured=<bool>`) |
+| `wifi off <conv#\|user> [minutes]` | the cellular-fallback test switch (plan 0031): queue `wifi_off` — the handset drops wlan0 and auto-restores after the window (device default 10 min; persistent config untouched, so a reboot also restores) — and wait for the report, which arrives over whatever transport survived the drop: `wifi off ok <detail>` / `wifi off failed: <detail>` |
 | `join <net#>` | prompt `psk?` and read the PSK as the NEXT stdin line (empty for an open network — a prompt, not an argument, so the secret never sits in a shell history line), queue `wifi_join` for the last `wifi` target, wait for the device's verdict: `wifi join ok <detail>` / `wifi join failed: <detail>` |
 | `raw <METHOD> <path> [json]` | an authenticated request straight at the server; prints `raw <status> <length>` then the body |
 | `wait <ms>` | poll snapshots for that long, printing `change convs=<n> unplayed=<n>` whenever the summary moves, then `waited <ms>` |
@@ -113,12 +114,13 @@ it in sequence, since `wataclient`'s runtime is one client per process:
    whoami / quit`.
 3. **alice again**, for the wifi panel: while a harness thread plays bob's
    handset over the command mailbox (long-polls `/cmd/poll` with bob's
-   token, answers the scan with canned networks and the join with a
-   verdict), the session runs `join`-before-scan (refused), `wifi
-   @bob:localhost`, a bad `join 9`, and `join 1` with the PSK on the next
-   line. Asserted: the numbered network lines match the canned report
-   verbatim, the verdict line, and — on the device side — that the join
-   command arrived with the ssid and the exact PSK.
+   token, answers the scan with canned networks, the join and the off
+   with verdicts), the session runs `join`-before-scan (refused), `wifi
+   @bob:localhost`, a bad `join 9`, `join 1` with the PSK on the next
+   line, and `wifi off @bob:localhost 5`. Asserted: the numbered network
+   lines match the canned report verbatim, the join and off verdict
+   lines, and — on the device side — that the join command arrived with
+   the ssid and the exact PSK, and the off with its minutes.
 
 It asserts on the printed lines: the first `snap` shows the server-minted
 family room at index 1 and bob's DM at index 2 with `msgs=1 unplayed=1`, `msgs` lists one unplayed message from bob with an

@@ -20,12 +20,15 @@ import sgo.add
  *  only — sim and uitest stay deterministic; the integ scenario drives the
  *  same loop directly against a fake wifi seam.
  *
- *  THE WIFI SEAM (`WifiCmd`): the two ops shell out exactly the way `Diag`
- *  does, and both are overridable for a host harness —
+ *  THE WIFI SEAM (`WifiCmd`): the ops shell out exactly the way `Diag`
+ *  does, and all are overridable for a host harness —
  *
- *    wifi_scan   `<cli> scan` + `<cli> scan_results` where `<cli>` is
- *                `$WATA_WIFI_CLI`, else `wpa_cli -i wlan0` on the device,
- *                else the op reports `{ok:false, detail:"not on device"}`.
+ *    wifi_scan   `<cli> scan`, then `<cli> scan_results` polled until it
+ *                moves off the pre-scan cache (plan 0031: the scan is
+ *                async and an instant read reports the PREVIOUS sweep) —
+ *                where `<cli>` is `$WATA_WIFI_CLI`, else `wpa_cli -i
+ *                wlan0` on the device, else the op reports
+ *                `{ok:false, detail:"not on device"}`.
  *    wifi_join   `$WATA_WIFI_JOIN`, else `/usr/local/bin/wifi-join` — the
  *                alpine-provided helper (bq268-alpine
  *                docs/planning/wifi-join-helper.md): argv is the ssid
@@ -33,6 +36,13 @@ import sgo.add
  *                environment are world-readable in /proc, stdin is not. A
  *                helper that is not there reports
  *                `{ok:false, detail:"wifi-join helper missing"}` honestly.
+ *                The helper's exit 0 means CONFIG APPLIED, not joined: the
+ *                verdict is the association probe (plan 0031) — `<cli>
+ *                status` until the target ssid completes or the window
+ *                passes — and a failed join rolls the previous conf back.
+ *    wifi_off    `<cli> disable_network all` + an in-process auto-restore
+ *                timer (plan 0031's cellular-fallback test switch);
+ *                persistent config untouched, so a reboot also restores.
  */
 object CmdPoller:
   private val epochC: sgo.Atomic[scala.Int] = sgo.atomic(0)
@@ -97,6 +107,7 @@ object CmdPoller:
     if op == "wifi_scan" then WifiCmd.scan()
     else if op == "wifi_join" then
       WifiCmd.join(WJson.strField(cmd, "ssid", ""), WJson.strField(cmd, "psk", ""))
+    else if op == "wifi_off" then WifiCmd.off(WJson.longField(cmd, "minutes", 10L))
     else WifiCmd.fail("unsupported op")
 
 /** the two wifi ops' device mechanics — every command line is run the way
@@ -120,22 +131,53 @@ object WifiCmd:
 
   // ---- wifi_scan -----------------------------------------------------------------
 
-  /** `{ok, networks: [{ssid, signal, secured}]}` — trigger a scan, then parse
-   *  `scan_results` (header line, then tab-separated
-   *  bssid/freq/signal/flags/ssid rows). Duplicate ssids (one per band)
-   *  collapse to the strongest signal; hidden networks (empty ssid) drop. */
+  /** `{ok, networks: [{ssid, signal, secured}]}` — trigger a scan, wait for
+   *  the results to SETTLE, then parse `scan_results` (header line, then
+   *  tab-separated bssid/freq/signal/flags/ssid rows). Duplicate ssids (one
+   *  per band) collapse to the strongest signal; hidden networks (empty
+   *  ssid) drop. */
   def scan(): Json =
     val base = cliBase()
     if base == "" then fail("not on device")
     else scanWith(base)
 
   def scanWith(base: String): Json =
+    val baseline = readResults(base)
     if !Diag.shOk(base + " scan") then fail("scan failed")
+    else scanSettled(base, baseline)
+
+  /** `wpa_cli scan` is ASYNC: an instant `scan_results` read answers the
+   *  previous cached sweep (plan 0031 — a visible network went missing from
+   *  a listing that way). Poll (500ms steps) until the output moves off the
+   *  pre-scan baseline or the settle window passes, and report the last
+   *  read — a sweep that happens to equal the cache costs the full window,
+   *  which is indistinguishable without wpa_supplicant event listening.
+   *  `$WATA_WIFI_SETTLE_MS` (default 4000) bounds it; the harness sets 0 so
+   *  its canned fake stays instant. */
+  def scanSettled(base: String, baseline: String): Json =
+    var out = readResults(base)
+    var left = settleMs()
+    while left > 0L && out == baseline do
+      FbCaps.sleepMs(500L)
+      left = left - 500L
+      out = readResults(base)
+    var fs: List[(String, Json)] = Nil
+    fs = ("networks", JArr(netJsons(parseResults(out), Nil))) :: fs
+    fs = ("ok", JBool(true)) :: fs
+    JObj(fs)
+
+  def readResults(base: String): String = Diag.shOut(base + " scan_results 2>/dev/null")
+
+  def settleMs(): Long = envMsOr("WATA_WIFI_SETTLE_MS", 4000L)
+
+  /** `$name` as milliseconds; the default on unset or junk (a leading digit
+   *  run parses, so "0" is a real zero). */
+  def envMsOr(name: String, dflt: Long): Long =
+    val s = go.sys.getenv(name)
+    if s == "" then dflt
     else
-      var fs: List[(String, Json)] = Nil
-      fs = ("networks", JArr(netJsons(parseResults(Diag.shOut(base + " scan_results 2>/dev/null")), Nil))) :: fs
-      fs = ("ok", JBool(true)) :: fs
-      JObj(fs)
+      val v = Diag.intPrefix(s)
+      if v < 0 then dflt else v.toLong
 
   def netJsons(xs: List[ScanNet], acc: List[Json]): List[Json] = xs match
     case h :: t => netJsons(t, netJson(h) :: acc)
@@ -239,33 +281,154 @@ object WifiCmd:
     else if Diag.onDevice() then "/usr/local/bin/wifi-join"
     else ""
 
-  /** `{ok, detail}` — run `wifi-join <ssid>` with the PSK on stdin. The
-   *  helper owns the join mechanics (the wpa_supplicant block, reconfigure,
-   *  surviving reboot); this end only reports what it said. */
+  /** `{ok, detail}` — run `wifi-join <ssid>` with the PSK on stdin, then
+   *  probe until the target ssid ASSOCIATES (plan 0031: the verdict IS the
+   *  association outcome — the helper owns the config mechanics, exit 0
+   *  means "config applied", and a mistyped PSK used to answer "join ok"
+   *  while the radio silently roamed to a fallback). "ok" is impossible
+   *  without association, and a failed join rolls the previous conf back so
+   *  a bad join never destroys a working credential. */
   def join(ssid: String, psk: String): Json =
     val helper = joinHelper()
     if ssid == "" then fail("no ssid")
     else if helper == "" || !Diag.readable(helper) then fail("wifi-join helper missing")
-    else joinRun(helper, ssid, psk)
+    else if cliBase() == "" then fail("no wpa_cli to verify association")
+    else joinRun(cliBase(), helper, ssid, psk)
 
-  def joinRun(helper: String, ssid: String, psk: String): Json =
-    var ok = true
+  def joinRun(base: String, helper: String, ssid: String, psk: String): Json =
+    backupConf()
+    var applied = true
     var detail = ""
     try
       val cmd = go.exec.command1(helper, ssid)
       cmd.stdin = go.strings.newReader(psk)
       detail = firstLine(go.string(cmd.output()))
     catch case e: sgo.GoError =>
-      ok = false
+      applied = false
       detail = e.message
+    if !applied then
+      dropBackup()               // helper contract: non-zero = config not applied
+      fail(detail)
+    else joinVerdict(base, ssid)
+
+  /** probe `status` (1s steps) until the TARGET ssid completes or the window
+   *  (`$WATA_WIFI_ASSOC_MS`, default 20000) passes; commit or roll back the
+   *  conf backup accordingly. */
+  def joinVerdict(base: String, ssid: String): Json =
+    var left = envMsOr("WATA_WIFI_ASSOC_MS", 20000L)
+    var done = associated(base, ssid)
+    while left > 0L && !done do
+      FbCaps.sleepMs(1000L)
+      left = left - 1000L
+      done = associated(base, ssid)
+    if done then
+      dropBackup()
+      okDetail("joined " + ssid)
+    else
+      restoreConf(base)
+      fail("auth failed for " + ssid + ", still on " + currentSsid(base))
+
+  def associated(base: String, ssid: String): Boolean =
+    val out = Diag.shOut(base + " status 2>/dev/null")
+    statusField(out, "ssid") == ssid && statusField(out, "wpa_state") == "COMPLETED"
+
+  def currentSsid(base: String): String =
+    val s = statusField(Diag.shOut(base + " status 2>/dev/null"), "ssid")
+    if s == "" then "nothing" else s
+
+  /** `key=value` out of `wpa_cli status` output, matched per LINE (a bare
+   *  `indexOf("ssid=")` would hit `bssid=`); "" when absent. */
+  def statusField(out: String, key: String): String =
+    var rest = out
+    var found = ""
+    var going = true
+    while going do
+      val nl = rest.indexOf("\n")
+      var line = rest
+      if nl >= 0 then
+        line = rest.substring(0, nl)
+        rest = rest.substring(nl + 1, rest.length)
+      else going = false
+      if found == "" && line.startsWith(key + "=") then
+        found = line.substring(key.length + 1, line.length)
+    found
+
+  // the conf backup that makes a bad join non-destructive: the live file is
+  // copied aside (OPAQUE BYTES — its format stays the helper's business)
+  // before the helper rewrites it, restored + reconfigured on a failed
+  // association, deleted on success. No conf file (every dev host, and the
+  // harness) = every leg a silent no-op.
+
+  def confPath(): String = "/etc/wpa_supplicant/wpa_supplicant.conf"
+  def bakPath(): String = confPath() + ".wata-prev"
+
+  def backupConf(): Unit =
+    if Diag.readable(confPath()) then discard(Diag.shOk("cp " + confPath() + " " + bakPath()))
+
+  def dropBackup(): Unit =
+    discard(Diag.shOk("rm -f " + bakPath()))
+
+  def restoreConf(base: String): Unit =
+    if Diag.readable(bakPath()) then
+      discard(Diag.shOk("mv " + bakPath() + " " + confPath() + " && " + base + " reconfigure"))
+
+  def discard(b: Boolean): Unit = ()
+
+  def okDetail(detail: String): Json =
     var fs: List[(String, Json)] = Nil
     fs = ("detail", JStr(detail)) :: fs
-    fs = ("ok", JBool(ok)) :: fs
+    fs = ("ok", JBool(true)) :: fs
     JObj(fs)
 
   def firstLine(s: String): String =
     val nl = s.indexOf("\n")
     if nl < 0 then s else s.substring(0, nl)
+
+  // ---- wifi_off -----------------------------------------------------------------
+
+  // the auto-restore epoch: a second wifi_off re-arms the window by bumping
+  // it, so a stale timer never restores early (it checks its epoch first).
+  private val offEpochC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+
+  /** `{ok, detail}` — take wlan0 down at RUNTIME only (`disable_network
+   *  all`; nothing calls save_config, so persistent config is untouched and
+   *  a reboot restores wifi) and arm the in-process auto-restore timer. A
+   *  stranded handset is impossible: the timer, a reboot, or a power cycle
+   *  each restore. The report goes out AFTER the radio drops — arriving
+   *  over whatever transport survives is the point (plan 0031). */
+  def off(minutes: Long): Json =
+    val base = cliBase()
+    if base == "" then fail("not on device")
+    else offWith(base, clampMinutes(minutes))
+
+  /** absent/junk -> the 10min default; ceiling 120 so a typo cannot park a
+   *  handset off-wifi for a day. */
+  def clampMinutes(m: Long): scala.Int =
+    if m <= 0L then 10 else if m > 120L then 120 else m.toInt
+
+  def offWith(base: String, minutes: scala.Int): Json =
+    if !Diag.shOk(base + " disable_network all") then fail("disable_network failed")
+    else
+      val e = offEpochC.add(1)
+      sgo.spawn(() => restoreJob(base, e, restoreDelayMs(minutes)))
+      okDetail("wifi off for " + minutes + " min; auto-restore armed")
+
+  /** `$WATA_WIFI_RESTORE_MS` overrides the window so a harness can watch the
+   *  restore fire without waiting minutes. */
+  def restoreDelayMs(minutes: scala.Int): Long =
+    envMsOr("WATA_WIFI_RESTORE_MS", minutes.toLong * 60000L)
+
+  /** sleep out the window in 500ms slices, abandoning the moment a newer
+   *  wifi_off supersedes this one; then restore. */
+  def restoreJob(base: String, epoch: scala.Int, delayMs: Long): Unit =
+    var left = delayMs
+    while left > 0L && offEpochC.get() == epoch do
+      var step = 500L
+      if left < 500L then step = left
+      FbCaps.sleepMs(step)
+      left = left - step
+    if offEpochC.get() == epoch then
+      discard(Diag.shOk(base + " enable_network all && " + base + " reassociate"))
 
 /** one parsed scan row. */
 case class ScanNet(ssid: String, signal: Long, secured: Boolean)

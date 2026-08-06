@@ -521,8 +521,9 @@ comparison). The long-poll reuses the store's waiter discipline
 (close-signalled channel, register-then-recheck) under the mailbox's own
 mutex and waiter list, so a mailbox wake never touches `/sync` pollers.
 
-The two ops that ship — `wifi_scan` and `wifi_join` — are the device's
-business, not the server's: the mailbox validates only the envelope. The
+The ops that ride it — `wifi_scan`, `wifi_join`, `wifi_off` (plans
+0020/0031) — are the device's business, not the server's: the mailbox
+validates only the envelope, and a new op needs no server change. The
 device half is wata-fb's command poller (wata-fb.md), the admin half the
 tui's `wifi`/`join` flow (wata-tui.md). `tools/wata-cmd-smoke.py`
 (`just cmd-smoke`, in `just ci`) is the gate: the admin gate on all four

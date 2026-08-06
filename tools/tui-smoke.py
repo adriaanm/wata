@@ -47,15 +47,17 @@ BOB_SCRIPT = """send @alice:localhost {ogg}
 quit
 """
 
-# The wifi panel (plan 0020): a `join` before any scan is refused; the scan
-# lists the canned networks the fake device reports; a bad network number is
-# refused without eating the PSK line; the join prompts for the PSK on the
-# NEXT line and reports the device's verdict.
+# The wifi panel (plans 0020/0031): a `join` before any scan is refused; the
+# scan lists the canned networks the fake device reports; a bad network number
+# is refused without eating the PSK line; the join prompts for the PSK on the
+# NEXT line and reports the device's verdict; `wifi off` queues the
+# cellular-fallback switch and prints the device's report.
 WIFI_SCRIPT = """join 1
 wifi @bob:localhost
 join 9
 join 1
 secretpsk
+wifi off @bob:localhost 5
 quit
 """
 
@@ -187,8 +189,9 @@ def http_json(method, path, body=None, token=None, timeout=20):
 
 def device_player(token, seen, stop):
     """Play bob's handset over plain HTTP: long-poll the command mailbox,
-    answer a wifi_scan with the canned networks and a wifi_join with a
-    success verdict, recording what arrived for the harness to assert."""
+    answer a wifi_scan with the canned networks, a wifi_join with a success
+    verdict, and a wifi_off (the session's last op) with the off-and-armed
+    verdict, recording what arrived for the harness to assert."""
     deadline = time.monotonic() + 90
     while not stop.is_set() and time.monotonic() < deadline:
         st, j = http_json("GET", "/_wata/v1/cmd/poll?wait=5", token=token, timeout=15)
@@ -206,6 +209,12 @@ def device_player(token, seen, stop):
                 http_json("POST", "/_wata/v1/cmd/report",
                           {"op": "wifi_join",
                            "result": {"ok": True, "detail": "joined"}},
+                          token=token)
+            elif cmd.get("op") == "wifi_off":
+                http_json("POST", "/_wata/v1/cmd/report",
+                          {"op": "wifi_off",
+                           "result": {"ok": True,
+                                      "detail": "wifi off for 5 min; auto-restore armed"}},
                           token=token)
                 return
 
@@ -337,6 +346,15 @@ def run(tmp):
     c.ok(len(joins) == 1 and joins[0].get("ssid") == "HomeNet"
          and joins[0].get("psk") == "secretpsk",
          f"wifi: the device did not receive the join command intact: {joins!r}")
+
+    # wifi off (plan 0031): queued for the target, the minutes ride the body,
+    # and the device's report is printed as the verdict.
+    c.line(wifi, lambda l: l == "wifi off queued @bob:localhost", "wifi: no off-queued line")
+    c.line(wifi, lambda l: l == "wifi off ok wifi off for 5 min; auto-restore armed",
+           "wifi: no off verdict line")
+    offs = [cmd for cmd in seen if cmd.get("op") == "wifi_off"]
+    c.ok(len(offs) == 1 and offs[0].get("minutes") == 5,
+         f"wifi: the device did not receive wifi_off with its minutes: {offs!r}")
     return c.failed, bob, alice + wifi
 
 

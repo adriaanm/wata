@@ -34,6 +34,12 @@ blocks + git log; each entry cites where it was recorded.*
   `fb-deploy`; verify no white screen at boot and after idle wake. The
   cmdline half (`consoleblank=0`) is handed to bq268-alpine
   (`docs/planning/consoleblank-cmdline.md` there).
+- **Wifi truthfulness needs its device passes** (plan 0031, 2026-08-06):
+  the settle/verdict/off changes are integ-proven on the fake seam only.
+  On hardware, after the next `fb-deploy`: a `wifi`+`join` with a real
+  mistyped PSK must answer the auth-failed verdict and leave the handset
+  on its previous network (the conf rollback), and `wifi off` must
+  report over cellular and auto-restore.
 - **Aged-refusal endpoint rebuild not yet on the device** (plan 0030,
   2026-08-06): the fix lives in the irohnet Rust staticlib; only the
   host lib (`clib/darwin`) was rebuilt. The armv7 lib rides the next

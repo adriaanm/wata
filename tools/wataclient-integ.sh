@@ -40,13 +40,23 @@ CLIENT="$FB_EMIT/wata-fb_race"
 SERVER="$WATA_EMIT/$(binname wata-server)"
 
 TMP=$(mktemp -d)
-# The wifi-cmd scenario's fake device seam (plan 0020): the client's WifiCmd
-# runs these instead of wpa_cli / the alpine wifi-join helper, and the fake
-# helper records what reached it (ssid via argv, PSK via stdin) for the
+# The wifi-cmd scenario's fake device seam (plans 0020/0031): the client's
+# WifiCmd runs these instead of wpa_cli / the alpine wifi-join helper, and the
+# fake helper records what reached it (ssid via argv, PSK via stdin) for the
 # scenario to assert. Inert for every other scenario — nothing else reads them.
 export WATA_WIFI_CLI="$WATA/tools/integ-wifi-cli.py"
 export WATA_WIFI_JOIN="$WATA/tools/integ-wifi-join.py"
 export WATA_WIFI_CAPTURE="$TMP/wifi-capture.json"
+# Plan 0031's truthfulness knobs, harness-sized: the canned scan_results never
+# move so the settle poll must not wait; the fake association state (written
+# by the fake helper for HomeNet only, read by the fake cli's `status`) drives
+# both join verdicts with a short probe window; the invocation log is how the
+# scenario sees wifi_off's disable and the auto-restore firing (300ms here).
+export WATA_WIFI_SETTLE_MS=0
+export WATA_WIFI_ASSOC_MS=1500
+export WATA_WIFI_RESTORE_MS=300
+export WATA_WIFI_STATE="$TMP/wifi-state.txt"
+export WATA_WIFI_CLI_LOG="$TMP/wifi-cli.log"
 SRV_PID=""
 cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null || true; }
 trap cleanup EXIT

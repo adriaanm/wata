@@ -23,6 +23,12 @@ import language.experimental.saferExceptions
  *                             for that user's handset through the server's
  *                             command mailbox, wait for its report, print the
  *                             networks numbered
+ *    wifi off <conv#|user> [minutes]   the cellular-fallback test switch
+ *                             (plan 0031): queue wifi_off — the device drops
+ *                             wlan0 and auto-restores after the window
+ *                             (default 10 min; persistent config untouched)
+ *                             — and wait for the report, which arrives over
+ *                             whatever transport survives
  *    join <net#>              prompt for the PSK (the next stdin line), queue
  *                             wifi_join for the last `wifi` target, wait for
  *                             its report, say what happened
@@ -79,7 +85,7 @@ object Repl:
     else if cmd == "play" then play(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
     else if cmd == "mark" then mark(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
     else if cmd == "fav" then fav(c, Str.num(Str.nth(ts, 1), 0), Str.num(Str.nth(ts, 2), 0))
-    else if cmd == "wifi" then wifi(c, Str.nth(ts, 1))
+    else if cmd == "wifi" then wifiDispatch(c, ts)
     else if cmd == "join" then join(c, sc, Str.num(Str.nth(ts, 1), 0))
     else if cmd == "raw" then raw(c, Str.nth(ts, 1), Str.nth(ts, 2), Str.restLine(line, 3))
     else if cmd == "wait" then waitMs(c, Str.num(Str.nth(ts, 1), 1000))
@@ -308,10 +314,50 @@ object Repl:
    *  carries a server-stamped `seq`, so "the answer to THIS scan" is "the
    *  seq moved past what it was before the queue" — no clock comparison
    *  between two machines. */
+  /** `wifi <conv#|user>` is the scan panel; `wifi off <conv#|user>
+   *  [minutes]` is plan 0031's cellular-fallback test switch. */
+  def wifiDispatch(c: MatrixClient, ts: List[String]): Unit =
+    if Str.nth(ts, 1) == "off" then
+      wifiOff(c, Str.nth(ts, 2), Str.num(Str.nth(ts, 3), 10))
+    else wifi(c, Str.nth(ts, 1))
+
   def wifi(c: MatrixClient, who: String): Unit =
     val target = wifiTarget(who)
     if target == "" then println("? wifi wants <conv#|user>")
     else wifiScan(c, target)
+
+  /** queue `wifi_off {minutes}` and wait for the device's report — which
+   *  rides whatever transport survives the radio drop; that arrival IS the
+   *  fallback test. The device clamps the window and always auto-restores. */
+  def wifiOff(c: MatrixClient, who: String, minutes: scala.Int): Unit =
+    val target = wifiTarget(who)
+    if target == "" then println("? wifi off wants <conv#|user> [minutes]")
+    else wifiOffQueue(c, target, minutes)
+
+  def wifiOffQueue(c: MatrixClient, target: String, minutes: scala.Int): Unit =
+    val hs = hsOf(c)
+    val before = reportSeq(hs, target, "wifi_off")
+    val q = MatrixHttp.request(hs, "POST", cmdPath(target), JSON, offBody(minutes))
+    if q.status != 200 then println("? wifi queue failed: " + q.status + " " + q.body)
+    else
+      println("wifi off queued " + target)
+      wifiOffWait(c, target, before)
+
+  def offBody(minutes: scala.Int): String =
+    var fs: List[(String, Json)] = Nil
+    fs = ("minutes", JInt(minutes.toLong)) :: fs
+    fs = ("op", JStr("wifi_off")) :: fs
+    Json.write(JObj(fs))
+
+  def wifiOffWait(c: MatrixClient, target: String, before: Long): Unit =
+    val rep = awaitReport(c, target, "wifi_off", before, 60000L)
+    if !WJson.boolField(rep, "arrived") then println("wifi off timed out")
+    else wifiOffResult(WJson.objField(rep, "result"))
+
+  def wifiOffResult(result: Json): Unit =
+    val detail = WJson.strField(result, "detail", "")
+    if WJson.boolField(result, "ok") then println("wifi off ok " + detail)
+    else println("wifi off failed: " + detail)
 
   /** a conversation number resolves to its contact; anything else is a user
    *  id (bare localpart or full mxid — the server normalizes). */
