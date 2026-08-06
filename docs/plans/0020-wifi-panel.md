@@ -114,6 +114,11 @@ reacting to the network change.
   answers a scan with canned results; the admin session's `wifi` flow
   is asserted line-by-line. On-device wifi_join is a hardware pass,
   recorded when it happens.
+- **Field 2026-08-06, the scan half on hardware**: owner ran `wifi alma`
+  from the tui against the live handset (real server, mailbox, fb
+  poller, real radio): `net 1 youbetcha signal=-52 secured=true` —
+  exactly the report shape the smoke pins, from a real scan. The join
+  half awaits its hardware run (WIFI-JOIN-DEVICE-PASS).
 
 ## Out of scope
 
