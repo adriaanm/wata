@@ -105,6 +105,13 @@ objc-spike:
     # Not in ci for the same reason.
     cd tools/objc-spike && ../../tools/sgo build
 
+# plan 0038 gate: can a facade express AppKit geometry? (1 known gap)
+interp-spike:
+    # It does not build, and that IS the finding — tools/interp-spike/REPORT.md
+    # owns the expectation (a facade class is always a Go POINTER, and cannot
+    # be constructed). Not in ci for the same reason.
+    cd tools/interp-spike && ../../tools/sgo build
+
 # UI layer: portability/dependency tripwires, the differ's round-trip oracle
 wataui-tests:
     bash tools/wataui-tests.sh

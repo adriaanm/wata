@@ -98,6 +98,20 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
+- **`FACADE-VALUE-STRUCT`** — a facade class type is always a Go
+  **pointer**, and cannot be constructed. Repro in `tools/interp-spike`
+  (`just interp-spike`), diagnostics in its REPORT.md. It blocks
+  `WIRE-DIES-INTERP-TO-SGOLA`: AppKit's geometry is C structs by value
+  (`CGRect`, and the ObjC handles themselves are `struct{ objc.ID }`),
+  so every crossing mismatches — `cannot use … (value of struct type
+  appkit.CGRect) as *appkit.CGRect value`. Field access, `@go.name` and
+  method binding are all already right; only the `*` and building a
+  composite literal are missing. Constructing one today either emits the
+  Sgola-side name (`undefined: appkit_CGRect`, from a `case class`) or
+  crashes the plugin (`unsupported expression (Apply)` on `new`). No
+  workaround taken — the alternative is a pointer-shaped Go shim in front
+  of the generated bindings, which is the layer the port exists to delete.
+
 - **`FACADE-UINTPTR-TYPE`** and **`FACADE-DISCARD-EXTRA-RESULTS`** — the
   two gaps plan 0038's call-out spike walked into, with a live repro in
   `tools/objc-spike` (`just objc-spike`) and the diagnostics in its

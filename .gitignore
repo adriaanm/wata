@@ -116,3 +116,4 @@ tools/phone-spike/out/
 tools/bindgen/hello/out/
 tools/bindgen/hello/*.mobileprovision
 tools/objc-spike/.sgo/
+tools/interp-spike/.sgo/

@@ -157,6 +157,26 @@ piece with a consumer that is staying (`shell.go`'s key view); it crosses
 when `shell.go` hands raw `keyCode`s over the seam instead of translated
 ones — a change local to that file.
 
+### The interp gate, answered — `tools/interp-spike/REPORT.md`
+
+The combined move was gated on whether a facade can express the `appkit`
+surface `interp.go` uses. It cannot, for **one** reason in two sizes, and
+nothing else is in the way: method binding, chained calls, nested field
+reads and `@go.name` all come out exactly as a hand-written binding would.
+
+A facade class type is always a Go **pointer**. `appkit`'s types are
+values — `CGRect` is a struct of floats, and even the ObjC handles are
+`type NSView struct{ objc.ID }` — so every crossing mismatches. And a
+facade class cannot be constructed, which the interpreter needs to build
+rects from wataui coordinates: a `case class` emits the Sgola-side name
+(`undefined: appkit_CGRect`) and a `new` on a plain facade class crashes
+the plugin. Filed as `FACADE-VALUE-STRUCT`; the spike is committed not
+building, spelled the way the interpreter wants it.
+
+The gate's other half needs no compiler change: `interp.go`'s `image/png`
+encode is only how it gets bytes into an `NSImage`, and
+`NSBitmapImageRep` over raw RGBA is already in the bindings.
+
 Queue effect: `NATIVEUI-LOGIC-TO-SGOLA` is not a separate item and
 `WIRE-DIES-INTERP-TO-SGOLA` is not blocked on it. What actually gates the
 combined move is whether a facade can express the `appkit` surface

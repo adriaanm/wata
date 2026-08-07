@@ -1,0 +1,14 @@
+# sgo.build — plan 0038's interp gate. The question WIRE-DIES-INTERP-TO-SGOLA
+# has to answer before any of interp.go is ported: can a facade express the
+# generated `appkit` surface, whose method signatures pass and return
+# CGRect/CGPoint/CGSize BY VALUE? Every facade this repo has today binds an
+# opaque handle or a scalar; a Go struct with fields, constructed on the Sgola
+# side, is new.
+#
+# The bindings ride in as an ordinary godep (they are a plain Go module here),
+# so nothing about this spike is about bindgen — only about the facade.
+mode app
+emitname interp-spike
+binname interp-spike
+gomod interpspike
+godep github.com/adriaanm/wata/go-pkgs/appleptt ../go-pkgs/appleptt
