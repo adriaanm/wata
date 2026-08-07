@@ -98,6 +98,13 @@ fb-ui-tests *ARGS:
 fb-sim *ARGS:
     bash tools/fb-sim.sh {{ARGS}}
 
+# plan 0038 probe: can Sgola reach the C ABI with no Go of ours? (2 known gaps)
+objc-spike:
+    # It does not build, and that IS the finding — tools/objc-spike/REPORT.md
+    # owns the expectation (go.Uintptr; discarding a Go func's extra results).
+    # Not in ci for the same reason.
+    cd tools/objc-spike && ../../tools/sgo build
+
 # UI layer: portability/dependency tripwires, the differ's round-trip oracle
 wataui-tests:
     bash tools/wataui-tests.sh

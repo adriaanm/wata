@@ -98,6 +98,28 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
+- **`FACADE-UINTPTR-TYPE`** and **`FACADE-DISCARD-EXTRA-RESULTS`** — the
+  two gaps plan 0038's call-out spike walked into, with a live repro in
+  `tools/objc-spike` (`just objc-spike`) and the diagnostics in its
+  REPORT.md. Between them they are the whole distance from here to "an
+  FFI layer written in Sgola": everything ELSE the spike needed already
+  works — `(uintptr, error)` rides the `throws` lowering unchanged, and
+  the variadic facade binding emits a bare Go variadic call.
+  - `go.Uintptr`: Go's pointer-sized integer, absent from `gocore.scala`
+    AND the emitter. Every FFI value is one, and it is neither `Int` nor
+    `Long` — Go rejects both. Precedent to copy: `go.Int`'s opaque
+    IOP-2 posture.
+  - Discarding extra results: `SyscallN(…) (r1, r2, err uintptr)` is
+    unbindable because `throws`→`(T, error)` is the only multi-result
+    shape. Asked as a DISCARD rule (`r1, _, _ :=`), not as N-tuple
+    support — nothing wants `r2`, tuples would need a representation,
+    and the emitter change is one line at the call site.
+  - **Not yet filed**: there is no sgola working tree on this machine
+    (only the read-only pinned clone under `.toolchain/`), so the
+    `inbox/` drop has to happen from a checkout that has one. Filing
+    these is the first act of the next session that does.
+
+
 - ~~`WATA-EITHER-LIST-PAYLOAD`~~ FIXED (upstream `860e6d4`) and verified
   downstream: pin `860e6d4` full-gate green with `Group.resolveAll`
   returned to `Either[String, List[String]]` (the flat `ResolvedMembers`

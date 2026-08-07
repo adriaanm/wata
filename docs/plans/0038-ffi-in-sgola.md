@@ -1,6 +1,6 @@
 # 0038 — how far does Sgola reach into the FFI layer?
 
-Status: proposed
+Status: accepted (leg 1 run — two gaps named, everything else works)
 
 ## The problem
 
@@ -72,6 +72,24 @@ macshell, not a port; the smallest program that answers the question.
 The spike is the evidence for the tickets, not the other way round: file
 after the wall is hit, with the exact diagnostic, so sgola gets a repro
 rather than a wish.
+
+### Leg 1 result (run 2026-08-07) — `tools/objc-spike/REPORT.md`
+
+Two gaps, and **everything else already works**. `(uintptr, error)`
+rides the `throws` lowering unchanged; the variadic facade binding emits
+a bare Go variadic call; every `go build` error is one of the two, with
+no third problem behind them. The emitted Go is what a hand-written FFI
+looks like.
+
+1. `go.Uintptr` does not exist — not in `gocore.scala`, not in the
+   emitter. Neither `Int` nor `Long` substitutes; Go rejects both.
+2. A facade cannot discard a Go function's extra results, so
+   `SyscallN(…) (r1, r2, err uintptr)` is unbindable. Asked as a
+   discard rule, not as N-tuple support.
+
+The spike is left spelled the way it WANTS to be spelled and does not
+build: the day both gaps close it compiles, and the leg is answered
+without anyone having to reconstruct what it was asking.
 
 **What this plan does NOT decide** is whether macshell should be ported.
 That question is downstream of the answer, and it changes shape depending

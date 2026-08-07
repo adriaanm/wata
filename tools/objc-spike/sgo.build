@@ -1,0 +1,9 @@
+# sgo.build — plan 0038's call-out leg. An ObjC bridge with NO Go in it: the
+# whole point is to find where Sgola stops, so this module has no godep of a
+# hand-written shim. `purego` is an ordinary Go module dependency, reached
+# through a facade in the app's own sources.
+mode app
+emitname objc-spike
+binname objc-spike
+gomod objcspike
+godep github.com/adriaanm/wata/go-pkgs/puredep ../go-pkgs/puredep

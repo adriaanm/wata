@@ -115,3 +115,4 @@ tools/phone-spike/out/
 # the PushToTalk hello's build products and the owner's provisioning profile
 tools/bindgen/hello/out/
 tools/bindgen/hello/*.mobileprovision
+tools/objc-spike/.sgo/
