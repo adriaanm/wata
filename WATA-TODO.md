@@ -114,10 +114,12 @@ blocks + git log; each entry cites where it was recorded.*
     shape. Asked as a DISCARD rule (`r1, _, _ :=`), not as N-tuple
     support — nothing wants `r2`, tuples would need a representation,
     and the emitter change is one line at the call site.
-  - **Not yet filed**: there is no sgola working tree on this machine
-    (only the read-only pinned clone under `.toolchain/`), so the
-    `inbox/` drop has to happen from a checkout that has one. Filing
-    these is the first act of the next session that does.
+  - Filed 2026-08-07, with a third file alongside them:
+    `VERIFY-VARIADIC-FACADE-BIND`, the other direction of the loop —
+    `VARIADIC-FACADE-BIND` was minted from this inbox on 2026-08-05 and
+    the spike is its first serious consumer outside its own scenario. It
+    emitted a bare Go variadic call at three arities, first try; the wall
+    that ticket was minted for never came up.
 
 
 - ~~`WATA-EITHER-LIST-PAYLOAD`~~ FIXED (upstream `860e6d4`) and verified
