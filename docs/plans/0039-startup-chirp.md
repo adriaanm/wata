@@ -1,6 +1,7 @@
 # 0039 — the handset says hello
 
-Status: accepted — host side done and gated; the on-device audible check is outstanding
+Status: done — shipped and heard on the handset; the cold-boot leg of the
+verification is outstanding (WATA-TODO.md, client/device)
 
 ## The problem
 
@@ -94,7 +95,9 @@ than as a command someone once ran.
 | `wata-fb/src/main/scala/ui.scala` (or the startup path) | play after the mixer is set up |
 | `tools/fb-deploy.sh` | ship the asset next to the binary, both run and install |
 | `docs/design/wata-fb.md` | the asset, its format, and the page-duration reason |
-| `justfile` | `make-chirp` recipe |
+| `justfile` | `make-chirp` and `chirp-check` recipes |
+| `tools/wata-fb-smoke.sh` | the `oggforeign` oracle over the committed asset |
+| `tools/chirp-check.py` | the device oracle: is the bleep audible? |
 
 ## The silent position
 
@@ -128,11 +131,18 @@ anyone tries to send anything. The durable fix stays that ticket's.
   asset, is what proves the container is one our own reader understands.
 - `just ci` green; `just fb-smoke` and the goldens unmoved (this adds no
   screen).
-- On the device, after `just fb-deploy install`: a cold boot makes the
-  bleep audible, judged by bq268-alpine's `just speaker-check`, which
-  compares the tone's band against a neighbouring band in the same
-  recording — a route that reads right in `amixer` but plays nothing fails
-  it.
+- On the device, after `just fb-deploy install`: the bleep is audible.
+  bq268-alpine's `just speaker-check` cannot judge it — it plays its OWN
+  sine through `speaker-test` on `hw:0,0`, which wata holds, and its band
+  test assumes a single tone. `just chirp-check` is the counterpart that
+  can: same in-recording ratios, but it makes the APP play and scans for
+  the loudest 0.5s window, since the chirp is one short event. Measured
+  on the handset: 8x the neighbouring band, 5-8x the baseline, against a
+  negative control at 0.3x.
+- The cold-boot leg — the one where the codec can wipe the route as the Q6
+  comes up — is still owed (`just chirp-check --cold-boot`, WATA-TODO.md):
+  the attempt landed the device in aboot's fastboot rather than Linux, so
+  it recorded a device that was not booting.
 
 ## Out of scope
 

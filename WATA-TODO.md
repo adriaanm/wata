@@ -39,6 +39,17 @@ blocks + git log; each entry cites where it was recorded.*
   white. The idle-wake half still needs a physical key press; note that
   `just fb-shot` shows the last PAINTED frame, so a shot taken while the
   screensaver is off is not evidence either way.
+- **The startup chirp's COLD-BOOT leg is unverified** (plan 0039,
+  2026-08-08): installed and heard on the handset — `just chirp-check`
+  reads the bleep at 8x its neighbouring band and 5-8x the baseline after
+  an app restart, with the negative control at 0.3x — but the run that
+  reboots (`just chirp-check --cold-boot`) has not produced a verdict:
+  the device came up in aboot's fastboot instead of Linux and needed a
+  manual `fastboot continue`, so those 90 seconds recorded a device that
+  was not booting. Rerun it with someone near the handset. That leg is
+  the interesting one: the codec resets `RX2 MIX1 INP1` as the Q6 comes
+  up, so a chirp played right after `SetupMixer` can be silent while
+  everything reports success (AUDIO-ROUTE-REAPPLY).
 - **Wifi truthfulness needs its device passes** (plan 0031, 2026-08-06):
   the settle/verdict/off changes are integ-proven on the fake seam only.
   On hardware, after the next `fb-deploy`: a `wifi`+`join` with a real

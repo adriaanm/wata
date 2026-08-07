@@ -271,6 +271,12 @@ make-chirp *ARGS:
 fb-deploy *FLAGS:
     bash tools/fb-deploy.sh {{FLAGS}}
 
+# did the handset's startup chirp make a sound? restarts the app on the device
+# and listens on this Mac's mic (--cold-boot reboots instead; --no-restart is
+# the negative control)
+chirp-check *ARGS:
+    tools/chirp-check.py {{ARGS}}
+
 # the device panel as a PNG, over ssh — what the handset is showing right now
 fb-shot *ARGS:
     python3 tools/fb-shot.py {{ARGS}}

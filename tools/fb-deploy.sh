@@ -84,9 +84,13 @@ if [ "$INSTALL" = 1 ]; then
   echo "== fb-deploy: install -> $HOST:/opt/wata/wata-fb (previous kept as .prev) =="
   scp -q "$BIN" "root@$HOST:/opt/wata/wata-fb.new"
   scp -q "$CHIRP" "root@$HOST:/opt/wata/chirp.ogg"
+  # `pkill -f 'wata-fb ui'` matches the ssh session's OWN command line, which
+  # carries that text — it kills the remote shell mid-install and the deploy
+  # exits 255 having done the work. The bracket keeps the pattern from
+  # matching itself while still matching the process.
   ssh "root@$HOST" "cd /opt/wata && chmod +x wata-fb.new && mv -f wata-fb wata-fb.prev && \
-    mv wata-fb.new wata-fb && sync && pkill -f 'wata-fb ui'; sleep 2; ls -la /opt/wata; \
-    ps aux | grep -F 'wata-fb ui' | grep -v grep"
+    mv wata-fb.new wata-fb && sync && pkill -f 'wata-fb[ ]ui'; sleep 2; ls -la /opt/wata; \
+    ps aux | grep -F 'wata-fb ui' | grep -v grep || true"
   echo "== fb-deploy: installed (tty1 respawned it) =="
   exit 0
 fi

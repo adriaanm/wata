@@ -970,6 +970,20 @@ the trim and the encoder flags as code. Two of those flags are load-bearing:
   the comment header, so two encodes of identical audio differ in the serial
   and every page CRC, and "did the asset change" stops being answerable.
 
+**Judging it on the device** is `tools/chirp-check.py` (`just chirp-check`):
+it restarts the app while recording the room on this Mac and compares the
+chirp's band (700-2600Hz, where the asset's energy is) against the same band
+in a baseline taken moments earlier and against a neighbouring band in the
+same recording — the shape bq268-alpine's `speaker-check` established, since
+in-recording ratios are what keep a noisy room from deciding the answer. Two
+differences from that one: it cannot play its own sound (wata holds `hw:0,0`,
+and the point is to hear what the *app* plays), and the chirp is ~0.6s inside
+a multi-second recording, so both recordings are scanned in 0.5s windows and
+compared at their loudest one rather than by whole-recording RMS.
+`--no-restart` is the negative control, `--cold-boot` reboots instead.
+Measured on the handset: the chirp reads 8x its neighbouring band and 5-8x
+the baseline; the control reads 0.3x the baseline.
+
 On a cold boot the chirp can be inaudible while everything reports success:
 the codec resets `RX2 MIX1 INP1` to zero as the Q6 comes up, and `SetupMixer`
 runs once. That is `AUDIO-ROUTE-REAPPLY`, not a chirp defect — and the chirp
@@ -1571,7 +1585,14 @@ lands it beside the running one, rotates the old one to
 `/opt/wata/start.sh`, so the new binary is up within a second and the
 previous one is one `mv` away. It never touches `/etc/wata/iroh.json`:
 that file carries the handset's minted identity, and an enrolled device
-must not be re-identified by a deploy.
+must not be re-identified by a deploy. It ships `chirp.ogg` alongside the
+binary in both modes.
+
+The kill is spelled `pkill -f 'wata-fb[ ]ui'`. Without the bracket the
+pattern matches the ssh session's own command line, which carries that text:
+the install kills its own remote shell, the deploy exits 255, and everything
+it was supposed to do has already happened — a failure that looks like a
+network problem and is not one.
 
 `just fb-shot` (`tools/fb-shot.py`) reads `/dev/fb0` over ssh and writes
 the panel as a PNG — the live screen, without taking the panel over,
