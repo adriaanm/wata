@@ -54,3 +54,25 @@ object MacStr:
     else if ch == "8" then 8
     else if ch == "9" then 9
     else -1
+
+  /** field `i` of a TAB-separated line, or "" past the end. The login sheet's
+   *  answer is tab-separated rather than whitespace-separated because a
+   *  password may hold spaces and a homeserver may not be typed tidily —
+   *  `splitWs` would tear both apart. Hand-scanned: the subset has no split.
+   */
+  def tabField(line: String, i: scala.Int): String =
+    var start = 0
+    var field = 0
+    var out = ""
+    var found = false
+    var p = 0
+    while p <= line.length do
+      val atEnd = p == line.length
+      if atEnd || line.substring(p, p + 1) == "\t" then
+        if field == i && !found then
+          out = line.substring(start, p)
+          found = true
+        field = field + 1
+        start = p + 1
+      p = p + 1
+    out

@@ -96,7 +96,7 @@ a given binary but CHANGES when the binary changes, so a rebuild still
 re-prompts the Keychain. Only a Developer ID identity fixes that, and it
 stays out of scope.
 
-### 2. The login sheet
+### 2. The login sheet — DONE
 
 A native modal: homeserver, username, password, and a "remember me"
 checkbox (default on). Shown when the stores hold no usable identity, and
@@ -107,7 +107,44 @@ a requirement; the checkbox is that choice, and unchecking it keeps the
 token only.
 
 `Account ▸ Sign Out` forgets both Keychain items and returns to the
-sheet, which is also the "switch account" path.
+sheet, which is also the "switch account" path. (Deferred to slice 3 —
+it is a menu item, and there is no menu bar yet.)
+
+Landed, and **the named binding risk did not bite**: `NSAlert.runModal`
+is a synchronous call returning an `NSInteger`, so the sheet needs no
+block, no delegate and no completion handler. The refusal on
+struct/`CGFloat` callback returns is still real, but it lives in slice
+4's `UNUserNotificationCenter` authorization, not here.
+
+NSAlert, NSButton and NSSecureTextField are not in the bindgen
+allowlist, and are reached with raw `objc.Send` — the way
+`nativeui/keyview.go` already synthesizes its key view. Eight selectors
+in one file did not justify an SDK regeneration; the menu bar and
+notifications should tip that decision the other way.
+
+Two structural consequences worth knowing:
+
+- **The session grew an outer loop.** A modal must run on the main
+  thread, and the main queue only drains under `runApp`, so the sheet
+  runs on the PUMP goroutine — which means the client is now built there
+  too, after the credentials are known, rather than on the main thread
+  before the pump starts. The loop is: get credentials, run the session,
+  and if what ended it was `ConnAuthRejected`, forget the secrets and ask
+  again. That last arc is the one the sheet exists for.
+- **Headless has no sheet.** There is no runloop to put a modal on, and a
+  harness that hung waiting for a click would be worse than one that says
+  what it needs — so headless keeps the stdin prompt and the "set
+  WATA_MAC_USER" message. `mac-creds-smoke` asserts both answers: bare
+  headless asks and exits, bare windowed comes up and STAYS up.
+
+Verification note: this machine has no screen-recording grant, so the
+sheet could not be screenshotted. Instead the sheet is split into a
+builder and a reader with the modal in between, and `login_test.go`
+asserts what a look would have checked — that the password field is
+really an `NSSecureTextField` (one that was not would echo the password
+to the screen), that all seven controls are in the accessory view, that
+the prefills land, that the cursor starts at the first empty field, and
+that the answer trims the server but NOT the password.
 
 ### 3. The menu bar and Preferences
 

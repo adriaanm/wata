@@ -38,6 +38,18 @@ object bufio:
 object macshell:
   /** windowed init: NSApplication + window + stage + key view. Main thread. */
   @go.name("Start") def start(scale: scala.Int, title: String): Unit = ???
+
+  /** the login sheet (plan 0037): an NSAlert with server/name/password
+   *  fields and a "stay signed in" checkbox, prefilled with what is passed.
+   *  BLOCKS until the user commits or cancels — it runs the modal on the
+   *  main thread and waits, so call it from the pump, never before
+   *  `runApp` is on its way (a sheet asked for earlier simply waits for the
+   *  queue to drain, which is right: there is no window to put it on yet).
+   *
+   *  Answers "" for cancel, else a tab-separated
+   *  `homeserver 	 user 	 password 	 0|1` — the flag being the checkbox.
+   *  Strings only, like the rest of this facade. */
+  @go.name("Login") def login(hs: String, user: String): String = ???
   /** headless init: the stage on a dedicated locked OS thread. */
   @go.name("StartHeadless") def startHeadless(scale: scala.Int): Unit = ???
   /** NSApplication.run — never returns. */

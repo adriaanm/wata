@@ -91,6 +91,15 @@ object FbConfig:
 
   def keychainOff(): Boolean = go.sys.getenv(ENV_NO_KEYCHAIN) != ""
 
+  /** the login sheet's "stay signed in" checkbox. Cleared, nothing is
+   *  written — not the password and not the token — so the next launch asks
+   *  again, which is what unchecking it means. Default true: the stores are
+   *  the point, and a first run from the environment has no sheet to say
+   *  otherwise. */
+  private val rememberC: sgo.Atomic[Boolean] = sgo.atomic(true)
+  def setRemember(on: Boolean): Unit = rememberC.set(on)
+  def remembering(): Boolean = rememberC.get()
+
   def loadToken(hs: String, user: String): String =
     if user == "" || hs == "" || keychainOff() then ""
     else go.mackeychain.lookup(SERVICE, tokenAccount(hs, user))
@@ -103,12 +112,12 @@ object FbConfig:
    *  keychain that refuses the write means every later launch asks for a
    *  password again, and the user should hear why once. */
   def saveToken(hs: String, user: String, token: String): Unit =
-    if user != "" && hs != "" && token != "" && !keychainOff() then
+    if user != "" && hs != "" && token != "" && !keychainOff() && remembering() then
       val err = go.mackeychain.store(SERVICE, tokenAccount(hs, user), token)
       if err != "" then println("wata-mac: could not store the token: " + err)
 
   def savePassword(hs: String, user: String, pass: String): Unit =
-    if user != "" && hs != "" && pass != "" && !keychainOff() &&
+    if user != "" && hs != "" && pass != "" && !keychainOff() && remembering() &&
       go.sys.getenv(ENV_NO_SAVE_PASSWORD) == "" then
       val err = go.mackeychain.store(SERVICE, passAccount(hs, user), pass)
       if err != "" then println("wata-mac: could not store the password: " + err)
@@ -157,7 +166,8 @@ object FbConfig:
   def saveLogin(homeserver: String, username: String, creds: AuthCreds): Unit =
     val user = sessionUser(username, creds.userId)
     saveToken(homeserver, user, creds.accessToken)
-    writeStore(Session(homeserver, user, "", creds.userId, ""), loadPrefs())
+    if remembering() then
+      writeStore(Session(homeserver, user, "", creds.userId, ""), loadPrefs())
 
   def sessionUser(username: String, userId: String): String =
     var out = username
@@ -281,3 +291,11 @@ object FbConfig:
     var session = stored
     if stored.homeserver != hs || stored.username != user then session = empty()
     ClientConfig(hs, user, pass, 1000, session)
+
+  /** the identity failed against the server: drop both its secrets so the
+   *  next pass asks rather than retrying what was just refused, and hand back
+   *  a config that still remembers WHERE and WHO, which is what prefills the
+   *  sheet. */
+  def forgetAndReload(c: ClientConfig): ClientConfig =
+    forget(c.homeserver, c.username)
+    ClientConfig(c.homeserver, c.username, "", c.syncTimeoutMs, empty())

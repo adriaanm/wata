@@ -57,15 +57,23 @@ object Main:
     // secrets the last run left behind. So the FIRST run still needs
     // WATA_MAC_USER/PASS, and no run after it needs anything at all.
     var cfg = FbConfig.resolve(hs, user, passIn)
-    if cfg.username != "" && cfg.password == "" && cfg.stored.accessToken == "" then
-      cfg = withPassword(cfg, askPass(sc))
-    if cfg.username == "" || (cfg.password == "" && cfg.stored.accessToken == "") then
-      println("wata-mac: set WATA_MAC_USER (and WATA_MAC_PASS), or pass <homeserver> <user> [password]")
-    else
-      // the password that got us in is worth keeping only if it is the one
-      // the user just supplied; a stored one is already where it belongs.
-      if passIn != "" then FbConfig.savePassword(cfg.homeserver, cfg.username, passIn)
-      run(cfg, sc)
+    // the password that got us in is worth keeping only if it is the one the
+    // user just supplied; a stored one is already where it belongs.
+    if passIn != "" then FbConfig.savePassword(cfg.homeserver, cfg.username, passIn)
+    if go.sys.getenv("WATA_MAC_HEADLESS") != "" then
+      // headless has no runloop to put a modal on, and a harness that hung
+      // waiting for a click would be worse than one that says what it needs.
+      if cfg.username != "" && !hasCredentials(cfg) then
+        cfg = withPassword(cfg, askPass(sc))
+      if !hasCredentials(cfg) then
+        println("wata-mac: set WATA_MAC_USER (and WATA_MAC_PASS), or pass <homeserver> <user> [password]")
+      else Pump.runHeadless(cfg, scale(), sc)
+    else Pump.runWindowed(cfg, scale())
+
+  /** enough to attempt a session: a name, and either a password or a stored
+   *  token to try first. */
+  def hasCredentials(c: ClientConfig): Boolean =
+    c.username != "" && (c.password != "" || c.stored.accessToken != "")
 
   def withPassword(c: ClientConfig, pass: String): ClientConfig =
     ClientConfig(c.homeserver, c.username, pass, c.syncTimeoutMs, c.stored)
@@ -85,10 +93,6 @@ object Main:
     var out = MacStr.num(go.sys.getenv("WATA_MAC_SCALE"), 4)
     if out < 1 then out = 1
     out
-
-  def run(cfg: ClientConfig, sc: go.bufio.Scanner): Unit =
-    if go.sys.getenv("WATA_MAC_HEADLESS") != "" then Pump.runHeadless(cfg, scale(), sc)
-    else Pump.runWindowed(cfg, scale())
 
 /** one pump step's carried state: the wata applet state, the last tree the
  *  shell was handed (None before the first frame), the two-step quit's arm
@@ -147,11 +151,52 @@ object Pump:
 
   def runWindowed(cfg: ClientConfig, scale: scala.Int): Unit =
     go.macshell.start(scale, "Wata")
-    val h = startAudioClient(cfg)
-    sgo.spawn(() => Pump.windowedPump(h))
+    // The session runs on the pump goroutine, INCLUDING the login sheet: a
+    // modal has to go on the main queue, and that queue only drains once
+    // `runApp` is going. So the client is built here rather than on the main
+    // thread, after the credentials are known.
+    sgo.spawn(() => Pump.windowedSession(cfg))
     go.macshell.runApp() // never returns; quit leaves through macshell.terminate
 
-  def windowedPump(h: Handle): Unit =
+  /** the outer loop around a windowed session: get credentials (from the
+   *  stores, or by asking), run until the session ends, and ask again if what
+   *  ended it was the server rejecting the account. That last arc is why the
+   *  sheet exists at all — a token invalidated server-side used to leave the
+   *  window on its boot screen with nothing a user could do about it. */
+  def windowedSession(cfg0: ClientConfig): Unit =
+    var cfg = cfg0
+    var going = true
+    while going do
+      cfg = ensureCredentials(cfg)
+      if cfg.username == "" then going = false          // the sheet was cancelled
+      else
+        val h = startAudioClient(cfg)
+        val rejected = windowedPump(h)
+        h.stop()
+        val joined = ClientHandle.join(h, 5000L)
+        if rejected then cfg = Main.withPassword(FbConfig.forgetAndReload(cfg), "")
+        else going = false
+    go.macshell.terminate()
+
+  /** what the sheet is for: nothing usable stored, so ask. Cancelling answers
+   *  an empty config, which ends the app — "Quit" is the sheet's other button
+   *  and has to mean it. */
+  def ensureCredentials(c: ClientConfig): ClientConfig =
+    if Main.hasCredentials(c) then c
+    else
+      val line = go.macshell.login(c.homeserver, c.username)
+      if line == "" then ClientConfig("", "", "", c.syncTimeoutMs, FbConfig.empty())
+      else
+        val hs = MacStr.tabField(line, 0)
+        val user = MacStr.tabField(line, 1)
+        val pass = MacStr.tabField(line, 2)
+        FbConfig.setRemember(MacStr.tabField(line, 3) == "1")
+        FbConfig.savePassword(hs, user, pass)
+        FbConfig.resolve(hs, user, pass)
+
+  /** true = the session ended because the SERVER rejected the account, which
+   *  is the one ending worth asking about again. */
+  def windowedPump(h: Handle): Boolean =
     val clock = MacCaps.clock()
     NetStatus.reset()
     if Runtime.waitForConnection(h.client, Syncing(), connectMs()) then
@@ -165,14 +210,16 @@ object Pump:
       val audioCmds = h.client.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       var st = initial(clock)
-      while !st.quit do
+      while !st.quit && !isRejected(h.connection()) do
         val took = h.waitEvent(FRAME_MS)
         st = frame(h, clock, evts, st, false)
       audioCmds.send(AcQuit()) // the fork's only exit; the scope joins it
     }
-    h.stop()
-    val joined = ClientHandle.join(h, 5000L)
-    go.macshell.terminate()
+    isRejected(h.connection())
+
+  def isRejected(c: ConnectionState): Boolean = c match
+    case _: ConnAuthRejected => true
+    case _                   => false
 
   def runHeadless(cfg: ClientConfig, scale: scala.Int, sc: go.bufio.Scanner): Unit =
     go.macshell.startHeadless(scale)

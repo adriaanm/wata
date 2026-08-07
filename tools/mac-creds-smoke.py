@@ -153,18 +153,37 @@ def main():
         if subprocess.run(["codesign", "--verify", "--deep", "--strict", app],
                           capture_output=True).returncode != 0:
             failed.append("the bundle's signature does not verify")
-        # launched with NOTHING in the environment but HOME and PATH, it must
-        # start and say what it needs — not crash, and not hang.
-        bare = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin"}
+        # Launched with NOTHING in the environment but HOME and PATH. Two
+        # different right answers, so both are checked:
+        bare = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin",
+                "WATA_MAC_NO_KEYCHAIN": "1",
+                "WATA_MAC_CONFIG": os.path.join(tmp, "bare.json")}
+        # headless — no runloop to put a modal on, so it must SAY what it
+        # needs and exit rather than wait for a click nobody can give it.
         try:
-            out = subprocess.run([exe], env=bare, stdin=subprocess.DEVNULL,
-                                 capture_output=True, text=True, timeout=60).stdout
+            out = subprocess.run([exe], env=dict(bare, WATA_MAC_HEADLESS="1"),
+                                 stdin=subprocess.DEVNULL, capture_output=True,
+                                 text=True, timeout=60).stdout
+            if "WATA_MAC_USER" not in out:
+                failed.append(f"bare headless said something unexpected: {out[:200]!r}")
         except subprocess.TimeoutExpired:
-            out = ""
-            failed.append("the bundled app hung on a bare environment")
-        if out and "WATA_MAC_USER" not in out and "ready" not in out:
-            failed.append(f"the bundled app said something unexpected: {out[:200]!r}")
-        print(f"  [4: the bundle] signed, {len(info)} Info.plist keys, runs bare")
+            failed.append("bare headless hung — it has no way to ask for credentials")
+        # windowed — it must come up and STAY up, presenting the login sheet.
+        # Exiting here would mean a user who double-clicks the app gets
+        # nothing; the sheet is the whole of plan 0037 slice 2.
+        p2 = subprocess.Popen([exe], env=bare, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True)
+        try:
+            p2.wait(timeout=8)
+            failed.append(f"the windowed app exited ({p2.returncode}) instead of "
+                          f"presenting the login sheet: {p2.stdout.read()[:200]!r}")
+        except subprocess.TimeoutExpired:
+            pass                      # still up with its sheet — the pass
+        finally:
+            p2.kill()
+        print(f"  [4: the bundle] signed, {len(info)} Info.plist keys, "
+              f"bare-headless asks, bare-windowed presents the sheet")
 
     if failed:
         for f in failed:
