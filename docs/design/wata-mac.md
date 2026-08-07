@@ -17,7 +17,7 @@ family's Pi.
 |---|---|
 | `go-pkgs/appleptt/appkit` | generated AppKit bindings (bindgen target `appkit`; see [bindgen.md](bindgen.md) for what was refused and why it shaped the backend) |
 | `go-pkgs/nativeui` | plain Go: the algebra mirror, the retained interpreter (`Stage`), pixels, glyphs, the key table + the synthesized key view, the dispatch seam |
-| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam |
+| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam, and the NATIVE CHROME (login sheet, menu bar, Settings window) |
 | `go-pkgs/macaudio` | plain Go, no cgo: the Opus codec (AudioToolbox's C AudioConverter over purego) and the capture/playback engine (AVFAudio), presenting `go-pkgs/audio`'s API |
 | `wata-mac/` | the Sgola module: caps, the frame pump, the wire encoder, the headless command loop |
 
@@ -90,6 +90,51 @@ reference appearing in a shared file fails this module's build loudly;
 that tripwire is the price list of the sharing, and it is cheap.
 Enrolment/QR screens are fb-only (`Enrol.required()` is false here);
 the settings applet compiles in but is not driven.
+
+## The chrome (plan 0037)
+
+Two surfaces, kept apart on purpose. The **stage** is 160×128, wata-fb's
+own bodies, the 10-key vocabulary — the handset's contract, and nothing
+is added to it for the sake of a desktop. Everything a mac user needs
+that the handset does not have is **native chrome around it**: the login
+sheet (`macshell/login.go`), the menu bar (`menu.go`) and the Settings
+window (`prefs.go`). iOS reuses the first and rewrites the second, which
+is what this app exists to prove.
+
+The menu bar is mostly not features. Without one there is no ⌘Q, no
+About, and — the one that matters — no ⌘V, so a login sheet cannot be
+pasted into and every password manager is useless. Almost every item
+targets **nil**, which sends the action down the responder chain to
+whatever is focused: `terminate:`, `hide:`, `paste:` and
+`performMiniaturize:` are AppKit's own, and nil-targeting is how Edit
+reaches the sheet's text fields without macshell knowing they exist.
+
+The two items that are ours — Settings and Sign Out — cannot work that
+way, because signing out means ending the session and clearing the
+stores, which belongs to the Sgola side. They push a string onto a
+**command queue** (`NextCommand`, the same shape as the key queue) that
+the pump polls once a frame. A menu action must not block the main thread
+waiting for the pump, and this way it does not.
+
+`Pump.windowedSession`'s outer loop therefore has three endings rather
+than two: `quit` ends the app, while `rejected` (the server refused the
+account) and `signout` (the user asked) both forget the secrets and
+return to the sheet. They share every line except who decided.
+
+**Settings shows the account; it does not edit it.** The token is scoped
+to the (server, name) pair, the Keychain items are keyed by it, and the
+running client is bound to it — an editable field would pretend a text
+edit could do what only a re-login can. So the window names the account
+and offers `Sign Out…`, which returns to the sheet prefilled with what
+was there. That is also the "switch account" path.
+
+Main-thread rules bit twice here and shaped the code: AppKit throws on a
+`setMainMenu:` off the main thread, and refuses to instantiate an
+`NSWindow` at all. Both are therefore split builder-from-installer
+(`buildMainMenu`, `fillPrefsView`) so the structure can be asserted from
+a test goroutine — the same bargain `login.go` struck, and for the same
+reason: this machine has no screen-recording grant, so the structure is
+the oracle.
 
 ## The frame pump (`main.scala`, `Pump`)
 
@@ -321,8 +366,13 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   after both build-from-scratch and patch scripts), patch splicing and
   in-place mutation, the offscreen probe render, the dispatch seam, the
   key view's translation and phases (driven by a synthesized stand-in
-  event class), the pure pixel/glyph/key tables, and macshell's wire
-  grammar.
+  event class), the pure pixel/glyph/key tables, macshell's wire
+  grammar, the login sheet's controls (`login_test.go`), and the menu bar
+  + Settings content (`menu_test.go`: every item's title and key
+  equivalent, that Quit reaches `terminate:` through the responder chain
+  while ours target our own object, that Edit's items target nil so they
+  reach the focused field, and that refilling Settings replaces its
+  labels rather than stacking a second set).
 - `just mac-creds-smoke` (macOS-only, not in ci; touches the login
   keychain and cleans up after itself): three headless runs against one
   server — with a password in the environment, with NOTHING in it (which

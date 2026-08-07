@@ -67,6 +67,17 @@ object macshell:
   /** the live native hierarchy, one view per line (headless only). */
   @go.name("TreeDump") def treeDump(): String throws sgo.GoError = ???
 
+  /** one pending CHROME command, or "" — never blocks, polled once a frame
+   *  like `nextKey`. A menu item cannot do the work itself: signing out means
+   *  ending the session and clearing the stores, which is the Sgola side's.
+   *  Today the only command that reaches here is `"signout"` (Settings opens
+   *  its own window without asking anyone). */
+  @go.name("NextCommand") def nextCommand(): String = ???
+  /** what the Settings window says the session is signed in as. */
+  @go.name("SetAccount") def setAccount(hs: String, user: String): Unit = ???
+  /** open Settings from outside the menu (the smoke's way in). */
+  @go.name("ShowPrefs") def showPrefs(): Unit = ???
+
 /** `go.mackeychain` — the login keychain (go-pkgs/mackeychain), where the
  *  access token and the password live instead of the environment (plan 0036).
  *

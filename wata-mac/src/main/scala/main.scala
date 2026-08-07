@@ -170,12 +170,17 @@ object Pump:
       cfg = ensureCredentials(cfg)
       if cfg.username == "" then going = false          // the sheet was cancelled
       else
+        go.macshell.setAccount(cfg.homeserver, cfg.username)
         val h = startAudioClient(cfg)
-        val rejected = windowedPump(h)
+        val ending = windowedPump(h)
         h.stop()
         val joined = ClientHandle.join(h, 5000L)
-        if rejected then cfg = Main.withPassword(FbConfig.forgetAndReload(cfg), "")
-        else going = false
+        // Rejected and signed-out end the same way — forget the secrets and
+        // ask again — and differ only in who decided. Quitting ends the loop.
+        if ending == "quit" then going = false
+        else
+          go.macshell.setAccount("", "")
+          cfg = Main.withPassword(FbConfig.forgetAndReload(cfg), "")
     go.macshell.terminate()
 
   /** what the sheet is for: nothing usable stored, so ask. Cancelling answers
@@ -194,9 +199,11 @@ object Pump:
         FbConfig.savePassword(hs, user, pass)
         FbConfig.resolve(hs, user, pass)
 
-  /** true = the session ended because the SERVER rejected the account, which
-   *  is the one ending worth asking about again. */
-  def windowedPump(h: Handle): Boolean =
+  /** how the session ended: `"quit"` (the window's own quit gesture),
+   *  `"rejected"` (the server refused the account) or `"signout"` (the user
+   *  asked, from the menu or the Settings window). The last two both mean
+   *  "ask again"; the first ends the app. */
+  def windowedPump(h: Handle): String =
     val clock = MacCaps.clock()
     NetStatus.reset()
     if Runtime.waitForConnection(h.client, Syncing(), connectMs()) then
@@ -210,12 +217,26 @@ object Pump:
       val audioCmds = h.client.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
       var st = initial(clock)
-      while !st.quit && !isRejected(h.connection()) do
+      while !st.quit && !isRejected(h.connection()) && !signedOutC.get() do
         val took = h.waitEvent(FRAME_MS)
         st = frame(h, clock, evts, st, false)
+        pollChrome()
       audioCmds.send(AcQuit()) // the fork's only exit; the scope joins it
     }
-    isRejected(h.connection())
+    if signedOutC.get() then
+      signedOutC.set(false)
+      "signout"
+    else if isRejected(h.connection()) then "rejected"
+    else "quit"
+
+  /** the chrome's commands, drained once a frame beside the key queue. A menu
+   *  click lands on the main thread; the session ends here, on the pump's own
+   *  thread, where the client and the stores are. */
+  private val signedOutC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  def pollChrome(): Unit =
+    val cmd = go.macshell.nextCommand()
+    if cmd == "signout" then signedOutC.set(true)
 
   def isRejected(c: ConnectionState): Boolean = c match
     case _: ConnAuthRejected => true

@@ -146,12 +146,46 @@ to the screen), that all seven controls are in the accessory view, that
 the prefills land, that the cursor starts at the first empty field, and
 that the answer trims the server but NOT the password.
 
-### 3. The menu bar and Preferences
+### 3. The menu bar and Preferences — DONE
 
 The standard three menus a mac user expects to find (App/Edit/Window),
 `About`, `Preferences ⌘,`, `Quit ⌘Q` — today ⌘Q does nothing and the
 two-step Back quit is a handset idiom nobody will guess. Preferences
 holds the account, the notification mode (slice 4), and the homeserver.
+
+Landed as `macshell/menu.go` + `prefs.go`, and it carries slice 2's
+deferred `Account ▸ Sign Out`. Three things worth keeping:
+
+- **The Edit menu is the point, not an afterthought.** Without it there
+  is no ⌘V, so the login sheet cannot be pasted into and every password
+  manager is useless — which undoes most of what slice 2 was for. Its
+  items target **nil** so the action walks the responder chain to the
+  focused field; macshell never learns the sheet's fields exist.
+- **Our two items cannot work that way.** Settings and Sign Out belong to
+  the Sgola session (the stores, the client lifecycle), so they push onto
+  a command queue the pump polls once a frame — a menu click must not
+  block the main thread waiting for the pump. `windowedSession` now has
+  three endings: `quit`, `rejected`, `signout`, the last two identical
+  except for who decided.
+- **Settings shows the account rather than editing it.** The token is
+  scoped to the (server, name) pair and the Keychain items are keyed by
+  it, so an editable field would pretend a text edit could do what only a
+  re-login can. `Sign Out…` returns to the sheet, prefilled — which is
+  the switch-account path too.
+
+The notification mode stays out until slice 4, where the setting will
+exist at all. The homeserver is shown, not editable, for the reason
+above.
+
+Verification note, same shape as slice 2's: AppKit throws on
+`setMainMenu:` off the main thread and refuses to instantiate an
+`NSWindow` there at all, so both are split builder-from-installer and
+`menu_test.go` asserts the built structure from a test goroutine. What is
+NOT covered by a test is the sign-out ARC end to end — the headless smoke
+has no menus, and the windowed one cannot be clicked. Its second half
+(forget the secrets, return to the sheet) is the same code
+`mac-creds-smoke` case 3 already drives through the rejected-token path;
+only the trigger differs.
 
 ### 4. Notifications
 

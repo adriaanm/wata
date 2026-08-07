@@ -19,3 +19,7 @@ func Apply(wire string) error         { return errDarwinOnly }
 func NextKey() int                    { return -1 }
 func PushKeyCode(code int, phase int) {}
 func TreeDump() (string, error)       { return "", errDarwinOnly }
+func Login(hs, user string) string    { return "" }
+func NextCommand() string             { return "" }
+func SetAccount(hs, user string)      {}
+func ShowPrefs()                      {}

@@ -123,6 +123,9 @@ func Start(scale int, title string) {
 
 	app := appkit.GetNSApplicationClass().SharedApplication()
 	app.SetActivationPolicy(appkit.NSApplicationActivationPolicyRegular)
+	// before the window: an app with no menu bar has no ⌘Q, no About, and no
+	// ⌘V in the login sheet (menu.go)
+	installMenuBar(app.ID, title)
 
 	s := nativeui.NewStage(scale)
 	stageRect := appkit.CGRect{Size: appkit.CGSize{
