@@ -296,6 +296,10 @@ object Ui:
     // connectivity story, against a transport that logs a dial failure once
     // per distinct reason and then looks silent (plan 0035).
     NetStatus.logTransition(net, conn, NetStatus.clockOk())
+    // and one line per change of what the client HAS — a healthy transport
+    // whose message count never moves is a different bug from a moving count
+    // that never reaches the screen, and only this line tells them apart.
+    NetStatus.logSnapshot(snapC.get(), conn)
     // the network ARRIVING is the one moment worth retrying immediately: the
     // sync loop's backoff may be at its 60s ceiling from dialling with no
     // interface at all.

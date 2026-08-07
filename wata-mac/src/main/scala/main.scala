@@ -252,6 +252,7 @@ object Pump:
     // the same two connectivity duties wata-fb's frame step has (plan 0035):
     // one log line per change, and an immediate retry when the pipe arrives.
     NetStatus.logTransition(net, conn, NetStatus.clockOk())
+    NetStatus.logSnapshot(snap, conn)
     if NetStatus.takePipeArrival() then Runtime.retryNow(h.client)
     val ctx = FrameCtx(snap, conn, net, h.client, h.client.audioCmds, evts,
       st.unsent, st.undelivered, st.quitArm > 0.0)

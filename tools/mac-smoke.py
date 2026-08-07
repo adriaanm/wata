@@ -346,6 +346,27 @@ def run(tmp):
                f"bob2: the family room does not hold two messages, got {b2!r}")
         c.line(b2, lambda l: re.match(r'msg \d+ @alice:localhost dur=1\d\d\d ', l),
                f"bob2: no ~1s voice message from alice, got {b2!r}")
+
+        # ---- arrival while the CONVERSATION IS OPEN ---------------------------
+        # Everything above receives a message with the contact list showing and
+        # opens the conversation afterwards. Nobody was watching an open
+        # conversation when a message landed in it — which is exactly the moment
+        # a user calls "live", and the only shape a report of "it does not
+        # update live" can mean. Alice is still inside the family conversation
+        # here, so bob's next message must appear as a row without a keystroke.
+        bob3 = subprocess.run([tui_bin], input=BOB_SCRIPT, capture_output=True,
+                              text=True, env=benv, timeout=120)
+        c.line((bob3.stdout + bob3.stderr).splitlines(), lambda l: l.startswith("sent "),
+               "bob3: no `sent` line")
+        live = sess.cmd("wait 8000", lambda l: l == "waited 8000")
+        lp = [l for l in live if l.startswith("patch ")]
+        c.line(lp, lambda l: re.fullmatch(
+            r'patch insert \[0\.1\] \d+ \$\S+:group\[dur:text\(\d+,\d+,"0:0\d",\d+\) '
+            r'sender:text\(\d+,\d+,"Bob",\d+\)\]', l),
+            f"open-conversation arrival: no new message row, got {lp!r}")
+        t6 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
+        c.ok(sum(1 for l in t6 if l.strip().endswith('"Bob"')) == 2,
+             f"tree 6: want two Bob rows in the open conversation, got {t6!r}")
     except TimeoutError as e:
         c.failed.append(str(e))
     finally:

@@ -220,6 +220,53 @@ object NetStatus:
 
   def clockName(ok: Boolean): String = if ok then "set" else "UNSET"
 
+  // ---- what the client actually HAS ----------------------------------------
+  // `net:` says the transport is healthy; it does not say a single message
+  // arrived. A report of "messages do not appear live" is unanswerable without
+  // that second fact — a session showing `conn=syncing` for an hour while its
+  // message count never moves is a sync bug, and one whose count tracks the
+  // server is a rendering bug, and from the outside the two look identical.
+  //
+  // So: one line whenever the totals CHANGE, plus a heartbeat every 60s so a
+  // count that is standing still is visible as such rather than as silence.
+  private val lastCountsC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
+  private val lastBeatC: sgo.Atomic[Long] = sgo.atomic(0L)
+  val BEAT_MS: Long = 60000L
+
+  def logSnapshot(s: StateSnapshot, c: ConnectionState): Unit =
+    val convs = listLen(s.conversations)
+    val msgs = totalMessages(s.conversations)
+    val unplayed = totalUnplayed(s.conversations)
+    val key = (convs * 1000000) + (msgs * 1000) + unplayed
+    val now = go.time.nowUnixMilli()
+    val beat = lastBeatC.get()
+    val due = beat == 0L || (now - beat) >= BEAT_MS
+    if lastCountsC.get() != key || due then
+      lastCountsC.set(key)
+      lastBeatC.set(now)
+      if logZeroC.get() == 0L then logZeroC.set(now)
+      val secs = (now - logZeroC.get()) / 1000L
+      println("have: +" + secs + "s conv=" + intStr(convs) + " msgs=" + intStr(msgs) +
+        " unplayed=" + intStr(unplayed) + " conn=" + connName(c))
+
+  def intStr(n: scala.Int): String = "" + n
+
+  def listLen(xs: List[Conversation]): scala.Int = xs match
+    case _: Nil.type => 0
+    case c: ::[Conversation] => 1 + listLen(c.tail)
+
+  def totalMessages(xs: List[Conversation]): scala.Int = xs match
+    case _: Nil.type => 0
+    case c: ::[Conversation] => msgLen(c.head.messages) + totalMessages(c.tail)
+
+  def msgLen(xs: List[VoiceMessage]): scala.Int = xs match
+    case _: Nil.type => 0
+    case c: ::[VoiceMessage] => 1 + msgLen(c.tail)
+
+  def totalUnplayed(xs: List[Conversation]): scala.Int = xs match
+    case _: Nil.type => 0
+    case c: ::[Conversation] => c.head.unplayedCount + totalUnplayed(c.tail)
+
   // ---- the pipe (cached; re-read every REFRESH_FRAMES frames) ---------------
   def pipeTag(): scala.Int =
     val forced = forcedC.get()
