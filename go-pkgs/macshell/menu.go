@@ -37,6 +37,10 @@ import (
 const (
 	CmdPrefs   = "prefs"
 	CmdSignOut = "signout"
+	// the walkie-talkie toggle (slice 4). The chrome knows the two spellings
+	// because it draws the checkbox; what they MEAN is wataclient's NotifyMode.
+	CmdNotifyPlay  = "notify:play"
+	CmdNotifyQuiet = "notify:quiet"
 )
 
 const cmdQueueCap = 8
@@ -54,6 +58,7 @@ var (
 	selSetTarget  = objc.RegisterName("setTarget:")
 	selPrefsCmd   = objc.RegisterName("wataPrefs:")
 	selSignOutCmd = objc.RegisterName("wataSignOut:")
+	selNotifyCmd  = objc.RegisterName("wataNotifyMode:")
 )
 
 func pushCommand(c string) {
@@ -84,6 +89,18 @@ func registerMenuTarget() {
 				{Cmd: selSignOutCmd, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
 					closePrefs() // the window names an account that is about to go
 					pushCommand(CmdSignOut)
+				}},
+				// The checkbox reports the state it just moved to. The chrome
+				// does NOT act on it — persisting the choice and changing what
+				// an arrival does belong to the session, which polls the queue.
+				{Cmd: selNotifyCmd, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					on := int(sender.Send(objc.RegisterName("state"))) == controlStateOn
+					SetNotifyPlay(on)
+					if on {
+						pushCommand(CmdNotifyPlay)
+					} else {
+						pushCommand(CmdNotifyQuiet)
+					}
 				}},
 			})
 		if err != nil {

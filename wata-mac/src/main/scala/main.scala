@@ -57,6 +57,10 @@ object Main:
     // secrets the last run left behind. So the FIRST run still needs
     // WATA_MAC_USER/PASS, and no run after it needs anything at all.
     var cfg = FbConfig.resolve(hs, user, passIn)
+    // The walkie-talkie toggle, read once and pushed to the chrome so the
+    // Settings checkbox draws the stored answer. Primed here because every
+    // config WRITE re-emits it from the same cell (config.scala).
+    go.macshell.setNotifyPlay(Notify.playsNow(FbConfig.loadNotifyMode()))
     // the password that got us in is worth keeping only if it is the one the
     // user just supplied; a stored one is already where it belongs.
     if passIn != "" then FbConfig.savePassword(cfg.homeserver, cfg.username, passIn)
@@ -107,7 +111,11 @@ case class PumpSt(
   lastMs: Long,
   quit: Boolean,
   unsent: List[String],
-  undelivered: List[String]
+  undelivered: List[String],
+  // the unplayed marks the arrival edge is measured against (wataclient's
+  // `Notify`) — the last count this pump saw per conversation. Named `marks`
+  // and not `notify`: a `notify` member cannot override Object's final one.
+  marks: NotifyState
 )
 
 object Pump:
@@ -116,7 +124,8 @@ object Pump:
   val QUIT_ARM_S: scala.Double = 2.0
 
   def initial(clock: Clock): PumpSt =
-    PumpSt(WataLogic.initial(), None, 0.0, clock.nowUnixMillis(), false, Nil, Nil)
+    PumpSt(WataLogic.initial(), None, 0.0, clock.nowUnixMillis(), false, Nil, Nil,
+      Notify.initial())
 
   // ---- the two drivers ------------------------------------------------------
 
@@ -237,6 +246,14 @@ object Pump:
   def pollChrome(): Unit =
     val cmd = go.macshell.nextCommand()
     if cmd == "signout" then signedOutC.set(true)
+    else if cmd == "notify:play" then setMode(NotifyPlayNow())
+    else if cmd == "notify:quiet" then setMode(NotifyQuiet())
+
+  /** the Settings checkbox moved: persist it, and say so once. The chrome
+   *  already drew the new state; this side owns what it MEANS. */
+  def setMode(m: NotifyMode): Unit =
+    FbConfig.saveNotifyMode(m)
+    println("notify: mode " + Notify.spellMode(m))
 
   def isRejected(c: ConnectionState): Boolean = c match
     case _: ConnAuthRejected => true
@@ -279,6 +296,8 @@ object Pump:
         else if cmd == "wait" then st = doWait(h, clock, evts, st, MacStr.num(MacStr.nth(ts, 1), 0))
         else if cmd == "tree" then printTree()
         else if cmd == "key" then doKey(MacStr.nth(ts, 1), MacStr.nth(ts, 2))
+        else if cmd == "front" then doFront(MacStr.nth(ts, 1))
+        else if cmd == "mode" then doMode(MacStr.nth(ts, 1))
         else if cmd != "" then println("? " + cmd)
 
   /** pump frames for `ms`, printing each applied patch — the smoke's window
@@ -295,6 +314,21 @@ object Pump:
         st = frame(h, clock, evts, st, true)
     println("waited " + ms)
     st
+
+  /** headless has no NSApplication to ask whether it is frontmost, so the
+   *  harness says — which is what makes the "not while the user is looking at
+   *  it" rule testable at all. */
+  def doFront(arg: String): Unit =
+    val on = arg == "1" || arg == "on"
+    go.macshell.setFrontmost(on)
+    println("front " + (if on then "1" else "0"))
+
+  /** the walkie-talkie toggle, without a mouse: the same path the Settings
+   *  checkbox takes (persist + tell the chrome). */
+  def doMode(arg: String): Unit =
+    val m = Notify.parseMode(arg)
+    setMode(m)
+    go.macshell.setNotifyPlay(Notify.playsNow(m))
 
   def printTree(): Unit =
     try
@@ -338,7 +372,7 @@ object Pump:
   def frame(h: Handle, clock: Clock, evts: sgo.Chan[AudioEvt], st0: PumpSt, verbose: Boolean): PumpSt =
     val nowMs = clock.nowUnixMillis()
     val dt = clampDt(nowMs - st0.lastMs).toDouble / 1000.0
-    var st = PumpSt(st0.wata, st0.last, st0.quitArm, nowMs, st0.quit, st0.unsent, st0.undelivered)
+    var st = PumpSt(st0.wata, st0.last, st0.quitArm, nowMs, st0.quit, st0.unsent, st0.undelivered, st0.marks)
     st = drainUiEvents(h, st)
     val snap = h.snapshot()
     val conn = h.connection()
@@ -353,15 +387,16 @@ object Pump:
       st.unsent, st.undelivered, st.quitArm > 0.0)
     st = applyKeys(st, ctx)
     st = drainAudio(st, ctx)
+    st = notifyStep(h, st, snap)
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
-      st.lastMs, st.quit, st.unsent, st.undelivered)
+      st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
       st.unsent, st.undelivered,
       NetStatus.everLive(), FbCaps.transportUnavailable(), None, false, NetStatus.clockOk())
     st.last match
       case old: Some[View] => patchTo(old.value, v, verbose)
       case None            => setTree(v, verbose)
-    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered)
+    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
 
   // ---- the two mailbox drains ------------------------------------------------
 
@@ -387,7 +422,7 @@ object Pump:
     case pe: EvPlaybackError =>
       withWata(st, WataLogic.notifyPlayError(st.wata, pe.fetchFailed))
     case ob: EvOutbox =>
-      PumpSt(st.wata, st.last, st.quitArm, st.lastMs, st.quit, ob.unsent, ob.undelivered)
+      PumpSt(st.wata, st.last, st.quitArm, st.lastMs, st.quit, ob.unsent, ob.undelivered, st.marks)
     case _ => st // EvConn -> h.connection(), EvSnapshot -> h.snapshot()
 
   /** the audio thread's `AudioEvt` queue, ONCE per frame, before the applet
@@ -419,8 +454,74 @@ object Pump:
     case _: AeEchoError     => true
     case _                  => false
 
+  // ---- arrival notification (plan 0037 slice 4) -----------------------------
+
+  /** The arrival edge, once a frame, off the snapshot the frame already read:
+   *  `Notify.step` (wataclient, shared with the handset) answers which
+   *  conversations' unplayed counts ROSE and who to name, and the badge is
+   *  the same counts added up. There is deliberately no second channel
+   *  through the sync engine — one number drives the badge, the banner and
+   *  the contact list's own badge, so they cannot disagree.
+   *
+   *  Every arrival prints ONE decision line, in both drivers:
+   *
+   *      notify: play|banner|suppressed "<title>" "<body>" badge=<n>
+   *
+   *  That line is the assertable part — whether macOS actually drew a banner
+   *  is macOS's business and is not observable from here — and it is worth
+   *  having in the windowed app's log for the same reason the `net:` lines
+   *  are. */
+  def notifyStep(h: Handle, st0: PumpSt, snap: StateSnapshot): PumpSt =
+    val r = Notify.step(st0.marks, snap)
+    val badge = Notify.totalUnplayed(snap)
+    go.macshell.setBadge(badge)
+    var st = PumpSt(st0.wata, st0.last, st0.quitArm, st0.lastMs, st0.quit,
+      st0.unsent, st0.undelivered, r.marks)
+    var cur = r.arrivals
+    var going = true
+    while going do
+      cur match
+        case c: ::[Arrival] =>
+          st = announce(h, st, c.head, badge)
+          cur = c.tail
+        case Nil => going = false
+    st
+
+  /** what one arrival does. Being FRONTMOST silences the banner — a person
+   *  looking at the window has already been told, and an app that banners
+   *  over itself is the thing everyone turns notifications off for. It does
+   *  NOT silence walkie-talkie mode: a walkie-talkie does not go quiet
+   *  because you happen to be holding it. */
+  def announce(h: Handle, st: PumpSt, a: Arrival, badge: scala.Int): PumpSt =
+    val front = go.macshell.frontmost()
+    var out = st
+    if Notify.playsNow(FbConfig.notifyMode()) && canAutoPlay(st.wata) then
+      // exactly what OK on the message does (`WataLogic.playSelected`),
+      // including marking the applet as playing — which is what makes the
+      // existing `AePlaybackDone` arm send the read receipt, so an
+      // auto-played message really becomes played rather than badging forever.
+      Runtime.sendAction(h.client, ActPlay(a.mxcUrl))
+      out = withWata(st, WataLogic.withPlaying(st.wata, true, a.roomId, a.eventId))
+      println(notifyLine("play", a, badge, ""))
+    else if front then println(notifyLine("suppressed", a, badge, ""))
+    else println(notifyLine("banner", a, badge, go.macshell.notify(Notify.title(a), Notify.body(a))))
+    out
+
+  /** the audio thread does one thing at a time, so an auto-play waits rather
+   *  than cutting into a playback or a recording in progress. It is not
+   *  queued: the badge and the conversation still carry the message, and a
+   *  burst of arrivals playing back to back over each other is worse than one
+   *  the user presses OK on. */
+  def canAutoPlay(s: WataState): Boolean = !s.playing && !s.pttHeld
+
+  def notifyLine(what: String, a: Arrival, badge: scala.Int, err: String): String =
+    var out = "notify: " + what + " \"" + Notify.title(a) + "\" \"" + Notify.body(a) +
+      "\" badge=" + badge
+    if err != "" then out = out + " (" + err + ")"
+    out
+
   def withWata(st: PumpSt, w: WataState): PumpSt =
-    PumpSt(w, st.last, st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered)
+    PumpSt(w, st.last, st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
 
   def clampDt(raw: Long): Long =
     if raw < 0L then 0L else if raw > 1000L then 1000L else raw
@@ -498,7 +599,7 @@ object Pump:
     if edge && arm > 0.0 then quit = true
     if edge then arm = QUIT_ARM_S
     PumpSt(WataLogic.handleInput(st.wata, ev.key, ev.state, ctx), st.last, arm, st.lastMs, quit,
-      st.unsent, st.undelivered)
+      st.unsent, st.undelivered, st.marks)
 
   def isQuitEdge(s: WataState, ev: KeyEvent): Boolean =
     Shell.isPressed(ev.state) && Shell.isBackKey(ev.key) && isContacts(s.view)

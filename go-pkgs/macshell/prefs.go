@@ -1,5 +1,6 @@
-// The Settings window (plan 0037, slice 3). Deliberately three lines and one
-// button: who you are signed in as, which server, and a way out of both.
+// The Settings window (plan 0037, slices 3 and 4). Deliberately small: who
+// you are signed in as, which server, what an arriving message does, and a way
+// out of the first two.
 //
 // It shows the account rather than editing it. Changing the server or the
 // name IS signing out — the token is scoped to that pair, the Keychain items
@@ -13,8 +14,10 @@
 // package has no idea what is stored; the window is rebuilt from it every
 // time it opens, which is cheaper than keeping labels in step.
 //
-// The notification mode this window is also supposed to hold belongs to slice
-// 4, which is where the setting will exist at all.
+// The walkie-talkie toggle is the one control here that CHANGES anything, and
+// it changes it the same way the menu items do: it reports the new state onto
+// the command queue and the session decides what that means and persists it.
+// The chrome keeps only enough to draw the checkbox (SetNotifyPlay).
 
 //go:build darwin
 
@@ -29,8 +32,8 @@ import (
 )
 
 const (
-	prefsW      = 360.0
-	prefsH      = 150.0
+	prefsW      = 380.0
+	prefsH      = 214.0
 	prefsMargin = 20.0
 )
 
@@ -136,11 +139,34 @@ func fillPrefsView(content appkit.NSView) {
 	content.AddSubview(appkit.NSView{ID: newLabel("Server", prefsMargin, row(1), labelCol, rowH)})
 	content.AddSubview(appkit.NSView{ID: newLabel(where, prefsMargin+labelCol, row(1), valueW, rowH)})
 
-	note := newLabel("Signing out returns to the sign-in window, where you can "+
-		"use a different server or name.", prefsMargin, row(3)-rowH, prefsW-prefsMargin*2, rowH*2)
+	// The walkie-talkie toggle (slice 4). Off is the mac's default and the
+	// checkbox is phrased for the ON state, because playing sound the moment a
+	// message lands is the surprising half — a handset clipped to a belt is a
+	// walkie-talkie, a laptop behind three other windows is not, and a client
+	// that starts talking out loud on first launch is one nobody trusts again.
+	content.AddSubview(appkit.NSView{ID: newLabel("Arriving messages", prefsMargin, row(2), labelCol, rowH)})
+	play := objc.ID(objc.GetClass("NSButton")).Send(selAlloc).
+		Send(objc.RegisterName("initWithFrame:"), appkit.CGRect{
+			Origin: appkit.CGPoint{X: prefsMargin + labelCol, Y: row(2)},
+			Size:   appkit.CGSize{Width: valueW, Height: rowH},
+		})
+	play.Send(objc.RegisterName("setButtonType:"), buttonTypeSwitch)
+	play.Send(objc.RegisterName("setTitle:"), objcrt.NSString("Play right away"))
+	play.Send(objc.RegisterName("setState:"), notifyStateValue())
+	play.Send(objc.RegisterName("setTarget:"), menuTarget)
+	play.Send(objc.RegisterName("setAction:"), selNotifyCmd)
+	content.AddSubview(appkit.NSView{ID: play})
+
+	// Between the last row and the button, not on the `row` ladder: three
+	// wrapped 10pt lines are not a 24pt row, and a note laid out as one
+	// overlaps the button it explains.
+	note := newLabel("Off, an arriving message is announced and badged, and you "+
+		"press OK to hear it. Signing out returns to the sign-in window, where "+
+		"you can use a different server or name.",
+		prefsMargin, prefsMargin+32, prefsW-prefsMargin*2, 52)
 	note.Send(objc.RegisterName("setFont:"),
 		objc.ID(objc.GetClass("NSFont")).Send(objc.RegisterName("systemFontOfSize:"), 10.0))
-	// two short lines rather than one clipped one
+	// short lines rather than one clipped one
 	note.Send(objc.RegisterName("setUsesSingleLineMode:"), false)
 	note.Send(objc.RegisterName("cell")).
 		Send(objc.RegisterName("setWraps:"), true)
@@ -159,7 +185,14 @@ func fillPrefsView(content appkit.NSView) {
 	content.AddSubview(appkit.NSView{ID: btn})
 }
 
-const (
-	nsBezelStyleRounded      = 1
+const nsBezelStyleRounded = 1
 
-)
+// notifyStateValue is the checkbox's NSControlStateValue for the mode the
+// session last set (SetNotifyPlay) — the window is rebuilt from it on every
+// open, so the stored answer is what shows.
+func notifyStateValue() int {
+	if notifyPlaying() {
+		return controlStateOn
+	}
+	return 0
+}

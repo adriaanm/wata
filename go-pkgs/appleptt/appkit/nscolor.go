@@ -557,6 +557,11 @@ func (c NSColorClass) ColorNamed(name string) NSColor {
 	return NSColor{objc.ID(c.Class).Send(selColorNamed, objcrt.NSString(name))}
 }
 
+// ColorNamedBundle — Create catalog colors from values stored with the given name in the Asset Catalog of the specified bundle.  To look in the main bundle, use the method without the bundle argument, or specify a nil bundle argument.
+func (c NSColorClass) ColorNamedBundle(name string, bundle NSBundle) NSColor {
+	return NSColor{objc.ID(c.Class).Send(selColorNamedBundle, objcrt.NSString(name), bundle.ID)}
+}
+
 // ColorWithCalibratedHueSaturationBrightnessAlpha calls +[NSColor colorWithCalibratedHue:saturation:brightness:alpha:].
 func (c NSColorClass) ColorWithCalibratedHueSaturationBrightnessAlpha(hue float64, saturation float64, brightness float64, alpha float64) NSColor {
 	return NSColor{objc.ID(c.Class).Send(selColorWithCalibratedHueSaturationBrightnessAlpha, hue, saturation, brightness, alpha)}

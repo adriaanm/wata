@@ -126,6 +126,10 @@ func Start(scale int, title string) {
 	// before the window: an app with no menu bar has no ⌘Q, no About, and no
 	// ⌘V in the login sheet (menu.go)
 	installMenuBar(app.ID, title)
+	// Ask for notification permission while the app is coming up rather than
+	// at the first arrival: the prompt is then part of launching, not a dialog
+	// that interrupts the moment a message lands. A no-op unbundled.
+	RequestNotifyAuth()
 
 	s := nativeui.NewStage(scale)
 	stageRect := appkit.CGRect{Size: appkit.CGSize{

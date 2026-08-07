@@ -236,6 +236,11 @@ func (o NSWindow) SetDisplaysWhenScreenProfileChanges(v bool) {
 	o.ID.Send(selSetDisplaysWhenScreenProfileChanges, v)
 }
 
+// DockTile reads the NSWindow property dockTile.
+func (o NSWindow) DockTile() NSDockTile {
+	return NSDockTile{o.ID.Send(selDockTile)}
+}
+
 // DocumentEdited reads the NSWindow property documentEdited.
 func (o NSWindow) DocumentEdited() bool {
 	return objc.Send[bool](o.ID, selIsDocumentEdited)

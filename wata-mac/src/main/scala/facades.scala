@@ -78,6 +78,33 @@ object macshell:
   /** open Settings from outside the menu (the smoke's way in). */
   @go.name("ShowPrefs") def showPrefs(): Unit = ???
 
+  // ---- arrival notifications (plan 0037 slice 4) ---------------------------
+  // The DECISION is `Notify`'s, in wataclient, and shared with the handset;
+  // these are only its macOS presentation. Everything here is gated on a
+  // BUNDLE: UNUserNotificationCenter raises on a process with no bundle id,
+  // and headless has no NSApplication to hang a Dock tile off.
+
+  /** ask for alert+badge permission, once. Called from `start`; a no-op
+   *  unbundled, and its answer is only ever logged — a denial is the user's
+   *  decision, not something to retry per arrival. */
+  @go.name("RequestNotifyAuth") def requestNotifyAuth(): Unit = ???
+  /** can a banner be posted at all — a windowed run inside a bundle? */
+  @go.name("NotifyAvailable") def notifyAvailable(): Boolean = ???
+  /** post one banner. "" when it was handed to the notification centre, else
+   *  the reason it was not; a client that silently stops announcing looks
+   *  exactly like one with nothing to announce, so the caller logs it. */
+  @go.name("Notify") def notify(title: String, body: String): String = ???
+  /** the Dock tile's unplayed count; 0 clears the badge. */
+  @go.name("SetBadge") def setBadge(n: scala.Int): Unit = ???
+  /** is the user looking at this app? Windowed, `[NSApp isActive]`; headless,
+   *  whatever `setFrontmost` was last told. */
+  @go.name("Frontmost") def frontmost(): Boolean = ???
+  /** the headless override, so a harness drives both sides of the rule. */
+  @go.name("SetFrontmost") def setFrontmost(on: Boolean): Unit = ???
+  /** which way the Settings checkbox draws — the session's mode, since the
+   *  chrome does not own it. */
+  @go.name("SetNotifyPlay") def setNotifyPlay(on: Boolean): Unit = ???
+
 /** `go.mackeychain` — the login keychain (go-pkgs/mackeychain), where the
  *  access token and the password live instead of the environment (plan 0036).
  *

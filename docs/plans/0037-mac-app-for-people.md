@@ -187,22 +187,45 @@ has no menus, and the windowed one cannot be clicked. Its second half
 `mac-creds-smoke` case 3 already drives through the rejected-token path;
 only the trigger differs.
 
-### 4. Notifications
+### 4. Notifications — DONE
 
 On a message arriving while the app is not frontmost:
 
 - a `UNUserNotificationCenter` banner naming the sender,
 - the Dock tile badged with the unplayed count,
-- optionally a sound.
+- plus the **walkie-talkie toggle** `MSG-NOTIFICATION-DESIGN` asks for:
+  play the message immediately, or notify quietly.
 
-Plus the **walkie-talkie toggle** `MSG-NOTIFICATION-DESIGN` asks for:
-play the message immediately, or notify quietly. This slice implements
-the mac half of that ticket and settles the model; the handset half
-(LED, speaker, screen state) stays in the ticket, and the two should
-share the mode enum in `wataclient` rather than each inventing one.
+Landed, and the model is settled where the handset half can reuse it:
+`wataclient/src/main/scala/notify.scala` (`NotifyMode`, `Arrival`,
+`Notify.step`), with a pinned byte oracle in `just ci`
+(`wata-fb notifytest`) and `just mac-notify-smoke` for the mac end to end.
+Four things worth keeping:
 
-The arrival edge already exists and is already logged — `have:` lines
-(the unplayed count moving) are exactly the signal to notify on.
+- **The named binding risk did not bite.** `tools/bindgen` generates
+  `UNUserNotificationCenter`, `UNMutableNotificationContent`,
+  `UNNotificationRequest` and `NSDockTile` with no refusal on anything
+  needed. The two calls that take handlers take **outgoing** blocks, which
+  the emitter has always mapped; `BINDGEN-TYPED-STRUCTS` gates struct and
+  `CGFloat` *returns from a callback*, and neither handler returns anything.
+  "The handler is a block" and "the handler is a refused shape" read alike
+  and are different questions — the refused axis is the return.
+- **The arrival edge is the unplayed count rising**, off the snapshot the
+  frame already reads. No second channel through the sync engine, so the
+  banner, the badge and the contact list's own badge cannot disagree.
+- **Priming is once per session, not once per conversation.** The obvious
+  rule — never announce a conversation you are seeing for the first time —
+  silences exactly the arrival most worth having, because a DM ROOM IS
+  CREATED BY ITS FIRST MESSAGE. Caught by the smoke, not by review.
+- **Auto-play is the OK path, not a second one**: the same `ActPlay` plus
+  `WataLogic.withPlaying`, so the existing `AePlaybackDone` arm sends the
+  read receipt and an auto-played message really becomes played. The smoke
+  proves that through the NEXT arrival's badge reading 1 rather than 2.
+
+The one gap this slice hit is upstream, not here: a tuple component of
+interface type erases to Go's `any` and loses its type assertion on
+assignment (`TUPLE-REF-COMPONENT-ASSIGN`, filed; workaround is a named case
+class, which reads better anyway).
 
 ### 5. The Devices window — the admin surface
 
@@ -221,17 +244,21 @@ is done, and this slice is presentation over it.
 
 ## The binding work
 
-All of this is AppKit that `tools/bindgen` does not generate yet: a new
-`macui` target in `bindgen.json` for `NSAlert`, `NSMenu`, `NSMenuItem`,
-`NSSecureTextField`, `NSButton`, `NSDockTile`, and
-`UNUserNotificationCenter`/`UNMutableNotificationContent`.
+How it settled, once each slice actually needed the calls:
 
-**The known risk**: notification and sheet completion handlers are
-delegate callbacks, and `BINDGEN-TYPED-STRUCTS` records that struct and
-`CGFloat` returns from a callback are currently refused. If a handler
-needed here is one of those, that ticket becomes a prerequisite rather
-than a nice-to-have — worth checking at the top of slice 2, not at the
-bottom of slice 4.
+- **The AppKit chrome is raw `objc.Send`.** `NSAlert`, `NSMenu`,
+  `NSMenuItem`, `NSSecureTextField` and `NSButton` are a handful of
+  selectors in three files, all taking objects or nothing, and generating
+  a target for them would have been more machinery than the machinery it
+  replaced.
+- **The notification surface IS generated**, because it is a real API with
+  enums and a completion-handler contract rather than a few setters:
+  `usernotifications` is its own bindgen target and `NSDockTile`/`NSBundle`
+  joined `appkit`.
+- **The known risk did not materialize.** `BINDGEN-TYPED-STRUCTS` refuses a
+  struct or `CGFloat` RETURN from a callback; the handlers here are outgoing
+  blocks returning void, which the emitter has always mapped. Nothing in
+  this plan was blocked on that ticket.
 
 ## Verification
 
@@ -245,6 +272,13 @@ bottom of slice 4.
   design error rather than a test to re-bless.
 - The bundle gets its own check: launch `Wata.app` with an empty
   environment and reach the contact list.
+- Slice 4's oracle is the DECISION, not the pixels: the pump prints
+  `notify: play|banner|suppressed "<title>" "<body>" badge=<n>` per
+  arrival, and `just mac-notify-smoke` asserts those lines. Whether macOS
+  drew a banner is macOS's business; whether this client would have asked
+  for one, naming whom, at what count, is entirely ours. The shared edge
+  logic is pure, so it also gets a byte oracle inside `just ci`
+  (`wata-fb notifytest`).
 
 ## Out of scope
 

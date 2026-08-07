@@ -17,7 +17,7 @@ family's Pi.
 |---|---|
 | `go-pkgs/appleptt/appkit` | generated AppKit bindings (bindgen target `appkit`; see [bindgen.md](bindgen.md) for what was refused and why it shaped the backend) |
 | `go-pkgs/nativeui` | plain Go: the algebra mirror, the retained interpreter (`Stage`), pixels, glyphs, the key table + the synthesized key view, the dispatch seam |
-| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam, and the NATIVE CHROME (login sheet, menu bar, Settings window) |
+| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam, and the NATIVE CHROME (login sheet, menu bar, Settings window, notifications + Dock badge) |
 | `go-pkgs/macaudio` | plain Go, no cgo: the Opus codec (AudioToolbox's C AudioConverter over purego) and the capture/playback engine (AVFAudio), presenting `go-pkgs/audio`'s API |
 | `wata-mac/` | the Sgola module: caps, the frame pump, the wire encoder, the headless command loop |
 
@@ -43,7 +43,7 @@ Three stores, split by what each thing is:
 | what | where | why not elsewhere |
 |------|-------|-------------------|
 | access token, password | login Keychain, service `wata`, account `<user>@<homeserver>` | a secret does not belong in a file or an environment variable |
-| homeserver, username, user id, preferences | `~/Library/Application Support/wata/config.json`, 0600 | not secret, and readable when something is wrong |
+| homeserver, username, user id, preferences (including the walkie-talkie toggle, `notify_mode`) | `~/Library/Application Support/wata/config.json`, 0600 | not secret, and readable when something is wrong |
 | queued voice messages | `…/wata/outbox/eN.msg` | it was `MemOutbox`: a recording queued during an outage died with the window |
 
 Resolution order for one run: an explicit argument or environment
@@ -97,9 +97,9 @@ Two surfaces, kept apart on purpose. The **stage** is 160×128, wata-fb's
 own bodies, the 10-key vocabulary — the handset's contract, and nothing
 is added to it for the sake of a desktop. Everything a mac user needs
 that the handset does not have is **native chrome around it**: the login
-sheet (`macshell/login.go`), the menu bar (`menu.go`) and the Settings
-window (`prefs.go`). iOS reuses the first and rewrites the second, which
-is what this app exists to prove.
+sheet (`macshell/login.go`), the menu bar (`menu.go`), the Settings window
+(`prefs.go`) and the arrival notifications (`notify.go`). iOS reuses the
+first and rewrites the second, which is what this app exists to prove.
 
 The menu bar is mostly not features. Without one there is no ⌘Q, no
 About, and — the one that matters — no ⌘V, so a login sheet cannot be
@@ -120,6 +120,75 @@ waiting for the pump, and this way it does not.
 than two: `quit` ends the app, while `rejected` (the server refused the
 account) and `signout` (the user asked) both forget the secrets and
 return to the sheet. They share every line except who decided.
+
+### Arrival notifications and the Dock badge
+
+A message landing while the window is behind another one used to be
+invisible. Now: a `UNUserNotificationCenter` banner naming the sender, the
+Dock tile badged with the unplayed count, and a **walkie-talkie toggle** in
+Settings — play it right away, or announce it and let the user press OK.
+
+**The model is `wataclient`'s, not the mac's** (`notify.scala`:
+`NotifyMode`, `Arrival`, `Notify.step`). Both clients answer the same two
+questions — which arrival is worth announcing, and what an arrival *does* —
+so the handset half reuses this and only the presentation differs.
+
+- **The edge is the unplayed count rising.** That count is what the sync
+  engine already computes and what the contact list already badges, so the
+  banner, the Dock badge and the screen cannot disagree — there is one
+  number, not a second notification channel through the sync engine to
+  drift away from it. The pump carries the previous counts in `PumpSt.marks`
+  and runs `Notify.step` once a frame, off the snapshot the frame already
+  read.
+- **Priming is once per session, not once per conversation.** The first
+  snapshot with any conversations records their counts silently, so a launch
+  with a backlog badges it instead of bannering every message in it. After
+  that a room seen for the first time counts from zero — which matters more
+  than it looks: **a DM room is created by its first message**, so the room,
+  the conversation and the message all appear together, and priming
+  per-conversation would silence exactly the arrival most worth having.
+- **Frontmost silences the banner, not the walkie-talkie.** Someone looking
+  at the window has already been told, and an app that banners over itself is
+  what people turn notifications off for. Playing is different: a
+  walkie-talkie does not go quiet because you happen to be holding it.
+- **Auto-play is the OK path, not a second one.** `announce` sends the same
+  `ActPlay` the applet's `playSelected` sends and marks the applet as playing
+  (`WataLogic.withPlaying`), so the existing `AePlaybackDone` arm sends the
+  read receipt — an auto-played message really becomes played rather than
+  badging forever. It waits rather than queueing when something is already
+  playing or PTT is held: the audio thread does one thing at a time, and a
+  burst playing back to back over itself is worse than one the user presses
+  OK on.
+- **Every arrival prints one decision line**, in both drivers:
+  `notify: play|banner|suppressed "<title>" "<body>" badge=<n>`. That is the
+  assertable part — whether macOS drew a banner is macOS's business — and it
+  is worth having in the windowed log for the same reason the `net:` lines
+  are.
+- **Both AppKit halves are gated on a bundle.** `UNUserNotificationCenter`
+  reads the process's bundle proxy on its first call and raises when there is
+  none, so an unbundled build (`just mac-build`, every harness) must never
+  touch it; the Dock tile is the same story for a different reason, since
+  headless brings up no `NSApplication` at all. `macshell.Notify` therefore
+  answers a REASON string rather than failing silently, and the pump logs it
+  (`(no bundle)` is what a harness run shows). Authorization is asked for
+  once, from `Start`, so the prompt is part of launching rather than a dialog
+  that interrupts the first arrival.
+- **The mode is persisted with the other preferences**, as `notify_mode` in
+  `config.json` — never in the keychain, it is not a secret. It is
+  deliberately NOT a third `FbPrefs` field: the shared settings applet
+  constructs that record positionally, so a field added for a control the
+  handset does not have yet would have to appear on the device too.
+  `config.scala` holds it in a cell that every write path re-emits, primed
+  from the file by `Main` before anything else runs.
+- **The checkbox reports, it does not act.** Like the menu items, it pushes
+  `notify:play`/`notify:quiet` onto the command queue and the pump persists
+  the choice; the chrome keeps only enough to draw the control
+  (`SetNotifyPlay`).
+
+Bindings: `usernotifications` is a bindgen target of its own and
+`NSDockTile`/`NSBundle` joined `appkit`, so none of this is raw `objc.Send`.
+The block risk plan 0037 flagged did not bite — see
+[bindgen.md](bindgen.md).
 
 **Settings shows the account; it does not edit it.** The token is scoped
 to the (server, name) pair, the Keychain items are keyed by it, and the
@@ -372,7 +441,10 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   equivalent, that Quit reaches `terminate:` through the responder chain
   while ours target our own object, that Edit's items target nil so they
   reach the focused field, and that refilling Settings replaces its
-  labels rather than stacking a second set).
+  labels rather than stacking a second set, that the walkie-talkie checkbox
+  SHOWS the session's mode and reports the new one onto the command queue,
+  and that headless `Frontmost`/`Notify`/`SetBadge` decline rather than
+  reaching for an NSApplication or a bundle that is not there).
 - `just mac-creds-smoke` (macOS-only, not in ci; touches the login
   keychain and cleans up after itself): three headless runs against one
   server — with a password in the environment, with NOTHING in it (which
@@ -391,6 +463,16 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   prints the play triangle then the played check) and PTT records one (the
   overlay counts up, alice's own row and the SENT flash appear, and a fresh
   bob session reads the ~1.2s message back off the server).
+- `just mac-notify-smoke` (~3min, macOS-only, not in ci): the arrival
+  DECISION, headless — a banner naming bob while not frontmost, the same
+  arrival suppressed while frontmost, a DM room created by its first message
+  announcing, the badge adding up across conversations and coming back to 0
+  once everything is played, walkie-talkie mode playing instead of bannering
+  (proved by the NEXT arrival's badge reading 1, which means the auto-played
+  one was really receipted), and the mode surviving a restart that does not
+  re-announce the backlog it opens with. Two headless REPL commands exist for
+  it: `front 0|1` (headless has no NSApplication to ask) and
+  `mode play|quiet`.
 - `just mac-iroh-smoke` (~1min, macOS + cargo, not in ci): the same
   headless client over the iroh transport — one wata-server in iroh mode,
   three provisioned node keys, and a homeserver URL (`http://wata.iroh`)

@@ -137,8 +137,10 @@ class MacSession:
                     WATA_MAC_SCALE="1", WATA_MAC_AUDIO="fake",
                     WATA_MAC_NO_KEYCHAIN="1",
                     WATA_MAC_CONFIG=os.path.join(
-                        tempfile.gettempdir(), "wata-mac-smoke", "config.json"),
-                    **(extra_env or {}))
+                        tempfile.gettempdir(), "wata-mac-smoke", "config.json"))
+        # applied last, so a caller may OVERRIDE any of the above — which is
+        # how mac-notify-smoke gets its own config file to restart against.
+        senv.update(extra_env or {})
         self.proc = subprocess.Popen([binary], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True,

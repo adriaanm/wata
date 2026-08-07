@@ -98,6 +98,19 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
+- **`TUPLE-REF-COMPONENT-ASSIGN`** — a tuple component whose type lowers
+  to a Go interface (a sealed trait, a `List[T]`) is erased to `any` in
+  the emitted tuple struct, and the type assertion that puts it back is
+  inserted at ARGUMENT reads but not at a plain assignment, so the
+  module does not compile (`cannot use r._2 (variable of interface type
+  any) as List__Arrival value in assignment`). Value-shaped components
+  are unaffected — `(String, Int)` and `(String, NotifyState)` are fine
+  in the same build. Hit by `Notify.step`, which wanted to answer
+  `(NotifyState, List[Arrival])`. **Workaround taken**: a named case
+  class, `NotifyStep(marks, arrivals)` — clearer anyway, so it stays
+  once the gap closes; the note lives in
+  `wataclient/src/main/scala/notify.scala`.
+
 - **`FACADE-VALUE-STRUCT`** — a facade class type is always a Go
   **pointer**, and cannot be constructed. Repro in `tools/interp-spike`
   (`just interp-spike`), diagnostics in its REPORT.md. It blocks

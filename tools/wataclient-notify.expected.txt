@@ -1,0 +1,38 @@
+== notify: the mode enum ==
+  parse(play)=play
+  parse(quiet)=quiet
+  parse(nonsense)=quiet
+  playsNow(play)=true
+  playsNow(quiet)=false
+== notify: the arrival edge ==
+1 first sight, two unplayed
+  (none)
+  badge=2
+2 unchanged
+  (none)
+  badge=2
+3 one arrives in the family thread
+  arrival room=!fam event=$e4 mxc=mxc://wata/$e4 title="Bob" body="sent a voice message to Moors"
+  badge=3
+4 our own send
+  (none)
+  badge=3
+5 one played
+  (none)
+  badge=2
+6 a DM room appears with its first message
+  arrival room=!dm event=$d1 mxc=mxc://wata/$d1 title="Bob" body="sent you a voice message"
+  badge=3
+7 a DM moves and a group appears
+  arrival room=!dm event=$d2 mxc=mxc://wata/$d2 title="Bob" body="sent you a voice message"
+  arrival room=!grp event=$g1 mxc=mxc://wata/$g1 title="carol" body="sent a voice message to Kids"
+  badge=5
+8 the group's next message
+  arrival room=!grp event=$g2 mxc=mxc://wata/$g2 title="carol" body="sent a voice message to Kids"
+  badge=6
+9 no family name: priming
+  (none)
+  badge=0
+9b no family name: arrival
+  arrival room=!fam event=$e2 mxc=mxc://wata/$e2 title="Bob" body="sent a voice message to Family"
+  badge=1

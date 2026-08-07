@@ -11,15 +11,22 @@ import "errors"
 
 var errDarwinOnly = errors.New("macshell: darwin only — wata-mac needs macOS")
 
-func StartHeadless(scale int)         {}
-func Start(scale int, title string)   {}
-func RunApp()                         {}
-func Terminate()                      {}
-func Apply(wire string) error         { return errDarwinOnly }
-func NextKey() int                    { return -1 }
-func PushKeyCode(code int, phase int) {}
-func TreeDump() (string, error)       { return "", errDarwinOnly }
-func Login(hs, user string) string    { return "" }
-func NextCommand() string             { return "" }
-func SetAccount(hs, user string)      {}
-func ShowPrefs()                      {}
+func StartHeadless(scale int)          {}
+func Start(scale int, title string)    {}
+func RunApp()                          {}
+func Terminate()                       {}
+func Apply(wire string) error          { return errDarwinOnly }
+func NextKey() int                     { return -1 }
+func PushKeyCode(code int, phase int)  {}
+func TreeDump() (string, error)        { return "", errDarwinOnly }
+func Login(hs, user string) string     { return "" }
+func NextCommand() string              { return "" }
+func SetAccount(hs, user string)       {}
+func ShowPrefs()                       {}
+func RequestNotifyAuth()               {}
+func NotifyAvailable() bool            { return false }
+func Notify(title, body string) string { return "darwin only" }
+func SetBadge(n int)                   {}
+func Frontmost() bool                  { return true }
+func SetFrontmost(on bool)             {}
+func SetNotifyPlay(on bool)            {}

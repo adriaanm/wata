@@ -19,9 +19,10 @@ import language.experimental.saferExceptions
  *  who would rather re-run with `WATA_MAC_PASS` after an expiry.
  *
  *  THE CONFIG FILE holds the non-secret half — homeserver, username, user id
- *  — under `~/Library/Application Support/wata/`, 0600, and the settings
- *  applet's preferences beside them. No token is ever written here; that
- *  split is the whole point.
+ *  — under `~/Library/Application Support/wata/`, 0600, and the preferences
+ *  beside them: the settings applet's two, and the walkie-talkie toggle
+ *  (`notify_mode`). No token is ever written here; that split is the whole
+ *  point.
  *
  *  THE OUTBOX is numbered slot files in a directory beside the config file,
  *  the same shape wata-fb uses. Before this the mac ran on `MemOutbox`, so a
@@ -156,6 +157,32 @@ object FbConfig:
 
   def loadPrefs(): FbPrefs = prefsFrom(readJson())
 
+  // ---- the arrival-notification mode ---------------------------------------
+
+  /** The walkie-talkie toggle (plan 0037 slice 4) lives here with the other
+   *  preferences rather than in `FbPrefs`, whose two fields are the handset's
+   *  brightness and screen timeout — the SHARED settings applet constructs
+   *  that record positionally, so a third field would have to appear on the
+   *  device too, for a control the device does not have yet.
+   *
+   *  The cell is the reader for every write path: `writeStore` is called by
+   *  `saveLogin` and `savePrefs`, neither of which knows about the mode, and
+   *  a writer that read the file each time would race with itself. `Main`
+   *  primes it from the file before anything else runs. */
+  private val modeC: sgo.Atomic[String] = sgo.atomic(Notify.MODE_QUIET)
+
+  def loadNotifyMode(): NotifyMode =
+    val m = Notify.parseMode(WJson.strField(readJson(), "notify_mode", Notify.MODE_QUIET))
+    modeC.set(Notify.spellMode(m))
+    m
+
+  def notifyMode(): NotifyMode = Notify.parseMode(modeC.get())
+
+  /** the user changed it in Settings: remember it for the next launch. */
+  def saveNotifyMode(m: NotifyMode): Unit =
+    modeC.set(Notify.spellMode(m))
+    writeStore(load(), loadPrefs())
+
   def prefsFrom(j: Json): FbPrefs =
     FbPrefs(WJson.longField(j, "brightness", 40L).toInt,
       WJson.longField(j, "screen_timeout_idx", 1L).toInt)
@@ -183,6 +210,7 @@ object FbConfig:
 
   def toJson(s: Session, p: FbPrefs): Json =
     var fs: List[(String, Json)] = Nil
+    fs = ("notify_mode", JStr(modeC.get())) :: fs
     fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
     fs = ("brightness", JInt(p.brightness.toLong)) :: fs
     fs = ("user_id", JStr(s.userId)) :: fs

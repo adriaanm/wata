@@ -7,7 +7,6 @@ with the reason. This is the worklist: a refusal is either a mapping the
 generator should learn or a decl the allowlist should stop asking for.
 
 - `NSApplication` `@property currentSystemPresentationOptions` — no Go mapping for 'NSApplicationPresentationOptions'
-- `NSApplication` `@property dockTile` — NSDockTile is not on the allowlist (add it to classes or opaque)
 - `NSApplication` `@property helpMenu` — NSMenu is not on the allowlist (add it to classes or opaque)
 - `NSApplication` `@property mainMenu` — NSMenu is not on the allowlist (add it to classes or opaque)
 - `NSApplication` `@property occlusionState` — no Go mapping for 'NSApplicationOcclusionState'
@@ -89,13 +88,35 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSBitmapImageRep` `representationUsingType:properties:` — no Go mapping for 'NSBitmapImageFileType'
 - `NSBitmapImageRep` `setCompression:factor:` — no Go mapping for 'NSTIFFCompression'
 - `NSBitmapImageRep` `setPixel:atX:y:` — NSUInteger is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property appStoreReceiptURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property builtInPlugInsURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property bundleURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property executableURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property privateFrameworksURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property resourceURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property sharedFrameworksURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `@property sharedSupportURL` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `URLForAuxiliaryExecutable:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `URLForImageResource:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `URLForResource:withExtension:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `URLForResource:withExtension:subdirectory:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `URLForResource:withExtension:subdirectory:inBundleWithURL:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `URLForResource:withExtension:subdirectory:localization:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `URLsForResourcesWithExtension:subdirectory:inBundleWithURL:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `bundleWithURL:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `contextHelpForKey:` — NSAttributedString is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `initWithURL:` — NSURL is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `loadNibFile:externalNameTable:withZone:` — NSZone is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `loadNibFile:externalNameTable:withZone:` — NSZone is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `loadNibNamed:owner:topLevelObjects:` — no Go mapping for 'NSArray * _Nullable * _Nullable'
+- `NSBundle` `localizedAttributedStringForKey:value:table:` — NSAttributedString is not on the allowlist (add it to classes or opaque)
+- `NSBundle` `setPreservationPriority:forTags:` — NSSet is not on the allowlist (add it to classes or opaque)
 - `NSColor` `@property CGColor` — no Go mapping for 'NS_RETURNS_INNER_POINTER CGColorRef'
 - `NSColor` `@property colorSpace` — NSColorSpace is not on the allowlist (add it to classes or opaque)
 - `NSColor` `@property currentControlTint` — no Go mapping for 'NSControlTint'
 - `NSColor` `@property type` — no Go mapping for 'NSColorType'
 - `NSColor` `colorForControlTint:` — no Go mapping for 'NSControlTint'
 - `NSColor` `colorFromPasteboard:` — NSPasteboard is not on the allowlist (add it to classes or opaque)
-- `NSColor` `colorNamed:bundle:` — NSBundle is not on the allowlist (add it to classes or opaque)
 - `NSColor` `colorUsingColorSpace:` — NSColorSpace is not on the allowlist (add it to classes or opaque)
 - `NSColor` `colorUsingType:` — no Go mapping for 'NSColorType'
 - `NSColor` `colorWithCGColor:` — no Go mapping for 'CGColorRef _Nonnull'
@@ -191,7 +212,6 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSImage` `imageWithLocale:` — NSLocale is not on the allowlist (add it to classes or opaque)
 - `NSImage` `imageWithSize:flipped:drawingHandler:` — no Go mapping for 'NSRect'
 - `NSImage` `imageWithSymbolConfiguration:` — NSImageSymbolConfiguration is not on the allowlist (add it to classes or opaque)
-- `NSImage` `imageWithSymbolName:bundle:variableValue:` — NSBundle is not on the allowlist (add it to classes or opaque)
 - `NSImage` `initByReferencingURL:` — NSURL is not on the allowlist (add it to classes or opaque)
 - `NSImage` `initWithCGImage:size:` — no Go mapping for 'CGImageRef _Nonnull'
 - `NSImage` `initWithCoder:` — NSCoder is not on the allowlist (add it to classes or opaque)
@@ -303,7 +323,6 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSWindow` `@property defaultButtonCell` — NSButtonCell is not on the allowlist (add it to classes or opaque)
 - `NSWindow` `@property defaultDepthLimit` — no Go mapping for 'NSWindowDepth'
 - `NSWindow` `@property depthLimit` — no Go mapping for 'NSWindowDepth'
-- `NSWindow` `@property dockTile` — NSDockTile is not on the allowlist (add it to classes or opaque)
 - `NSWindow` `@property firstResponder` — NSResponder is not on the allowlist (add it to classes or opaque)
 - `NSWindow` `@property keyViewSelectionDirection` — no Go mapping for 'NSSelectionDirection'
 - `NSWindow` `@property occlusionState` — no Go mapping for 'NSWindowOcclusionState'

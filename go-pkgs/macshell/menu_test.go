@@ -167,16 +167,19 @@ func prefsText(t *testing.T, content appkit.NSView) string {
 	return b.String()
 }
 
-func prefsButton(t *testing.T, content appkit.NSView) objc.ID {
+// prefsButton finds a button by its title: the window holds two (the
+// walkie-talkie checkbox and Sign Out), so position is not an identity.
+func prefsButton(t *testing.T, content appkit.NSView, title string) objc.ID {
 	t.Helper()
 	subs := content.Subviews()
 	for i := 0; i < int(subs.Count()); i++ {
 		id := subs.ObjectAtIndex(uint(i))
-		if className(id) == "NSButton" {
+		if className(id) == "NSButton" &&
+			objcrt.GoString(id.Send(objc.RegisterName("title"))) == title {
 			return id
 		}
 	}
-	t.Fatal("the Settings window has no button")
+	t.Fatalf("the Settings window has no %q button", title)
 	return 0
 }
 
@@ -198,10 +201,7 @@ func TestPrefsWindow(t *testing.T) {
 			t.Errorf("the Settings window does not show %q; it shows:\n%s", want, txt)
 		}
 	}
-	btn := prefsButton(t, box)
-	if got := objcrt.GoString(btn.Send(objc.RegisterName("title"))); got != "Sign Out…" {
-		t.Errorf("button title = %q", got)
-	}
+	btn := prefsButton(t, box, "Sign Out…")
 	if btn.Send(objc.RegisterName("target")) != menuTarget {
 		t.Error("the Sign Out button does not target the menu target")
 	}
@@ -219,7 +219,7 @@ func TestPrefsWindow(t *testing.T) {
 	if !strings.Contains(txt, "not signed in") {
 		t.Errorf("no signed-out state shown:\n%s", txt)
 	}
-	if int(prefsButton(t, box).Send(objc.RegisterName("isEnabled"))) != 0 {
+	if int(prefsButton(t, box, "Sign Out…").Send(objc.RegisterName("isEnabled"))) != 0 {
 		t.Error("Sign Out is enabled with nobody signed in")
 	}
 
@@ -230,4 +230,86 @@ func TestPrefsWindow(t *testing.T) {
 	if n1 != n2 {
 		t.Fatalf("refilling grew the content view from %d to %d subviews", n1, n2)
 	}
+}
+
+// The walkie-talkie toggle (slice 4). The checkbox must SHOW the mode the
+// session is in — a control that always draws the default silently lies about
+// what a restart restored — and clicking it must report the new state onto the
+// command queue rather than acting on it, because persisting the choice and
+// changing what an arrival does belong to the session.
+func TestNotifyToggle(t *testing.T) {
+	registerMenuTarget()
+	box := appkit.NSView{ID: objc.ID(objc.GetClass("NSView")).Send(objc.RegisterName("alloc")).
+		Send(objc.RegisterName("initWithFrame:"), appkit.CGRect{
+			Size: appkit.CGSize{Width: prefsW, Height: prefsH},
+		})}
+	SetAccount("http://pi.local:8008", "alice")
+
+	for _, tc := range []struct {
+		play bool
+		want int
+	}{{false, 0}, {true, controlStateOn}} {
+		SetNotifyPlay(tc.play)
+		fillPrefsView(box)
+		cb := prefsButton(t, box, "Play right away")
+		if got := int(cb.Send(objc.RegisterName("state"))); got != tc.want {
+			t.Errorf("SetNotifyPlay(%v): checkbox state = %d, want %d", tc.play, got, tc.want)
+		}
+		if cb.Send(objc.RegisterName("target")) != menuTarget {
+			t.Error("the toggle does not target the menu target")
+		}
+		if objc.SEL(cb.Send(objc.RegisterName("action"))) != selNotifyCmd {
+			t.Error("the toggle's action is not wataNotifyMode:")
+		}
+	}
+
+	// clicking it: the action reads the control's NEW state, so drive it the
+	// way AppKit does — set the state, then send the action.
+	for NextCommand() != "" {
+	}
+	cb := prefsButton(t, box, "Play right away")
+	for _, tc := range []struct {
+		state int
+		want  string
+	}{{controlStateOn, CmdNotifyPlay}, {0, CmdNotifyQuiet}} {
+		cb.Send(objc.RegisterName("setState:"), tc.state)
+		menuTarget.Send(selNotifyCmd, cb)
+		if got := NextCommand(); got != tc.want {
+			t.Errorf("state %d queued %q, want %q", tc.state, got, tc.want)
+		}
+		// and the chrome now remembers it, so reopening shows what was clicked
+		if notifyPlaying() != (tc.state == controlStateOn) {
+			t.Errorf("state %d: notifyPlaying() = %v", tc.state, notifyPlaying())
+		}
+	}
+}
+
+// Frontmost is what decides whether an arrival banners at all, and the
+// headless answer is a harness control rather than an AppKit question — there
+// is no NSApplication to ask.
+func TestFrontmostHeadless(t *testing.T) {
+	mu.Lock()
+	saved := headless
+	headless = true
+	mu.Unlock()
+	defer func() { mu.Lock(); headless = saved; mu.Unlock() }()
+
+	SetFrontmost(true)
+	if !Frontmost() {
+		t.Error("SetFrontmost(true) did not take")
+	}
+	SetFrontmost(false)
+	if Frontmost() {
+		t.Error("SetFrontmost(false) did not take")
+	}
+	// And neither notifications nor the Dock tile may touch AppKit here: no
+	// bundle and no NSApplication, so both must decline rather than crash.
+	if NotifyAvailable() {
+		t.Error("NotifyAvailable() is true with no bundle")
+	}
+	if got := Notify("Bob", "sent you a voice message"); got == "" {
+		t.Error("Notify() claimed to have posted a banner with no bundle")
+	}
+	SetBadge(3)
+	SetBadge(0)
 }

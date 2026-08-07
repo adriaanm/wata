@@ -328,6 +328,29 @@ shaped what `go-pkgs/nativeui` does:
   from PNG bytes via `initWithData:` rather than raw bitmap planes
   (`initWithBitmapDataPlanes:…` is a refused `unsigned char **`).
 
+`appkit` also carries `NSDockTile` and `NSBundle` for the mac client's
+notifications: the tile is the unplayed badge, and the bundle identifier is
+the gate that decides whether notifications may be touched at all.
+
+`usernotifications` (macOS SDK, `frameworks: ["UserNotifications"]`):
+`UNUserNotificationCenter`, `UNNotificationContent`,
+`UNMutableNotificationContent`, `UNNotificationRequest`,
+`UNNotificationSettings`; `UNAuthorizationOptions`/`UNAuthorizationStatus`;
+sounds, triggers and attachments opaque. 17 refusals, none load-bearing —
+`badge` and the `UNNotificationSettings` properties want `NSNumber` and
+per-setting enums nothing here reads.
+
+**The risk plan 0037 named did not bite.** `requestAuthorizationWithOptions:
+completionHandler:` and `addNotificationRequest:withCompletionHandler:` both
+bind, because their handlers are **outgoing** blocks — the app hands the
+framework a block, which the emitter has always mapped through
+`objc.NewBlock` (`func(bool, error)`, `func(error)`). What
+`BINDGEN-TYPED-STRUCTS` still gates is a struct or `CGFloat` **return from a
+callback**, and neither of these callbacks returns anything. Worth stating
+because "the handler is a block" and "the handler is a refused shape" read
+alike and are not the same question: the refused axis is the *return*, not
+the direction.
+
 Growing any target is a reviewed diff of `bindgen.json` plus regenerated
 output. The UIKit views the iOS port will want are the next entries.
 

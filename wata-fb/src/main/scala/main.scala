@@ -24,6 +24,12 @@ object Main:
     //                                       PASS/FAIL <scenario>.
     if args.length > 0 && args(0) == "synctest" then
       printReport(SyncOracle.report())
+    // the arrival-notification oracle: `Notify.step` over hand-built
+    // snapshots, byte-diffed against tools/wataclient-notify.expected.txt.
+    // The edge both clients notify on is a pure function of the snapshot, so
+    // it is pinned here rather than only in a macOS-only smoke.
+    else if args.length > 0 && args(0) == "notifytest" then
+      printReport(NotifyOracle.report())
     // the sgola-side Ogg/CRC byte oracle: the SAME OggOracle.report() the JVM
     // conformance seed runs, exercised on the Go-emitted side too (this catches
     // codegen-only drift, since the writer bug that motivated this oracle only

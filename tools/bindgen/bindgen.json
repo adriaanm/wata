@@ -44,7 +44,9 @@
       "out": "go-pkgs/appleptt/avfaudio",
       "sdk": "macosx",
       "triple": "arm64-apple-macos26.0",
-      "frameworks": ["AVFAudio"],
+      "frameworks": [
+        "AVFAudio"
+      ],
       "imports": [
         "Foundation/Foundation.h",
         "AVFAudio/AVFAudio.h"
@@ -77,26 +79,30 @@
       "out": "go-pkgs/appleptt/appkit",
       "sdk": "macosx",
       "triple": "arm64-apple-macos26.0",
-      "frameworks": ["AppKit"],
+      "frameworks": [
+        "AppKit"
+      ],
       "imports": [
         "Foundation/Foundation.h",
         "AppKit/AppKit.h"
       ],
       "classes": [
         "NSApplication",
-        "NSWindow",
-        "NSView",
-        "NSTextField",
-        "NSControl",
-        "NSImageView",
-        "NSColor",
-        "NSFont",
-        "NSImage",
-        "NSEvent",
-        "NSBox",
         "NSArray",
         "NSBitmapImageRep",
-        "NSImageRep"
+        "NSBox",
+        "NSBundle",
+        "NSColor",
+        "NSControl",
+        "NSDockTile",
+        "NSEvent",
+        "NSFont",
+        "NSImage",
+        "NSImageRep",
+        "NSImageView",
+        "NSTextField",
+        "NSView",
+        "NSWindow"
       ],
       "protocols": [
         "NSWindowDelegate"
@@ -167,6 +173,41 @@
         "NSURLSessionConfiguration",
         "NSURLSessionDataTask",
         "NSURLResponse"
+      ]
+    },
+    {
+      "package": "usernotifications",
+      "out": "go-pkgs/appleptt/usernotifications",
+      "sdk": "macosx",
+      "triple": "arm64-apple-macos26.0",
+      "frameworks": [
+        "UserNotifications"
+      ],
+      "imports": [
+        "Foundation/Foundation.h",
+        "UserNotifications/UserNotifications.h"
+      ],
+      "classes": [
+        "UNUserNotificationCenter",
+        "UNNotificationContent",
+        "UNMutableNotificationContent",
+        "UNNotificationRequest",
+        "UNNotificationSettings"
+      ],
+      "enums": [
+        "UNAuthorizationOptions",
+        "UNAuthorizationStatus"
+      ],
+      "opaque": [
+        "NSArray",
+        "NSData",
+        "NSDate",
+        "NSDictionary",
+        "NSError",
+        "NSSet",
+        "UNNotificationAttachment",
+        "UNNotificationSound",
+        "UNNotificationTrigger"
       ]
     }
   ]

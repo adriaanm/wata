@@ -341,6 +341,11 @@ func (c NSImageClass) ImageUnfilteredPasteboardTypes() NSArray {
 	return NSArray{objc.ID(c.Class).Send(selImageUnfilteredPasteboardTypes)}
 }
 
+// ImageWithSymbolNameBundleVariableValue calls +[NSImage imageWithSymbolName:bundle:variableValue:].
+func (c NSImageClass) ImageWithSymbolNameBundleVariableValue(name string, bundle NSBundle, value float64) NSImage {
+	return NSImage{objc.ID(c.Class).Send(selImageWithSymbolNameBundleVariableValue, objcrt.NSString(name), bundle.ID, value)}
+}
+
 // ImageWithSymbolNameVariableValue calls +[NSImage imageWithSymbolName:variableValue:].
 func (c NSImageClass) ImageWithSymbolNameVariableValue(name string, value float64) NSImage {
 	return NSImage{objc.ID(c.Class).Send(selImageWithSymbolNameVariableValue, objcrt.NSString(name), value)}

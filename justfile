@@ -209,6 +209,13 @@ mac-app *FLAGS:
 mac-icon:
     tools/mac-icon.py
 
+# macOS client notifications (plan 0037 slice 4): headless, one fresh server,
+# bob sending — the DECISION per arrival (banner / suppressed while frontmost /
+# played in walkie-talkie mode) plus the badge adding up and clearing, and the
+# mode surviving a restart. macOS only, not in ci.
+mac-notify-smoke:
+    tools/mac-notify-smoke.py
+
 # macOS client credentials (plan 0036): three headless runs — with a password
 # in the environment, with NOTHING in it, and with the stored token no longer
 # valid. Touches the login keychain; macOS only, not in ci.

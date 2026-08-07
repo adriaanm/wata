@@ -61,6 +61,11 @@ func (o NSApplication) SetDelegate(v objc.ID) {
 	o.ID.Send(selSetDelegate, v)
 }
 
+// DockTile reads the NSApplication property dockTile.
+func (o NSApplication) DockTile() NSDockTile {
+	return NSDockTile{o.ID.Send(selDockTile)}
+}
+
 // Hidden reads the NSApplication property hidden.
 func (o NSApplication) Hidden() bool {
 	return objc.Send[bool](o.ID, selIsHidden)
