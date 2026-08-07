@@ -41,6 +41,14 @@ object NetStatus:
    *  diagnostics cadence, and system-menu's before it). */
   val REFRESH_FRAMES = 150
 
+  /** frames between re-reads while there is NO interface (~1s). A device
+   *  waiting for its network re-asks five times as often, because that read is
+   *  what arms the retry poke (`notePipe`): at the 5s cadence an interface
+   *  that appeared could sit unnoticed while the client's backoff ran on. The
+   *  cost is one extra pair of reads a second, and only in the state where
+   *  nothing else is happening. */
+  val REFRESH_FRAMES_NO_PIPE = 30
+
   /** frames per phase of the reconnecting `..` (~0.5s at 30fps). The phase
    *  counter is reset whenever the health CHANGES, so the animation starts at
    *  a known phase on the frame the state turns bad — which is what makes a
@@ -224,8 +232,13 @@ object NetStatus:
     else
       out = readPipe()
       pipeC.set(out)
-      leftC.set(REFRESH_FRAMES)
+      leftC.set(refreshFrames(out))
     out
+
+  /** how long to wait before the next read: the ordinary cadence once an
+   *  interface is carrying traffic, the fast one while none is. */
+  def refreshFrames(tag: scala.Int): scala.Int =
+    if hasInterface(pipeOf(tag)) then REFRESH_FRAMES else REFRESH_FRAMES_NO_PIPE
 
   /** wifi wins when wlan0 has an address, cellular when ppp0 is up; both
    *  sources answering `n/a` is the host (no interfaces to ask), anything

@@ -1,6 +1,6 @@
 # 0035 — the boot screen tells the truth, and says so out loud
 
-Status: accepted
+Status: done
 
 ## The problem
 
@@ -132,10 +132,44 @@ net: +22s pipe=wifi conn=syncing    clock=set
 The last three lines are the confirmation that the clock IS the outage:
 the running process — no restart, no endpoint rebuild — connected 22s
 after the clock was stepped, having failed for eight minutes before it.
-Left alone, chronyd never sets the clock at all (rootfs bug, root-caused
-in the handoff: `/etc/resolv.conf` is `0600 root:root` and chronyd runs
-as user `chrony`, so its pool never resolves), so the handset stays
-calmly unusable until that lands.
+Left alone, chronyd never set the clock at all (rootfs bug, root-caused
+in the handoff: `/etc/resolv.conf` was `0600 root:root` and chronyd runs
+as user `chrony`, so its pool never resolved).
+
+### The rootfs half landed the same day
+
+bq268-alpine `3503f13` (spec + results in its
+`docs/planning/clock-at-boot.md`, and `435f4de`): the resolv.conf mode,
+`swclock` restoring the clock at boot from the last shutdown, a
+15-minute re-save for the battery-pull case, and a `clock-kick` from the
+wifi/ppp up-hooks that restarts chronyd so it resolves its pool at once.
+
+The result, cold boot, five runs: the clock is right from wata's first
+frame and the handset reaches `syncing` **~42s after userspace starts**,
+where it had been failing indefinitely. On the battery-pull run
+(`reboot -f` with the saved clock deleted) the boot screen stays calm on
+`clock=UNSET` and then goes `clock=set -> connected -> syncing` within
+three seconds of NTP landing. That closes the outage this plan opened
+with: a cold-booted handset reaches its contact list on its own, with
+nobody setting a clock by hand.
+
+Those forty seconds are the Q6 DSP's firmware load, and they are not
+negotiable on this board: a parallel runlevel got the handset syncing in
+16s and lost its wifi on one boot in three, because the wlan chip's NV
+calibration travels over the same SMD transport the Q6 saturates. The
+rootfs commit has the detail. What it means here is that the boot screen
+is on display for the better part of a minute on every single boot —
+which is exactly why it has to be honest, and why "starting up..." for
+forty seconds is the right thing for it to say.
+
+One wata-side follow-up came out of watching those boots: the interface
+poll re-reads every ~1s while there is NO interface
+(`NetStatus.REFRESH_FRAMES_NO_PIPE`) instead of every 5s. That read is
+what arms the arrival poke, and at the 5s cadence an interface that
+appeared could sit unnoticed while the backoff ran on — which matters
+more the longer the no-network stretch is, since the backoff has climbed
+to its 60s ceiling by then. Verified across five boots: the pipe arrives
+and the client is `syncing` one to three seconds later.
 
 ## Out of scope
 
