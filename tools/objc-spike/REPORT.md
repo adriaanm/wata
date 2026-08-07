@@ -107,6 +107,60 @@ Three things are pinned by that output:
 3. **The call shape needs nothing else.** Every `go build` error is one
    of the two gaps above. There is no third problem hiding behind them.
 
+## Gap 1 is closed — verified 2026-08-07
+
+`go.Uintptr` landed upstream (`b85a713`) and all **seven** `[E008]` sites
+here are gone; the compile stage passes for the first time. It binds as a
+facade parameter, a result and a variadic element, survives being stored
+in a `val`, and passes on to the next facade call. The emitted Go is what
+a hand-written FFI looks like:
+
+```go
+var cls uintptr
+cls = purego.SyscallN(getClass, Main_cstr("NSString"))
+```
+
+The `(uintptr, error)` prediction is now compiled rather than asserted:
+`Dlopen`/`Dlsym` emit `x, err := purego.Dlsym(…)` with the error arm
+inline — no wrapper, no adapter. `def cstr(s: String): go.Uintptr` also
+compiles as a declaration, so the type is no longer what stops it; the
+liveness question that ticket exists for is untouched, since nothing has
+called it into a real address yet.
+
+Gap 2 remains, alone, with nothing behind it:
+
+```
+./main.go:39:13: assignment mismatch: 1 variable but purego.SyscallN returns 3 values
+```
+
+Its ruling is in and is **not** the annotation this report's ticket asked
+for. A Scala tuple in a result type *is* Go's result parameters — a
+method's Go results are `flatten(R) ++ (error if throws)`, one level, in
+both directions. So when it lands this spike is respelled
+
+```scala
+def syscallN(fn: go.Uintptr, args: go.Uintptr*): (go.Uintptr, go.Uintptr, go.Uintptr)
+val (r1, _, _) = purego.syscallN(msgSend, cls, sel)
+```
+
+which emits `r1, _, _ := purego.SyscallN(…)`. Scala's discard spelling and
+Go's are the same spelling, so nothing had to be invented, and
+destructuring at the binding site allocates nothing because no tuple
+struct is ever built. Two things follow: "want `r2` but not `r1`" is just
+`val (_, r2, _) = …`, no wall; and the **destructured** form is the one to
+use for anything reference-shaped, because the bound-whole leg depends on
+`TUPLE-REF-COMPONENT-ASSIGN` (a tuple component lowering to a Go interface
+erases to `any` and the assertion is missing at assignments — wata hit
+that independently the same day, from `wataclient`'s notification edge
+detector).
+
+This report's ticket argued against tuples on the grounds that they would
+force a representation and allocation decision. The representation was
+settled long ago — tuples are a blessed value composite with a Go struct
+rep — so only allocation was live, and it is ruled acceptable here. The
+instinct was right and the premise was stale; worth remembering as a
+reminder to check a constraint before arguing from it.
+
 ## What this does NOT answer
 
 Leg 2, the callback half: `purego.NewCallback` takes a func value and
