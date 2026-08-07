@@ -13,6 +13,5 @@ wait msgs 4 1500
 
 advance 120
 tap enter
-wait played 1 2000
 advance 30
 checkpoint fam3-alice-conv

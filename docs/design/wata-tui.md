@@ -38,10 +38,10 @@ Startup prints one line: `ready <userId>`, or `login failed`.
 | command | does |
 |---|---|
 | `snap` | the current `StateSnapshot`: `conn`, `self`, one `contact` line each, one `conv` line each with message and unplayed counts |
-| `msgs <conv#>` | that conversation's voice messages: sender, duration, `origin_server_ts`, played flag, `peer=` (a non-sender has receipted it — the sent-message second check, [wataclient.md](wataclient.md)'s `playedByPeer`), event id, mxc url |
+| `msgs <conv#>` | that conversation's voice messages, NEWEST FIRST (so `msg 1` is the latest, and that is the number `play` takes): sender, duration, `origin_server_ts`, played flag, `peer=` (a non-sender has receipted it — the sent-message second check, [wataclient.md](wataclient.md)'s `playedByPeer`), event id, mxc url |
 | `send <conv#\|user> <file.ogg>` | upload the file and send it as `m.audio`; a non-numeric target is a user id whose DM room the server resolves |
-| `play <conv#> <msg#>` | download the Ogg, write it under `$WATA_TUI_TMPDIR` (default `/tmp`), hand it to the player, then send the read receipt |
-| `mark <conv#> <msg#>` | the read receipt only |
+| `play <conv#> <msg#>` | download the Ogg, write it under `$WATA_TUI_TMPDIR` (default `/tmp`), hand it to the player, and send the read receipt IF the player returned no error — a receipt asserts the clip was heard ([wataclient.md](wataclient.md)) |
+| `mark <conv#> <msg#>` | the read receipt only — the admin's way to say "heard" by hand, e.g. when the player is missing on this host |
 | `fav <conv#> <msg#>` | TOGGLE the server's `net.wata.favorite` marker on that message (plan 0019), so the media retention sweep spares it; prints `fav <eventId> <true\|false>` — the state the toggle left behind — or `fav failed: <status> <body>` |
 | `wifi <conv#\|user>` | the wifi panel (plan 0020): queue a `wifi_scan` for that user's handset through the server's command mailbox, wait for its report, print the networks numbered (`net <n> <ssid> signal=<dBm> secured=<bool>`) |
 | `wifi off <conv#\|user> [minutes]` | the cellular-fallback test switch (plan 0031): queue `wifi_off` — the handset drops wlan0 and auto-restores after the window (device default 10 min; persistent config untouched, so a reboot also restores) — and wait for the report, which arrives over whatever transport survived the drop: `wifi off ok <detail>` / `wifi off failed: <detail>` |

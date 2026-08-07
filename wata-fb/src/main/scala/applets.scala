@@ -43,6 +43,10 @@ case class WataState(
   pttHeld: Boolean,
   pttHoldTime: scala.Double,
   playing: Boolean,
+  // the message currently playing, so the read receipt can be sent when the
+  // audio FINISHES rather than when it starts. Both empty when nothing plays.
+  playingRoom: String,
+  playingId: String,
   sendError: Boolean,
   sendOk: Boolean,
   playError: Boolean,
@@ -61,7 +65,7 @@ object WataLogic:
   val FOOTER_ROW = Font.ROWS - 1
 
   def initial(): WataState =
-    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, false, false, false, false, 0.0,
+    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, 0.0,
       false, 0.0, false, 0.0)
 
   /** visible list rows between header and footer (bitmap grid). */
@@ -71,11 +75,11 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   /** Opens at row 0, which is the NEWEST message now that the list comes back
    *  newest first — the one somebody just pressed the LED for. It used to be
@@ -83,26 +87,29 @@ object WataLogic:
    *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
-  def withPlaying(s: WataState, playing: Boolean): WataState =
+  /** `room`/`id` name what is playing, and are cleared when it stops — a
+   *  playback target that outlives the playback would receipt the wrong
+   *  message the next time audio ends. */
+  def withPlaying(s: WataState, playing: Boolean, room: String, id: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   /** the full status-flash tuple (hold + timer + the three flash flags); the
    *  play-failure CAUSE rides along unchanged. */
   def withFlash(s: WataState, hold: scala.Double, timer: scala.Double,
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, hold, s.playing, sendErr, sendOk, playErr, s.noAudio, timer, s.backHeld, s.backHoldTime,
+      s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, timer, s.backHeld, s.backHoldTime,
       s.okHeld, s.okHoldTime)
 
   /** a play that failed: the flash, its cause, and `playing` dropped — a
@@ -110,17 +117,17 @@ object WataLogic:
   def withPlayErr(s: WataState, playing: Boolean, playErr: Boolean, noAudio: Boolean,
                   timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, s.sendError, s.sendOk, playErr, noAudio, timer,
+      s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, timer,
       s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
       s.backHeld, s.backHoldTime, held, hold)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
       held, hold, s.okHeld, s.okHoldTime)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
@@ -222,12 +229,17 @@ object WataLogic:
     val off = if sel < s.scrollOffset then sel else s.scrollOffset
     withSel(s, sel, off)
 
-  /** open the selected conversation + send a read receipt for its latest msg,
-   *  and clear its undelivered marker: the mark exists to tell the user a
-   *  message of theirs never arrived, and opening the conversation is where
-   *  they find that out. */
+  /** Open the selected conversation and clear its undelivered marker: the
+   *  mark exists to tell the user a message of theirs never arrived, and
+   *  opening the conversation is where they find that out.
+   *
+   *  Opening sends NO read receipt. On a text client, a message on screen has
+   *  been read and a receipt is the best signal available; here the message IS
+   *  audio, and seeing a row is not hearing it. The receipt goes out when the
+   *  clip finishes playing (`onAudioEvent`), which is the signal this product
+   *  actually has — and the sender's double-check then means "heard", not
+   *  "was in the room when it arrived". */
   def enterConversation(s: WataState, ctx: FrameCtx): WataState =
-    sendReceiptForConversation(ctx, s.selected)
     ackOutbox(ctx, s.selected)
     enterConv(s, s.selected)
 
@@ -266,13 +278,13 @@ object WataLogic:
       withMsgSel(s, sel, scr)
     else s
 
-  /** OK on a message: read receipt (if unplayed) + download-and-play. */
+  /** OK on a message: download-and-play, remembering WHICH message so the
+   *  receipt can follow the audio rather than the keypress. */
   def playSelected(s: WataState, ctx: FrameCtx): WataState =
     selectedMsg(ctx.snap, s.convContactIdx, s.msgSelected) match
       case m: Some[VoiceMessage] =>
-        if !m.value.isPlayed then pushReceipt(ctx, roomIdAt(ctx.snap, s.convContactIdx), m.value.id)
         Runtime.sendAction(ctx.client, ActPlay(m.value.mxcUrl))
-        withPlaying(s, true)
+        withPlaying(s, true, roomIdAt(ctx.snap, s.convContactIdx), m.value.id)
       case None => s
 
   def deleteSelected(s: WataState, ctx: FrameCtx): WataState =
@@ -293,18 +305,9 @@ object WataLogic:
       case None => s
 
   // ---- receipts ------------------------------------------------------------------
-  def sendReceiptForConversation(ctx: FrameCtx, idx: scala.Int): Unit =
-    convAt(ctx.snap, idx) match
-      case c: Some[Conversation] => receiptLatest(ctx, c.value)
-      case None => ()
-
-  /** the read receipt names the NEWEST message, which is the head now that
-   *  the list is newest-first (it used to be the last element). */
-  def receiptLatest(ctx: FrameCtx, conv: Conversation): Unit =
-    newestMsg(conv.messages) match
-      case m: Some[VoiceMessage] => pushReceipt(ctx, conv.roomId, m.value.id)
-      case None => ()
-
+  /** The ONE place a receipt is sent, called from `AePlaybackDone`. There is
+   *  deliberately no "receipt the conversation's latest" path: a receipt here
+   *  asserts the audio was heard, which only playback can know. */
   def pushReceipt(ctx: FrameCtx, roomId: String, eventId: String): Unit =
     if roomId != "" && eventId != "" then Runtime.sendAction(ctx.client, ActReceipt(roomId, eventId))
 
@@ -380,7 +383,12 @@ object WataLogic:
       uploadRecording(ctx, s, d.ogg, d.durationMs)
       s
     case _: AeRecordingError => withFlash(s, s.pttHoldTime, 2.0, true, s.sendOk, s.playError)
-    case _: AePlaybackDone   => withPlaying(s, false)
+    // the clip played to the end, which is what "heard" means here: receipt
+    // now, and only now. A playback that ERRORED sends nothing — a broken
+    // speaker must not tell the sender their message got through.
+    case _: AePlaybackDone   =>
+      pushReceipt(ctx, s.playingRoom, s.playingId)
+      withPlaying(s, false, "", "")
     // the audio thread failing is the "nothing to play it through" cause by
     // construction: the bytes were already in hand.
     case _: AePlaybackError  => withPlayErr(s, false, true, true, 2.0)
@@ -949,10 +957,6 @@ object WataLogic:
   def msgAtStep(h: VoiceMessage, t: List[VoiceMessage], i: scala.Int): Option[VoiceMessage] =
     if i == 0 then Some(h) else msgAt(t, i - 1)
 
-  /** the newest message: the HEAD, the list being newest-first. */
-  def newestMsg(ms: List[VoiceMessage]): Option[VoiceMessage] = ms match
-    case h :: t => Some(h)
-    case _      => None
 
 /** the UNIFIED per-frame context, one record for every applet: the live
  *  snapshot, the connection, the frame's computed connectivity (netstatus.scala

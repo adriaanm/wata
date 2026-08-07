@@ -418,14 +418,37 @@ DM contacts, message senders, self, and the tui's `display()`.
 computed as "self's user id appears in that event's receipt user-id list"
 — read receipts, not a separate read-marker.
 
-`playedByPeer` (`SyncEngine.playedByPeer`) is the companion flag a SENT
-message's second check renders: "a user other than the message's SENDER
-appears in that event's receipt list". Sender-relative, not
-self-relative — in a DM the non-sender is the peer, in the family/group
-thread any listener counts, and the sender's own receipt (posted when
-they view their own conversation, which is what makes `isPlayed`
-trivially true for own messages) never sets it. Both flags derive from
-the same `ReceiptEntry` list; they just ask it different questions.
+**A receipt means HEARD, and only playback may post one.** A text client
+has no better signal than "it was on screen", so it receipts on display;
+this product's messages are audio, and the audio has to be played, which
+is a signal worth having. So no client receipts on opening a conversation
+or on rendering a row: the fb/mac bodies post one from `AePlaybackDone`
+(`WataLogic.onAudioEvent`) and the tui from a `Player.run` that returned
+no error. A playback that FAILED posts nothing — a broken speaker must
+not tell a sender their message got through, which is exactly the failure
+this hardware produces.
+
+This makes the sender's double check mean something specific: not "they
+were in the room when it arrived" but "it came out of a speaker". It also
+costs a visible round-trip — the check appears when the receipt returns
+through `/sync`, a moment after the audio ends, and nothing is drawn
+optimistically in between.
+
+Two consequences fall out of it, both of which used to be masked by the
+on-open receipt covering the sender's own message:
+
+- `unplayedOf` skips messages sent by self. There is nothing to hear in
+  a message you recorded, and without the exclusion your own send would
+  badge your own conversation until you played it back to yourself.
+- `playedByPeer` (`SyncEngine.playedByPeer`) — the flag a SENT message's
+  second check renders — is "a user other than the message's SENDER
+  appears in that event's receipt list". Sender-relative, not
+  self-relative: in a DM the non-sender is the peer, in the family/group
+  thread any listener counts. It was already written to ignore a
+  sender's own receipt; now no such receipt is posted in the first place.
+
+Both flags derive from the same `ReceiptEntry` list; they just ask it
+different questions.
 
 `isFavorite` is the room's `favorites` membership for that event id — the
 server's `net.wata.favorite` marker (plan 0019), which keeps the message

@@ -300,13 +300,21 @@ def run(tmp):
         # then the played check (0x80 = 128). Seeing the second one is also
         # the end-to-end proof of the runtime's `UiEvent`/audio drains, since
         # nothing else moves that glyph.
+        #
+        # The row starts with NO mark — a received message is unplayed until it
+        # has been HEARD, and opening the conversation receipts nothing — so
+        # each glyph is INSERTED into the row rather than overwriting the
+        # previous one. That also makes the ordering meaningful: the triangle
+        # goes away when the audio ends, and the check appears a moment later,
+        # when the receipt has been round-tripped through /sync. Nothing here
+        # is optimistic; the check means the server recorded it.
         sess.cmd("key enter press", lambda l: l == "key ok")
         sess.cmd("key enter release", lambda l: l == "key ok")
         played = sess.cmd("wait 8000", lambda l: l == "waited 8000")
         pp = [l for l in played if l.startswith("patch ")]
-        c.ok(pp[:1] == ['patch set [0.1.0.1] glyph(0,17,144,0)'],
+        c.ok(pp[:1] == ['patch insert [0.1.0] 1 mark:glyph(0,17,144,0)'],
              f"play: want the play-triangle patch first, got {pp!r}")
-        c.line(pp, lambda l: l == 'patch set [0.1.0.1] glyph(0,17,128,0)',
+        c.line(pp, lambda l: l == 'patch insert [0.1.0] 1 mark:glyph(0,17,128,0)',
                f"play: no played-check patch after it, got {pp!r}")
         t4 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
         c.line(t4, lambda l: l.strip() == 'NSTextField 0 103 6 8 "✓"',

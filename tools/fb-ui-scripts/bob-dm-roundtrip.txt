@@ -10,16 +10,15 @@ wait msgs 1 2000
 advance 30
 checkpoint dm-bob-roster
 
-# open the DM — which receipts its latest (alice's) message: the played mark
-# turns on and the badge basis clears
+# open the DM, then OK on alice's message: it plays through the sim audio
+# actor, and the receipt goes out when the audio ENDS — so the played mark
+# turning on is proof the clip was heard, not that the screen was looked at.
+tap enter
+advance 30
 tap enter
 wait played 1 2000
 advance 30
 checkpoint dm-bob-played
-
-# OK plays the selected, already-receipted message through the sim audio actor
-tap enter
-advance 30
 
 # reply: PTT inside the conversation view sends into this DM room
 key ptt press

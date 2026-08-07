@@ -11,9 +11,8 @@ wait msgs 1 2000
 advance 30
 checkpoint bob-contacts
 
-# open the family conversation — which also sends the read receipt for its
-# latest message
+# open the family conversation. Nothing is receipted by opening — the row
+# renders UNPLAYED, which is the honest state: bob has not heard it yet.
 tap enter
-wait played 1 2000
 advance 60
 checkpoint bob-conversation

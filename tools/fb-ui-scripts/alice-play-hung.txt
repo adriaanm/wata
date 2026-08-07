@@ -19,9 +19,8 @@ key ptt release
 wait msgs 1 1500
 advance 120
 
-# open the conversation (which receipts the message)
+# open the conversation
 tap enter
-wait played 1 1500
 advance 30
 
 # the server is stopped mid-phase; the round hangs until the deadline

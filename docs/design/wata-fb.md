@@ -1110,16 +1110,24 @@ there is no separate "apply message" step in this module.
 The message rows render the snapshot's list as it comes, and that list is
 **newest first** (see `docs/design/wataclient.md`), so row 0 — the top row,
 and the row `enterConv` puts the cursor on — is the message that just
-arrived. Two consequences to know before touching this view. Opening a
-conversation receipts its newest message, which is now the row under the
-cursor, so OK on it replays something already marked played; reaching an
-unplayed message means pressing DOWN. And every arrival inserts at index
-0, so a cursor parked on an older row keeps its INDEX and slides one
-message older — `[FB-CURSOR-ANCHOR]`. Playing a
-received clip is a full round-trip: `ActPlay(mxcUrl)` goes to
+arrived — so opening a conversation puts the cursor on the message
+somebody just sent, and OK plays it. One thing to know before touching
+this view: every arrival inserts at index 0, so a cursor parked on an
+older row keeps its INDEX and slides one message older —
+`[FB-CURSOR-ANCHOR]`.
+
+Playing a received clip is a full round-trip: `ActPlay(mxcUrl)` goes to
 `wataclient`, which downloads and hands PCM/Ogg bytes back through the
 `AudioEvt` channel, and `WataLogic.onAudioEvent`
 (`applets.scala:241`) reacts to `AePlaybackDone`/`AePlaybackError`.
+**`AePlaybackDone` is also the only place this client posts a read
+receipt** — the rule is `wataclient`'s and the reasoning lives there, but
+its mechanics are here: `playSelected` records the playing message in
+`WataState.playingRoom`/`playingId`, because by the time the audio ends
+the cursor may have moved and `AePlaybackDone` carries no identity of its
+own. Both fields clear when playback stops, so a stale target cannot
+receipt the wrong message on the next clip. `AePlaybackError` posts
+nothing.
 
 ## Dev/test surface
 
@@ -1410,9 +1418,9 @@ information in the equivalent place, not the same number.
 | **Conversation view** ||||
 | contact list: select, scroll window, family accent | yes | yes | same |
 | unplayed-count badge, right-aligned | yes | yes | same |
-| open conversation + receipt for the latest message | yes | yes | same |
+| open conversation (NO receipt: a receipt means heard, and only playback posts one) | receipts | no receipt | wata-fb changed the rule — see `docs/design/wataclient.md` |
 | message rows: duration `m:ss`, sender, played check-mark, gray-when-played | yes | yes | same |
-| OK tap = receipt (if unplayed) + download-and-play | yes | yes | same gesture; wata-fb acts on the RELEASE, because OK now also has a hold |
+| OK tap = download-and-play, receipt when the audio ENDS | receipt on play start | receipt on `AePlaybackDone` | same gesture; wata-fb acts on the RELEASE, because OK now also has a hold, and a failed playback receipts nothing |
 | hold OK past `OK_HOLD_FAVORITE` = toggle the message's favorite | no | yes | wata-fb only (plan 0019): the star keeps the clip past media retention |
 | a favorited row's star, right-aligned | no | yes | wata-fb only; `Font.ICON_STAR` (0x8D), drawn from the server's `net.wata.favorite` state |
 | hold red (or F2 in sim/scripts) = redact the selected message | F2 only | yes | wata-fb adds the red hold; a red tap still navigates back |

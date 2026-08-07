@@ -2,23 +2,24 @@
 # one, which is the play path plus the per-message read receipt that turns a
 # row's played mark on.
 #
-# Receipts are per event, not a high-water mark: opening the conversation
-# receipts only its LATEST message, so bob arrives with exactly one played row
-# — and, the list being newest first, the cursor is sitting ON it. Moving down
-# one row is what reaches an unplayed message.
+# Receipts are per event and follow the AUDIO: opening receipts nothing, and a
+# row goes played only when its clip has finished playing. So bob arrives with
+# twelve unplayed rows, and each OK adds exactly one.
 
 wait syncing 1 900
 wait convs 2 900
 wait msgs 12 2000
 
+# open, and play the newest row the cursor lands on: download-and-play through
+# the sim audio actor, then the receipt as the audio ends.
+tap enter
 tap enter
 wait played 1 2000
 advance 30
 checkpoint bob-conv-open
 
-# down to the next-newest row, which nothing has played yet, then OK: receipt
-# for it, then download-and-play through the sim audio actor. The second
-# played row is the assertion.
+# down to the next row and play that one too — two played rows, two clips
+# actually heard.
 tap down
 tap enter
 wait played 2 2000

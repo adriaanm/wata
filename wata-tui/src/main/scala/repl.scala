@@ -272,9 +272,14 @@ object Repl:
       if !writeFile(path, ogg) then println("play failed: cannot write " + path)
       else
         println("play " + m.mxcUrl + " bytes=" + ogg.size + " file=" + path)
+        // the receipt follows the AUDIO: a player that failed heard nothing,
+        // and saying otherwise tells the sender their message got through.
+        // `mark` is still there for an admin who needs to say it by hand.
         val err = Player.run(path)
-        if err == "" then println("player ok") else println("player failed: " + err)
-        markMsg(c, cv, m)
+        if err == "" then
+          println("player ok")
+          markMsg(c, cv, m)
+        else println("player failed: " + err)
 
   def mark(c: MatrixClient, ci: scala.Int, mi: scala.Int): Unit = convAt(ci) match
     case cv: Some[Conversation] => markIn(c, cv.value, mi)

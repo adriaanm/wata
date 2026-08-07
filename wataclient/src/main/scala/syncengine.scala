@@ -813,6 +813,12 @@ object SyncEngine:
     case h :: t => if h == sender then hasOtherUser(t, sender) else true
     case Nil  => false
 
+  /** unplayed = not receipted by us and not FROM us. Own messages are excluded
+   *  because there is nothing to hear: you recorded it. They used to be
+   *  excluded by accident — the device receipted the conversation's newest
+   *  message on open, which covered your own send — and once the receipt
+   *  became a statement about playback, a message you just sent would have
+   *  badged your own conversation until you played it back to yourself. */
   def unplayedOf(messages: List[VoiceMessage]): Int =
     var n = 0
     var cur = messages
@@ -820,7 +826,7 @@ object SyncEngine:
     while going do
       cur match
         case c: ::[VoiceMessage] =>
-          if !c.head.isPlayed then n += 1
+          if !c.head.isPlayed && c.head.sender.id != selfUserId then n += 1
           cur = c.tail
         case Nil => going = false
     n

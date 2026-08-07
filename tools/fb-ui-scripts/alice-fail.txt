@@ -33,11 +33,11 @@ advance 120
 checkpoint fail-send-recovered
 
 # ---- PLAY FAILED -------------------------------------------------------------
-# open the conversation (which receipts the one message), then arm one
-# failure and OK the row: the download answers 500 -> EvPlaybackError ->
-# the PLAY FAILED flash.
+# open the conversation, then arm one failure and OK the row: the download
+# answers 500 -> EvPlaybackError -> the PLAY FAILED flash. Nothing is
+# receipted along the way — a play that failed heard nothing.
 tap enter
-wait played 1 1500
+advance 10
 failnext 1
 tap enter
 wait playfail 1 1500

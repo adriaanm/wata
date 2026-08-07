@@ -20,11 +20,10 @@ advance 20
 key ptt release
 wait msgs 1 1500
 
-# outrun the SENT flash (1.5s of frame time), then open the conversation —
-# which receipts alice's own (latest) message, so her own row is played and
-# cannot pollute the badge arithmetic in phase 4
+# outrun the SENT flash (1.5s of frame time), then open the conversation.
+# Alice's own message is not something she has to hear, so it never counts
+# toward her badge (`unplayedOf` skips own messages) and nothing receipts it.
 advance 120
 tap enter
-wait played 1 1500
 advance 30
 checkpoint dm-sent

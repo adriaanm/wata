@@ -15,10 +15,10 @@ advance 4
 key ptt release
 wait msgs 3 1500
 
-# outrun the SENT flash, then open the family conversation — which receipts
-# its latest (charlie's own) message
+# outrun the SENT flash, then open the family conversation. The newest row is
+# charlie's own send, which needs no receipt; the two rows above it are alice's
+# and bob's, unheard and rendering as such.
 advance 120
 tap enter
-wait played 1 2000
 advance 30
 checkpoint fam3-charlie-conv
