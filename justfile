@@ -185,6 +185,16 @@ mac *ARGS:
 mac-smoke:
     tools/mac-smoke.py
 
+# macOS client as a real .app (plan 0037): Info.plist, icon, ad-hoc signature.
+# A bundle is what makes notifications, the microphone and a stable Keychain
+# identity possible at all — and what a non-technical user double-clicks.
+mac-app *FLAGS:
+    tools/mac-app.py {{FLAGS}}
+
+# redraw tools/wata.iconset from tools/mac-icon.py (~40s; the PNGs are committed)
+mac-icon:
+    tools/mac-icon.py
+
 # macOS client credentials (plan 0036): three headless runs — with a password
 # in the environment, with NOTHING in it, and with the stored token no longer
 # valid. Touches the login keychain; macOS only, not in ci.

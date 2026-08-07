@@ -67,7 +67,7 @@ architecture (A) finding.
 Five, in dependency order. Each lands on its own with its own
 verification; none is big enough to need its own plan.
 
-### 1. `Wata.app` — the bundle
+### 1. `Wata.app` — the bundle — DONE
 
 `tools/mac-app.py` (Python, per the >10-lines rule) assembles the bundle
 from the `sgo`-built binary: `Info.plist` (bundle id
@@ -78,6 +78,23 @@ builds it; `just mac` keeps working unbundled for development.
 The app must run with **no environment at all** — which plan 0036
 already delivered, provided something has logged in once. Slice 2 is
 what makes that first login possible.
+
+Landed. `tools/mac-icon.py` builds the iconset from `wata-icon-src.png`
+(pixel-art handset, screen lit with the app's name) — cropped to the
+device, scaled with `sips`, composited onto a rounded plate. The trick
+that makes it an icon rather than a black square: macOS does not round
+app icons the way iOS does, so every source pixel darker than an ink
+floor becomes transparent and a near-black plate shows through, which
+also swallows the dark pixels inside the device.
+
+`mac-creds-smoke` grew the bundle check — Info.plist keys, a signature
+that verifies, and the executable starting from an environment holding
+only `HOME` and `PATH`.
+
+One limit worth stating: the ad-hoc signature (`--sign -`) is stable for
+a given binary but CHANGES when the binary changes, so a rebuild still
+re-prompts the Keychain. Only a Developer ID identity fixes that, and it
+stays out of scope.
 
 ### 2. The login sheet
 

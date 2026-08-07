@@ -21,6 +21,10 @@ Then the config file is checked for the thing that must NOT be in it: the
 access token. A store that keeps the secret in the plain file would pass
 every run above and still be wrong.
 
+Then the same question from the other side (plan 0037): the `Wata.app`
+bundle builds, has the Info.plist keys macOS requires, verifies its
+signature, and its executable starts from a bare environment.
+
 Touches the developer's login keychain, under service `wata` with a
 scratch homeserver in the account name, and cleans up after itself.
 macOS only, not in ci.
@@ -124,6 +128,43 @@ def main():
             print("scratch kept at " + tmp)
         else:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- the bundle (plan 0037, slice 1) ------------------------------------
+    # Not a credential case, but the same question from the other side: can
+    # this thing be launched by someone who has no shell? Assert the shape
+    # macOS requires, that the signature verifies, and that the executable
+    # inside actually runs — a bundle that is merely well-formed is not one.
+    app = os.path.join(WATA, "wata-mac", ".sgo", "Wata.app")
+    r = subprocess.run([sys.executable, os.path.join(WATA, "tools", "mac-app.py")],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        failed.append(f"mac-app.py failed: {r.stdout}{r.stderr}")
+    else:
+        plist = os.path.join(app, "Contents", "Info.plist")
+        exe = os.path.join(app, "Contents", "MacOS", "Wata")
+        if not os.path.exists(exe):
+            failed.append("the bundle has no Contents/MacOS/Wata")
+        import plistlib
+        info = plistlib.load(open(plist, "rb")) if os.path.exists(plist) else {}
+        for key in ("CFBundleIdentifier", "CFBundleExecutable",
+                    "NSMicrophoneUsageDescription"):
+            if not info.get(key):
+                failed.append(f"Info.plist is missing {key}")
+        if subprocess.run(["codesign", "--verify", "--deep", "--strict", app],
+                          capture_output=True).returncode != 0:
+            failed.append("the bundle's signature does not verify")
+        # launched with NOTHING in the environment but HOME and PATH, it must
+        # start and say what it needs — not crash, and not hang.
+        bare = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin"}
+        try:
+            out = subprocess.run([exe], env=bare, stdin=subprocess.DEVNULL,
+                                 capture_output=True, text=True, timeout=60).stdout
+        except subprocess.TimeoutExpired:
+            out = ""
+            failed.append("the bundled app hung on a bare environment")
+        if out and "WATA_MAC_USER" not in out and "ready" not in out:
+            failed.append(f"the bundled app said something unexpected: {out[:200]!r}")
+        print(f"  [4: the bundle] signed, {len(info)} Info.plist keys, runs bare")
 
     if failed:
         for f in failed:
