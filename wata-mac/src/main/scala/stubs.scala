@@ -75,12 +75,27 @@ object Led:
   def readBatteryPercent(): scala.Int = -1
   def setBacklight(brightness: scala.Int): Unit = ()
 
-/** wata-fb's config store (config.scala): the mac app logs in from the
- *  environment each run (like wata-tui) and persists nothing. */
+/** wata-fb's preferences record. The STORE that persists it is real here —
+ *  config.scala, plan 0036 — so only the record itself lives in this file of
+ *  device-shaped things; `FbConfig` is not a stub any more.
+ *
+ *  `FbOutbox` likewise: the mac writes numbered slot files beside its config,
+ *  the same shape the device uses, so a recording queued during an outage
+ *  survives the window closing. */
 case class FbPrefs(brightness: scala.Int, timeoutIdx: scala.Int)
 
-object FbConfig:
-  def savePrefs(p: FbPrefs): Unit = ()
+/** the mac's `OutboxStore`: one file per queued voice message under the state
+ *  directory. `writable` is probed once — a directory we cannot write is
+ *  reported non-persistent, which degrades to a memory queue for the session
+ *  and says so once, rather than pretending to persist. */
+final class FbOutbox(val dir: String, val writable: Boolean) extends OutboxStore:
+  def read(slot: scala.Int): String = FbConfig.readSlot(dir, slot)
+  def write(slot: scala.Int, data: String): Boolean =
+    var ok = false
+    if writable then ok = FbConfig.writeSlot(dir, slot, data)
+    ok
+  def clear(slot: scala.Int): Unit = FbConfig.clearSlot(dir, slot)
+  def persistent(): Boolean = writable
 
 /** wata-fb's app-edge capability extras (caps.scala). Not a stub any more
  *  (plan 0034): the mac dials over iroh when `WATA_IROH_CONFIG` is set, so

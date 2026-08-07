@@ -54,3 +54,21 @@ object macshell:
   @go.name("PushKeyCode") def pushKeyCode(code: scala.Int, phase: scala.Int): Unit = ???
   /** the live native hierarchy, one view per line (headless only). */
   @go.name("TreeDump") def treeDump(): String throws sgo.GoError = ???
+
+/** `go.mackeychain` — the login keychain (go-pkgs/mackeychain), where the
+ *  access token and the password live instead of the environment (plan 0036).
+ *
+ *  The surface is strings both ways on purpose: an item that is not there is
+ *  the ORDINARY first-run case, so `lookup` answers "" rather than throwing,
+ *  and `store`/`forget` answer "" for success or the error text — a client
+ *  that cannot reach the keychain still works, it just cannot remember. */
+@go.bind("github.com/adriaanm/wata/go-pkgs/mackeychain")
+object mackeychain:
+  /** false = no Security.framework; every call below is then a no-op. */
+  @go.name("Available") def available(): Boolean = ???
+  /** the stored secret, or "" for absent/unreachable. */
+  @go.name("Lookup") def lookup(service: String, account: String): String = ???
+  /** "" on success, else the error text. */
+  @go.name("Store") def store(service: String, account: String, secret: String): String = ???
+  /** "" on success (including "it was not there"), else the error text. */
+  @go.name("Forget") def forget(service: String, account: String): String = ???

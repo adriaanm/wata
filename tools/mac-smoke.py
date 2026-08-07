@@ -127,9 +127,17 @@ class MacSession:
     iroh transport instead of localhost TCP."""
 
     def __init__(self, binary, env, hs=None, extra_env=None):
+        # A harness supplies its own credentials, so it must leave the
+        # developer's keychain and state directory alone: no items keyed by a
+        # random scratch port piling up in the login keychain, no config file
+        # written under ~/Library. tools/mac-creds-smoke.py is the one smoke
+        # that deliberately does not set these — the stores are its subject.
         senv = dict(env, WATA_MAC_HS=hs or BASE, WATA_MAC_USER="alice",
                     WATA_MAC_PASS=PASSWORD, WATA_MAC_HEADLESS="1",
                     WATA_MAC_SCALE="1", WATA_MAC_AUDIO="fake",
+                    WATA_MAC_NO_KEYCHAIN="1",
+                    WATA_MAC_CONFIG=os.path.join(
+                        tempfile.gettempdir(), "wata-mac-smoke", "config.json"),
                     **(extra_env or {}))
         self.proc = subprocess.Popen([binary], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE,

@@ -48,14 +48,27 @@ import language.experimental.saferExceptions
  *  session. */
 object Main:
   def main(args: Array[String]): Unit =
-    val hs = pick(args, 0, "WATA_MAC_HS", "http://127.0.0.1:8008")
+    val hs = pick(args, 0, "WATA_MAC_HS", "")
     val user = pick(args, 1, "WATA_MAC_USER", "")
-    var pass = pick(args, 2, "WATA_MAC_PASS", "")
+    val passIn = pick(args, 2, "WATA_MAC_PASS", "")
     val sc = go.bufio.newScanner(go.osx.Stdin)
-    if user != "" && pass == "" then pass = askPass(sc)
-    if user == "" || pass == "" then
+    // The stores decide what this run logs in as (plan 0036): an explicit
+    // argument or environment variable wins, then the identity and the
+    // secrets the last run left behind. So the FIRST run still needs
+    // WATA_MAC_USER/PASS, and no run after it needs anything at all.
+    var cfg = FbConfig.resolve(hs, user, passIn)
+    if cfg.username != "" && cfg.password == "" && cfg.stored.accessToken == "" then
+      cfg = withPassword(cfg, askPass(sc))
+    if cfg.username == "" || (cfg.password == "" && cfg.stored.accessToken == "") then
       println("wata-mac: set WATA_MAC_USER (and WATA_MAC_PASS), or pass <homeserver> <user> [password]")
-    else run(hs, user, pass, sc)
+    else
+      // the password that got us in is worth keeping only if it is the one
+      // the user just supplied; a stored one is already where it belongs.
+      if passIn != "" then FbConfig.savePassword(cfg.homeserver, cfg.username, passIn)
+      run(cfg, sc)
+
+  def withPassword(c: ClientConfig, pass: String): ClientConfig =
+    ClientConfig(c.homeserver, c.username, pass, c.syncTimeoutMs, c.stored)
 
   def askPass(sc: go.bufio.Scanner): String =
     println("password?")
@@ -73,8 +86,7 @@ object Main:
     if out < 1 then out = 1
     out
 
-  def run(hs: String, user: String, pass: String, sc: go.bufio.Scanner): Unit =
-    val cfg = ClientConfig(hs, user, pass, 1000, Session("", "", "", "", ""))
+  def run(cfg: ClientConfig, sc: go.bufio.Scanner): Unit =
     if go.sys.getenv("WATA_MAC_HEADLESS") != "" then Pump.runHeadless(cfg, scale(), sc)
     else Pump.runWindowed(cfg, scale())
 
@@ -105,12 +117,26 @@ object Pump:
   // ---- the two drivers ------------------------------------------------------
 
   /** the client both drivers run: `makeWithAudio`, so the action loop's
-   *  `AcPlay` reaches the audio thread this app forks. No stored outbox — the
-   *  mac logs in from the environment every run and persists nothing (see
-   *  `stubs.scala`'s `FbConfig`), so an in-memory queue is the honest shape;
+   *  `AcPlay` reaches the audio thread this app forks — and now with a STORED
+   *  outbox (plan 0036), so a recording queued while the server was
+   *  unreachable is still there after the window closes. It was `MemOutbox`
+   *  before, which quietly threw those away.
    *  `ClientHandle.startClient` is the seam that takes a caller-built client. */
   def startAudioClient(cfg: ClientConfig): Handle =
-    ClientHandle.startClient(Runtime.makeWithAudio(cfg, MacCaps.httpDo(), MacCaps.clock()))
+    ClientHandle.startClient(
+      Runtime.makeWithAudioStored(cfg, MacCaps.httpDo(), MacCaps.clock(), FbConfig.outbox()))
+
+  /** the token this session actually got, kept for the next launch — written
+   *  once per session and only when it is real, so a failed login cannot
+   *  overwrite a good stored one with nothing. */
+  private val savedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  def persistSession(c: MatrixClient): Unit =
+    if !savedC.get() then
+      val creds = Runtime.lastAuth
+      if creds.accessToken != "" then
+        savedC.set(true)
+        FbConfig.saveLogin(c.cfg.homeserver, c.cfg.username, creds)
 
   /** how long startup waits for the first live sync before saying so. The
    *  answer is only a PRINT — both drivers keep pumping either way — so
@@ -253,6 +279,7 @@ object Pump:
     // one log line per change, and an immediate retry when the pipe arrives.
     NetStatus.logTransition(net, conn, NetStatus.clockOk())
     NetStatus.logSnapshot(snap, conn)
+    persistSession(h.client)
     if NetStatus.takePipeArrival() then Runtime.retryNow(h.client)
     val ctx = FrameCtx(snap, conn, net, h.client, h.client.audioCmds, evts,
       st.unsent, st.undelivered, st.quitArm > 0.0)

@@ -28,3 +28,6 @@ godep github.com/adriaanm/wata/go-pkgs/macaudio go-pkgs/macaudio
 # (darwin + `-tags iroh`, `just mac-iroh-build`); the ordinary build rides the
 # pure-Go stub and needs no cargo.
 godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet
+# The Keychain (plan 0036): the access token and the password live in the
+# login keychain, not in the environment and not in the config file.
+godep github.com/adriaanm/wata/go-pkgs/mackeychain go-pkgs/mackeychain

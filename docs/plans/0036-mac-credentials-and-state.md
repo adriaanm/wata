@@ -1,6 +1,6 @@
 # 0036 — the mac client remembers who you are
 
-Status: proposed
+Status: done
 
 ## The problem
 
@@ -91,11 +91,13 @@ released inside each call so none of them outlive it.
 | file | change |
 |------|--------|
 | `go-pkgs/mackeychain/` | new: purego bindings to SecItemAdd/CopyMatching/Update/Delete + the CF glue; `keychain_test.go` |
-| `wata-mac/src/main/scala/keychain.scala` | new: the facade over it, and the token/password login sequence |
-| `wata-mac/src/main/scala/config.scala` | new: the real `FbConfig` (replacing the stub) and the file-backed `OutboxStore` |
+| `wata-mac/src/main/scala/facades.scala` | the `go.mackeychain` facade (strings both ways: an absent item is the ordinary first-run case, not an exception) |
+| `wata-mac/src/main/scala/config.scala` | new: the real `FbConfig` — all three stores and the run's identity resolution |
+| `wata-mac/src/main/scala/stubs.scala` | the `FbConfig` stub out, `FbOutbox` in |
 | `wata-mac/src/main/scala/stubs.scala` | the `FbConfig` stub comes out |
 | `wata-mac/src/main/scala/main.scala` | login from the stores, environment as the fallback |
-| `tools/mac-smoke.py` | unchanged in what it asserts; it keeps passing env credentials, which stays the first-run path |
+| `tools/mac-smoke.py` | unchanged in what it asserts; `MacSession` now sets `WATA_MAC_NO_KEYCHAIN` and a scratch config path so no harness touches the developer's keychain |
+| `tools/mac-creds-smoke.py`, `justfile` | new: `just mac-creds-smoke` |
 | `docs/design/wata-mac.md` | the three stores, and the codesigning gotcha below |
 
 ## Verification
@@ -106,10 +108,37 @@ released inside each call so none of them outlive it.
 - A new `just mac-creds-smoke`: a headless run with `WATA_MAC_PASS` set
   writes the token; a SECOND headless run with **no** credentials in the
   environment reaches `ready @alice:localhost` from the Keychain alone;
-  a third with a deliberately corrupted token still gets there through
-  the stored password. Standalone like mac-smoke, macOS only, not in
-  `ci` (it touches the developer's login keychain).
+  a third, run after the server is restarted under it so the stored token
+  no longer works, still gets there through the stored password. Plus the
+  assertion the split exists for: no `access_token` key in the config
+  file. Standalone like mac-smoke, macOS only, not in `ci` (it touches
+  the developer's login keychain, and cleans up after itself).
 - `just mac-smoke` and `just ci` stay green — the env path is untouched.
+
+## What the implementation turned up
+
+Two things worth keeping:
+
+- **A default that comes too early is worse than no default.** The
+  homeserver default (`http://127.0.0.1:8008`) was an argument default,
+  so it was never empty and the stored homeserver was never consulted.
+  The keychain account is keyed by homeserver, so every lookup missed —
+  and a miss is indistinguishable from having stored nothing, which made
+  it look like the keychain write had failed. The default now comes last,
+  after the stored value.
+- **The harnesses had to be told to keep out.** Once the stores were
+  real, every `mac-smoke` run left a keychain item keyed by its random
+  scratch port, and wrote the developer's own config file. Hence
+  `WATA_MAC_NO_KEYCHAIN`, set by `MacSession` (so mac-iroh-smoke
+  inherits it) together with a scratch `WATA_MAC_CONFIG`.
+  mac-creds-smoke is the one harness that deliberately does not set
+  them, the stores being its subject.
+
+Also: run 3 originally rewrote the stored token with `security
+add-generic-password`, which takes the item out of wata-mac's ACL and
+makes the next read prompt — an unattended smoke cannot answer a dialog.
+Restarting the in-memory server invalidates the token instead, which is
+both prompt-free and the real shape of an expiry.
 
 ## The gotcha this will hit
 

@@ -29,12 +29,47 @@ WATA_MAC_USER=alice WATA_MAC_PASS=testpass123 just mac     # the window
 just mac-smoke                                             # the headless gate
 ```
 
-Login is from `WATA_MAC_HS` (default `http://127.0.0.1:8008`),
-`WATA_MAC_USER`, `WATA_MAC_PASS`, positional arguments overriding — the
-same rule as wata-tui, prompt-for-password included. `WATA_MAC_SCALE`
-sets the stage's integer scale (default 4 → a 640×512 window);
-`WATA_MAC_HEADLESS=1` selects the smoke's mode (below). Startup prints
-`ready <userId>` or `login failed`.
+Login is from `WATA_MAC_HS`, `WATA_MAC_USER`, `WATA_MAC_PASS`, positional
+arguments overriding — but only on the FIRST run. After that the app
+logs itself in from its own stores (below), so `just mac` alone is
+enough. `WATA_MAC_SCALE` sets the stage's integer scale (default 4 → a
+640×512 window); `WATA_MAC_HEADLESS=1` selects the smoke's mode (below).
+Startup prints `ready <userId>` or `login failed`.
+
+## What the app remembers (`config.scala`, plan 0036)
+
+Three stores, split by what each thing is:
+
+| what | where | why not elsewhere |
+|------|-------|-------------------|
+| access token, password | login Keychain, service `wata`, account `<user>@<homeserver>` | a secret does not belong in a file or an environment variable |
+| homeserver, username, user id, preferences | `~/Library/Application Support/wata/config.json`, 0600 | not secret, and readable when something is wrong |
+| queued voice messages | `…/wata/outbox/eN.msg` | it was `MemOutbox`: a recording queued during an outage died with the window |
+
+Resolution order for one run: an explicit argument or environment
+variable, then the stored identity, then the default homeserver **last**
+— a default applied earlier silently wins over the stored homeserver, and
+since the keychain account is keyed by homeserver, every lookup then
+misses in a way indistinguishable from having stored nothing.
+
+The **password** is stored, not just the token, because this window has
+nowhere to type one: the screens are wata-fb's bodies, a keyboard-driven
+contact list with no text entry. A token that expires or is invalidated
+server-side would otherwise strand the app on its boot screen with no
+user-reachable fix, so the recovery path has to be unattended.
+`WATA_MAC_NO_SAVE_PASSWORD` opts out.
+
+`WATA_MAC_NO_KEYCHAIN=1` turns the keychain off entirely. Every harness
+sets it (`MacSession` does, so mac-iroh-smoke inherits it) along with a
+scratch `WATA_MAC_CONFIG` — a smoke that already has credentials in its
+environment must not leave an item per run, keyed by a random scratch
+port, in the developer's login keychain.
+
+**Gotcha: keychain ACLs are keyed to the binary's code signature.** An
+unsigned build — what `just mac-build` produces — gets a fresh identity
+every rebuild, so macOS re-prompts and "Always Allow" does not stick
+across builds. That is the cost of not having a signed bundle, not a
+bug; signing and bundling are their own piece of work.
 
 ## The screens are wata-fb's own sources
 
@@ -288,6 +323,13 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   key view's translation and phases (driven by a synthesized stand-in
   event class), the pure pixel/glyph/key tables, and macshell's wire
   grammar.
+- `just mac-creds-smoke` (macOS-only, not in ci; touches the login
+  keychain and cleans up after itself): three headless runs against one
+  server — with a password in the environment, with NOTHING in it (which
+  must still reach `ready`, off the stored identity and token), and with
+  the stored token no longer valid (the server is restarted under it),
+  which must recover through the stored password. Plus the assertion the
+  split exists for: no `access_token` key in the config file.
 - `just mac-smoke` (~30s, standalone like tui-smoke; macOS-only, not in
   ci): one fresh wata-server; alice's headless session asserts the
   contact-list NATIVE hierarchy line by line, then bob (a tui session)

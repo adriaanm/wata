@@ -185,6 +185,12 @@ mac *ARGS:
 mac-smoke:
     tools/mac-smoke.py
 
+# macOS client credentials (plan 0036): three headless runs — with a password
+# in the environment, with NOTHING in it, and with the stored token no longer
+# valid. Touches the login keychain; macOS only, not in ci.
+mac-creds-smoke:
+    tools/mac-creds-smoke.py
+
 # macOS client over embedded iroh (plan 0034): the same app, built with
 # `-tags iroh` over its emitted tree — the transport the client exists for, a
 # parent away from home. Needs cargo (mklib.py stages the Rust staticlib);
