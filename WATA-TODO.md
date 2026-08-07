@@ -107,19 +107,36 @@ blocks + git log; each entry cites where it was recorded.*
   the variadic facade binding emits a bare Go variadic call.
   - `go.Uintptr`: Go's pointer-sized integer, absent from `gocore.scala`
     AND the emitter. Every FFI value is one, and it is neither `Int` nor
-    `Long` — Go rejects both. Precedent to copy: `go.Int`'s opaque
-    IOP-2 posture.
+    `Long` — Go rejects both. **RULED A**: an opaque address-sized
+    scalar — bindable and passable, nothing else. (The ticket cited
+    `go.Int`'s opaque IOP-2 posture as precedent; that citation was
+    WRONG — IOP-2 was revised 2026-07-12 and opaque `go.Int` is retired,
+    `int` maps to `Int`. Do not reason from it again. The ruling rests
+    opacity on the semantics instead: a uintptr is not a reference and
+    does not keep its referent alive.)
   - Discarding extra results: `SyscallN(…) (r1, r2, err uintptr)` is
     unbindable because `throws`→`(T, error)` is the only multi-result
     shape. Asked as a DISCARD rule (`r1, _, _ :=`), not as N-tuple
     support — nothing wants `r2`, tuples would need a representation,
-    and the emitter change is one line at the call site.
+    and the emitter change is one line at the call site. **RULED A and
+    EXPLICIT** — `@go.discardResults`, loud by default, which was our
+    lean for our reason. Refined on one point we had wrong:
+    trailing-only does not compose with `throws`, since `(T, U, error)`
+    puts the discard in the MIDDLE. Declared results bind left-to-right
+    from the FRONT, `throws` claims the trailing `error`, the annotation
+    authorizes dropping what is unclaimed between.
   - Filed 2026-08-07, with a third file alongside them:
     `VERIFY-VARIADIC-FACADE-BIND`, the other direction of the loop —
     `VARIADIC-FACADE-BIND` was minted from this inbox on 2026-08-05 and
     the spike is its first serious consumer outside its own scenario. It
     emitted a bare Go variadic call at three arities, first try; the wall
-    that ticket was minted for never came up.
+    that ticket was minted for never came up. Banked, no ticket — with a
+    gap named back at us: the **Array-spread leg was not exercised**
+    (every call site passes individual args), so `expr*` still rests on
+    its own scenario alone.
+  - Both gaps are Sonnet-tier and small, and they serialize behind each
+    other (one agent in the sgola tree at a time). No date promised; the
+    repin notice arrives in our `inbox/`, which now has a Monitor on it.
 
 
 - ~~`WATA-EITHER-LIST-PAYLOAD`~~ FIXED (upstream `860e6d4`) and verified

@@ -91,6 +91,26 @@ The spike is left spelled the way it WANTS to be spelled and does not
 build: the day both gaps close it compiles, and the leg is answered
 without anyone having to reconstruct what it was asking.
 
+**Both RULED A the same day** (sgola inbox drain 2026-08-07, minted at
+the top of its queue; Sonnet-tier, serialized behind each other, no date
+promised). `go.Uintptr` becomes an opaque address-sized scalar, and the
+discard becomes explicit — `@go.discardResults`, loud by default. Two
+things to carry forward from the ruling:
+
+- The ticket's precedent citation was **wrong**: IOP-2 was revised
+  2026-07-12 and opaque `go.Int` is retired. The opacity stands on its
+  own semantics — a `uintptr` is not a reference and does not keep its
+  referent alive.
+- Trailing-only discard does not compose with `throws`, because
+  `(T, U, error)` puts the discard in the MIDDLE. Ruled: results bind
+  left-to-right from the front, `throws` claims the trailing `error`,
+  the annotation authorizes what is unclaimed between.
+
+`cstr` was deliberately NOT ruled, and leaving it `???` was endorsed:
+obtaining a `uintptr` from a String's address is where GC liveness
+actually bites, so it gets its own ticket when the spike reaches it —
+carrying whatever we learn about what shape the address has to survive.
+
 **What this plan does NOT decide** is whether macshell should be ported.
 That question is downstream of the answer, and it changes shape depending
 on it — a port if FFI is expressible, a rewrite-around if it is not.

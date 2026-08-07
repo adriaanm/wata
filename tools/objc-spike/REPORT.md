@@ -37,10 +37,18 @@ Seven sites. It is absent from `core/gocore.scala` AND from the emitter
 pointer-sized value in an FFI is this type, and it is not `Int` and not
 `Long`: Go treats it as distinct and rejects both.
 
-The precedent to copy is `go.Int` — Go's platform-sized `int`, modeled
-OPAQUELY under IOP-2 with no arithmetic surface. `uintptr` wants exactly
-that posture, plus whatever conversion an FFI needs to make one from a
-string's address.
+**RULED A** (sgola inbox drain, 2026-08-07): `go.Uintptr` is being added
+as an opaque address-sized scalar — bindable in facade signatures,
+passable between facade calls, and nothing else. No arithmetic, no
+`Int`/`Long` conversions, no literals.
+
+The ticket reasoned from "`go.Int`'s opaque IOP-2 posture", and that
+citation was **wrong**: IOP-2 was revised 2026-07-12 and opaque `go.Int`
+is retired — Go's `int` maps to `Int` now. The ask was right anyway, and
+the ruling gives opacity a better rationale than the one borrowed: a
+`uintptr` is not a reference, it does not keep its referent alive, and
+arithmetic on one is valid only inside a single `unsafe.Pointer`
+expression. Opacity here is the semantics, not staging.
 
 ## Gap 2 — a facade cannot discard extra Go results
 
@@ -56,6 +64,16 @@ three values and an FFI caller wants only `r1`. Go spells that
 Worth stating as a discard rule rather than as "support N-tuples":
 nothing wants `r2` or `err` here, tuples would need a representation, and
 the emitter change is one line at the call site.
+
+**RULED A and EXPLICIT** (same drain): loud by default, opt in with
+`@go.discardResults`. One refinement on the rule as sketched —
+trailing-only does not compose with `throws`, because `(T, U, error)`
+puts the discard in the MIDDLE. The ruled rule: declared results bind
+left-to-right **from the front**, `throws` claims the trailing `error`,
+and the annotation authorizes dropping whatever is left unclaimed in
+between. That covers `r1, _, _` and the throws shape both. Wanting `r2`
+but not `r1` stays a loud wall, and tuples stay refused on the grounds
+the ticket gave.
 
 ## What already works — the more useful half of the result
 
@@ -81,7 +99,11 @@ Three things are pinned by that output:
 2. **Variadic facade binding carries FFI** — `SyscallN(a, b, c)` emits as
    a bare Go variadic call, no `[]uintptr{…}` wrapper. That is
    `VARIADIC-FACADE-BIND`, ruled from this repo's own inbox on
-   2026-08-05, doing real work in its first serious consumer.
+   2026-08-05, doing real work in its first serious consumer. Reported
+   back upstream and banked — with a gap named back at us: every call
+   site here passes INDIVIDUAL args, so the `Array` spread form (`expr*`)
+   is untouched and still rests on its own scenario alone
+   (`VERIFY-VARIADIC-ARRAY-SPREAD`).
 3. **The call shape needs nothing else.** Every `go build` error is one
    of the two gaps above. There is no third problem hiding behind them.
 
