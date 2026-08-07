@@ -23,6 +23,20 @@ netpipe none
 advance 2
 checkpoint boot-starting-up
 
+# a dial FAILED while there is still no interface with an address. The device
+# is booting, not broken: the failure says nothing about the server, so the
+# screen stays on the calm line (plan 0035 — the field sequence opened with
+# "can't reach server" here, before the wifi was even up).
+conn error
+advance 2
+checkpoint boot-no-pipe-stays-calm
+
+# back to `off` before the wifi frames: `connecting` after `error` is not a
+# health CHANGE (both are "reconnecting"), and the blink phase only restarts on
+# a change — stepping through `off` is what keeps the next checkpoint the same
+# frame every run.
+conn off
+
 # wifi came up and the client is trying: the message moves on, and the header
 # element is the ordinary reconnecting one (glyph yellow, `..` on the first
 # phase — the health change reset the blink phase).

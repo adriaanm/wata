@@ -249,6 +249,10 @@ object Pump:
     val snap = h.snapshot()
     val conn = h.connection()
     val net = NetStatus.poll(conn)
+    // the same two connectivity duties wata-fb's frame step has (plan 0035):
+    // one log line per change, and an immediate retry when the pipe arrives.
+    NetStatus.logTransition(net, conn, NetStatus.clockOk())
+    if NetStatus.takePipeArrival() then Runtime.retryNow(h.client)
     val ctx = FrameCtx(snap, conn, net, h.client, h.client.audioCmds, evts,
       st.unsent, st.undelivered, st.quitArm > 0.0)
     st = applyKeys(st, ctx)
@@ -257,7 +261,7 @@ object Pump:
       st.lastMs, st.quit, st.unsent, st.undelivered)
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
       st.unsent, st.undelivered,
-      NetStatus.everLive(), FbCaps.transportUnavailable(), None, false)
+      NetStatus.everLive(), FbCaps.transportUnavailable(), None, false, NetStatus.clockOk())
     st.last match
       case old: Some[View] => patchTo(old.value, v, verbose)
       case None            => setTree(v, verbose)

@@ -220,6 +220,10 @@ fixtures:
 fb-deploy *FLAGS:
     bash tools/fb-deploy.sh {{FLAGS}}
 
+# the device panel as a PNG, over ssh — what the handset is showing right now
+fb-shot *ARGS:
+    python3 tools/fb-shot.py {{ARGS}}
+
 # macOS service (plan 0015, [SRV-PACKAGE]): package wata-server, no sudo
 server-package *FLAGS:
     python3 tools/server-service.py package {{FLAGS}}

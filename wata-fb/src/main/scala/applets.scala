@@ -417,7 +417,7 @@ object WataLogic:
     val everLive = NetStatus.everLive()
     FbPaint.draw(px, body(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
       ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable(),
-      enrolSnap(ctx, everLive), Enrol.provisioning()))
+      enrolSnap(ctx, everLive), Enrol.provisioning(), NetStatus.clockOk()))
 
   /** the screen, then the two things that sit OVER it: the send/play status
    *  flash and the recording bar. They are children after the screen because
@@ -425,10 +425,12 @@ object WataLogic:
    *  drew them last. */
   def body(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean): View =
+      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean,
+      clockOk: Boolean): View =
     val screen: View = s.view match
       case _: VContacts =>
-        bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol, prov)
+        bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol,
+          prov, clockOk)
       case _: VConversation => bodyConversation(s, snap)
     var kids: List[Keyed] = Nil
     if s.pttHeld then kids = Keyed("rec", recordingView(s)) :: kids
@@ -457,15 +459,17 @@ object WataLogic:
    *  produced a self user or a conversation, then the list. */
   def bodyContacts(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean): View =
+      everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean,
+      clockOk: Boolean): View =
     enrol match
       case e: Some[EnrolSnap] => Enrol.body(e.value)
-      case None               => bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, prov)
+      case None               =>
+        bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, prov, clockOk)
 
   def bodyLive(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean, prov: Boolean): View =
-    if !everLive then bodyBoot(net, c, quitArmed, unavail, prov)
+      everLive: Boolean, unavail: Boolean, prov: Boolean, clockOk: Boolean): View =
+    if !everLive then bodyBoot(net, c, quitArmed, unavail, prov, clockOk)
     else if !snap.hasSelfUser && convCount(snap) == 0 then
       VText(1, 2, connectingMsg(c), Color.midGray)
     else
@@ -712,47 +716,79 @@ object WataLogic:
    *  needs (`NetStatus.everLive`, `FbCaps.transportUnavailable`) are hoisted
    *  to — a body reads its arguments and nothing else. */
   def bodyBoot(net: NetState, c: ConnectionState, quitArmed: Boolean, unavail: Boolean,
-      prov: Boolean): View =
-    val sub = bootSubMsg(net, c, unavail, prov)
+      prov: Boolean, clockOk: Boolean): View =
+    val sub = bootSubMsg(net, c, unavail, prov, clockOk)
     // one calm line sits centered; a failure's two lines straddle that row
     val head = if sub == "" then 7 else 6
-    val msg = bootMsg(net, c, unavail, prov)
+    val msg = bootMsg(net, c, unavail, prov, clockOk)
     val keys = bootKeys(quitArmed)
     var kids: List[Keyed] =
       Keyed("footer", VText(FbPaint.centerCol(keys), FOOTER_ROW, keys, Color.midGray)) :: Nil
     if sub != "" then
       kids = Keyed("sub", VText(FbPaint.centerCol(sub), 8, sub, Color.midGray)) :: kids
-    kids = Keyed("head", VText(FbPaint.centerCol(msg), head, msg, bootColor(c, unavail))) :: kids
+    kids = Keyed("head", VText(FbPaint.centerCol(msg), head, msg, bootColor(net, c, unavail, clockOk))) :: kids
     VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) :: (Keyed("net", netView(net)) :: kids))
 
-  /** the headline: the transport being unavailable outright, then the two
-   *  failure states, then the two calm waiting states ("starting up" until
-   *  there is BOTH an interface and a client trying to use it; "waiting for
-   *  network" once the pipe is there and the sync loop is connecting). Live
-   *  never reaches here — the first live frame latches `everLive` and the
-   *  ordinary UI takes over for the session. */
-  def bootMsg(net: NetState, c: ConnectionState, unavail: Boolean, prov: Boolean): String =
+  /** the headline: the transport being unavailable outright, then the states
+   *  the device is STILL BOOTING through, then the two failure states, then
+   *  the two calm waiting states ("starting up" until there is BOTH an
+   *  interface and a client trying to use it; "waiting for network" once the
+   *  pipe is there and the sync loop is connecting). Live never reaches here —
+   *  the first live frame latches `everLive` and the ordinary UI takes over
+   *  for the session.
+   *
+   *  `stillBooting` outranks the connection error, which is a REFINEMENT of
+   *  plan 0022 rather than a reversal of it: that plan let a failure speak
+   *  even before the first live link, because a client that never connected is
+   *  exactly the case an `everLive` gate could never reach. That holds once
+   *  the device could plausibly have connected. It does not hold in the first
+   *  seconds of a power-on, where a dial fails because there is no network yet
+   *  or no clock yet (`NetStatus.clockOk`) — blaming the server there teaches
+   *  a kid that the radio is broken every morning, which is the thing the boot
+   *  screen exists to avoid. */
+  def bootMsg(net: NetState, c: ConnectionState, unavail: Boolean, prov: Boolean,
+      clockOk: Boolean): String =
     if unavail then "transport unavailable"
     else if isAuthRejected(c) then "account rejected"
+    else if stillBooting(net, clockOk) then "starting up..."
     else if isConnError(c) then "can't reach server"
     else if prov then "setting up..."
     else if NetStatus.hasInterface(net.pipe) && !NetStatus.isDown(net.health) then "waiting for network"
     else "starting up..."
+
+  /** is the device in a state where a failed dial says NOTHING about the
+   *  server — no interface holding an address, or no valid wall clock (at
+   *  1970 every TLS handshake fails, so iroh's relay and address discovery
+   *  cannot work whatever the network does)?
+   *
+   *  `PipeNone` is the DEVICE's honest "interfaces exist, none has an
+   *  address". `PipeUnknown` — the host answer, and what every off-device
+   *  build and golden sees — is deliberately NOT included: on a Mac pointed
+   *  at a dead server the failure is the whole truth, and plan 0022's
+   *  behaviour there stands unchanged. */
+  def stillBooting(net: NetState, clockOk: Boolean): Boolean =
+    NetStatus.isNoPipe(net.pipe) || !clockOk
 
   /** the second line: what to do about it. Empty for the calm states, which
    *  need no instruction — provisioning (plan 0027: this session's QR was
    *  just approved and the handset is trading its node id for a session)
    *  says so, because the parent is WATCHING this screen right after the
    *  approve click and "waiting for network" would read as a failure. */
-  def bootSubMsg(net: NetState, c: ConnectionState, unavail: Boolean, prov: Boolean): String =
+  def bootSubMsg(net: NetState, c: ConnectionState, unavail: Boolean, prov: Boolean,
+      clockOk: Boolean): String =
     if unavail then "check config"
     else if isAuthRejected(c) then "check server"
+    else if stillBooting(net, clockOk) then ""
     else if isConnError(c) then "retrying..."
     else if prov then "handset approved"
     else ""
 
-  def bootColor(c: ConnectionState, unavail: Boolean): scala.Int =
-    if unavail || isAuthRejected(c) || isConnError(c) then Color.red
+  /** red only where the headline blames something. A still-booting device is
+   *  calm gray however its dials are going. */
+  def bootColor(net: NetState, c: ConnectionState, unavail: Boolean, clockOk: Boolean): scala.Int =
+    if unavail || isAuthRejected(c) then Color.red
+    else if stillBooting(net, clockOk) then Color.midGray
+    else if isConnError(c) then Color.red
     else Color.midGray
 
   /** the footer names the live keys — and, once Back is armed, replaces them

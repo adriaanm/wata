@@ -69,6 +69,17 @@ object NetStatus:
   // connected and dropped (the ordinary reconnect presentation). Health alone
   // cannot tell those apart — both are `NetDown`/`NetReconnecting`.
   private val everLiveC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  // the pipe tag the previous frame saw (-1 before the first poll), and the
+  // one-shot the ARRIVAL edge arms — see `notePipe`.
+  private val lastPipeC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
+  private val arrivedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  // has the system clock been plausible at any point this session? Latched:
+  // a clock only ever gets SET (see `clockOk`).
+  private val clockOkC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  // `logTransition`'s last printed key, and the ms stamp of its first call
+  // (the log's zero — process start, near enough).
+  private val lastLogC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
+  private val logZeroC: sgo.Atomic[Long] = sgo.atomic(0L)
 
   /** a fresh session: re-read the interfaces on the next frame and start the
    *  reconnecting animation from its first phase (the host drivers run several
@@ -80,6 +91,9 @@ object NetStatus:
     lastHealthC.set(-1)
     forcedC.set(-1)
     everLiveC.set(false)
+    lastPipeC.set(-1)
+    arrivedC.set(false)
+    lastLogC.set(-1)
 
   /** the uitest-only pipe override (-1 = read the interfaces). */
   def forcePipe(tag: scala.Int): Unit = forcedC.set(tag)
@@ -94,7 +108,109 @@ object NetStatus:
   def poll(c: ConnectionState): NetState =
     val h = healthTag(c)
     if h == 0 then everLiveC.set(true)
-    NetState(pipeOf(pipeTag()), healthOf(h), blinkPhase(h))
+    val p = pipeTag()
+    notePipe(p)
+    NetState(pipeOf(p), healthOf(h), blinkPhase(h))
+
+  // ---- the pipe-arrival edge -----------------------------------------------
+
+  /** the frame on which the device goes from NO interface with an address to
+   *  one arms a one-shot the frame loop takes (`takePipeArrival`) to poke the
+   *  sync loop's backoff. Without it a client whose backoff had climbed to its
+   *  60s ceiling while there was no network sits out that ceiling with wifi
+   *  already up — a full minute of "can't reach server" over a working link.
+   *
+   *  Only a real transition counts: the first poll of a session (previous tag
+   *  -1) arms nothing, since a session that starts with an interface has its
+   *  backoff at 1s anyway. */
+  def notePipe(tag: scala.Int): Unit =
+    val prev = lastPipeC.get()
+    if prev != tag then
+      lastPipeC.set(tag)
+      if prev >= 0 && !hasInterface(pipeOf(prev)) && hasInterface(pipeOf(tag)) then
+        arrivedC.set(true)
+
+  /** take the pipe-arrival one-shot (true at most once per arrival). */
+  def takePipeArrival(): Boolean =
+    val out = arrivedC.get()
+    if out then arrivedC.set(false)
+    out
+
+  // ---- the clock -----------------------------------------------------------
+
+  /** 2025-01-01Z in epoch ms: the floor below which the system clock is not a
+   *  clock. Far above any unset one, far below any real one. */
+  val CLOCK_FLOOR_MS: Long = 1735689600000L
+
+  /** does this machine have a plausible wall clock? The handset has no
+   *  battery-backed RTC, so it boots at 1970 and stays there until NTP lands —
+   *  and at 1970 every TLS handshake fails certificate validation, which takes
+   *  down iroh's relay and address-discovery paths outright. A dial that fails
+   *  in that window says nothing about the server, so the boot screen stays
+   *  calm (`Applets.bootMsg`) and the log says which state it is in.
+   *
+   *  LATCHED, and deliberately not cleared by `reset`: a clock only ever gets
+   *  set, and it is a property of the machine, not of a client session. */
+  def clockOk(): Boolean =
+    var out = clockOkC.get()
+    if !out && go.time.nowUnixMilli() >= CLOCK_FLOOR_MS then
+      clockOkC.set(true)
+      out = true
+    out
+
+  // ---- the transition log --------------------------------------------------
+
+  /** print ONE line per change of (pipe, connection, clock) — the four or five
+   *  lines that make a boot legible afterwards, against a transport whose own
+   *  dial log prints once per distinct reason and can therefore look silent
+   *  for an hour. Called once a frame; a frame that changed nothing prints
+   *  nothing. */
+  def logTransition(n: NetState, c: ConnectionState, clock: Boolean): Unit =
+    var flag = 0
+    if clock then flag = 1
+    val key = (pipeTagOf(n.pipe) * 100) + (connTag(c) * 10) + flag
+    if lastLogC.get() != key then
+      val hadClock = (lastLogC.get() % 10) == 1
+      lastLogC.set(key)
+      val now = go.time.nowUnixMilli()
+      // the stamps are wall-clock deltas, and on this device the wall clock
+      // STEPS — from 1970 to now, the moment NTP lands. Re-zero on that step,
+      // so the line reporting it reads +0s and the ones after it count from
+      // there rather than from 1970 (a 56-year delta on every later line).
+      if logZeroC.get() == 0L || (clock && !hadClock) then logZeroC.set(now)
+      val secs = (now - logZeroC.get()) / 1000L
+      println("net: +" + secs + "s pipe=" + pipeName(n.pipe) + " conn=" + connName(c) +
+        " clock=" + clockName(clock))
+
+  def pipeTagOf(p: NetPipe): scala.Int = p match
+    case _: PipeWifi => P_WIFI
+    case _: PipeCell => P_CELL
+    case _: PipeNone => P_NONE
+    case _           => P_UNKNOWN
+
+  def pipeName(p: NetPipe): String = p match
+    case _: PipeWifi => "wifi"
+    case _: PipeCell => "cell"
+    case _: PipeNone => "none"
+    case _           => "unknown"
+
+  def connTag(c: ConnectionState): scala.Int = c match
+    case _: Connected        => 0
+    case _: Syncing          => 1
+    case _: Connecting       => 2
+    case _: ConnError        => 3
+    case _: Disconnected     => 4
+    case _: ConnAuthRejected => 5
+
+  def connName(c: ConnectionState): String = c match
+    case _: Connected        => "connected"
+    case _: Syncing          => "syncing"
+    case _: Connecting       => "connecting"
+    case _: ConnError        => "error"
+    case _: Disconnected     => "disconnected"
+    case _: ConnAuthRejected => "rejected"
+
+  def clockName(ok: Boolean): String = if ok then "set" else "UNSET"
 
   // ---- the pipe (cached; re-read every REFRESH_FRAMES frames) ---------------
   def pipeTag(): scala.Int =

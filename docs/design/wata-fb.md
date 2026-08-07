@@ -487,8 +487,9 @@ saying what to do about it, and a footer naming the two live keys.
 
 This was the first screen built as a `wataui` BODY (plan 0024):
 `WataLogic.bodyBoot` is a pure function of
-`(NetState, ConnectionState, quitArmed, transportUnavailable)` to a view
-tree. The app-edge read — `FbCaps.transportUnavailable()` — is hoisted
+`(NetState, ConnectionState, quitArmed, transportUnavailable, provisioning,
+clockOk)` to a view tree. The app-edge reads —
+`FbCaps.transportUnavailable()`, `NetStatus.clockOk()` — are hoisted
 to `WataLogic.render`, the call site that paints the whole applet, because
 a body reads its arguments and nothing else ([wataui.md](wataui.md)).
 Centering is the body's arithmetic (`FbPaint.centerCol`), so the
@@ -502,20 +503,57 @@ The copy is `WataLogic.bootMsg`/`bootSubMsg`, in priority order:
 |---|---|---|
 | `FbCaps.transportUnavailable()` | `transport unavailable` | `check config` |
 | connection is `ConnAuthRejected` | `account rejected` | `check server` |
+| `stillBooting` (below) | `starting up...` | — |
 | connection is `ConnError` | `can't reach server` | `retrying...` |
+| provisioning | `setting up...` | `handset approved` |
 | an interface, and health not down | `waiting for network` | — |
 | otherwise | `starting up...` | — |
 
-The two calm states are the boot-before-the-network case: naming it an
+The calm states are the boot-before-the-network case: naming it an
 error there would teach a kid that the radio is broken every morning.
-The two failure states are the opposite mistake, and the one the field
+The failure states are the opposite mistake, and the one the field
 actually hit — the error copy used to be gated behind `everLive`, so a
 client that never got its first connection could only ever show the calm
 line, and a device sat for hours saying "waiting for network" under a
-live wifi glyph. Error copy now renders whenever the state says error,
+live wifi glyph. Error copy renders whenever the state says error,
 latched or not (plan 0022). A rejected login is separated from a
 transport failure because the two need different actions from whoever is
 holding the handset.
+
+`WataLogic.stillBooting` is where those two pressures meet (plan 0035):
+a failure outranks the calm copy only once the device could plausibly
+have succeeded. It could not while
+
+- the pipe is `PipeNone` — the DEVICE's honest "interfaces exist, none
+  holds an address". `PipeUnknown`, the host answer every off-device
+  build and golden sees, is deliberately excluded: on a Mac pointed at a
+  dead server the failure is the whole truth.
+- `NetStatus.clockOk()` is false. The handset has no battery-backed RTC,
+  so it boots at Jan 1 1970, and at 1970 every TLS handshake fails
+  certificate validation — which takes out iroh's relay connections and
+  its pkarr/DNS address discovery outright. A dial that fails in that
+  window says nothing about the server. The check is a latch against a
+  2025-01-01 floor: a clock only ever gets set, and the flag is a
+  property of the machine, not of a client session (`NetStatus.reset`
+  leaves it alone). Making the clock actually arrive is the rootfs's job
+  — bq268-alpine `docs/planning/clock-at-boot.md`.
+
+Two more things ride the frame step for the same reason (`Ui.frameStep`,
+and its counterpart in wata-mac's pump):
+
+- **The network arriving retries immediately.** `NetStatus.poll` marks
+  the edge from no interface to an interface; the frame loop takes it
+  (`takePipeArrival`) and pokes `Runtime.retryNow`. Without it a client
+  whose backoff climbed to its 60s ceiling while it had no network sits
+  out that ceiling with wifi already up.
+- **One log line per connectivity change.** `NetStatus.logTransition`
+  prints `net: +47s pipe=wifi conn=connecting clock=UNSET` on each change
+  of the (pipe, connection, clock) tuple — a boot's whole story in four
+  or five lines, against a transport that logs a dial failure once per
+  distinct reason and can therefore look silent for an hour. The stamps
+  re-zero when the clock steps from 1970, or every later line would carry
+  a 56-year delta. The iroh dialer repeats a stuck reason every 60s with
+  the count it swallowed (`go-pkgs/irohnet`, `logDialError`).
 
 BOTH KEYS ARE LIVE on this screen, which is the other half of the same
 fix — the screen a stuck user presses things on used to have exactly one
@@ -1199,7 +1237,7 @@ one-user phases:
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED` over a row that now carries the unsent mark, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm, and the send's retry is the OUTBOX's, not a second press. |
 | `outbox-restart` | a message survives an outage and a restart (plan 0022): with every upload answering 500, the send is queued and the row marked; a SECOND PROCESS resumes from the config store, finds the queue on disk beside it, and — once the hook is disarmed — delivers it on the next sync round, clearing the mark. Goldens the marked row, the cleared row with its badge, and the message in the conversation. |
 | `playing-hung` | the playback mark and the hung download: a SIGSTOPped server (`stop_server_after` + `http_timeout_ms: 1500`) means the fetch never answers, so the mark drawn on the OK release stays until the deadline turns it into `PLAY FAILED` and clears it. |
-| `early-boot` | the applet's boot presentation and its session latch: the earliest cold-boot frame (`starting up...`, no interface), the frame after an interface appears and the client starts trying (`waiting for network`), the ordinary contact list once the link has been live once, and — after a scripted health drop — that the boot screen does NOT come back. Forced with `conn`/`netpipe` from the first frame the script steps, so no frame is ever polled live before the boot frames are taken. |
+| `early-boot` | the applet's boot presentation and its session latch: the earliest cold-boot frame (`starting up...`, no interface), a dial that FAILED while there is still no interface (`starting up...` again — plan 0035's calm-outranks-failure rule, and the frame the field sequence got wrong), the frame after an interface appears and the client starts trying (`waiting for network`), the ordinary contact list once the link has been live once, and — after a scripted health drop — that the boot screen does NOT come back. Forced with `conn`/`netpipe` from the first frame the script steps, so no frame is ever polled live before the boot frames are taken. |
 | `conn-status` | the header's connectivity element and the status line it shares its computed state with: connected (`NET` off-device), reconnecting on both phases of the `..` alternation, disconnected, and — through the `netpipe` override — the device-only wifi and cellular glyphs and the `OFF` state, whose red status line the client's own belief that it is syncing does not override. |
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Nineteen checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
@@ -1455,11 +1493,26 @@ dependency possible without a native ARM toolchain — see
 `/dev/shm` (a 192MB tmpfs — the device's root filesystem has only
 about 9MB free), remounts `/dev/shm` executable (it's `noexec` by
 default), runs it over ssh with output streamed back live, and then
-deletes it. There is no persistent install path in this script —
-deployment is deliberately transient; a binary surviving reboot would
-need to be copied somewhere durable manually. `BQ268_HOST` and
+deletes it. `BQ268_HOST` and
 `FB_CC` are overridable via environment variables; the device's SSH
 host alias is expected to be `bq268` in the operator's `~/.ssh/config`.
+
+`tools/fb-deploy.sh install` (`just fb-deploy install`) is the durable
+path, and the only mode that is not transient: it builds the iroh binary
+(an installed handset's transport is iroh, so `install` implies it),
+lands it beside the running one, rotates the old one to
+`/opt/wata/wata-fb.prev`, and kills the running app — tty1 respawns
+`/opt/wata/start.sh`, so the new binary is up within a second and the
+previous one is one `mv` away. It never touches `/etc/wata/iroh.json`:
+that file carries the handset's minted identity, and an enrolled device
+must not be re-identified by a deploy.
+
+`just fb-shot` (`tools/fb-shot.py`) reads `/dev/fb0` over ssh and writes
+the panel as a PNG — the live screen, without taking the panel over,
+which is how a boot sequence is checked from the host. It shows the last
+PAINTED frame: the screensaver stops rendering rather than clearing, so
+a shot taken while the screen is off is the frame from before it went
+off, not a stale bug.
 
 The durable install on the device is `/opt/wata/wata-fb` plus
 `/opt/wata/start.sh` (`exec /opt/wata/wata-fb ui` — the `ui`

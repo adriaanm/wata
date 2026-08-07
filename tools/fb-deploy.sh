@@ -7,6 +7,10 @@
 # clean, and the run does not touch the speaker or mic.
 #
 #   tools/fb-deploy.sh                 # build + deploy + run the app (default)
+#   tools/fb-deploy.sh install         # replace /opt/wata/wata-fb — the binary
+#                                      #   tty1 respawns — and restart it. The
+#                                      #   iroh build, the previous binary kept
+#                                      #   as wata-fb.prev.
 #   tools/fb-deploy.sh fbsmoke         # device smoke: draw the test
 #                                      #   pattern to /dev/fb0, blink the LEDs,
 #                                      #   echo evdev keys ~20s ([HUMAN-VERIFY]:
@@ -44,10 +48,16 @@ CC="${FB_CC:-zig cc -target arm-linux-musleabihf}"
 BIN="$(emitdir wata-fb)/wata-fb-linux-arm"
 REMOTE="/dev/shm/wata-fb"
 FB_CMD="${1:-}"   # e.g. `fbsmoke`; empty = plain run
+# `install` is not a run mode: it replaces the binary tty1 respawns
+# (/opt/wata/wata-fb) instead of running one out of /dev/shm. It implies the
+# iroh build — an installed handset's transport is iroh — and it never touches
+# /etc/wata/iroh.json, which carries the device's minted identity.
+INSTALL=0
+if [ "$FB_CMD" = "install" ]; then INSTALL=1; FB_CMD=""; fi
 
 echo "== fb-deploy: cross-build wata-fb (armv7-musl) =="
 ( cd "$WATA/wata-fb" && "$SGO" build --goos linux --goarch arm --goarm 7 --cgo --cc "$CC" )
-if [ -n "${BQ268_IROH_PEER:-}" ]; then
+if [ -n "${BQ268_IROH_PEER:-}" ] || [ "$INSTALL" = 1 ]; then
   # The sgo cross-build produces the STUB transport; iroh mode needs the
   # -tags iroh binary linked against a current arm staticlib (the clib is
   # gitignored and goes stale whenever the FFI changes — a stale one either
@@ -59,6 +69,19 @@ if [ -n "${BQ268_IROH_PEER:-}" ]; then
       CGO_ENABLED=1 CC="$CC" go build -tags iroh -o "$BIN" . )
 fi
 ls -la "$BIN"; file "$BIN" || true
+
+if [ "$INSTALL" = 1 ]; then
+  # Land it beside the running one, rotate, then kill the running app: tty1
+  # respawns /opt/wata/start.sh, so the new binary is up within a second and
+  # the previous one is one `mv` away.
+  echo "== fb-deploy: install -> $HOST:/opt/wata/wata-fb (previous kept as .prev) =="
+  scp -q "$BIN" "root@$HOST:/opt/wata/wata-fb.new"
+  ssh "root@$HOST" "cd /opt/wata && chmod +x wata-fb.new && mv -f wata-fb wata-fb.prev && \
+    mv wata-fb.new wata-fb && sync && pkill -f 'wata-fb ui'; sleep 2; ls -la /opt/wata; \
+    ps aux | grep -F 'wata-fb ui' | grep -v grep"
+  echo "== fb-deploy: installed (tty1 respawned it) =="
+  exit 0
+fi
 
 echo "== fb-deploy: scp -> $HOST:$REMOTE =="
 if ! scp -q "$BIN" "root@$HOST:$REMOTE"; then

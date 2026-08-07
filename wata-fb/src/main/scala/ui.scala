@@ -292,6 +292,14 @@ object Ui:
     // countdown and the reconnecting blink, so it belongs here, once a frame.
     val conn = connV
     val net = NetStatus.poll(conn)
+    // one log line per change of (pipe, connection, clock) — a boot's whole
+    // connectivity story, against a transport that logs a dial failure once
+    // per distinct reason and then looks silent (plan 0035).
+    NetStatus.logTransition(net, conn, NetStatus.clockOk())
+    // the network ARRIVING is the one moment worth retrying immediately: the
+    // sync loop's backoff may be at its 60s ceiling from dialling with no
+    // interface at all.
+    if NetStatus.takePipeArrival() then Runtime.retryNow(c)
 
     // build this frame's context: ONE unified FrameCtx shared by every applet
     val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts,

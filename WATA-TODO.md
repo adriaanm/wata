@@ -33,7 +33,12 @@ blocks + git log; each entry cites where it was recorded.*
   and every screensaver wake land on an unblanked panel. Rides the next
   `fb-deploy`; verify no white screen at boot and after idle wake. The
   cmdline half (`consoleblank=0`) is handed to bq268-alpine
-  (`docs/planning/consoleblank-cmdline.md` there).
+  (`docs/planning/consoleblank-cmdline.md` there). 2026-08-07: installed
+  and cold-booted twice (`just fb-deploy install`) — the boot half is
+  good, the panel painted the boot screen from the first frame with no
+  white. The idle-wake half still needs a physical key press; note that
+  `just fb-shot` shows the last PAINTED frame, so a shot taken while the
+  screensaver is off is not evidence either way.
 - **Wifi truthfulness needs its device passes** (plan 0031, 2026-08-06):
   the settle/verdict/off changes are integ-proven on the fake seam only.
   On hardware, after the next `fb-deploy`: a `wifi`+`join` with a real

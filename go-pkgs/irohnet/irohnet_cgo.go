@@ -461,7 +461,18 @@ type Dialer struct {
 
 	logMu      sync.Mutex
 	lastLogged string // last dial-error reason printed; suppresses repeats
+	// how many failures the current reason has swallowed since it was last
+	// printed, and when it was last printed — the heartbeat below.
+	sameCount int
+	lastAt    time.Time
 }
+
+// How long a dial failure that keeps repeating verbatim stays silent before it
+// is printed again, with the count of what was swallowed. Log-once-per-reason
+// alone makes a client stuck for an hour look identical to one that failed
+// twice and recovered, which is exactly what a handset that never came up
+// after boot looked like in its log (plan 0035).
+const dialLogRepeat = 60 * time.Second
 
 // NewDialer binds a client endpoint from cfg (Peer required; PeerAddrs
 // required when Relay is "none").
@@ -517,6 +528,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, addr string) (net.Con
 func (d *Dialer) dialWorked() {
 	d.logMu.Lock()
 	d.lastLogged = ""
+	d.sameCount = 0
 	d.logMu.Unlock()
 	clearRefusal()
 }
@@ -529,13 +541,28 @@ func (d *Dialer) dialWorked() {
 // both wata-server's client use and wata-fb/wata-tui share this path. The
 // Rust side already keeps a redial loop from repeating an application close
 // on the wire; this dedupes what reaches the log on top of that.
+//
+// A reason that keeps repeating is not silent forever: every dialLogRepeat it
+// prints once more with the number of attempts it swallowed, so a client stuck
+// on one failure is visible as stuck rather than as quiet.
 func (d *Dialer) logDialError(reason string) {
 	d.logMu.Lock()
 	defer d.logMu.Unlock()
+	now := time.Now()
 	if reason == d.lastLogged {
+		d.sameCount++
+		if now.Sub(d.lastAt) < dialLogRepeat {
+			return
+		}
+		fmt.Printf("irohnet: dial %s still failing after %d more attempts: %s\n",
+			d.peer, d.sameCount, reason)
+		d.sameCount = 0
+		d.lastAt = now
 		return
 	}
 	d.lastLogged = reason
+	d.sameCount = 0
+	d.lastAt = now
 	noteRefusal(reason)
 	fmt.Printf("irohnet: dial %s failed: %s\n", d.peer, reason)
 }
