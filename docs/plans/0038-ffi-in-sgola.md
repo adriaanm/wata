@@ -23,7 +23,8 @@ An inventory of the two packages, by what each line needs:
 
 | what | where | needs |
 |---|---|---|
-| pure logic — the mirror, the differ target, keys, pixels, glyphs | `nativeui/view,dispatch,keys,pixels,glyphs` (491 lines) | **nothing**; zero FFI of any kind |
+| pure logic — the mirror, the differ target, keys, pixels, glyphs | `nativeui/view,keys,pixels,glyphs` (397 lines) | **nothing**; zero FFI of any kind |
+| the main-queue seam | `nativeui/dispatch.go` (94 lines) | `Dlopen`/`Dlsym`/`NewCallback`/`uintptr` — the FFI core, see the correction below |
 | the retained interpreter | `nativeui/interp.go` (359 lines) | only *typed* `appkit.*` wrappers — ordinary Go funcs, facade-able today |
 | the chrome | `macshell/login,menu,prefs` (581 lines) | raw ObjC messaging: 64 `objc.Send`/`RegisterName` sites |
 | class synthesis | `nativeui/keyview.go`, `macshell/menu.go` | Go **func values** as ObjC method bodies |
@@ -120,12 +121,50 @@ Recording it here so a green spike does not get read as a mandate.
 
 Stages 1 and 2 need nothing from the compiler and should not wait:
 
-1. `nativeui/view,dispatch,keys,pixels,glyphs` → Sgola. 491 lines, zero
-   FFI. Pure win, no risk.
+1. `nativeui/view,keys,pixels,glyphs` → Sgola. 397 lines, zero FFI.
 2. `nativeui/interp.go` → Sgola, over facades on the generated `appkit`
    bindings. **The wire dies here** — with the mirror types on the Sgola
    side, `wataui`'s `View` crosses by direct call and ~400 lines of
    encoder, decoder and grammar test go with it.
+
+### The staging is inverted — corrected 2026-08-07
+
+Two things the inventory above got wrong, found by reading the files
+before starting stage 1:
+
+**`dispatch.go` is not FFI-free.** It was counted in the "needs nothing"
+row (it is the 94 lines that made 397 into 491), but it is the *purest*
+FFI file in the package: `purego.Dlopen` on libSystem, `Dlsym` for
+`_dispatch_main_q`, `purego.NewCallback` for the work trampoline, and
+`uintptr` as the queue handle, the context word and the callback address.
+It needs both gaps this plan filed **and** the func-typed facade param the
+call-in leg is blocked on, so it belongs in the FFI-core row and moves
+with `macshell/shell.go`, not before it.
+
+**Stage 1 cannot precede stage 2; it rides with it.** The pure logic is
+pure, but it has no Sgola consumer yet and three plain-Go ones: `interp.go`
+walks the `View` mirror and calls `pixels`/`glyphs`, `macshell/wire.go`
+*builds* mirror values, and `macshell/shell.go` calls `TranslateKeyCode`.
+Moving the definitions to Sgola while the consumers stay in Go needs the
+emitted Sgola package to be importable from plain Go — `emitpackage` makes
+that possible now (it landed for `tools/phone-spike`), but it buys the
+wrong thing: `wata-mac` links these sources whole-program *and* Go imports
+their emission, so the types exist twice and the wire is still needed to
+cross between the copies. The wire dies only when the interpreter is on
+the Sgola side. So the order is: **port `interp.go`, pulling `view`,
+`pixels` and `glyphs` across with it, in one move.** `keys.go` is the one
+piece with a consumer that is staying (`shell.go`'s key view); it crosses
+when `shell.go` hands raw `keyCode`s over the seam instead of translated
+ones — a change local to that file.
+
+Queue effect: `NATIVEUI-LOGIC-TO-SGOLA` is not a separate item and
+`WIRE-DIES-INTERP-TO-SGOLA` is not blocked on it. What actually gates the
+combined move is whether a facade can express the `appkit` surface
+`interp.go` uses — in particular `CGRect`/`CGPoint`/`CGSize` passed and
+returned **by value** (today's facades bind opaque handles and scalars),
+and `image/png` encoding, which `interp.go` uses to hand `VImage` bytes to
+`NSImage`. Those are the questions to answer before the port, and they are
+the same shape as `BINDGEN-TYPED-STRUCTS`.
 
 ## Verification
 
