@@ -213,7 +213,7 @@ object Ui:
       // hoist the command Chan out of the fork — the body needs only the
       // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
-      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts, true))
       Runtime.start(c)
       CmdPoller.start(c)     // the device-command mailbox (plan 0020)
       frameLoop(c, clock, evts, dev, px)

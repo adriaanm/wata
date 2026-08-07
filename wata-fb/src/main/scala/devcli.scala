@@ -52,7 +52,7 @@ object DevCli:
       // hoist the command Chan out of the fork — the body needs only the
       // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
-      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts, false))
       Runtime.start(c)
       var r = false
       if Runtime.waitForConnection(c, Syncing(), 15000L) then
@@ -81,7 +81,7 @@ object DevCli:
       // hoist the command Chan out of the fork — the body needs only the
       // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
-      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts, false))
       Runtime.start(c)
       var r = false
       if Runtime.waitForConnection(c, Syncing(), 15000L)
@@ -118,7 +118,7 @@ object DevCli:
       // hoist the command Chan out of the fork — the body needs only the
       // channel (a synchronizer), not the whole client record.
       val audioCmds = c.audioCmds
-      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts, false))
       Runtime.start(c)
       if Runtime.waitForConnection(c, Syncing(), 15000L) then
         val deadline = clock.nowUnixMillis() + soakSecs.toLong * 1000L

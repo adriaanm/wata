@@ -6,6 +6,11 @@
 # output, and cleans up. Nothing is installed to /opt/wata: device state stays
 # clean, and the run does not touch the speaker or mic.
 #
+# The startup chirp (wata-fb/assets/chirp.ogg) ships alongside the binary in
+# both modes — beside it in /dev/shm for a run (WATA_CHIRP points the app at
+# it), and as /opt/wata/chirp.ogg for an install, where the app finds it by
+# default.
+#
 #   tools/fb-deploy.sh                 # build + deploy + run the app (default)
 #   tools/fb-deploy.sh install         # replace /opt/wata/wata-fb — the binary
 #                                      #   tty1 respawns — and restart it. The
@@ -47,6 +52,8 @@ CC="${FB_CC:-zig cc -target arm-linux-musleabihf}"
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 BIN="$(emitdir wata-fb)/wata-fb-linux-arm"
 REMOTE="/dev/shm/wata-fb"
+CHIRP="$WATA/wata-fb/assets/chirp.ogg"            # the startup bleep, shipped beside the binary
+REMOTE_CHIRP="/dev/shm/chirp.ogg"
 FB_CMD="${1:-}"   # e.g. `fbsmoke`; empty = plain run
 # `install` is not a run mode: it replaces the binary tty1 respawns
 # (/opt/wata/wata-fb) instead of running one out of /dev/shm. It implies the
@@ -76,6 +83,7 @@ if [ "$INSTALL" = 1 ]; then
   # the previous one is one `mv` away.
   echo "== fb-deploy: install -> $HOST:/opt/wata/wata-fb (previous kept as .prev) =="
   scp -q "$BIN" "root@$HOST:/opt/wata/wata-fb.new"
+  scp -q "$CHIRP" "root@$HOST:/opt/wata/chirp.ogg"
   ssh "root@$HOST" "cd /opt/wata && chmod +x wata-fb.new && mv -f wata-fb wata-fb.prev && \
     mv wata-fb.new wata-fb && sync && pkill -f 'wata-fb ui'; sleep 2; ls -la /opt/wata; \
     ps aux | grep -F 'wata-fb ui' | grep -v grep"
@@ -83,19 +91,21 @@ if [ "$INSTALL" = 1 ]; then
   exit 0
 fi
 
-echo "== fb-deploy: scp -> $HOST:$REMOTE =="
-if ! scp -q "$BIN" "root@$HOST:$REMOTE"; then
+echo "== fb-deploy: scp -> $HOST:$REMOTE (+ chirp.ogg) =="
+if ! scp -q "$BIN" "$CHIRP" "root@$HOST:/dev/shm/"; then
   echo "################################################"
   echo "## fb-deploy FAILED: cannot scp to $HOST (wifi/DHCP? update ~/.ssh/config HostName)"
   echo "################################################"
   exit 1
 fi
 
-RUN_ENV=""
+# the app looks for the chirp beside the INSTALLED binary; a run out of
+# /dev/shm has to be told where it landed.
+RUN_ENV="WATA_CHIRP=$REMOTE_CHIRP"
 if [ -n "${BQ268_IROH_PEER:-}" ]; then
   REMOTE_IROH="/etc/wata/iroh.json"
   IROH_JSON="{\"peer\":\"$BQ268_IROH_PEER\",\"relay\":\"${BQ268_IROH_RELAY:-n0}\"}"
-  RUN_ENV="env WATA_IROH_CONFIG=$REMOTE_IROH"
+  RUN_ENV="$RUN_ENV WATA_IROH_CONFIG=$REMOTE_IROH"
   if [ -n "${WATA_ADMIN_URL:-}" ]; then
     IROH_JSON="{\"peer\":\"$BQ268_IROH_PEER\",\"relay\":\"${BQ268_IROH_RELAY:-n0}\",\"adminUrl\":\"$WATA_ADMIN_URL\"}"
     RUN_ENV="$RUN_ENV WATA_ADMIN_URL=$WATA_ADMIN_URL"
@@ -109,5 +119,5 @@ fi
 echo "== fb-deploy: remount /dev/shm exec + run ($REMOTE $FB_CMD) =="
 # /dev/shm is noexec by default (README shortcut); remount, run, remove. The
 # smoke ($FB_CMD=fbsmoke) runs ~20s+ polling input — stream its output live.
-ssh "root@$HOST" "mount -o remount,exec /dev/shm && chmod +x $REMOTE && $RUN_ENV $REMOTE $FB_CMD; rc=\$?; rm -f $REMOTE; exit \$rc"
+ssh "root@$HOST" "mount -o remount,exec /dev/shm && chmod +x $REMOTE && env $RUN_ENV $REMOTE $FB_CMD; rc=\$?; rm -f $REMOTE $REMOTE_CHIRP; exit \$rc"
 echo "== fb-deploy: done (binary removed from /dev/shm) =="

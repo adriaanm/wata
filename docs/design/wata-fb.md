@@ -931,6 +931,54 @@ speaker, the message plays to completion, matching the same
 uninterruptible-write shape used elsewhere in this codebase's
 lower-level write loop.
 
+**The startup chirp** (`chirp.scala`, `wata-fb/assets/chirp.ogg`) is the
+short walkie-talkie bleep the handset plays once its audio route exists, so
+a user holding a device with a ~40s boot can tell "ready" from "still
+booting" from "broken". `AudioThread.mainLoop` plays it right after
+`setupMixer()` and before the first command — the routes must exist for it
+to be audible, and that thread owns the pcm device, so playing it anywhere
+else would race the mixer setup. The `chirp` flag on `mainLoop` is what
+selects it: the app passes true, the diagnostic drivers (`selftest`,
+`devcli`) pass false, since they are judged by the sounds they make on
+purpose. A PTT or roger beep is a further `Chirp.play()` call site from
+that thread, not a redesign.
+
+The asset is a **file beside the binary** (`/opt/wata/chirp.ogg`, or
+wherever `WATA_CHIRP` points — the run-mode deploy lands it in `/dev/shm`),
+not bytes compiled into the source, so ~3KB of audio stays reviewable data
+instead of a generated array literal. `tools/fb-deploy.sh` ships it in both
+run and install modes. The price is that a deploy can skew: a missing or
+unreadable asset prints one line and the app runs on. `Chirp.play()` is
+otherwise nothing new — `Ogg.readFrames` → `Decoder.decodeFrame` →
+`playMessage`, the same path a voice message takes.
+
+Format is the device's own — Ogg/Opus, mono, 48kHz — built from the owner's
+source recording by `tools/make-chirp.py` (`just make-chirp`), which records
+the trim and the encoder flags as code. Two of those flags are load-bearing:
+
+- **`-page_duration 20000`** puts one 20ms Opus packet in each Ogg page.
+  `Ogg.readFrames` treats a page's whole payload as a single frame, so an
+  ffmpeg-default file — which packs many packets per page — reads as one
+  2000-byte "frame" claiming 20ms and would play as a fraction of itself.
+  The reader limitation is real and tracked as `OGG-MULTI-PACKET-PAGE`; the
+  flag keeps the asset inside what our own reader understands. `wata-fb
+  oggforeign` over the committed asset is pinned in the fb smoke
+  (`tools/fb-chirp.expected.txt`), so a re-encode that loses the flag fails
+  a gate rather than a boot.
+- **`-fflags +bitexact`** makes the output byte-stable. Without it the Ogg
+  muxer picks a random stream serial per run and stamps a vendor string into
+  the comment header, so two encodes of identical audio differ in the serial
+  and every page CRC, and "did the asset change" stops being answerable.
+
+On a cold boot the chirp can be inaudible while everything reports success:
+the codec resets `RX2 MIX1 INP1` to zero as the Q6 comes up, and `SetupMixer`
+runs once. That is `AUDIO-ROUTE-REAPPLY`, not a chirp defect — and the chirp
+makes it *audible*, which is the point: a missing hello is the cheapest
+signal that the route is wrong, available before anyone tries to send
+anything. There is no software volume anywhere in the client (`PlayVol` is a
+fixed 8192), so the hardware knob's off position silences the chirp by
+construction, exactly as it silences a message.
+
 **The vendored tinyalsa patch.** `go-pkgs/audio/vendor/tinyalsa/src/pcm.c`
 carries a local patch (search for `SGOLA PATCH`) to `pcm_start` and
 `pcm_state`. Background: `pcm_sync_ptr`'s flags argument controls
@@ -1630,7 +1678,8 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `led.scala` | 63 | Backlight/LED control and the battery-capacity read, via sysfs; best-effort, errors swallowed, and a missing battery node reads -1 rather than failing. |
 | `oggforeign.scala` | 22 | `wata-fb oggforeign` driver: reads a fixture file and prints `wataclient`'s foreign-Ogg oracle report. |
 | `syncfixdriver.scala` | 28 | `wata-fb syncfix` driver: reads captured `/sync` fixture files and feeds them to `wataclient`'s sync-fixture oracle. |
-| `audiothread.scala` | 342 | The background audio goroutine: record/playback/echo-test sessions over the `AudioCmd`/`AudioEvt` mailbox protocol, layered close-and-rethrow resource tiers around the cgo capture/encoder/decoder handles. |
+| `audiothread.scala` | 349 | The background audio goroutine: record/playback/echo-test sessions over the `AudioCmd`/`AudioEvt` mailbox protocol, layered close-and-rethrow resource tiers around the cgo capture/encoder/decoder handles. |
+| `chirp.scala` | 57 | The startup bleep: loads `/opt/wata/chirp.ogg` (or `$WATA_CHIRP`), decodes and plays it through the same reader/decoder/`playMessage` path a voice message takes, best-effort throughout. `Chirp.play()` is the whole surface, so a PTT or roger beep is a call site. |
 | `fbtest.scala` | 102 | `fbdump` (host PNG golden) and `fbsmoke` (on-device fb/LED/evdev smoke test) drivers; also `FbTest.present`, the byte-copy blit used by the real UI loop too. |
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
 | `shell.scala` | 214 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, red-in-snake goes back to wata, everything else goes to the active applet; the snake is also the one applet ticked only while active). |

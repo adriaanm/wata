@@ -1,0 +1,41 @@
+== foreign Ogg/Opus container (TUI-shaped fixture) ==
+bytes 3068
+packet 1: 3B toc-cfg 31 -> 960 samples@48k c=0
+packet 2: 3B toc-cfg 31 -> 960 samples@48k c=0
+packet 3: 3B toc-cfg 31 -> 960 samples@48k c=0
+packet 4: 3B toc-cfg 31 -> 960 samples@48k c=0
+packet 5: 67B toc-cfg 15 -> 960 samples@48k c=0
+packet 6: 37B toc-cfg 15 -> 960 samples@48k c=0
+packet 7: 79B toc-cfg 15 -> 960 samples@48k c=0
+packet 8: 71B toc-cfg 15 -> 960 samples@48k c=0
+packet 9: 62B toc-cfg 15 -> 960 samples@48k c=0
+packet 10: 58B toc-cfg 15 -> 960 samples@48k c=0
+packet 11: 55B toc-cfg 15 -> 960 samples@48k c=0
+packet 12: 53B toc-cfg 15 -> 960 samples@48k c=0
+packet 13: 54B toc-cfg 15 -> 960 samples@48k c=0
+packet 14: 79B toc-cfg 15 -> 960 samples@48k c=0
+packet 15: 73B toc-cfg 15 -> 960 samples@48k c=0
+packet 16: 65B toc-cfg 15 -> 960 samples@48k c=0
+packet 17: 65B toc-cfg 15 -> 960 samples@48k c=0
+packet 18: 64B toc-cfg 15 -> 960 samples@48k c=0
+packet 19: 80B toc-cfg 15 -> 960 samples@48k c=0
+packet 20: 58B toc-cfg 15 -> 960 samples@48k c=0
+packet 21: 76B toc-cfg 15 -> 960 samples@48k c=0
+packet 22: 70B toc-cfg 15 -> 960 samples@48k c=0
+packet 23: 108B toc-cfg 15 -> 960 samples@48k c=0
+packet 24: 120B toc-cfg 31 -> 960 samples@48k c=0
+packet 25: 62B toc-cfg 31 -> 960 samples@48k c=0
+packet 26: 72B toc-cfg 31 -> 960 samples@48k c=0
+packet 27: 64B toc-cfg 31 -> 960 samples@48k c=0
+packet 28: 56B toc-cfg 31 -> 960 samples@48k c=0
+packet 29: 119B toc-cfg 31 -> 960 samples@48k c=0
+packet 30: 115B toc-cfg 31 -> 960 samples@48k c=0
+packet 31: 106B toc-cfg 31 -> 960 samples@48k c=0
+pages 33 audio-packets 31
+serial-is-foreign true
+eos-carries-audio true
+final-granule 29112
+toc-total-samples48 29760
+granule-matches-toc false
+readFrames-count 31
+reader-sees-all-packets true

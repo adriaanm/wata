@@ -25,7 +25,7 @@ object Selftest:
       sgo.supervised {
         val cmds = sgo.makeChan[AudioCmd](16)
         val evts = sgo.makeChan[AudioEvt](16)
-        sgo.fork(AudioThread.mainLoop(cmds, evts))
+        sgo.fork(AudioThread.mainLoop(cmds, evts, false))
         if stage == "all" || stage == "echo" then
           println("=== echo_test - record 2s, play back (SPEAK, then LISTEN) ===")
           cmds.send(AcEchoTest())

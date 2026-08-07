@@ -44,6 +44,24 @@ echo "-- wata-fb (1c): gioshell blit pipeline (go test) --"
   || { echo "go-pkgs/gioshell tests failed"; exit 1; }
 echo "   blit pipeline OK"
 
+# -- (1d) the startup chirp asset: the committed Ogg/Opus bleep read by OUR
+# reader, through the same foreign-container oracle the pinned fixture uses.
+# The asset is produced by ffmpeg (tools/make-chirp.py) and our reader does not
+# split a page's lacing into packets, so an asset re-encoded without
+# `-page_duration 20000` would read as one oversized frame and play as a
+# fraction of itself — that fails HERE rather than on a handset at boot.
+# `granule-matches-toc false` in the pinned report is correct and not a defect:
+# the final granule is short by opus's 312-sample pre-skip, which every real
+# encoder emits and our own writer does not.
+echo "-- wata-fb (1d): startup chirp asset (oggforeign) --"
+CHIRP="$WATA/wata-fb/assets/chirp.ogg"
+[ -f "$CHIRP" ] || { echo "wata-fb: missing chirp asset $CHIRP"; exit 1; }
+if ! diff <("$FB_EMIT/$FB_BIN" oggforeign "$CHIRP") tools/fb-chirp.expected.txt; then
+  echo "wata-fb: chirp asset report diverged from the pinned expected"
+  exit 1
+fi
+echo "   chirp asset OK (31 one-packet pages, reader sees them all)"
+
 echo "-- wata-fb (2/2): cross build armv7-musl (cgo opus + tinyalsa) --"
 if ! command -v zig >/dev/null 2>&1; then
   echo "   SKIP: zig not installed (cross-cgo needs the C cross-toolchain; no test needs the device)"

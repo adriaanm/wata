@@ -260,6 +260,11 @@ bench:
 fixtures:
     bash tools/wataclient-fixtures.sh
 
+# re-encode the startup chirp from the owner's source recording (--check diffs
+# the committed asset against a fresh encode without writing)
+make-chirp *ARGS:
+    tools/make-chirp.py {{ARGS}}
+
 # ── Deploy ────────────────────────────────────────────────────────────────────
 
 # cross-build armv7 and deploy the device client

@@ -46,11 +46,19 @@ object AudioThread:
 
   /** The thread body: block on the command mailbox, dispatch. Run as a `fork`
    *  in the app's supervised scope — the blocking `recv` is scope-aware, so a
-   *  sibling failure cancels it. */
-  def mainLoop(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt]): Unit =
+   *  sibling failure cancels it.
+   *
+   *  `chirp` plays the startup bleep (chirp.scala) once the mixer is up and
+   *  before the first command: the routes must exist for it to be audible,
+   *  and this thread owns the pcm device, so playing it anywhere else would
+   *  race the mixer setup. The app passes true; the diagnostic drivers
+   *  (selftest, devcli) pass false — they are judged by the sounds they make
+   *  on purpose. */
+  def mainLoop(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt], chirp: Boolean): Unit =
     // both mixer routes ONCE at startup — per-recording switching crashed the
     // ADSP on this hardware.
     go.audio.setupMixer()
+    if chirp then Chirp.play()
     var run = true
     while run do
       run = dispatch(cmds, evts, cmds.recv())

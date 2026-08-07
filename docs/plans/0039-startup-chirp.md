@@ -1,6 +1,6 @@
 # 0039 — the handset says hello
 
-Status: proposed
+Status: accepted — host side done and gated; the on-device audible check is outstanding
 
 ## The problem
 
@@ -60,6 +60,15 @@ the same way, which is a playback bug nobody has hit because the pinned
 fixture happens to be one-packet-per-page. Filed separately as
 `OGG-MULTI-PACKET-PAGE`; noted here because the encoder flag is otherwise
 an unexplained incantation.
+
+### Byte-stability needs one more flag
+
+`-fflags +bitexact`. The Ogg muxer otherwise picks a RANDOM stream serial per
+run and stamps its own vendor string into the comment header, so two encodes
+of identical audio differ in the serial and in every page CRC — and "did the
+asset change" stops being a question the bytes can answer. bitexact pins the
+serial to `serial_offset` (0) and drops the vendor string; the audio is
+untouched.
 
 ## The decision
 
