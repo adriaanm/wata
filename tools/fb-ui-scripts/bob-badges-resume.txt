@@ -12,11 +12,13 @@ tap up
 advance 30
 checkpoint badges-restored
 
-# play out the DM only: opening receipts its latest message, OK on the
-# remaining unplayed row receipts + plays it
+# play out the DM only: opening receipts its latest message — the row the
+# cursor lands on, the list being newest first — so it takes one row down to
+# reach the remaining unplayed message, which OK receipts and plays.
 tap down
 tap enter
 wait played 1 2000
+tap down
 tap enter
 wait played 2 2000
 tap back

@@ -349,6 +349,36 @@ It derives from the rooms the server classified — DM stamps, group stamps,
 the family stamp — and the family roster. List order: Family, then groups
 in room (stamp-creation) order, then DMs, then the roomless roster rows.
 
+**A conversation's `messages` come back NEWEST FIRST** (`buildMessages`),
+which is the opposite of the room's own `voiceMessages` — those stay in
+timeline order, because the backfill insert (`insertVoiceByTs`) and the
+dedup both reason chronologically. The reversal happens once, at the
+snapshot boundary, and it is free: the accumulator is built newest-first
+anyway, so the old order was the one that paid for a reversal.
+
+The order is a product decision, not a presentation detail, which is why
+it lives here rather than in each client. Voice messages are ephemeral —
+what a kid opens a conversation for is the thing that just arrived, and
+under the old order that was the LAST row, reached by scrolling past
+everything already heard. Newest-first also makes index 0 the message a
+conversation opens on and the one a read receipt names.
+
+The **conversation list is deliberately NOT sorted by recency**, though
+the same argument seems to apply. It is a contact list, and its order is
+something a kid learns as a position: papa is the second row. A list that
+reorders itself whenever somebody talks means hunting for a name that
+used to be where the thumb already is, and mis-sending to whoever was
+promoted. Voice messages are ephemeral and interchangeable; people are
+not. Unplayed messages are surfaced by the row's badge instead, which
+draws the eye without moving the target.
+
+Everything reading the list positionally follows from that: the fb chat
+view renders row 0 at the top, `receiptLatest` takes the head, and the
+tui's `msgs`/`play N` number from the newest. The one place still
+thinking chronologically is the integ oracle, which asserts the order the
+SENDER produced — so `lastDursIn` reverses the newest *k* back, and
+`dursRun` counts its duration run down rather than up.
+
 1. **Conversations from the classified DM rooms** (`dmConvs`): each room
    whose `dmMembers` pair names *us* is the conversation with the other
    member (`dmPeerOf`), and that member is a `Contact` with the display
@@ -695,7 +725,8 @@ The whole recipe is pinned live by two integ scenarios
 each forcing a deep gap by pumping voice events into a DM by direct HTTP
 before the client's first sync, with message *i* given duration *i* so one
 walk of the final snapshot asserts completeness, exact count, and
-chronological order at once (`dursRun`):
+chronological order at once (`dursRun` — which walks the snapshot's
+newest-first list, so it counts the run DOWN from the last duration):
 
 - **`backfill-paged`** — 130 pumped messages: 20 arrive in the limited
   initial window, the other 110 only through three backward `/messages`

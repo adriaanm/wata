@@ -257,23 +257,19 @@ object DevCli:
 
   def anyMsg(s: StateSnapshot): Boolean = firstMxc(s.conversations) != ""
 
-  /** the NEWEST message's mxc across conversations (messages append in ingest
-   *  order — the last one is the newest). */
+  /** the NEWEST message's mxc across conversations — the head of the first
+   *  conversation that has any, messages coming back newest first. */
   def firstMxc(cs: List[Conversation]): String = cs match
     case h :: t => firstMxcStep(h, t)
     case Nil  => ""
 
   def firstMxcStep(h: Conversation, t: List[Conversation]): String =
-    val m = lastMxcOf(h.messages)
+    val m = newestMxcOf(h.messages)
     if m != "" then m else firstMxc(t)
 
-  def lastMxcOf(ms: List[VoiceMessage]): String = ms match
-    case h :: t => lastMxcStep(h, t)
+  def newestMxcOf(ms: List[VoiceMessage]): String = ms match
+    case h :: t => h.mxcUrl
     case Nil  => ""
-
-  def lastMxcStep(h: VoiceMessage, t: List[VoiceMessage]): String =
-    val rest = lastMxcOf(t)
-    if rest != "" then rest else h.mxcUrl
 
   // ---- misc ----------------------------------------------------------------------
 

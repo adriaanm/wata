@@ -4,7 +4,8 @@
 #
 # Receipts are per event, not a high-water mark: opening the conversation
 # receipts only its LATEST message, so bob arrives with exactly one played row
-# and the selection sitting on an unplayed one.
+# — and, the list being newest first, the cursor is sitting ON it. Moving down
+# one row is what reaches an unplayed message.
 
 wait syncing 1 900
 wait convs 2 900
@@ -15,8 +16,10 @@ wait played 1 2000
 advance 30
 checkpoint bob-conv-open
 
-# OK on the selected message: receipt for it, then download-and-play through
-# the sim audio actor. The second played row is the assertion.
+# down to the next-newest row, which nothing has played yet, then OK: receipt
+# for it, then download-and-play through the sim audio actor. The second
+# played row is the assertion.
+tap down
 tap enter
 wait played 2 2000
 advance 30

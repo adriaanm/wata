@@ -760,6 +760,20 @@ object SyncEngine:
 
   // ---- messages / played state ----------------------------------------------------
 
+  /** the conversation's messages, NEWEST FIRST.
+   *
+   *  The room's timeline is oldest-first and stays that way; this is the
+   *  presentation order, and it is the walkie-talkie's order: what someone
+   *  just said is the thing you want, and everything older is history. It
+   *  also fixes where a conversation OPENS — the clients enter at index 0,
+   *  which under the old order was the oldest message in the room, so a kid
+   *  with thirty messages had to scroll to the bottom to reach the one that
+   *  just arrived.
+   *
+   *  Cheap, too: the accumulator is built newest-first anyway (each `::`
+   *  pushes the next timeline entry in front), so this order is the one that
+   *  needs NO reversal — the reverse that used to be here was the cost of
+   *  the old order, not of this one. */
   def buildMessages(r: RoomState): List[VoiceMessage] =
     var acc: List[VoiceMessage] = Nil
     var cur = r.voiceMessages
@@ -770,7 +784,7 @@ object SyncEngine:
           acc = buildMessage(r, c.head) :: acc
           cur = c.tail
         case Nil => going = false
-    ListOps.reverse(acc)
+    acc
 
   def buildMessage(r: RoomState, vm: VoiceMessageRaw): VoiceMessage =
     val senderName = Names.displayOr(displayInRoom(r, vm.sender), vm.sender)

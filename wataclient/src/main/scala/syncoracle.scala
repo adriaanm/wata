@@ -444,7 +444,10 @@ object SyncOracle:
       "\"sender\":\"@alice:test\",\"content\":{}}]}}}}}"
     SyncEngine.process(parse(js16b))
     val conv16b = nthConv(SyncEngine.buildSnapshot(), 0)
-    b.append(" cleared "); b.append(boolStr(!firstMessage(conv16b).isFavorite)); b.append('\n')
+    // index 1, not 0: messages come back NEWEST first, and the favorite is on
+    // $msg1, the older of the two. Reading index 0 here would report "cleared"
+    // about a message that was never marked.
+    b.append(" cleared "); b.append(boolStr(!nthMessage(conv16b, 1).isFavorite)); b.append('\n')
 
     // -- 17. the family STAMP classifies; a bare #family: alias no longer does -----------
     SyncEngine.reset()

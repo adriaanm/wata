@@ -77,6 +77,10 @@ object WataLogic:
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
 
+  /** Opens at row 0, which is the NEWEST message now that the list comes back
+   *  newest first — the one somebody just pressed the LED for. It used to be
+   *  the oldest, so a busy conversation opened on a message from days ago and
+   *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
       s.pttHeld, s.pttHoldTime, s.playing, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
@@ -294,8 +298,10 @@ object WataLogic:
       case c: Some[Conversation] => receiptLatest(ctx, c.value)
       case None => ()
 
+  /** the read receipt names the NEWEST message, which is the head now that
+   *  the list is newest-first (it used to be the last element). */
   def receiptLatest(ctx: FrameCtx, conv: Conversation): Unit =
-    lastMsg(conv.messages) match
+    newestMsg(conv.messages) match
       case m: Some[VoiceMessage] => pushReceipt(ctx, conv.roomId, m.value.id)
       case None => ()
 
@@ -943,13 +949,10 @@ object WataLogic:
   def msgAtStep(h: VoiceMessage, t: List[VoiceMessage], i: scala.Int): Option[VoiceMessage] =
     if i == 0 then Some(h) else msgAt(t, i - 1)
 
-  def lastMsg(ms: List[VoiceMessage]): Option[VoiceMessage] = ms match
-    case h :: t => lastMsgStep(h, t)
-    case Nil  => None
-
-  def lastMsgStep(h: VoiceMessage, t: List[VoiceMessage]): Option[VoiceMessage] = t match
-    case h2 :: t2 => lastMsgStep(h2, t2)
-    case Nil    => Some(h)
+  /** the newest message: the HEAD, the list being newest-first. */
+  def newestMsg(ms: List[VoiceMessage]): Option[VoiceMessage] = ms match
+    case h :: t => Some(h)
+    case _      => None
 
 /** the UNIFIED per-frame context, one record for every applet: the live
  *  snapshot, the connection, the frame's computed connectivity (netstatus.scala

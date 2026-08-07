@@ -1105,7 +1105,17 @@ sync loop (inside `wataclient`) updates server state and publishes a
 new `StateSnapshot`; the UI loop picks it up next frame and the
 applet bodies (`WataLogic.bodyContacts`'s `contactRowsView`,
 `bodyConversation`'s `msgRowsView`) build their views from it directly —
-there is no separate "apply message" step in this module. Playing a
+there is no separate "apply message" step in this module.
+
+The message rows render the snapshot's list as it comes, and that list is
+**newest first** (see `docs/design/wataclient.md`), so row 0 — the top row,
+and the row `enterConv` puts the cursor on — is the message that just
+arrived. Two consequences to know before touching this view. Opening a
+conversation receipts its newest message, which is now the row under the
+cursor, so OK on it replays something already marked played; reaching an
+unplayed message means pressing DOWN. And every arrival inserts at index
+0, so a cursor parked on an older row keeps its INDEX and slides one
+message older — `[FB-CURSOR-ANCHOR]`. Playing a
 received clip is a full round-trip: `ActPlay(mxcUrl)` goes to
 `wataclient`, which downloads and hands PCM/Ogg bytes back through the
 `AudioEvt` channel, and `WataLogic.onAudioEvent`
@@ -1635,6 +1645,18 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. Beyond what `WATA-TODO.md` already tracks (the dot2/event-bus
 gap, the `/dev/shm`-only deploy), a few things stood out during this read:
+
+- **The message cursor anchors to an INDEX, not to a message**
+  `[FB-CURSOR-ANCHOR]`. With the list newest first, an arriving message
+  inserts at index 0 and shifts every row down, so a selection parked on
+  an older message quietly moves to the one after it — the row under the
+  finger changes without a keystroke. It is benign when the cursor is at
+  the top (index 0 stays "the newest", which is what you want to play),
+  and wrong when somebody is scrolled down browsing. The fix is to
+  remember the selected event id and re-find it in `clampMessages`,
+  falling back to the clamped index when that message is gone (redacted,
+  or aged out). Worth doing with `FB-REC-LEVEL-METER`-scale care: the
+  selection is also what PTT, favorite and delete act on.
 
 - **`Draw.newBuffer()` allocates a new 40960-byte buffer, but the UI
   loop only allocates it once** (`ui.scala:70`, passed into

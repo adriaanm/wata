@@ -337,9 +337,13 @@ def run(tmp):
         sp = [l for l in sent if l.startswith("patch ")]
         c.ok(sp[:1] == ['patch delete [] 1'],
              f"send: the recording overlay was not removed first, got {sp[:1]!r}")
+        # index 0 and highlighted: messages come back newest first, so a sent
+        # message lands at the TOP, under a cursor that never moved. The black
+        # ink (0) on the green highlight rect is what "selected" looks like.
         c.line(sp, lambda l: re.fullmatch(
-            r'patch insert \[0\.1\] 1 \$\S+:group\[mark:glyph\(0,25,128,2016\) '
-            r'dur:text\(2,3,"0:01",2016\) sender:text\(7,3,"Alice",2016\)\]', l),
+            r'patch insert \[0\.1\] 0 \$\S+:group\[hl:rect\(0,17,160,8,2016\) '
+            r'mark:glyph\(0,17,128,0\) dur:text\(2,2,"0:01",0\) '
+            r'sender:text\(7,2,"Alice",0\)\]', l),
             f"send: no own message row for the ~1.2s recording, got {sp!r}")
         c.line(sp, lambda l: l == 'patch insert [] 1 flash:group[msg:text(8,9,"SENT",2016)]',
                f"send: no SENT flash (EvSendComplete never reached the pump), got {sp!r}")
@@ -369,8 +373,8 @@ def run(tmp):
         live = sess.cmd("wait 8000", lambda l: l == "waited 8000")
         lp = [l for l in live if l.startswith("patch ")]
         c.line(lp, lambda l: re.fullmatch(
-            r'patch insert \[0\.1\] \d+ \$\S+:group\[dur:text\(\d+,\d+,"0:0\d",\d+\) '
-            r'sender:text\(\d+,\d+,"Bob",\d+\)\]', l),
+            r'patch insert \[0\.1\] 0 \$\S+:group\[hl:rect\(\S+\) '
+            r'dur:text\(\d+,\d+,"0:0\d",\d+\) sender:text\(\d+,\d+,"Bob",\d+\)\]', l),
             f"open-conversation arrival: no new message row, got {lp!r}")
         t6 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
         c.ok(sum(1 for l in t6 if l.strip().endswith('"Bob"')) == 2,

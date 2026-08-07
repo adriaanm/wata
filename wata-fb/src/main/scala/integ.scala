@@ -252,11 +252,38 @@ object Integ:
       case cv: Some[Conversation] => lastDursIn(cv.value.messages, ds)
       case None  => false
 
+  /** `ds` is chronological — oldest first, the order the sender recorded them
+   *  in — and the list is newest first, so the newest `k` are the list's HEAD
+   *  read backwards. */
   def lastDursIn(ms: List[VoiceMessage], ds: List[Long]): Boolean =
-    val n = msgCount(ms)
     val k = lenDurs(ds)
-    if n < k then false
-    else dursMatch(dropMsgs(ms, n - k), ds)
+    if msgCount(ms) < k then false
+    else dursMatch(revMsgs(takeMsgs(ms, k)), ds)
+
+  def takeMsgs(ms: List[VoiceMessage], n: Int): List[VoiceMessage] =
+    var acc: List[VoiceMessage] = Nil
+    var cur = ms
+    var i = 0
+    while i < n do
+      cur match
+        case h :: t =>
+          acc = h :: acc
+          cur = t
+          i += 1
+        case Nil => i = n
+    revMsgs(acc)
+
+  def revMsgs(ms: List[VoiceMessage]): List[VoiceMessage] =
+    var acc: List[VoiceMessage] = Nil
+    var cur = ms
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          acc = h :: acc
+          cur = t
+        case Nil => going = false
+    acc
 
   def lenDurs(ds: List[Long]): Int =
     var n = 0
@@ -321,10 +348,9 @@ object Integ:
       case cv: Some[Conversation] => stashFromConv(cv.value)
       case None  => false
 
+  /** the newest message is the HEAD, the list being newest first. */
   def stashFromConv(conv: Conversation): Boolean =
-    val n = msgCount(conv.messages)
-    if n == 0 then false
-    else stashMsgFields(conv.roomId, dropMsgs(conv.messages, n - 1))
+    stashMsgFields(conv.roomId, conv.messages)
 
   def stashMsgFields(roomId: String, lastOne: List[VoiceMessage]): Boolean = lastOne match
     case m :: t => stashMsg1(roomId, m)
@@ -813,9 +839,12 @@ object Integ:
       case cv: Some[Conversation] => runMatches(cv.value.messages, firstDur, n)
       case None => false
 
+  /** Walked from the head, which is the NEWEST message, so the run counts
+   *  DOWN from the last duration to `firstDur`. The caller still names the
+   *  run chronologically — that is how the sender produced it. */
   def runMatches(ms: List[VoiceMessage], firstDur: Long, n: Int): Boolean =
     var cur = ms
-    var want = firstDur
+    var want = firstDur + n.toLong - 1L
     var left = n
     var ok = true
     var going = true
@@ -829,7 +858,7 @@ object Integ:
             ok = false
             going = false
           else
-            want += 1L
+            want -= 1L
             left -= 1
             cur = t
         case Nil =>
