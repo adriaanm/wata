@@ -9,12 +9,11 @@ import language.experimental.saferExceptions
  *  toggles, which only care whether it succeeded) and run one capturing its
  *  stdout (the gateway address and the modem's signal strength).
  *
- *  Go's `exec.Command(name string, arg ...string)` is VARIADIC and this
- *  dialect has no slice-spread lowering, so the arity is bound explicitly,
- *  the same way `wata-tui`'s facade does it. Two arguments is all `Diag`
- *  uses: every command it runs is one of system-menu's own shell lines,
- *  passed as `sh -c <line>` so the redirections in those lines (`2>&1`,
- *  `2>/dev/null`, the backgrounding `&`) mean what they mean there. */
+ *  Go's `exec.Command(name string, arg ...string)` is VARIADIC and binds as
+ *  Scala varargs, so one declaration covers every arity. Every command `Diag`
+ *  runs is one of system-menu's own shell lines, passed as `sh -c <line>` so
+ *  the redirections in those lines (`2>&1`, `2>/dev/null`, the backgrounding
+ *  `&`) mean what they mean there. */
 @go.bind("os/exec")
 object exec:
   /** Facade class for Go `*exec.Cmd`. */
@@ -34,14 +33,11 @@ object exec:
     @go.name("Stdin") def stdin: go.io.Reader = ???
     @go.name("Stdin") def stdin_=(v: go.io.Reader): Unit = ???
 
-  /** `exec.Command(name)` — `name` without a path separator is resolved
-   *  through `$PATH` (how "poweroff" finds /sbin/poweroff). */
-  @go.name("Command") def command(name: String): go.exec.Cmd = ???
-  /** `exec.Command(name, a1)` — one argument, no shell: the wifi-join
-   *  helper's ssid, passed as real argv so no quoting layer can mangle it. */
-  @go.name("Command") def command1(name: String, a1: String): go.exec.Cmd = ???
-  /** `exec.Command(name, a1, a2)` — the `sh -c <line>` arity. */
-  @go.name("Command") def command2(name: String, a1: String, a2: String): go.exec.Cmd = ???
+  /** `exec.Command(name, arg*)` — `name` without a path separator is resolved
+   *  through `$PATH` (how "poweroff" finds /sbin/poweroff). Arguments are real
+   *  argv, so no quoting layer can mangle one: that is what the wifi-join
+   *  helper's ssid rides. */
+  @go.name("Command") def command(name: String, arg: String*): go.exec.Cmd = ???
 
 /** `go.netif` — the APP-OWNED facade over stdlib `net`, curated to the one
  *  read the settings applet's IP rows need: a named interface's assigned

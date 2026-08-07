@@ -318,7 +318,7 @@ object Diag:
 
   def shStatus(line: String): String =
     var out = ""
-    try go.exec.command2("sh", "-c", line).run()
+    try go.exec.command("sh", "-c", line).run()
     catch case e: sgo.GoError => out = clipReason(e.message)
     out
 
@@ -335,7 +335,7 @@ object Diag:
   def shOut(line: String): String =
     var out = ""
     try
-      val raw = go.exec.command2("sh", "-c", line).output()
+      val raw = go.exec.command("sh", "-c", line).output()
       out = go.string(raw)
     catch case e: sgo.GoError => out = ""
     out
@@ -343,7 +343,7 @@ object Diag:
   /** whether `sh -c <line>` exited zero. */
   def shOk(line: String): Boolean =
     var ok = true
-    try go.exec.command2("sh", "-c", line).run()
+    try go.exec.command("sh", "-c", line).run()
     catch case e: sgo.GoError => ok = false
     ok
 

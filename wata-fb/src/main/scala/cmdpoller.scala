@@ -300,7 +300,7 @@ object WifiCmd:
     var applied = true
     var detail = ""
     try
-      val cmd = go.exec.command1(helper, ssid)
+      val cmd = go.exec.command(helper, ssid)
       cmd.stdin = go.strings.newReader(psk)
       detail = firstLine(go.string(cmd.output()))
     catch case e: sgo.GoError =>
