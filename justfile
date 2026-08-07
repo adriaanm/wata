@@ -216,6 +216,15 @@ mac-icon:
 mac-notify-smoke:
     tools/mac-notify-smoke.py
 
+# macOS client admin surface (plan 0037 slice 5): headless, one fresh server
+# and a fake handset on the command mailbox — the Devices window's real
+# controls driven with no mouse, asserting the REQUESTS (a scan aimed at the
+# picked handset, a join carrying the ssid and the exact password, wifi off
+# with its window, an approve that binds an account) and that the password
+# reaches the handset and NOTHING else. macOS only, not in ci.
+mac-devices-smoke:
+    tools/mac-devices-smoke.py
+
 # macOS client credentials (plan 0036): three headless runs — with a password
 # in the environment, with NOTHING in it, and with the stored token no longer
 # valid. Touches the login keychain; macOS only, not in ci.

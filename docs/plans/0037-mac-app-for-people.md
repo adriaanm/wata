@@ -1,6 +1,6 @@
 # 0037 — the mac client becomes an app a parent can use
 
-Status: proposed
+Status: done
 
 ## The problem
 
@@ -227,7 +227,7 @@ interface type erases to Go's `any` and loses its type assertion on
 assignment (`TUPLE-REF-COMPONENT-ASSIGN`, filed; workaround is a named case
 class, which reads better anyway).
 
-### 5. The Devices window — the admin surface
+### 5. The Devices window — the admin surface — DONE
 
 What `wata-tui` can do and the app cannot, as a window:
 
@@ -242,15 +242,42 @@ Every one of these is a request through the server's command mailbox
 (plan 0020/0031) or the admin listener (plan 0027) — the transport work
 is done, and this slice is presentation over it.
 
+Landed as `macshell/devices.go` + `wata-mac`'s `devices.scala`, on ⌘D,
+gated by `just mac-devices-smoke` and `devices_test.go`. Four things
+worth keeping:
+
+- **The chrome does no I/O and the pump does not wait.** A button reads
+  its controls and pushes a command; the work runs on a forked goroutine
+  beside the audio thread, because a scan takes up to a minute and a pump
+  that waited would freeze the stage. The relay is `trySend`, so a busy
+  worker cannot stall a frame.
+- **The password never becomes a string anything might print.** It stays
+  in the `NSSecureTextField`; the session takes it with `TakePSK`, which
+  reads and clears in one call, and it reaches the request body only. The
+  log line says `psk=<n> chars`. The smoke's last check is a grep of every
+  printed line and the whole server log for the password it typed.
+- **The convenience factories are a trap.** `+[NSButton buttonWithTitle:
+  target:action:]` generates cleanly and blocks forever off the main
+  thread — the factories go through the appearance machinery, which waits
+  on the main runloop. A generated signature says nothing about which
+  thread may call it. `-alloc`/`-initWithFrame:` is fine.
+- **`NSSecureTextField` is unbindable and does not need binding**: it
+  declares no members of its own, so the generator refuses the class
+  outright and every message it answers already belongs to `NSTextField`
+  or `NSControl`.
+
 ## The binding work
 
 How it settled, once each slice actually needed the calls:
 
-- **The AppKit chrome is raw `objc.Send`.** `NSAlert`, `NSMenu`,
-  `NSMenuItem`, `NSSecureTextField` and `NSButton` are a handful of
-  selectors in three files, all taking objects or nothing, and generating
-  a target for them would have been more machinery than the machinery it
-  replaced.
+- **The AppKit chrome is mostly raw `objc.Send`.** `NSAlert`, `NSMenu`
+  and `NSMenuItem` are a handful of selectors in three files, all taking
+  objects or nothing, and generating a target for them would have been
+  more machinery than the machinery it replaced. Slice 5 moved `NSButton`
+  and `NSPopUpButton` onto the allowlist, because the Devices window reads
+  its lists back rather than only writing them. `NSSecureTextField` stays
+  raw of necessity: it declares no members of its own, so there is nothing
+  to generate.
 - **The notification surface IS generated**, because it is a real API with
   enums and a completion-handler contract rather than a few setters:
   `usernotifications` is its own bindgen target and `NSDockTile`/`NSBundle`
@@ -262,7 +289,8 @@ How it settled, once each slice actually needed the calls:
 
 ## Verification
 
-- Each slice extends `tools/mac-creds-smoke.py` or gets a sibling; the
+- Each slice extends `tools/mac-creds-smoke.py` or gets a sibling
+  (slice 5's is `tools/mac-devices-smoke.py`); the
   chrome is drivable headlessly the same way the stage is (`tree` already
   walks live NSViews, so a sheet's fields are assertable).
 - **`just mac-smoke` and `just ci` must stay green throughout.** The

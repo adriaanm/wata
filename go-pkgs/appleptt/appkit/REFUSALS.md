@@ -111,6 +111,17 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSBundle` `loadNibNamed:owner:topLevelObjects:` — no Go mapping for 'NSArray * _Nullable * _Nullable'
 - `NSBundle` `localizedAttributedStringForKey:value:table:` — NSAttributedString is not on the allowlist (add it to classes or opaque)
 - `NSBundle` `setPreservationPriority:forTags:` — NSSet is not on the allowlist (add it to classes or opaque)
+- `NSButton` `@property activeCompressionOptions` — NSUserInterfaceCompressionOptions is not on the allowlist (add it to classes or opaque)
+- `NSButton` `@property attributedAlternateTitle` — NSAttributedString is not on the allowlist (add it to classes or opaque)
+- `NSButton` `@property attributedTitle` — NSAttributedString is not on the allowlist (add it to classes or opaque)
+- `NSButton` `@property bezelStyle` — no Go mapping for 'NSBezelStyle'
+- `NSButton` `@property borderShape` — no Go mapping for 'NSControlBorderShape'
+- `NSButton` `@property imagePosition` — no Go mapping for 'NSCellImagePosition'
+- `NSButton` `@property sound` — NSSound is not on the allowlist (add it to classes or opaque)
+- `NSButton` `@property symbolConfiguration` — NSImageSymbolConfiguration is not on the allowlist (add it to classes or opaque)
+- `NSButton` `@property tintProminence` — no Go mapping for 'NSTintProminence'
+- `NSButton` `getPeriodicDelay:interval:` — no Go mapping for 'float * _Nonnull'
+- `NSButton` `setButtonType:` — no Go mapping for 'NSButtonType'
 - `NSColor` `@property CGColor` — no Go mapping for 'NS_RETURNS_INNER_POINTER CGColorRef'
 - `NSColor` `@property colorSpace` — NSColorSpace is not on the allowlist (add it to classes or opaque)
 - `NSColor` `@property currentControlTint` — no Go mapping for 'NSControlTint'
@@ -243,6 +254,18 @@ generator should learn or a decl the allowlist should stop asking for.
 - `NSImageView` `removeSymbolEffectOfType:options:animated:` — NSSymbolEffect is not on the allowlist (add it to classes or opaque)
 - `NSImageView` `setSymbolImage:withContentTransition:` — NSSymbolContentTransition is not on the allowlist (add it to classes or opaque)
 - `NSImageView` `setSymbolImage:withContentTransition:options:` — NSSymbolContentTransition is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `@property lastItem` — NSMenuItem is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `@property menu` — NSMenu is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `@property preferredEdge` — no Go mapping for 'NSRectEdge'
+- `NSPopUpButton` `@property selectedItem` — NSMenuItem is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `indexOfItem:` — NSMenuItem is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `itemAtIndex:` — NSMenuItem is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `itemWithTitle:` — NSMenuItem is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `popUpButtonWithMenu:target:action:` — NSMenu is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `pullDownButtonWithImage:menu:` — NSMenu is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `pullDownButtonWithTitle:image:menu:` — NSMenu is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `pullDownButtonWithTitle:menu:` — NSMenu is not on the allowlist (add it to classes or opaque)
+- `NSPopUpButton` `selectItem:` — NSMenuItem is not on the allowlist (add it to classes or opaque)
 - `NSTextField` `@property bezelStyle` — no Go mapping for 'NSTextFieldBezelStyle'
 - `NSTextField` `@property lineBreakStrategy` — no Go mapping for 'NSLineBreakStrategy'
 - `NSTextField` `@property placeholderAttributedString` — NSAttributedString is not on the allowlist (add it to classes or opaque)

@@ -17,7 +17,7 @@ family's Pi.
 |---|---|
 | `go-pkgs/appleptt/appkit` | generated AppKit bindings (bindgen target `appkit`; see [bindgen.md](bindgen.md) for what was refused and why it shaped the backend) |
 | `go-pkgs/nativeui` | plain Go: the algebra mirror, the retained interpreter (`Stage`), pixels, glyphs, the key table + the synthesized key view, the dispatch seam |
-| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam, and the NATIVE CHROME (login sheet, menu bar, Settings window, notifications + Dock badge) |
+| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam, and the NATIVE CHROME (login sheet, menu bar, Settings and Devices windows, notifications + Dock badge) |
 | `go-pkgs/macaudio` | plain Go, no cgo: the Opus codec (AudioToolbox's C AudioConverter over purego) and the capture/playback engine (AVFAudio), presenting `go-pkgs/audio`'s API |
 | `wata-mac/` | the Sgola module: caps, the frame pump, the wire encoder, the headless command loop |
 
@@ -98,7 +98,8 @@ own bodies, the 10-key vocabulary — the handset's contract, and nothing
 is added to it for the sake of a desktop. Everything a mac user needs
 that the handset does not have is **native chrome around it**: the login
 sheet (`macshell/login.go`), the menu bar (`menu.go`), the Settings window
-(`prefs.go`) and the arrival notifications (`notify.go`). iOS reuses the
+(`prefs.go`), the Devices window (`devices.go`) and the arrival
+notifications (`notify.go`). iOS reuses the
 first and rewrites the second, which is what this app exists to prove.
 
 The menu bar is mostly not features. Without one there is no ⌘Q, no
@@ -190,6 +191,69 @@ Bindings: `usernotifications` is a bindgen target of its own and
 The block risk plan 0037 flagged did not bite — see
 [bindgen.md](bindgen.md).
 
+### The Devices window — the admin surface
+
+What `wata-tui` does with `wifi` / `join` / `wifi off` and the `/admin`
+enrolment API, as a window (`macshell/devices.go` + `wata-mac`'s
+`devices.scala`): pick a handset, see what its radio can find, hand it a
+network and a password, drop its wifi for ten minutes to prove the cellular
+fallback works, and approve or deny a handset that has just announced itself.
+`Wata ▸ Devices…` (⌘D) opens it.
+
+Nothing new goes on the wire — every one of those is the device-command
+mailbox (plans 0020/0031) or the admin enrolment API (plan 0027), the same
+requests the tui makes, including the skew-free report wait (a report carries
+a server-stamped `seq`, and the answer to *this* scan is the seq moving past
+what it was before the queue).
+
+- **The chrome holds no logic and does no I/O.** A button reads its controls
+  and pushes a command string onto the queue the menu items already use
+  (`NextCommand`); the setters (`SetHandsets`, `SetNetworks`, `SetPending`,
+  `SetRoster`, `SetDevStatus`) are how the answer comes back.
+- **The work runs on its own goroutine**, forked beside the audio thread. A
+  scan may take a minute — the handset has to hear the command, run a scan and
+  report — and a pump that waited for it would freeze the stage and stop the
+  window redrawing. The pump only relays: `trySend`, never a blocking send, so
+  a busy worker cannot stall a frame.
+- **The password lives in an `NSSecureTextField` and nowhere else.** It is
+  never in a command string, never in a log line, never in the config. The
+  session collects it with `TakePSK`, which reads the field and CLEARS it in
+  the same call, and it goes into the request body only. The printed line says
+  `psk=<n> chars` — enough to tell an empty field from a typed one without
+  saying what was typed. This is wata-fb's own reasoning: its join helper
+  pipes the PSK over stdin because argv and the environment are world-readable
+  (`wata-fb/netexec.scala`), and a queue string some future log line prints
+  would undo it.
+- **Approve and Deny state the whole decision before the click.** Both are
+  irreversible from the user's side — denying a handset a parent has just
+  unboxed sends them back to the box — so a sentence beside the buttons names
+  the device (the leading node-id digits, which is what the handset's own
+  enrolment screen shows) and the account it will be bound to, and says what
+  Deny costs. An account name that is not on the roster creates it, which is
+  plan 0027's ruling: a casually minted name is renameable, an interrupted
+  onboarding is not.
+- **The status line states outcomes, not verbs** — plan 0027's field
+  follow-up: a parent read a terse successful approve as an error.
+- **The three lists are `NSPopUpButton`s, not `NSTableView`s.** A table needs
+  a data source whose delegate answers rows; a popup is a native list you pick
+  one thing out of, which is what all three are for, and it reads back as
+  titles and a selected index — which is what makes the window assertable with
+  no mouse. A redraw rebuilds every control, so the selections and the typed
+  account are explicitly carried across it: a scan report arriving must not
+  move the handset the user picked out from under them.
+- **Headless has no window, and that is fine.** An `NSWindow` cannot be
+  instantiated off the main thread, so headless builds only the content view —
+  the whole assertable surface — the same builder/installer split `login.go`
+  and `prefs.go` use.
+
+**Gotcha, and it is not visible in a signature: AppKit's convenience
+factories block off the main thread.** `+[NSButton buttonWithTitle:target:
+action:]` is generated and correct, and hangs forever when called from the
+headless stage thread or a test goroutine — the factories configure the
+control through the appearance machinery, which waits on the main runloop.
+`-alloc` + `-initWithFrame:` does not, and is what this window uses.
+`-[NSPopUpButton initWithFrame:pullsDown:]` is fine headless.
+
 **Settings shows the account; it does not edit it.** The token is scoped
 to the (server, name) pair, the Keychain items are keyed by it, and the
 running client is bound to it — an editable field would pretend a text
@@ -233,7 +297,12 @@ goroutine; only the shell's apply touches AppKit.
   smoke's window onto the differ), `tree` prints the live NATIVE
   hierarchy (class, frame, label text per view, group descent only),
   `key <name> <press|release|repeat>` injects a macOS virtual key code
-  through the real translation table, `quit` winds down. This is what
+  through the real translation table, the `dev …` family drives the Devices
+  window with no mouse (`dev show`, `dev sel <list> <i>`, `dev psk` — which
+  reads the password from the NEXT line, as wata-tui's `join` prompt does —
+  `dev acct <name>`, `dev click <button>`, `dev decision`, each click ending
+  in a `dev done <button>` terminator because an operation answers with a
+  variable number of lines), `quit` winds down. This is what
   `tools/mac-smoke.py` drives, tui-smoke style.
 
 Each frame drains TWO mailboxes, both in `frame` so the windowed and the
@@ -444,7 +513,14 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   labels rather than stacking a second set, that the walkie-talkie checkbox
   SHOWS the session's mode and reports the new one onto the command queue,
   and that headless `Frontmost`/`Notify`/`SetBadge` decline rather than
-  reaching for an NSApplication or a bundle that is not there).
+  reaching for an NSApplication or a bundle that is not there), and the
+  Devices window (`devices_test.go`: the lists carry what the setters handed
+  them and say whether a network needs a password, the password field really
+  is an `NSSecureTextField` and reading it empties it, the join command
+  carries the handset and the ssid and NOT the password, scan/off carry the
+  picked handset and the off window, the decision sentence names the device
+  and the account and what Deny costs, an empty window commits nothing, and a
+  redraw keeps the selection and the typed account).
 - `just mac-creds-smoke` (macOS-only, not in ci; touches the login
   keychain and cleans up after itself): three headless runs against one
   server — with a password in the environment, with NOTHING in it (which
@@ -473,6 +549,21 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   re-announce the backlog it opens with. Two headless REPL commands exist for
   it: `front 0|1` (headless has no NSApplication to ask) and
   `mode play|quiet`.
+- `just mac-devices-smoke` (~40s, macOS-only, not in ci): the admin surface
+  end to end — one fresh wata-server, a harness thread playing bob's handset
+  on the command mailbox, two handsets announced through the enrolment API,
+  and alice's headless session driving the window's REAL controls (`dev sel`
+  moves a popup, `dev psk` types into the secure field, `dev click join` calls
+  the function the Join button's action calls). It asserts the REQUESTS, not
+  the pixels: a scan aimed at the picked handset whose report becomes the
+  window's rows, a join carrying the ssid and — read from the device side, the
+  one place it legitimately arrives — the exact password, a SECOND join
+  finding the field empty (so a password cannot be reused on a network it was
+  not typed for), `wifi off` carrying its ten minutes and the verdict coming
+  back, and an approve that lands the node id in the allowlist file bound to
+  an account that now exists. The last check is the one the slice exists for:
+  every line the app printed and the whole server log are grepped for the
+  password, and a hit fails the run.
 - `just mac-iroh-smoke` (~1min, macOS + cargo, not in ci): the same
   headless client over the iroh transport — one wata-server in iroh mode,
   three provisioned node keys, and a homeserver URL (`http://wata.iroh`)

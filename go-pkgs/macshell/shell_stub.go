@@ -30,3 +30,14 @@ func SetBadge(n int)                   {}
 func Frontmost() bool                  { return true }
 func SetFrontmost(on bool)             {}
 func SetNotifyPlay(on bool)            {}
+func ShowDevices()                     {}
+func SetHandsets(tsv string)           {}
+func SetNetworks(tsv string)           {}
+func SetPending(tsv string)            {}
+func SetRoster(tsv string)             {}
+func SetDevStatus(s string)            {}
+func TakePSK() string                  { return "" }
+func DevSelect(kind string, i int)     {}
+func DevType(field, s string)          {}
+func DevClick(name string)             {}
+func DevDecision() string              { return "" }

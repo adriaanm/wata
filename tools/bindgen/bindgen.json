@@ -92,6 +92,7 @@
         "NSBitmapImageRep",
         "NSBox",
         "NSBundle",
+        "NSButton",
         "NSColor",
         "NSControl",
         "NSDockTile",
@@ -100,6 +101,7 @@
         "NSImage",
         "NSImageRep",
         "NSImageView",
+        "NSPopUpButton",
         "NSTextField",
         "NSView",
         "NSWindow"

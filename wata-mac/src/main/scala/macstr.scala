@@ -60,6 +60,24 @@ object MacStr:
    *  password may hold spaces and a homeserver may not be typed tidily —
    *  `splitWs` would tear both apart. Hand-scanned: the subset has no split.
    */
+  /** the non-empty lines of a newline-separated block — the shape every
+   *  macshell list setter speaks. */
+  def lines(block: String): List[String] =
+    var acc: List[String] = Nil
+    var cur = ""
+    var i = 0
+    while i < block.length do
+      val ch = block.substring(i, i + 1)
+      if ch == "\n" then
+        if cur != "" then acc = cur :: acc
+        cur = ""
+      else if ch != "\r" then cur = cur + ch
+      i = i + 1
+    if cur != "" then acc = cur :: acc
+    ListOps.reverse(acc)
+
+  def boolStr(b: Boolean): String = if b then "true" else "false"
+
   def tabField(line: String, i: scala.Int): String =
     var start = 0
     var field = 0

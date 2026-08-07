@@ -102,6 +102,34 @@ func registerMenuTarget() {
 						pushCommand(CmdNotifyQuiet)
 					}
 				}},
+				// The Devices window's controls (devices.go). Each one only
+				// reads the window and pushes a command; the session, which
+				// owns the client and the transport, does the work.
+				{Cmd: selDevices, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					showDevices()
+					pushCommand(CmdDevPending) // open on what is waiting NOW
+				}},
+				{Cmd: selDevScan, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					devScanClicked()
+				}},
+				{Cmd: selDevJoin, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					devJoinClicked()
+				}},
+				{Cmd: selDevOff, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					devOffClicked()
+				}},
+				{Cmd: selDevApprove, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					devApproveClicked()
+				}},
+				{Cmd: selDevDeny, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					devDenyClicked()
+				}},
+				{Cmd: selDevRefresh, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					devRefreshClicked()
+				}},
+				{Cmd: selDevPick, Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+					devPickChanged()
+				}},
 			})
 		if err != nil {
 			panic("macshell: registering WataMenuTarget: " + err.Error())
@@ -168,6 +196,10 @@ func buildMainMenu(appName string) (objc.ID, objc.ID) {
 	// ⌘, is where every mac user looks for settings, so it is the ONE binding
 	// here that has to be exactly right.
 	item(appMenu, "Settings…", "wataPrefs:", ",", menuTarget)
+	// The admin surface (devices.go). ⌘D rather than a Preferences tab: it is
+	// a task window someone keeps open while walking a handset around the
+	// house, not a setting.
+	item(appMenu, "Devices…", "wataDevices:", "d", menuTarget)
 	item(appMenu, "Sign Out…", "wataSignOut:", "", menuTarget)
 	separator(appMenu)
 	item(appMenu, "Hide "+appName, "hide:", "h", 0)

@@ -225,12 +225,22 @@ object Pump:
       // wata-fb's `Ui.loopWithDevice`.
       val audioCmds = h.client.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      // The Devices window's engine, on its own goroutine for the same reason
+      // the audio thread is on one: a wifi scan can take a minute to come
+      // back, and a frame pump that waited for it would freeze the stage.
+      val devCmds = sgo.makeChan[String](8)
+      Devices.resume()
+      sgo.fork(Devices.worker(devCmds, h.client))
       var st = initial(clock)
       while !st.quit && !isRejected(h.connection()) && !signedOutC.get() do
         val took = h.waitEvent(FRAME_MS)
         st = frame(h, clock, evts, st, false)
-        pollChrome()
-      audioCmds.send(AcQuit()) // the fork's only exit; the scope joins it
+        pollChrome(devCmds)
+      // both forks' only exit; the scope joins them. The stop flag is what
+      // makes a worker parked in a 60-second report poll notice.
+      Devices.stop()
+      val handed = devCmds.trySend("")
+      audioCmds.send(AcQuit())
     }
     if signedOutC.get() then
       signedOutC.set(false)
@@ -243,8 +253,20 @@ object Pump:
    *  thread, where the client and the stores are. */
   private val signedOutC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
-  def pollChrome(): Unit =
+  def pollChrome(devCmds: sgo.Chan[String]): Unit =
     val cmd = go.macshell.nextCommand()
+    // A Devices command goes to the worker; a full buffer means eight
+    // requests are already outstanding, and dropping the ninth beats blocking
+    // the frame that would draw the answer to the first.
+    if isDevCmd(cmd) then
+      val handed = devCmds.trySend(cmd)
+      if !handed then go.macshell.setDevStatus("Still working on the last request…")
+    else applyChrome(cmd)
+
+  /** the Devices window's commands are the ones that go somewhere else. */
+  def isDevCmd(cmd: String): Boolean = MacStr.tabField(cmd, 0).startsWith("dev:")
+
+  def applyChrome(cmd: String): Unit =
     if cmd == "signout" then signedOutC.set(true)
     else if cmd == "notify:play" then setMode(NotifyPlayNow())
     else if cmd == "notify:quiet" then setMode(NotifyQuiet())
@@ -262,6 +284,7 @@ object Pump:
   def runHeadless(cfg: ClientConfig, scale: scala.Int, sc: go.bufio.Scanner): Unit =
     go.macshell.startHeadless(scale)
     NetStatus.reset()
+    Devices.resume()
     val h = startAudioClient(cfg)
     if Runtime.waitForConnection(h.client, Syncing(), connectMs()) then
       println("ready " + Runtime.lastAuth.userId)
@@ -298,7 +321,61 @@ object Pump:
         else if cmd == "key" then doKey(MacStr.nth(ts, 1), MacStr.nth(ts, 2))
         else if cmd == "front" then doFront(MacStr.nth(ts, 1))
         else if cmd == "mode" then doMode(MacStr.nth(ts, 1))
+        else if cmd == "dev" then doDev(h, sc, ts)
         else if cmd != "" then println("? " + cmd)
+
+  /** the Devices window, without a mouse. Each subcommand is exactly what a
+   *  click or a keystroke does — `dev click join` calls the same function the
+   *  Join button's action calls — and the command the chrome pushes is then
+   *  drained and RUN INLINE here, rather than handed to the worker goroutine
+   *  the windowed driver forks. Headless is a script: a request that finished
+   *  before the next line is read is what makes the printed lines assertable,
+   *  and the worker exists to keep a window redrawing, which headless has no
+   *  window to do.
+   *
+   *      dev show                    build the window's content
+   *      dev sel handset|network|pending <i>
+   *      dev psk                     read the password from the NEXT line
+   *      dev acct <name>
+   *      dev click scan|join|off|approve|deny|refresh
+   *      dev decision                the sentence Approve/Deny commits to */
+  def doDev(h: Handle, sc: go.bufio.Scanner, ts: List[String]): Unit =
+    val sub = MacStr.nth(ts, 1)
+    if sub == "show" then
+      go.macshell.showDevices()
+      println("dev shown")
+    else if sub == "sel" then
+      go.macshell.devSelect(MacStr.nth(ts, 2), MacStr.num(MacStr.nth(ts, 3), 0))
+      println("dev sel " + MacStr.nth(ts, 2) + " " + MacStr.nth(ts, 3))
+    else if sub == "psk" then doPsk(sc)
+    else if sub == "acct" then
+      go.macshell.devType("account", MacStr.nth(ts, 2))
+      println("dev acct " + MacStr.nth(ts, 2))
+    else if sub == "click" then doDevClick(h, MacStr.nth(ts, 2))
+    else if sub == "decision" then println("dev decision " + go.macshell.devDecision())
+    else println("? dev " + sub)
+
+  /** the password comes on its OWN line, the way wata-tui's `join` prompts
+   *  for it: a secret does not belong in a command line that a shell history
+   *  or a process listing would keep. It goes straight into the window's
+   *  NSSecureTextField and nowhere else. */
+  def doPsk(sc: go.bufio.Scanner): Unit =
+    println("psk?")
+    var psk = ""
+    if sc.scan() then psk = sc.text()
+    go.macshell.devType("psk", psk)
+    println("dev psk set")
+
+  /** `dev done <what>` is the terminator, printed after the request has
+   *  finished — an operation answers with a variable number of lines (a scan
+   *  prints one per network, a refresh one per waiting handset), so a reader
+   *  that stopped at the first of them would see only the first. */
+  def doDevClick(h: Handle, what: String): Unit =
+    go.macshell.devClick(what)
+    val cmd = go.macshell.nextCommand()
+    if cmd == "" then println("? dev click " + what + " did nothing")
+    else Devices.run(h.client, cmd)
+    println("dev done " + what)
 
   /** pump frames for `ms`, printing each applied patch — the smoke's window
    *  onto the differ. The handle's event channel is the sleep: a dirty flag
@@ -388,6 +465,7 @@ object Pump:
     st = applyKeys(st, ctx)
     st = drainAudio(st, ctx)
     st = notifyStep(h, st, snap)
+    Devices.publishHandsets(snap) // the Devices window's picker, when it moves
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
       st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,

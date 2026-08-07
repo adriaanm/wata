@@ -330,7 +330,37 @@ shaped what `go-pkgs/nativeui` does:
 
 `appkit` also carries `NSDockTile` and `NSBundle` for the mac client's
 notifications: the tile is the unplayed badge, and the bundle identifier is
-the gate that decides whether notifications may be touched at all.
+the gate that decides whether notifications may be touched at all. It carries
+`NSButton` and `NSPopUpButton` for the Devices window, whose three lists are
+popups — a native list you pick one thing out of, which reads back as
+`ItemTitles`/`IndexOfSelectedItem` and so is assertable with no mouse.
+
+Three facts from that entry, each of which cost a probe:
+
+- **`NSSecureTextField` cannot be bound at all**, and does not need to be:
+  it declares no members of its own — every message it answers belongs to
+  `NSTextField` or `NSControl` — and the generator stops outright on a class
+  with an empty member list ("has no members in the macosx SDK"). Its class
+  object is fetched with `objc.GetClass` and driven through the generated
+  `NSTextField`/`NSControl` wrappers, which is not a workaround: there is
+  nothing else to generate.
+- **`NSTableView` stayed out.** It refuses 39 declarations and its rows come
+  from a data-source protocol rather than from the view, so it is a delegate
+  surface, not a control. Popups cost neither.
+- **The convenience FACTORIES generate but must not be called off the main
+  thread.** `+[NSButton buttonWithTitle:target:action:]` binds cleanly and
+  then *blocks forever* from a test goroutine or the headless stage thread —
+  the factories configure the control through the appearance machinery, which
+  waits on the main runloop. `-alloc`/`-initWithFrame:` does not. A generated
+  signature says nothing about which thread may use it.
+
+Adding `NSMenu`/`NSMenuItem` was probed and deliberately left out: they
+generate, and they would let `macshell/menu.go` stop being raw `objc.Send` —
+but they also un-refuse eleven `NSPopUpButton` item accessors, `NSApplication`
+`mainMenu`, several `NSView` context-menu methods and an `NSWindowDelegate`
+arm. That is the general shape: **allowlist growth is not local.** A class
+un-refuses every declaration that merely mentions it, so the review is the
+whole regenerated diff, not the class that was asked for.
 
 `usernotifications` (macOS SDK, `frameworks: ["UserNotifications"]`):
 `UNUserNotificationCenter`, `UNNotificationContent`,

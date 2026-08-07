@@ -105,6 +105,47 @@ object macshell:
    *  chrome does not own it. */
   @go.name("SetNotifyPlay") def setNotifyPlay(on: Boolean): Unit = ???
 
+  // ---- the Devices window (plan 0037 slice 5) ------------------------------
+  // The admin surface wata-tui drives from a command line. The window holds
+  // no logic: it draws what these setters hand it and pushes a command onto
+  // the same queue `nextCommand` drains, and `Devices` does the work on its
+  // own goroutine — a scan can take a minute, which is a minute the frame
+  // pump must not spend blocked.
+
+  /** open it (the menu item's ⌘D does this itself; this is the way in from
+   *  the session and the headless harness). */
+  @go.name("ShowDevices") def showDevices(): Unit = ???
+  /** the handset picker: `<userId>\t<display name>` per line. */
+  @go.name("SetHandsets") def setHandsets(tsv: String): Unit = ???
+  /** one handset's scan report: `<ssid>\t<signal dBm>\t<0|1 secured>`. */
+  @go.name("SetNetworks") def setNetworks(tsv: String): Unit = ???
+  /** the handsets waiting for a verdict: `<nodeId>\t<code>` per line. */
+  @go.name("SetPending") def setPending(tsv: String): Unit = ???
+  /** the accounts an approval may bind to, one per line. */
+  @go.name("SetRoster") def setRoster(tsv: String): Unit = ???
+  /** the one line under the buttons; an OUTCOME, never a verb. */
+  @go.name("SetDevStatus") def setDevStatus(s: String): Unit = ???
+  /** the wifi password, read out of the NSSecureTextField AND CLEARED in the
+   *  same call. This is the only way it leaves the chrome; it must not be
+   *  logged, stored or put in a command — argv and the environment are
+   *  world-readable, which is why wata-fb's own join helper pipes it over
+   *  stdin. */
+  @go.name("TakePSK") def takePsk(): String = ???
+
+  // driving the window with no mouse — the headless smoke's way in. Each is
+  // exactly what a click or a keystroke does: `devClick` calls the same
+  // function the button's action calls, so a green harness is evidence about
+  // the real path rather than a parallel one.
+  /** pick row `i` of "handset" / "network" / "pending". */
+  @go.name("DevSelect") def devSelect(kind: String, i: scala.Int): Unit = ???
+  /** type into "psk" (the secure field) or "account". */
+  @go.name("DevType") def devType(field: String, s: String): Unit = ???
+  /** press "scan" / "join" / "off" / "approve" / "deny" / "refresh". */
+  @go.name("DevClick") def devClick(name: String): Unit = ???
+  /** the sentence shown beside Approve and Deny — what the user is told
+   *  before an irreversible click. */
+  @go.name("DevDecision") def devDecision(): String = ???
+
 /** `go.mackeychain` — the login keychain (go-pkgs/mackeychain), where the
  *  access token and the password live instead of the environment (plan 0036).
  *
