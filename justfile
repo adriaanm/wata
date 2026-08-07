@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check amd64-smoke tunnel-smoke
+ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -155,6 +155,13 @@ nativeui-tests:
 # mic grant and no speaker are involved. Needs macOS; not in ci.
 macaudio-tests:
     cd go-pkgs/macaudio && GOWORK=off go test ./...
+
+# wata-mac's screens ARE wata-fb's, by symlink — so an edit under wata-fb/src
+# is an edit to two apps. Compile the second one, so stubs.scala's tripwire
+# fires in ci and not only when someone runs the macOS-only mac-smoke. A SKIP
+# with a reason off darwin (the app's godeps are AppKit/AudioToolbox). In ci.
+mac-build-check:
+    tools/mac-build-check.py
 
 # the facades a SYMLINKED source binds must declare the same thing: wata-fb's
 # and wata-mac's `go.audio` (plan 0033), compared declaration by declaration

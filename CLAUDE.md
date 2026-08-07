@@ -50,6 +50,17 @@ drains its inbox into its own `TODO.jsonl`; queue order stays its
 designer's act. Mirror the item in `WATA-TODO.md`'s waiting-on-sgola list,
 and when the fix lands upstream, remove the workaround.
 
+**Name the ticket key in the workaround's comment.** A workaround is
+always explained by a comment asserting the gap, and that comment is what
+outlives the gap: the code around it gets questioned, the sentence saying
+"this dialect cannot X" does not, and it goes on justifying the workaround
+for months after X started working. `go.exec` bound `exec.Command`'s arity
+by hand under exactly such a sentence. So write the key into the comment —
+`// VARIADIC-FACADE-BIND: bound by hand until the spread lands` — and a
+landing notice becomes greppable: one `grep` over the tree says what that
+fix just invalidated. sgola's notices name the comment as well as the code
+for the same reason.
+
 The loop closes in both directions: after a repin that consumes an
 upstream fix passes the full gate, file a verification ticket back in
 the sgola inbox — which fixes are confirmed green in a real consumer,

@@ -378,7 +378,9 @@ object OggOracle:
     b.append(boolStr((lastFlags & Ogg.FLAG_EOS) != 0 && lastPsize > 0))
     b.append('\n')
     b.append("final-granule ")
-    b.append("" + lastGranule) // Long: append(Long) emits Itoa (emitter gap); concat rides FormatInt
+    b.append("" + lastGranule) // STRINGBUILDER-APPEND-LONG: append(Long) emits strconv.Itoa,
+    // which takes an int; string concat rides FormatInt and compiles. Drop the
+    // "" + once that lands.
     b.append('\n')
     b.append("toc-total-samples48 ")
     b.append("" + samples48)

@@ -4,8 +4,9 @@ import language.experimental.saferExceptions
 
 /** The APP-OWNED `@go.bind` facades wata-mac needs beyond the core surface
  *  (the symlinked syscall.scala carries `go.syscall`): stdin + a line
- *  scanner for the headless command loop (wata-tui's pair, same naming
- *  workaround — core owns `go.os`, so the object reaching `os.Stdin` is
+ *  scanner for the headless command loop (wata-tui's pair, and the same
+ *  rename — core owns `go.os`, so an app-owned facade for the same Go
+ *  package cannot reuse the name, and the object reaching `os.Stdin` is
  *  `go.osx`), and the macshell package that owns the AppKit side. */
 
 /** `go.osx` — the `os` package, curated to standard input. */

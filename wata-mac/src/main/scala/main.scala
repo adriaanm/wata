@@ -224,7 +224,7 @@ object Pump:
       // channel (a synchronizer), not the whole client record. Same idiom as
       // wata-fb's `Ui.loopWithDevice`.
       val audioCmds = h.client.audioCmds
-      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts, false))
       // The Devices window's engine, on its own goroutine for the same reason
       // the audio thread is on one: a wifi scan can take a minute to come
       // back, and a frame pump that waited for it would freeze the stage.
@@ -296,7 +296,7 @@ object Pump:
     sgo.supervised {
       val evts = sgo.makeChan[AudioEvt](16)
       val audioCmds = h.client.audioCmds
-      sgo.fork(AudioThread.mainLoop(audioCmds, evts))
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts, false))
       repl(h, sc, evts)
       audioCmds.send(AcQuit())
     }

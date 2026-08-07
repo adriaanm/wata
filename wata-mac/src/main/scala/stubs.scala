@@ -105,3 +105,18 @@ final class FbOutbox(val dir: String, val writable: Boolean) extends OutboxStore
  *  `MacCaps` owns the cell, beside the client construction that writes it. */
 object FbCaps:
   def transportUnavailable(): Boolean = MacCaps.transportUnavailable()
+
+/** wata-fb's startup bleep (chirp.scala, plan 0039). The mac does not make
+ *  one: the chirp answers "has it finished booting?", a question the handset
+ *  poses because it spends ~40 seconds getting there and shows a kid nothing
+ *  in the meantime. A window that opens when you launch it has already
+ *  answered that, and a laptop chirping at every launch is noise.
+ *
+ *  The asset is device-shaped too — `Chirp` reads /opt/wata/chirp.ogg, which
+ *  fb-deploy puts there and nothing puts on a Mac.
+ *
+ *  This stays a stub rather than a `chirp: Boolean` the mac passes false to,
+ *  because the shared `AudioThread.mainLoop` must keep its parameter for the
+ *  fb harnesses that pass false (selftest, devcli). */
+object Chirp:
+  def play(): Unit = ()
