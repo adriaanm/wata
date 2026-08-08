@@ -48,13 +48,13 @@ case class NotifyState(primed: Boolean, marks: List[(String, Int)])
 
 /** one step's answer: the marks to carry forward, and what arrived.
  *
- *  A case class rather than the `(NotifyState, List[Arrival])` tuple this
- *  wants to be, because sgola erases a REFERENCE-typed tuple component to Go's
- *  `any` and then omits the type assertion on a plain assignment
- *  (`var cur = r._2` emits `var cur List__Arrival; cur = r._2`, which does not
- *  compile; the same read as a call argument does get the assertion). Filed
- *  upstream as TUPLE-REF-COMPONENT-ASSIGN. A named result is clearer here
- *  anyway, so this stays even once the gap closes. */
+ *  A case class rather than the `(NotifyState, List[Arrival])` tuple this was
+ *  first written as. The tuple form hit a real compiler bug — a reference-typed
+ *  component erased to Go's `any` with the type assertion missing at the read —
+ *  which is FIXED upstream (`TUPLE-REF-COMPONENT-ASSIGN`; it was the
+ *  cross-module case, this module constructing and `wata-mac` reading). The
+ *  named result stays because it reads better than a bare pair, not because
+ *  anything still forces it. */
 case class NotifyStep(marks: NotifyState, arrivals: List[Arrival])
 
 object Notify:

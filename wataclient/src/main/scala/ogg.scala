@@ -68,8 +68,16 @@ object Ogg:
 
   // ---- writer ---------------------------------------------------------------
 
-  /** number of lacing segments for a payload (0 -> 1 empty segment). */
-  def segCount(len: Int): Int = if len == 0 then 1 else (len + 254) / 255
+  /** number of lacing segments for a payload.
+   *
+   *  A packet is ENDED by a segment shorter than 255, so a length that is an
+   *  exact multiple of 255 needs a trailing ZERO segment — 510 bytes lace as
+   *  [255, 255, 0], not [255, 255]. Getting this wrong is invisible to a
+   *  reader that treats a page's payload as one packet and fatal to one that
+   *  walks the table: [255, 255] says "this packet continues on the next
+   *  page", and the next page does not continue it, so the packet is dropped.
+   *  `len / 255 + 1` is the whole rule, including the empty packet's 1. */
+  def segCount(len: Int): Int = len / 255 + 1
 
   /** build one page WITH the CRC field zeroed (the pre-image the CRC is over). */
   def pageNoCrc(payload: Bytes, granule: Long, headerType: Int, seq: Int): Bytes =

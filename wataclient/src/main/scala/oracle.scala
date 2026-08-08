@@ -88,7 +88,10 @@ object OggOracle:
     // ---- write a stream, verify page CRC + BOS/EOS ----------------------------
     var frames: List[Bytes] = Nil
     frames = fill(50, 5) :: frames
-    frames = fill(50, 4) :: frames
+    // exactly 2*255: the length that needs a TRAILING ZERO segment. Without
+    // one the lacing reads as an unfinished packet and a table-walking reader
+    // drops the frame entirely, which is invisible to any other length.
+    frames = fill(510, 4) :: frames
     frames = fill(600, 3) :: frames // >255 -> multi-segment (3 lacing segments)
     frames = fill(50, 2) :: frames
     frames = fill(50, 1) :: frames

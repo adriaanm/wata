@@ -94,6 +94,11 @@ golden:
 fb-ui-tests *ARGS:
     tools/fb-ui-tests.py {{ARGS}}
 
+# does wata-mac grow while it sits idle? RSS + Go live heap + OS threads
+# together, so the answer says WHERE (tools/mac-leak.py header)
+mac-leak *ARGS:
+    tools/mac-leak.py {{ARGS}}
+
 # device UI: the real frame loop in this terminal, against a live server
 fb-sim *ARGS:
     bash tools/fb-sim.sh {{ARGS}}
