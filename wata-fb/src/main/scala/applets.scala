@@ -521,17 +521,22 @@ object WataLogic:
       i += 1
     VGroup(ListOps.reverse(acc))
 
-  /** the row: the selection highlight first (children paint in list order), the
-   *  name — cyan for the family thread unless this row is the selected one,
-   *  whose black-on-green has to stay legible — then the outbox mark in the
-   *  last column and the unplayed badge, which slides two columns left to clear
-   *  the mark when there is one. */
+  /** the row: the selection highlight first (children paint in list order),
+   *  then the unplayed underline (plan 0041) — a yellow rule under any row
+   *  whose count is up, persistent until played because it renders the COUNT,
+   *  not the arrival edge; a count digit alone is a channel a kid never
+   *  notices — the name — cyan for the family thread unless this row is the
+   *  selected one, whose black-on-green has to stay legible — then the outbox
+   *  mark in the last column and the unplayed badge, which slides two columns
+   *  left to clear the mark when there is one. */
   def contactRowView(snap: StateSnapshot, conv: Conversation, mark: scala.Int,
       row: scala.Int, selected: Boolean): View =
     val y = 1 + row * Font.GLYPH_H
     val fg = if selected then Color.black else Color.green
     var kids: List[Keyed] = Nil
     if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
+    if conv.unplayedCount > 0 then
+      kids = Keyed("unp", VRect(0, y + Font.GLYPH_H - 1, Display.W, 1, Color.yellow)) :: kids
     val nameColor = if isFamily(conv.convType) && !selected then Color.cyan else fg
     kids = Keyed("name", VText(0, row, clip(convName(snap, conv), 18), nameColor)) :: kids
     if mark > 0 then kids = Keyed("mark", outboxMarkView(mark, y)) :: kids
@@ -1071,7 +1076,12 @@ case class SettingsState(
   netRunning: Boolean,
   actionMsg: String,
   diagLeft: scala.Int,
-  enrolOpen: Boolean
+  enrolOpen: Boolean,
+  // the arrival-notification mode's row value (plan 0041): true = play now.
+  // A mirror of FbConfig's notify-mode cell, held here so the menu body stays
+  // a pure function of the applet state; `persisted` writes it back through
+  // `FbConfig.saveNotifyMode` the moment it changes.
+  notifyPlay: Boolean
 )
 
 /** the settings applet: a thin dynamic-dispatch shell over `SettingsLogic`
@@ -1089,7 +1099,9 @@ object SettingsLogic:
   // menu items: 0 echo, 1 brightness, 2 screen_off, 3 disconnect, 4 info,
   // then the diagnostics absorbed from system-menu (plan 0003, phase 5):
   // 5 ip and 6 cell data (info), 7 net test, 8 wifi and 9 cellular-data
-  // toggles, 10-12 the power actions.
+  // toggles, 10-12 the power actions, and last the arrival-notification
+  // mode (plan 0041) — appended so no earlier row's position (or golden)
+  // moves.
   //
   // There is deliberately NO display-name row: a person's name is the
   // account's, set by whoever administers the server (the admin interface,
@@ -1102,7 +1114,7 @@ object SettingsLogic:
   // CONSTANTS below are stable ids rather than menu positions: `itemAt` maps
   // a position to an id, so inserting the row after Network shifts no id and
   // invalidates no golden of a non-iroh device.
-  val N_BASE = 13
+  val N_BASE = 14
   val ECHO = 0
   val BRIGHTNESS = 1
   val SCREEN_OFF = 2
@@ -1117,6 +1129,10 @@ object SettingsLogic:
   val REBOOT_BL = 11
   val REBOOT_EDL = 12
   val ENROLL = 13
+  // the arrival-notification mode (plan 0041). A stable id like the others;
+  // its POSITION is the last base row, below the power actions — appending
+  // keeps every other row where its golden pinned it.
+  val NOTIFY = 14
 
   /** how many rows the menu has this run — one more on a handset with an
    *  identity to enroll. */
@@ -1130,10 +1146,17 @@ object SettingsLogic:
    *  — not after the reboot rows. Everything below it shifts down by one
    *  position while keeping its id. */
   def itemAt(s: SettingsState, i: scala.Int): scala.Int =
-    if !s.diag.enrol then i
+    if !s.diag.enrol then plainId(i)
     else if i <= DISCONNECT then i
     else if i == DISCONNECT + 1 then ENROLL
-    else i - 1
+    else plainId(i - 1)
+
+  /** position -> id with no Enroll row in the way: identity, except the last
+   *  base position, which is the Notify row (its id sits past ENROLL's). */
+  def plainId(i: scala.Int): scala.Int =
+    var out = i
+    if i == N_BASE - 1 then out = NOTIFY
+    out
 
   /** the item id the selection is on. */
   def cur(s: SettingsState): scala.Int = itemAt(s, s.selected)
@@ -1162,13 +1185,17 @@ object SettingsLogic:
   val DETAIL_ROW = 13
 
   def initial(): SettingsState =
-    SettingsState(0, 40, EchoIdle(), 1, true, false, noDiag(), "", "", false, "", 0, false)
+    SettingsState(0, 40, EchoIdle(), 1, true, false, noDiag(), "", "", false, "", 0, false,
+      Notify.playsNow(FbConfig.notifyMode()))
 
   /** the boot state: preferences come back from the config store, so a device
-   *  keeps the backlight and timeout its owner set. */
+   *  keeps the backlight and timeout its owner set. The notify mode reads the
+   *  config module's cell (primed before the shell is built) rather than a
+   *  `FbPrefs` field — the record is constructed positionally by BOTH clients,
+   *  so a field for one would have to appear on the other in the same move. */
   def restored(p: FbPrefs): SettingsState =
     SettingsState(0, p.brightness, EchoIdle(), p.timeoutIdx, true, false,
-      noDiag(), "", "", false, "", 0, false)
+      noDiag(), "", "", false, "", 0, false, Notify.playsNow(FbConfig.notifyMode()))
 
   /** nothing read yet — the first `refreshDiag` fills it in on the first frame
    *  (`diagLeft` starts at 0). `enrol` is the exception: it decides how many
@@ -1189,34 +1216,37 @@ object SettingsLogic:
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
     SettingsState(sel, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
     SettingsState(s.selected, b, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
     SettingsState(s.selected, s.brightness, e, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, i, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, c,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
   def withArmed(s: SettingsState, a: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      a, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen)
+      a, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
   def withDiag(s: SettingsState, d: DiagSnap, left: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, d, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, left, s.enrolOpen)
+      s.armed, d, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, left, s.enrolOpen, s.notifyPlay)
   def withNetTest(s: SettingsState, l1: String, l2: String, running: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, l1, l2, running, s.actionMsg, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, l1, l2, running, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
   def withEnrolOpen(s: SettingsState, o: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, o)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, o, s.notifyPlay)
   def withActionMsg(s: SettingsState, m: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, m, s.diagLeft, s.enrolOpen)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, m, s.diagLeft, s.enrolOpen, s.notifyPlay)
+  def withNotify(s: SettingsState, play: Boolean): SettingsState =
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, play)
 
   // ---- input (press-only) ------------------------------------------------------
   /** every key goes through `persisted`, so the three stored preferences are
@@ -1255,7 +1285,15 @@ object SettingsLogic:
   def persisted(before: SettingsState, after: SettingsState): SettingsState =
     if prefsChanged(before, after) then
       FbConfig.savePrefs(FbPrefs(after.brightness, after.screenTimeoutIdx))
+    if before.notifyPlay != after.notifyPlay then
+      FbConfig.saveNotifyMode(modeOf(after.notifyPlay))
     after
+
+  /** the row's Boolean back as the shared model's mode. */
+  def modeOf(play: Boolean): NotifyMode =
+    var out: NotifyMode = NotifyQuiet()
+    if play then out = NotifyPlayNow()
+    out
 
   def prefsChanged(a: SettingsState, b: SettingsState): Boolean =
     a.brightness != b.brightness || a.screenTimeoutIdx != b.screenTimeoutIdx
@@ -1369,11 +1407,13 @@ object SettingsLogic:
   def onLeft(s: SettingsState): SettingsState =
     if cur(s) == BRIGHTNESS then brightnessDown(s)
     else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
+    else if cur(s) == NOTIFY then withNotify(s, !s.notifyPlay)
     else s
 
   def onRight(s: SettingsState): SettingsState =
     if cur(s) == BRIGHTNESS then brightnessUp(s)
     else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
+    else if cur(s) == NOTIFY then withNotify(s, !s.notifyPlay)
     else s
 
   /** wrap-decrement (the `if x==0 then n-1 else x-1` idiom as a plain fn). */
@@ -1497,6 +1537,7 @@ object SettingsLogic:
     else if i == DATA_TOGGLE then "Data link"
     else if i == POWER_OFF then "Power off"
     else if i == REBOOT_BL then "Reboot to BL"
+    else if i == NOTIFY then "Notify"
     else "Reboot to EDL"
 
   /** the row's right-hand value; "" for the rows that are a label alone (Device
@@ -1513,7 +1554,14 @@ object SettingsLogic:
     else if i == NET_TEST then netTestStatus(s)
     else if i == WIFI_TOGGLE then s.diag.wifi
     else if i == DATA_TOGGLE then dataState(s)
+    else if i == NOTIFY then notifyLabel(s)
     else ""
+
+  /** the Notify row's value: the persisted spellings, spoken as the row. */
+  def notifyLabel(s: SettingsState): String =
+    var out = "quiet"
+    if s.notifyPlay then out = "play now"
+    out
 
   def netLabel(s: SettingsState): String =
     var out = "OFF"
@@ -1568,6 +1616,7 @@ object SettingsLogic:
     else if i == IP_ADDR then twoLines("wlan0 IPv4 address", "")
     else if i == CELL_DATA then twoLines("ppp0 link + signal", cellAddrLine(s))
     else if i == NET_TEST then netTestDetail(s)
+    else if i == NOTIFY then twoLines("</> arriving messages", "play thru speaker/quiet")
     else actionDetail(s)
 
   /** the detail block's two rows, in the color everything but a warning uses. */

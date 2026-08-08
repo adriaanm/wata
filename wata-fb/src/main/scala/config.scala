@@ -120,6 +120,35 @@ object FbConfig:
   /** persist the settings applet's preferences, keeping the stored session. */
   def savePrefs(p: FbPrefs): Unit = writeStore(load(), p)
 
+  // ---- the arrival-notification mode ---------------------------------------
+
+  /** The walkie-talkie toggle (plan 0041) lives here with the other
+   *  preferences rather than in `FbPrefs`, for the reason the mac's
+   *  `config.scala` records: the SHARED settings applet constructs that
+   *  record positionally, so a field added on one client would have to
+   *  appear on the other in the same move. The cell is the reader for every
+   *  write path (`writeStore` is called by `saveSession` and `savePrefs`,
+   *  neither of which knows about the mode); `Ui.resetCells` primes it from
+   *  the file before the first frame. Default `play`: it is a walkie-talkie
+   *  (the mac defaults to `quiet` — a desktop is not one). */
+  private val modeC: sgo.Atomic[String] = sgo.atomic(Notify.MODE_PLAY)
+
+  def loadNotifyMode(): NotifyMode =
+    val m = Notify.parseMode(WJson.strField(readJson(), "notify_mode", Notify.MODE_PLAY))
+    modeC.set(Notify.spellMode(m))
+    m
+
+  def notifyMode(): NotifyMode = Notify.parseMode(modeC.get())
+
+  /** the user changed it in Settings: remember it for the next boot. */
+  def saveNotifyMode(m: NotifyMode): Unit =
+    modeC.set(Notify.spellMode(m))
+    writeStore(load(), loadPrefs())
+
+  /** set the cell WITHOUT touching the file — the scripted driver's mode
+   *  force, so a test leg needs no config I/O. */
+  def forceNotifyMode(m: NotifyMode): Unit = modeC.set(Notify.spellMode(m))
+
   /** the one writer: session fields first (the Zig client's file order), then
    *  the preference fields. Both halves are always written, so a caller that
    *  changed one of them has to have read the other back — which `saveSession`
@@ -128,6 +157,7 @@ object FbConfig:
 
   def toJson(s: Session, p: FbPrefs): Json =
     var fs: List[(String, Json)] = Nil
+    fs = ("notify_mode", JStr(modeC.get())) :: fs
     fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
     fs = ("brightness", JInt(p.brightness.toLong)) :: fs
     fs = ("device_id", JStr(s.deviceId)) :: fs

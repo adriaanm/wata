@@ -12,7 +12,7 @@ way tui-smoke drives the tui. The smoke asserts three layers at once:
     label strings) shows the contact list the fb bodies describe;
   - a message bob sends MID-SESSION (via the tui) arrives over sync and the
     printed differ script patches EXACTLY the row it names — the unplayed
-    badge inserted into the family row, nothing else;
+    underline + badge inserted into the family row, nothing else;
   - the key path (`key <name> press/release` feeds macOS virtual key codes
     through nativeui's real translation table) opens the conversation, whose
     native tree then shows bob's message row;
@@ -261,13 +261,15 @@ def run(tmp):
         c.line(boblines, lambda l: l == "ready @bob:localhost", "bob: no `ready`")
         c.line(boblines, lambda l: l.startswith("sent "), "bob: no `sent` line")
 
-        # the message arrives over sync; the differ patches EXACTLY the rows
-        # it changes: the unplayed badge inserted into the family row (child 2
-        # of row 0 of the rows group at path [2]), and nothing else.
+        # the message arrives over sync; the differ patches EXACTLY the row
+        # it changes: the unplayed underline (plan 0041's highlight, shared
+        # with the handset) and the unplayed badge inserted into the family
+        # row (row 0 of the rows group at path [2]), and nothing else.
         arrival = sess.cmd("wait 6000", lambda l: l == "waited 6000")
         patches = [l for l in arrival if l.startswith("patch ")]
-        c.ok(patches == ['patch insert [0.2.0] 2 badge:text(25,2,"1",65504)'],
-             f"arrival: want exactly the badge insert, got {patches!r}")
+        c.ok(patches == ['patch insert [0.2.0] 1 unp:rect(0,24,160,1,65504)',
+                         'patch insert [0.2.0] 3 badge:text(25,2,"1",65504)'],
+             f"arrival: want exactly the underline + badge inserts, got {patches!r}")
 
         # and the native tree now shows it, retained (no rebuild: same frames).
         t2 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))

@@ -27,6 +27,18 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## client / device
 
+- **Arrival notifications need their device pass** (plan 0041,
+  2026-08-08): the presentation is gate-proven only (`arrival-notify`
+  in fb-ui-tests: probes, goldens, decision lines) and rides the next
+  `fb-deploy`. On the handset: the green LED visibly blinks ~1 Hz while
+  a message waits and steadies once played; the quiet banner shows on a
+  lit screen and does NOT wake a dark one; play-now actually plays an
+  arriving message through the speaker (restart the sender side or use
+  a second handset); and the knob-off leg — auto-play with the volume
+  pot at zero stays silent yet the message still reads as played on the
+  sender (that is the contract, verify it holds rather than "fix" it).
+  Also confirm the new Settings row ("Notify") toggles and survives a
+  reboot.
 - **Framebuffer unblank fix needs a device pass** (FB-FIRST-FRAME-WHITE,
   2026-08-06): `Ui.loopWithDevice`/`Ui.wake` now write `0` to
   `/sys/class/graphics/fb0/blank` (`Led.unblankFb`) so the first frame

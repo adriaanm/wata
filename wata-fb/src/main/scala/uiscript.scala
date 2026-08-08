@@ -76,6 +76,15 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              (refused|ok|auto), then one frame — the real
  *                              one comes from an iroh dial refusal, which a
  *                              hermetic run cannot provoke
+ *    notifymode <play|quiet>   force the arrival-notification mode's cell
+ *                              (plan 0041) with no config I/O — what a
+ *                              notify leg sets instead of walking Settings
+ *    sendas <user>             send one voice message into the FAMILY room
+ *                              as <user>, out of band (a direct login +
+ *                              upload + send with the phase's password, like
+ *                              `group`) — the only way a scripted session
+ *                              sees a mid-session ARRIVAL, since its own
+ *                              sends never raise its unplayed counts
  *
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
@@ -91,7 +100,12 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  turning and a retry-now poke landing), quitarm (1 while the two-step quit
  *  is armed), unsent / undeliv (conversations carrying an outbox marker: a
  *  send still queued, or one the server refused), frames (the session's frame
- *  counter — what a script watches to prove the frame loop is not blocked). */
+ *  counter — what a script watches to prove the frame loop is not blocked),
+ *  and the arrival-notification probes (plan 0041): unplayed (the summed
+ *  unplayed counts the LED/banner/highlight all derive from), notifyled (the
+ *  green LED's computed policy: 0 off, 1 steady, 2 blinking), notifyred (1
+ *  while the arbiter holds the red LED on), notifybanner (1 while the quiet
+ *  banner is up). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -244,6 +258,10 @@ object UiScript:
       err = enrolIdDirective(nth(ts, 1), nth(ts, 2))
     else if cmd == "enrolstate" then
       err = enrolStateDirective(nth(ts, 1), c, clock, evts, dev, px)
+    else if cmd == "notifymode" then
+      err = notifyModeDirective(nth(ts, 1))
+    else if cmd == "sendas" then
+      err = sendAs(nth(ts, 1))
     else err = "unknown directive '" + cmd + "'"
     err
 
@@ -413,6 +431,62 @@ object UiScript:
     else if name == "refused" then 1
     else -2
 
+  // ---- the arrival-notification overrides (plan 0041) --------------------------
+
+  /** force the notify-mode CELL, no config I/O — the mode is device config,
+   *  and a script that wants quiet mode should not have to walk Settings or
+   *  write a file another phase would then resume into. */
+  def notifyModeDirective(name: String): String =
+    var err = ""
+    if name != Notify.MODE_PLAY && name != Notify.MODE_QUIET then
+      err = "notifymode wants play|quiet"
+    else FbConfig.forceNotifyMode(Notify.parseMode(name))
+    err
+
+  /** txn ids for `sendas` sends — each direct login is its own device, so
+   *  these only have to be distinct within one script. */
+  private val txnC: sgo.Atomic[scala.Int] = sgo.atomic(9000)
+
+  /** one out-of-band voice message into the FAMILY room as `user` (the
+   *  phase's password — the harness gives every account the same one): a
+   *  direct login + media upload + send, outside the client runtime, exactly
+   *  the `group` shape. This is what makes a mid-session ARRIVAL scriptable:
+   *  the frame loop's own sends never raise its unplayed counts. The family
+   *  room id comes from the live snapshot, so the script must have waited
+   *  for `convs` first. */
+  def sendAs(user: String): String =
+    if user == "" then "sendas wants a <user>"
+    else
+      val room = familyRoom(Ui.frameSnap)
+      if room == "" then "sendas: no family room in the snapshot yet"
+      else sendAsInto(user, room)
+
+  def sendAsInto(user: String, room: String): String =
+    val anon = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
+    val lr = MatrixHttp.login(anon, user, passC.get())
+    if lr.status != 200 then "sendas: login status " + lr.status
+    else
+      val tok = Matrix.parseLogin(MatrixHttp.parseOrNull(lr.body)).accessToken
+      if tok == "" then "sendas: no access token"
+      else sendVoiceAs(Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), tok), room)
+
+  def sendVoiceAs(hs: Hs, room: String): String =
+    val ogg = Integ.fakeOgg()
+    val up = MatrixHttp.uploadMedia(hs, ogg)
+    if up.status != 200 then "sendas: upload status " + up.status
+    else
+      val mxc = MatrixHttp.parseMxcUrl(up.body)
+      if mxc == "" then "sendas: no content_uri"
+      else
+        val resp = MatrixHttp.sendVoiceMessage(hs, room, mxc, 1000L, ogg.size, txnC.add(1))
+        if resp.status != 200 then "sendas: send status " + resp.status
+        else ""
+
+  def familyRoom(snap: StateSnapshot): String =
+    Integ.findFamilyConv(snap.conversations) match
+      case c: Some[Conversation] => c.value.roomId
+      case None                  => ""
+
   // ---- checkpoints ---------------------------------------------------------------
 
   /** dump the live pixel buffer as a PNG the harness byte-compares. Same
@@ -506,6 +580,12 @@ object UiScript:
     else if name == "undeliv" then countKeys(Ui.undeliveredKeys)
     else if name == "frames" then Ui.frames
     else if name == "nettest" then netTestProbe()
+    // the arrival-notification probes (plan 0041): the summed counts, the LED
+    // arbiter's computed decision, and the banner cell.
+    else if name == "unplayed" then Notify.totalUnplayed(Ui.frameSnap)
+    else if name == "notifyled" then Ui.ledGreenNow
+    else if name == "notifyred" then boolProbe(Ui.ledRedNow)
+    else if name == "notifybanner" then boolProbe(Ui.bannerOn)
     else -1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run

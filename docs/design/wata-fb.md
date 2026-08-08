@@ -1092,6 +1092,72 @@ it back (a "hear your own voice" check); `play` synthesizes a 1.5s
 decodes and plays it (a tone is easier to verify with a sound meter
 than speech).
 
+## Arrival notifications
+
+A message landing while nobody is looking at the handset announces itself
+beyond the unplayed-count digit (plan 0041). **The model is `wataclient`'s,
+not this client's** (`notify.scala`: `NotifyMode`, `Arrival`,
+`Notify.step`) — the mac consumes the same one
+(`docs/design/wata-mac.md`, "Arrival notifications"), so both clients
+answer "which arrival is worth announcing" identically and only the
+presentation differs. The frame loop steps it once per frame off the
+snapshot the frame already read (`Ui.notifyFrame`, marks carried in
+`notifyC` beside the other pump cells); the edge is a conversation's
+unplayed count RISING, priming is once per session.
+
+- **Play-now is the walkie-talkie default** (`notify_mode` absent =
+  `play`; the mac defaults to `quiet` — a desktop is not a
+  walkie-talkie). An arrival sends the same `ActPlay` the applet's OK
+  press sends and marks the applet playing through the
+  `Shell.notifyWataPlaying` shim, so the existing `AePlaybackDone` arm
+  sends the read receipt — an auto-played message really becomes played.
+  The `canAutoPlay` gate is the mac's (`!playing && !pttHeld`); an
+  arrival that loses it falls through to the quiet channels rather than
+  queueing — the audio thread does one thing at a time.
+- **The volume knob needs no software.** `PlayVol` is fixed; the pot is
+  analog and pre-PA, so its off position silences an auto-play exactly as
+  it silences the chirp — and the message is still receipted as played.
+  That is the walkie-talkie contract (a radio does not know its volume
+  either); a parent who wants unheard messages to stay unplayed sets
+  quiet mode.
+- **Quiet mode announces on three channels, all derived from the one
+  number** (`Notify.totalUnplayed` + the per-conversation counts the
+  contact list already badges — no second state threads through the sync
+  engine): the green LED **blinks** ~1 Hz while anything is unplayed (the
+  screen-off channel — see the LED arbiter below); a **banner**
+  (`Ui.bannerView`, two rows at the top of the panel showing
+  `Notify.title`/`Notify.body`) stays up `BANNER_MS` (~4s), drawn only
+  while the screen is on, never over the modal exit menu, and not when
+  the announced conversation is already open on a lit screen; and the
+  contact row of any conversation with `unplayedCount > 0` carries a
+  **yellow underline** (`contactRowView`'s `"unp"` child) — persistent
+  until played, because it renders the count, not the edge. An arrival
+  never wakes the screen: a handset in a dark bedroom staying dark is a
+  feature.
+- **Every arrival prints one decision line** to the app log:
+  `notify: play|quiet|suppressed "<title>" "<body>" unplayed=<n>` —
+  the assertable half of the presentation (`suppressed` = the person was
+  already looking at that conversation).
+- **The mode is device config**, a `notify_mode` key in the config store
+  with its own cell and `loadNotifyMode`/`notifyMode`/`saveNotifyMode`
+  (`config.scala`) — deliberately NOT an `FbPrefs` field, since the
+  shared settings applet constructs that record positionally. The
+  settings applet's last row ("Notify: play now / quiet", stable id
+  `NOTIFY`, appended so no earlier row's golden moves) toggles it on
+  left/right and persists through `SettingsLogic.persisted`, the same
+  seam as brightness/timeout. The applet is shared, so the mac's settings
+  body grows the row too; its chrome commands `notify:play`/`notify:quiet`
+  use the same `Notify.MODE_*` constants, so the spellings cannot drift.
+- **The gate**: the `arrival-notify` scenario in `fb-ui-tests.py` — the
+  `sendas` script directive lands a mid-session out-of-band arrival, the
+  `unplayed`/`notifyled`/`notifyred`/`notifybanner` probes read the
+  computed decisions, `notify-banner.png`/`notify-highlight.png` pin the
+  pixels, the harness's `logs` assertion pins the decision lines, and
+  play mode is proven by the `played` probe rising (the receipt went
+  through the ordinary playback-done arm). The on-handset pass (LED
+  visible, speaker plays, knob-off leg) rides the next `fb-deploy` —
+  tracked in WATA-TODO.md.
+
 ## LEDs and peripherals
 
 `Led` (`led.scala`) drives backlight, red LED, green LED, and button
@@ -1102,8 +1168,18 @@ means there is no way to detect from this code whether an LED write
 actually succeeded — deliberate, since the dev host has no such sysfs
 tree at all and the code needs to run unmodified there.
 
-`Ui.onConn` (`ui.scala:212`) maps connection state onto the LEDs: green
-while syncing/connected, red on error/disconnected. The backlight
+The LEDs are decided by ONE pure per-frame arbiter (`Ui.ledArbiter`,
+plan 0041 — `onConn` used to write them directly on connection changes,
+which left no room for a second meaning on the green):
+`(connState, unplayed, nowMs) -> LedState(green, red)`. Red steady =
+connection bad (error/auth-rejected/disconnected), as before. Green
+carries two meanings ordered by urgency: BLINKING ~1 Hz (frame-clock
+driven — the sysfs layer has no blink primitive) = unplayed messages
+waiting, which is the screen-off announcement channel; steady = live and
+idle. `Ui.applyLeds` writes through the `UiDevice` seam only on a change,
+so a blink costs two sysfs writes a second, not sixty; the policy half
+(`Ui.ledGreen`: 0 off / 1 steady / 2 blinking) is what the scripted
+driver's `notifyled` probe reads. The backlight
 brightness is user-configurable through the settings applet
 (`SettingsLogic.brightnessUp/Down`, `applets.scala:664-676`,
 30-second-to-never idle screen-off timeout,

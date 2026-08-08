@@ -109,6 +109,13 @@ object Shell:
     withApplet(s, WATA, WataApplet(WataLogic.notifySend(wataState(s), isError)))
   def notifyWataPlayError(s: ShellState, fetchFailed: Boolean): ShellState =
     withApplet(s, WATA, WataApplet(WataLogic.notifyPlayError(wataState(s), fetchFailed)))
+  /** an arrival auto-play (plan 0041): mark the wata applet playing exactly as
+   *  its own OK press does, so the existing `AePlaybackDone` arm sends the
+   *  read receipt. The mac's pump mutates `PumpSt.wata` directly; wata-fb's
+   *  applet state lives behind `stateC`, so the mutation rides this shim like
+   *  `notifyWataSend`'s. */
+  def notifyWataPlaying(s: ShellState, room: String, id: String): ShellState =
+    withApplet(s, WATA, WataApplet(WataLogic.withPlaying(wataState(s), true, room, id)))
 
   // ---- input routing ----------------------------------------------------------
   /** applet switching on dot1/dot2 (press only); PTT always -> wata; else

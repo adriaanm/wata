@@ -1,0 +1,21 @@
+# arrival-notify, phase 2 (plan 0041): PLAY-NOW mode (the walkie-talkie
+# default). Phase 1 left bob's message unplayed, so this session PRIMES on a
+# backlog and announces nothing for it — priming is once per session. The
+# second arrival then auto-plays: the same ActPlay the applet's OK press
+# sends plus withPlaying, so the ordinary AePlaybackDone arm receipts it and
+# the played count RISES through sync — the receipt is the proof the play
+# path really ran, not just the decision line.
+
+notifymode play
+wait syncing 1 900
+wait convs 2 900
+advance 30
+# the backlog primed silently: the count is up, nothing announced or played
+expect unplayed 1
+waitmax notifybanner 0 1
+
+sendas bob
+# the auto-play receipts through AePlaybackDone; sync brings the mark back
+wait played 1 2000
+# a played arrival banners nothing
+waitmax notifybanner 0 1

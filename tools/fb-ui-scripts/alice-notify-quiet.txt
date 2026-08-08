@@ -1,0 +1,36 @@
+# arrival-notify, phase 1 (plan 0041): QUIET mode. Bob's message lands
+# MID-SESSION, out of band (`sendas`) — the one shape that raises alice's
+# unplayed count while her session is primed and watching. The probes read
+# the frame's computed decisions (the LED arbiter's pair, the banner cell);
+# the two checkpoints pin the banner and the persistent row highlight.
+
+notifymode quiet
+wait syncing 1 900
+# [Family, Bob (roomless DM)]
+wait convs 2 900
+advance 30
+# live and idle: the arbiter holds a steady green (1 = steady)
+expect notifyled 1
+
+sendas bob
+wait unplayed 1 2000
+# the arrival announced on the quiet channels: banner up, green blinking (2)
+expect notifybanner 1
+expect notifyled 2
+advance 3
+checkpoint notify-banner
+
+# the arbiter's red arm: a bad connection is a steady red, and the blink
+# survives it — the two LEDs carry independent meanings
+conn error
+expect notifyred 1
+expect notifyled 2
+conn live
+
+# the banner ages out (~4s of frame time); the highlight renders the COUNT,
+# not the edge, so it stays until the message is played
+idle 150
+waitmax notifybanner 0 60
+advance 3
+checkpoint notify-highlight
+expect notifyled 2

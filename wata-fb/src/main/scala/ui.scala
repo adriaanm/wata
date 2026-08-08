@@ -73,6 +73,15 @@ final class FbUiDevice(fds: List[scala.Int], mem: go.Bytes) extends UiDevice:
   def buttonBacklight(on: Boolean): Unit = Led.setButtonBacklight(on)
   def frameSleep(ms: Long): Unit = FbCaps.sleepMs(ms)
 
+/** the arrival banner (plan 0041): what quiet mode shows at the top of the
+ *  panel for a few seconds after an arrival. `roomId` names the announced
+ *  conversation (the one screen the banner never draws over) and `untilMs`
+ *  is the frame clock's expiry. */
+case class NotifyBanner(title: String, body: String, roomId: String, untilMs: Long)
+
+/** one frame's LED decision, as the arbiter computes it. */
+case class LedState(green: Boolean, red: Boolean)
+
 object Ui:
 
   /** the frame pace (~30fps for the panel). */
@@ -118,6 +127,15 @@ object Ui:
   // an offline device accumulates.
   private val unsentC: sgo.Atomic[List[String]] = sgo.atomic(Nil)
   private val undelivC: sgo.Atomic[List[String]] = sgo.atomic(Nil)
+  // the arrival-notification marks (plan 0041): the unplayed counts the
+  // per-frame `Notify.step` measures the edge against — wataclient's model,
+  // the same record the mac pump carries in `PumpSt.marks`.
+  private val notifyC: sgo.Atomic[NotifyState] = sgo.atomic(Notify.initial())
+  // the quiet-mode banner, or None while nothing is announced.
+  private val bannerC: sgo.Atomic[Option[NotifyBanner]] = sgo.atomic(None)
+  // the last pair actually written to the LEDs, so the ~30fps loop only
+  // touches sysfs on a change (a blink is two writes a second, not sixty).
+  private val lastLedC: sgo.Atomic[Option[LedState]] = sgo.atomic(None)
   private def stateV: ShellState = stateC.get()
   private def connV: ConnectionState = connOf(connForceC.get(), connC.get())
   private def idleTime: scala.Double = idleC.get()
@@ -262,6 +280,9 @@ object Ui:
   /** reset the UI cells — a fresh session per run (the host drivers reuse the
    *  process across sequential sessions, so this is not merely cosmetic). */
   def resetCells(): Unit =
+    // the notify-mode cell first: `Shell.initial` -> `SettingsLogic.restored`
+    // reads it for the settings row, so it has to be primed before the shell.
+    FbConfig.loadNotifyMode()
     stateC.set(Shell.initial(FbConfig.loadPrefs()))
     connC.set(Disconnected())
     idleC.set(0.0)
@@ -279,6 +300,9 @@ object Ui:
     exitC.set(None)
     unsentC.set(Nil)
     undelivC.set(Nil)
+    notifyC.set(Notify.initial())
+    bannerC.set(None)
+    lastLedC.set(None)
     NetStatus.reset()
     Enrol.reset()
     Diag.resetNetTest()
@@ -333,6 +357,13 @@ object Ui:
     // interface at all.
     if NetStatus.takePipeArrival() then Runtime.retryNow(c)
 
+    // arrival notifications (plan 0041): the edge, once a frame, off the
+    // snapshot this frame picked up; then the LED arbiter and the banner's
+    // aging — every channel derived from the same unplayed counts.
+    notifyFrame(c, snapC.get(), nowMs)
+    applyLeds(dev, ledArbiter(conn, Notify.totalUnplayed(snapC.get()), nowMs))
+    tickBanner(nowMs)
+
     // build this frame's context: ONE unified FrameCtx shared by every applet
     val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts,
       unsentC.get(), undelivC.get(), quitArmed)
@@ -358,6 +389,7 @@ object Ui:
         exitMenu match
           case s: Some[ExitMenuState] => ExitMenu.render(s.value, px, ctx)
           case None                   => Shell.render(stateV, px, ctx)
+        drawBanner(px)
         dev.present(px)
       dev.frameSleep(FRAME_MS)
     tally(frameC)
@@ -500,13 +532,13 @@ object Ui:
     val n = cell.add(1)
     ()
 
-  /** connection change -> mirror on the red/green LEDs, and — the first time a
-   *  session actually comes up — write the credentials to the config store so
-   *  the next boot resumes without arguments. */
+  /** connection change -> the status cell (the per-frame LED arbiter reads it
+   *  from there), and — the first time a session actually comes up — write the
+   *  credentials to the config store so the next boot resumes without
+   *  arguments. */
   def onConn(c: MatrixClient, cs: ConnectionState, dev: UiDevice): Unit =
     connC.set(cs)
     if Runtime.connTag(cs) == 4 then tally(connErrC)
-    dev.leds(isLive(cs), isBad(cs))
     if isLive(cs) then persistSession(c)
 
   /** `Runtime.lastAuth` is set immediately before the runtime publishes
@@ -531,3 +563,145 @@ object Ui:
     case _: ConnAuthRejected => true
     case _: Disconnected     => true
     case _                   => false
+
+  // ---- arrival notifications (plan 0041) --------------------------------------
+
+  /** how long the quiet banner stays up (frame-clock ms). */
+  val BANNER_MS: Long = 4000L
+  /** half a blink period: green toggles every 500ms while messages wait. */
+  val BLINK_HALF_MS: Long = 500L
+
+  /** The arrival edge, once a frame, off the snapshot the frame already read:
+   *  `Notify.step` (wataclient, shared with the mac) answers which
+   *  conversations' unplayed counts ROSE and who to name. There is
+   *  deliberately no second channel through the sync engine — one number
+   *  drives the LED, the banner, the row highlight and the contact list's own
+   *  badge, so they cannot disagree. */
+  def notifyFrame(c: MatrixClient, snap: StateSnapshot, nowMs: Long): Unit =
+    val r = Notify.step(notifyC.get(), snap)
+    notifyC.set(r.marks)
+    val unplayed = Notify.totalUnplayed(snap)
+    var cur = r.arrivals
+    var going = true
+    while going do
+      cur match
+        case a: ::[Arrival] =>
+          announce(c, a.head, snap, unplayed, nowMs)
+          cur = a.tail
+        case Nil => going = false
+
+  /** What one arrival does, and the ONE decision line it prints:
+   *
+   *      notify: play|quiet|suppressed "<title>" "<body>" unplayed=<n>
+   *
+   *  `play` is the walkie-talkie default — the same `ActPlay` the applet's OK
+   *  press sends plus `withPlaying`, so the existing `AePlaybackDone` arm
+   *  sends the read receipt and an auto-played message really becomes played.
+   *  An arrival that loses the `canAutoPlay` gate falls through to the quiet
+   *  channels rather than queueing (the audio thread does one thing at a
+   *  time, and the count is still up). `suppressed` = the person is already
+   *  looking at that conversation on a lit screen — told already. */
+  def announce(c: MatrixClient, a: Arrival, snap: StateSnapshot,
+               unplayed: scala.Int, nowMs: Long): Unit =
+    if Notify.playsNow(FbConfig.notifyMode()) && canAutoPlay(Shell.wataState(stateV)) then
+      Runtime.sendAction(c, ActPlay(a.mxcUrl))
+      stateC.set(Shell.notifyWataPlaying(stateV, a.roomId, a.eventId))
+      println(notifyLine("play", a, unplayed))
+    else if viewingConv(snap, a.roomId) then println(notifyLine("suppressed", a, unplayed))
+    else
+      bannerC.set(Some(NotifyBanner(Notify.title(a), Notify.body(a), a.roomId,
+        nowMs + BANNER_MS)))
+      println(notifyLine("quiet", a, unplayed))
+
+  /** the mac's gate, restated: an auto-play waits rather than cutting into a
+   *  playback or a recording in progress. */
+  def canAutoPlay(w: WataState): Boolean = !w.playing && !w.pttHeld
+
+  /** is the announced conversation the one on a lit screen right now? The
+   *  exit menu is modal over everything, so an open menu means no. */
+  def viewingConv(snap: StateSnapshot, roomId: String): Boolean =
+    var out = false
+    if !displayOff && !exitMenuOpen && stateV.active == Shell.WATA then
+      val w = Shell.wataState(stateV)
+      if isConversation(w.view) && WataLogic.roomIdAt(snap, w.convContactIdx) == roomId then
+        out = true
+    out
+
+  def isConversation(v: WataView): Boolean = v match
+    case _: VConversation => true
+    case _                => false
+
+  def notifyLine(what: String, a: Arrival, unplayed: scala.Int): String =
+    "notify: " + what + " \"" + Notify.title(a) + "\" \"" + Notify.body(a) +
+      "\" unplayed=" + unplayed
+
+  // ---- the LED arbiter --------------------------------------------------------
+
+  /** ONE pure function decides the two LEDs each frame (`onConn` used to write
+   *  them directly, which left no room for a second meaning on the green).
+   *  Red steady = connection bad, exactly as before. Green carries two
+   *  meanings ordered by urgency: BLINKING (~1 Hz off the frame clock —
+   *  led.scala has no blink primitive) = unplayed messages waiting, which is
+   *  the screen-off channel; steady = connected and idle. */
+  def ledArbiter(cs: ConnectionState, unplayed: scala.Int, nowMs: Long): LedState =
+    LedState(greenOf(ledGreen(cs, unplayed), nowMs), isBad(cs))
+
+  /** the green LED's policy: 0 = off, 1 = steady (live, nothing waiting),
+   *  2 = blinking (unplayed messages) — what the `notifyled` probe reads. */
+  def ledGreen(cs: ConnectionState, unplayed: scala.Int): scala.Int =
+    var out = 0
+    if unplayed > 0 then out = 2
+    else if isLive(cs) then out = 1
+    out
+
+  def greenOf(mode: scala.Int, nowMs: Long): Boolean =
+    if mode == 2 then blinkOn(nowMs) else mode == 1
+
+  def blinkOn(nowMs: Long): Boolean = (nowMs / BLINK_HALF_MS) % 2L == 0L
+
+  /** write the pair through the device seam, only on change — a blink is two
+   *  sysfs writes a second, not sixty. */
+  def applyLeds(dev: UiDevice, l: LedState): Unit =
+    if ledChanged(lastLedC.get(), l) then
+      lastLedC.set(Some(l))
+      dev.leds(l.green, l.red)
+
+  def ledChanged(last: Option[LedState], l: LedState): Boolean = last match
+    case s: Some[LedState] => s.value.green != l.green || s.value.red != l.red
+    case None              => true
+
+  // ---- the banner -------------------------------------------------------------
+
+  /** is the arrival banner up (what the `notifybanner` probe reads)? */
+  def bannerOn: Boolean = bannerC.get() match
+    case _: Some[NotifyBanner] => true
+    case None                  => false
+
+  /** the green-LED policy THIS frame's arbiter would compute — the scripted
+   *  driver's probe surface. */
+  def ledGreenNow: scala.Int = ledGreen(connV, Notify.totalUnplayed(snapC.get()))
+  def ledRedNow: Boolean = isBad(connV)
+
+  def tickBanner(nowMs: Long): Unit =
+    bannerC.get() match
+      case b: Some[NotifyBanner] => if nowMs >= b.value.untilMs then bannerC.set(None)
+      case None                  => ()
+
+  /** paint the banner over the frame — only while the screen is on (the
+   *  caller's `!displayOff` gate; an arrival never wakes the screen, the LED
+   *  is the screen-off channel) and never over the modal exit menu. */
+  def drawBanner(px: go.Bytes): Unit =
+    bannerC.get() match
+      case b: Some[NotifyBanner] =>
+        if !exitMenuOpen then FbPaint.draw(px, bannerView(b.value))
+      case None => ()
+
+  /** two rows at the top of the panel: sender, then what landed where — the
+   *  shared `Notify.title`/`Notify.body` strings, so both clients say the
+   *  same thing. */
+  def bannerView(b: NotifyBanner): View =
+    VGroup(
+      Keyed("bg", VRect(0, 0, Display.W, 2 * Font.GLYPH_H + 2, Color.darkGray)) ::
+        (Keyed("rule", VRect(0, 2 * Font.GLYPH_H + 1, Display.W, 1, Color.yellow)) ::
+          (Keyed("title", VText(0, 0, WataLogic.clip(b.title, Font.COLS), Color.yellow)) ::
+            (Keyed("body", VText(0, 1, WataLogic.clip(b.body, Font.COLS), Color.white)) :: Nil))))

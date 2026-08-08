@@ -76,6 +76,8 @@ ADMIN_URL = "http://192.168.1.4:8008"
 #       with "http_timeout_ms" so the per-request deadline fires inside the
 #       test rather than 30s later.
 #   "http_timeout_ms": <ms> — WATA_HTTP_TIMEOUT_MS for the phases.
+#   "logs": {script: [substrings]} — assert each substring appears in that
+#       phase's output (how the notify decision lines are pinned).
 #   "iroh": True — write a device iroh config for the phases and point
 #       WATA_IROH_CONFIG + WATA_ADMIN_URL at it, i.e. run them as a handset
 #       configured to speak iroh (plan 0014). That is what turns the Enroll
@@ -237,6 +239,22 @@ SCENARIOS = [
             ("alice", "alice-disconnect-quit.txt"),
         ],
     },
+    {
+        # plan 0041: arrival notifications. Phase 1 pins quiet mode (banner +
+        # LED-arbiter decisions + persistent highlight); phase 2 pins play-now
+        # (the arrival auto-plays and the receipt raises `played`). The
+        # decision lines are asserted from the phase log — they are the
+        # assertable half of the presentation.
+        "name": "arrival-notify",
+        "phases": [
+            ("alice", "alice-notify-quiet.txt"),
+            ("alice", "alice-notify-play.txt"),
+        ],
+        "logs": {
+            "alice-notify-quiet.txt": ['notify: quiet "Bob"'],
+            "alice-notify-play.txt": ['notify: play "Bob"'],
+        },
+    },
 ]
 
 
@@ -379,6 +397,11 @@ def run_scenario(scenario, fb, server_bin, env, outdir, update):
             passed = any(line.startswith("UITEST PASS") for line in tail)
             if not passed:
                 return False, f"phase {user}/{script}: " + " | ".join(tail[-6:])
+            # optional per-phase log assertions ("logs": {script: [substr]}) —
+            # how the notify decision lines are pinned without a probe.
+            for sub in scenario.get("logs", {}).get(script, []):
+                if not any(sub in line for line in tail):
+                    return False, f"phase {user}/{script}: log line missing {sub!r}"
     finally:
         stop_server(srv["proc"], srv["log"])
     return compare(scenario, outdir, update)

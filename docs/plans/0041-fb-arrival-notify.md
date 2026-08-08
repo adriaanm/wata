@@ -1,6 +1,6 @@
 # 0041 — wata-fb arrival notifications (MSG-NOTIFICATION-DESIGN)
 
-Status: accepted
+Status: done
 
 ## The problem
 
