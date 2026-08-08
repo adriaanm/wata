@@ -53,10 +53,16 @@ settled, only the landing is pending.
   single blocker for porting `nativeui/interp.go` and deleting the
   frame wire (`WIRE-DIES-INTERP-TO-SGOLA`); `tools/interp-spike` is
   committed not-building, spelled the way the interpreter wants it.
-- **Equality over generic families** (`GENERIC-FAMILY-EQUALS`, queued
-  position 3). Not FFI, but it bit the FFI spikes: `==` on a case class
-  carrying `List[T]` is a loud DATA-4 wall until the reference-collapsed
-  instantiation learns a real equals.
+- **Equality over generic families** (`GENERIC-FAMILY-EQUALS`, landed
+  at sgola `e036452`, repinned 2026-08-08). Not FFI, but it bit the FFI
+  spikes: `==` on a case class carrying `List[T]` was a loud DATA-4
+  wall; the stamped per-instantiation equals now answers it. Not yet
+  consumable by wataui's View family, though: a case carrying a
+  stub-and-map core type (`VImage`'s `Bytes`) stamps an `equalsBytes`
+  that names the unemitted `Bytes` type (build break) and compares zero
+  fields — discrepancy reported upstream 2026-08-08, diff-spike's
+  workaround retained (see WATA-TODO.md). Consequence for FFI: this
+  landing moved `go.callback` to the FRONT of sgola's queue.
 
 ## Ruled — the call-in half
 
@@ -84,8 +90,9 @@ here. The contract to build against, ahead of the landing:
   `Atomic`/`Mutex` cells;
 - the returned address is opaque `go.Uintptr`, as ever.
 
-Implementation is queued (verdict A, one behind
-`GENERIC-FAMILY-EQUALS`). Everything that *receives control from C* is
+Implementation is now FIRST in sgola's queue (verdict A;
+`GENERIC-FAMILY-EQUALS`, which sat ahead of it, landed at `e036452`).
+Everything that *receives control from C* is
 this one feature wearing four costumes — `purego.NewCallback`,
 `objc.RegisterClass` method bodies, `MainQueue().Async` (the dispatch
 seam; `nativeui/dispatch.go` is the *purest* FFI file in the package,
@@ -218,8 +225,8 @@ verification.
   with the caveat that a cached value must be the bracket's *result*
   (the selector uintptr `sel_registerName` returns), never the bound
   `p` itself — the lint enforces exactly that.
-- `go.callback` lands (ruled 2026-08-08, queued one behind
-  `GENERIC-FAMILY-EQUALS`) → `tools/callback-spike` compiles and runs
+- `go.callback` lands (ruled 2026-08-08, now FIRST in sgola's queue —
+  `GENERIC-FAMILY-EQUALS` landed) → `tools/callback-spike` compiles and runs
   leg 2's oracle; on a pass, dispatch, keyview, menu synthesis and the
   objcrt split all unblock at once.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
