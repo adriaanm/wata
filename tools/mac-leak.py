@@ -62,13 +62,40 @@ def rss_kb(pid):
     return int(r.stdout.strip() or 0)
 
 
+def drain(sess):
+    """Pull whatever the app has printed into sess.lines and return it.
+
+    Headless, read_until does this as a side effect of driving the REPL. The
+    windowed app is not driven, so nothing would ever collect its gctrace and
+    schedtrace lines — and its pipe would eventually fill and block it."""
+    import queue as _q
+    got = []
+    while True:
+        try:
+            line = sess.q.get_nowait()
+        except _q.Empty:
+            return got
+        if line is None:
+            return got
+        got.append(line)
+        sess.lines.append(line)
+
+
 def heap_growth(tmp, binary):
     """`go tool pprof -base <first> … <last>`: what GREW, not what is there.
 
     A single heap profile is dominated by the app's ordinary steady-state
     objects and says nothing about a leak. Subtracting an early profile from a
     late one leaves only the difference, which is the question."""
-    profs = sorted(f for f in os.listdir(tmp) if f.endswith(".pprof"))
+    # heap.<n>.pprof — sort by n as a NUMBER. Lexicographically, heap.9 sorts
+    # after heap.24, so a plain sort silently compares the first profile
+    # against the tenth and reports a third of the run as if it were all of it.
+    def idx(f):
+        try:
+            return int(f.rsplit(".", 2)[1])
+        except (IndexError, ValueError):
+            return -1
+    profs = sorted((f for f in os.listdir(tmp) if f.endswith(".pprof")), key=idx)
     if len(profs) < 2:
         return [f"(only {len(profs)} heap profile(s) — the run is shorter "
                 f"than two dump intervals; use more rounds)"]
@@ -175,6 +202,10 @@ def main():
                     help="800ms rounds of idle frames (default 200 — fewer "
                          "than ~150 cannot contain a scavenger reclaim, so a "
                          "short run reads GROWING on the sawtooth's rising edge)")
+    ap.add_argument("--windowed", action="store_true",
+                    help="run the REAL windowed app (opens a window) instead "
+                         "of the headless harness — the shape the owner's "
+                         "26 GB happened in. No REPL, so rounds are wall time")
     ap.add_argument("--heap", action="store_true",
                     help="dump heap profiles during the run and print what "
                          "GREW between the first and last — names the site")
@@ -211,10 +242,28 @@ def main():
             if args.heap:
                 extra["WATA_MAC_HEAP_PROFILE"] = os.path.join(tmp, "heap")
                 extra["WATA_MAC_HEAP_EVERY"] = "20"
+            if args.windowed:
+                # The real app: NSApplication.run, a window, a drained main
+                # queue. It has no REPL, so a round is wall time rather than a
+                # driven frame — and the frames are the runloop's own, which is
+                # the point. MacSession sets HEADLESS=1; "" turns it back off.
+                extra["WATA_MAC_HEADLESS"] = ""
             sess = ms.MacSession(mac_bin, env, extra_env=extra)
-            sess.read_until(lambda l: l in ("ready @alice:localhost", "login failed"), 60)
+            if not args.windowed:
+                sess.read_until(
+                    lambda l: l in ("ready @alice:localhost", "login failed"), 60)
+            else:
+                # let it get through login and put a window up before round 0
+                time.sleep(12)
+                if sess.proc.poll() is not None:
+                    sys.exit("mac-leak: the windowed app exited during startup; "
+                             "its output:\n  " + "\n  ".join(drain(sess)[-20:]))
             for i in range(args.rounds):
-                sess.cmd("wait 800", lambda l: l == "waited 800", timeout=30)
+                if args.windowed:
+                    time.sleep(0.8)
+                    drain(sess)
+                else:
+                    sess.cmd("wait 800", lambda l: l == "waited 800", timeout=30)
                 rss.append(rss_kb(sess.proc.pid))
                 # a few rounds in, so startup's own allocation is not counted
                 # as growth; and at the end, before anything is torn down.
@@ -253,6 +302,14 @@ def main():
         if heaps:
             print(f"  Go live heap {heaps[0][1]} MB -> {heaps[-1][1]} MB "
                   f"({len(heaps)} GCs)")
+            # The series, not just the endpoints: a bounded working set
+            # plateaus, a leak keeps climbing, and first-vs-last cannot tell
+            # them apart. This is the number that matters most here — RSS is a
+            # sawtooth the scavenger drives, but live heap AFTER a collection
+            # is what the app is genuinely holding on to.
+            hstep = max(1, len(heaps) // 10)
+            print("  live heap after each GC (MB): " + " ".join(
+                str(h[1]) for h in heaps[::hstep]))
         else:
             print("  Go live heap  (no GC ran — the Go heap is not the growth)")
         if threads:
@@ -266,9 +323,25 @@ def main():
         # sawtooth is whether the TROUGHS rise, so compare the low-water mark
         # of the first quarter against that of the last, and say plainly when
         # the run was too short to contain a reclaim at all.
+        # The Go live heap gets the first word, because it is the only number
+        # here that a collection has already filtered: if it keeps climbing
+        # across many GCs, the app is holding objects, full stop. An earlier
+        # version of this verdict looked only at RSS and printed "sawtooth,
+        # not a leak" over a run whose live heap went 1 MB -> 35 MB.
         verdict = "steady"
         note = ""
-        if rss:
+        leaking = ""
+        if len(heaps) >= 6:
+            early = min(h[1] for h in heaps[:len(heaps) // 3])
+            late = min(h[1] for h in heaps[-len(heaps) // 3:])
+            if late - early >= 4:
+                leaking = (f"  (live heap after GC climbs {early} MB -> "
+                           f"{late} MB across {len(heaps)} collections — a "
+                           f"collection already removed everything "
+                           f"unreachable, so this is retention)")
+        if leaking:
+            verdict, note = "LEAKING (Go heap)", leaking
+        elif rss:
             q = max(1, len(rss) // 4)
             base, tail = min(rss[:q]), min(rss[-q:])
             reclaimed = max(rss) - min(rss[rss.index(max(rss)):]) > 2048

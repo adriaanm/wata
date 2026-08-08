@@ -520,6 +520,59 @@ VERDICT: GROWING
   (low-water 43.0 MB -> 50.4 MB: the troughs rise)
 ```
 
+**It is a real leak, it is Go objects, and the diff step is what causes
+the retention.** Confirmed in the WINDOWED app — the shape the 26 GB
+happened in — over ~11 minutes. The number that settles it is the live
+heap after each collection, which is what the app is still holding once
+everything unreachable has been removed:
+
+```
+live heap after each GC (MB): 1 2 4 6 8 11 14 18 21 24 27 31 34
+```
+
+A straight line across 39 collections, no plateau. ~3.4 MB/min is
+~200 MB/hour, which reaches 26 GB in about five days and matches "days of
+running". A bounded working set plateaus; this does not.
+
+**The bisect**, headless (which leaks the same way, so it is the cheap rig
+— see below for why that is now trustworthy). Each step ran ~220 rounds
+and the series is the live heap after GC:
+
+| what ran | series | verdict |
+|---|---|---|
+| everything | `1 1 2 3 4 5 7 9` | leaking |
+| tree built, `patchTo`/`setTree` skipped | `0 0 0 1 0` | **flat** |
+| `Diff.diff` + `Wire.encode*`, nothing sent to Go | `1 1 2 2 3 3 4 6 8` | leaking |
+| `Diff.diff` only, no encode, nothing sent | `1 1 1 2 2 3 3 4 5 6 5 7 8 9 10` | leaking |
+
+So building a fresh view tree every frame costs nothing that a collection
+does not reclaim — the flat row is the control, and it also rules out
+`WataLogic` and the client snapshot. `macshell.Apply` and the retained
+AppKit backend are ruled out too: the leak is identical with nothing
+handed across the seam. What is left is `Diff.diff`.
+
+The heap profile taken in that last state names what is retained, and it
+is **not** the patches:
+
+```
+4149kB 47.36%  main.sgolaNewColon2__Keyed
+1536kB 17.53%  main.WataLogic_bodyLive.func2 (inline)
+1536kB 17.53%  main.WataLogic_contactRowView      (cum 64.89%)
+ 515kB  5.88%  main.sgolaNewColon2__I   <- Diff_pathOf, the only Diff cost
+```
+
+The retained objects are the VIEW NODES; `Diff` itself accounts for half a
+megabyte of path lists. So diffing a tree is what makes that tree stay
+reachable, and each frame's tree is then held forever. The pump retains
+exactly one (`st.last`), and `contactRowsView` builds only `visibleRows()`
+rows, so neither the tree nor the pump explains it.
+
+**What is not yet known** is the retaining edge. `wataui/diff.scala` has no
+global state — every binding in it is a local `var` — so the next step is a
+standalone repro: loop `Diff.diff` over two fixed trees with no app around
+it. If that leaks, this is below the Sgola source and belongs upstream as a
+compiler ticket rather than here.
+
 **RSS here is a sawtooth, and that invalidates any short run.** It climbs
 for a couple of minutes and then the scavenger hands pages back, dropping
 it to near where it started. A 60-round run is ~48 seconds and sits
