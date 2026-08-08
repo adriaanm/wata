@@ -83,8 +83,8 @@ tap enter
 advance 5
 checkpoint conv-top
 
-# twelve downs walk the selection from the oldest message to the newest, which
-# sits one row past the window — the list scrolls by one.
+# twelve downs walk the selection from the newest message (row 0) to the
+# oldest, which sits one row past the window — the list scrolls by one.
 tap down
 tap down
 tap down
