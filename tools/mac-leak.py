@@ -216,6 +216,12 @@ def main():
     ap.add_argument("--goroutines", action="store_true",
                     help="SIGQUIT the app at the end and group the dump by "
                          "creation site — names the leaking goroutine directly")
+    ap.add_argument("--arm", default="",
+                    choices=["", "build", "diffonly", "diffself", "consttree"],
+                    help="MAC-IDLE-LEAK bisect arm (WATA_MAC_LEAK_ARM in the "
+                         "app): build = tree only, the flat control; diffonly "
+                         "= Diff.diff, nothing sent, the leaking state; "
+                         "consttree = full pipeline over a constant tree")
     args = ap.parse_args()
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -235,6 +241,8 @@ def main():
                 "GODEBUG": "gctrace=1,schedtrace=4000",
                 "WATA_MAC_CONFIG": os.path.join(tmp, "config.json"),
             }
+            if args.arm:
+                extra["WATA_MAC_LEAK_ARM"] = args.arm
             # SIGQUIT prints only the signalled goroutine unless told otherwise,
             # and the whole question here is the OTHER ones.
             if args.goroutines:

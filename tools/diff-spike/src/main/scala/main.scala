@@ -17,6 +17,9 @@
  *  - d: as b, but the script is dropped immediately — whether holding the
  *       List[Patch] even one iteration matters.
  *  - e: old is last iteration's new — the pump's real `st.last` shape.
+ *  - f: diff a fresh tree against an EQUAL long-lived one (empty script) —
+ *       the idle pump's real case, where the walk takes the all-fields-equal
+ *       path. The sanity assertion is skipped for this arm only.
  *
  *  The trees are shaped like the app's: a VGroup of KEYED rows (keys make the
  *  child scan take the keyed path), each row a group of a highlight VRect and
@@ -61,9 +64,10 @@ object Main:
 
   /** the root's child count — the read that keeps a built tree from being
    *  elidable without walking its nodes. NOT `==` on the views:
-   *  EQUALS-LIST-EMIT-BROKEN-CONS — universal equality over a List-bearing
-   *  case class emits Go naming the `::` class unmangled (`case *:::`), which
-   *  does not compile; sgola ticket filed. */
+   *  GENERIC-FAMILY-EQUALS — `==` over a case class carrying a generic
+   *  sealed-family field (List[Keyed]) is a loud upstream wall until the
+   *  reference-collapsed instantiation learns a real equals; sgola has it
+   *  queued (was EQUALS-LIST-EMIT-BROKEN-CONS, whose mangler half landed). */
   def rootLen(v: View): Int =
     v match
       case VGroup(children) => Views.len(children)
@@ -129,6 +133,20 @@ object Main:
     sampleLine("e", Iters)
     println("arm=e done sink=" + sink)
 
+  /** f: as b but the fresh tree EQUALS the long-lived one, so the script is
+   *  empty and the walk takes the all-fields-equal path — the idle pump's
+   *  real case, and the one path no other arm exercises. */
+  def runF(rows: Int): Unit =
+    val base = tree(0, rows)
+    var sink = 0
+    var i = 0
+    while i < Iters do
+      sink += lenPatches(Diff.diff(base, tree(0, rows)))
+      if i % Sample == 0 then sampleLine("f", i)
+      i += 1
+    sampleLine("f", Iters)
+    println("arm=f done sink=" + sink)
+
   /** d: as b, script dropped immediately. */
   def runD(rows: Int): Unit =
     val base = tree(0, rows)
@@ -154,4 +172,5 @@ object Main:
     else if arm == "c" then runC(rows)
     else if arm == "d" then runD(rows)
     else if arm == "e" then runE(rows)
-    else println("usage: diff-spike a|b|c|d|e")
+    else if arm == "f" then runF(rows)
+    else println("usage: diff-spike a|b|c|d|e|f")

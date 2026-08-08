@@ -471,10 +471,42 @@ object Pump:
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
       st.unsent, st.undelivered,
       NetStatus.everLive(), FbCaps.transportUnavailable(), None, false, NetStatus.clockOk())
-    st.last match
-      case old: Some[View] => patchTo(old.value, v, verbose)
-      case None            => setTree(v, verbose)
-    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    // MAC-IDLE-LEAK bisect arms, env-gated and COMMITTED so a bisect run is
+    // reproducible instead of a per-session working-tree edit (drive them with
+    // `just mac-leak --arm <x>`):
+    //   build     tree built, nothing diffed, nothing sent — the flat control
+    //   diffonly  Diff.diff runs, nothing encoded, nothing sent — the leaking
+    //             bisect state, kept reproducible for heap profiling
+    //   diffself  Diff.diff(v, v) — the all-equal walk over real content,
+    //             pointer-identical arguments, no previous frame involved
+    //   consttree the FULL pipeline, but diffing a constant spike-shaped tree
+    //             in place of the body's — splits the real trees' content from
+    //             the pump's structure (tools/diff-spike cleared the differ
+    //             itself on constant trees)
+    val armv = leakArm()
+    if armv == "build" then
+      PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    else if armv == "diffonly" then
+      st.last match
+        case old: Some[View] => leakSink(Diff.diff(old.value, v))
+        case None            => ()
+      PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    else if armv == "diffself" then
+      // the real tree against ITSELF: the all-equal walk over real content,
+      // with no previous-frame tree involved at all
+      leakSink(Diff.diff(v, v))
+      PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    else if armv == "consttree" then
+      val c = leakTree(((nowMs / 100L) % 2L).toInt)
+      st.last match
+        case old: Some[View] => patchTo(old.value, c, false)
+        case None            => setTree(c, false)
+      PumpSt(st.wata, Some(c), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    else
+      st.last match
+        case old: Some[View] => patchTo(old.value, v, verbose)
+        case None            => setTree(v, verbose)
+      PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
 
   // ---- the two mailbox drains ------------------------------------------------
 
@@ -611,6 +643,29 @@ object Pump:
       out = arm - dt
       if out < 0.0 then out = 0.0
     out
+
+  /** the MAC-IDLE-LEAK bisect arm, read per frame so no module state rides
+   *  on a debug switch. Empty (the normal path) unless the env names one. */
+  def leakArm(): String = go.sys.getenv("WATA_MAC_LEAK_ARM")
+
+  /** keep a bisect arm's diff result un-elidable without sending it. */
+  def leakSink(ps: List[Patch]): Unit =
+    if Wire.lenPatches(ps) < 0 then println("? leak arm")
+
+  /** the constant spike-shaped tree (tools/diff-spike's): 10 keyed rows of a
+   *  highlight VRect + a VText, row 0's text carrying `tag` so consecutive
+   *  frames produce a non-empty script. */
+  def leakTree(tag: Int): View =
+    var rows: List[Keyed] = Nil
+    var i = 9
+    while i >= 0 do
+      val hl = VRect(0, i * 12, 160, 12, if i == 0 then 0x1234 else 0)
+      val txt =
+        if i == 0 then VText(2, i, "row " + i + " v" + tag, 0xFFFF)
+        else VText(2, i, "row " + i, 0xFFFF)
+      rows = Keyed("row-" + i, VGroup(Keyed("", hl) :: Keyed("", txt) :: Nil)) :: rows
+      i -= 1
+    VGroup(rows)
 
   def setTree(v: View, verbose: Boolean): Unit =
     try
