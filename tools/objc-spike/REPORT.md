@@ -183,6 +183,58 @@ rep — so only allocation was live, and it is ruled acceptable here. The
 instinct was right and the premise was stale; worth remembering as a
 reminder to check a constraint before arguing from it.
 
+## Gap 2 is closed — verified 2026-08-08 (pin `40cc1f8`)
+
+**The spike builds.** `just objc-spike` runs clean through `go build`, so
+leg 1 is answered the way this report said it would be: the spike was left
+spelled the way it wants to be spelled, and the day the fix landed it
+compiled. It is in `ci` now, so it keeps compiling.
+
+Both failures are gone, and they were two independent defects: the stamp
+pass had no leg for tuples, so a tuple only ever RECEIVED from a facade was
+minted nowhere (compile and link both reported success — only `go build`
+saw it), and a facade call whose result is a tuple is now wrapped to bind N
+results and build the tuple value.
+
+Running the binary reaches `cstr` and panics on its `???`, which is the
+correct stopping point: every compiler-shaped question in this leg is
+answered, and the one left is `FFI-CSTR-ADDRESS`.
+
+**Leg (2) is not done, and the emitted Go says what it costs.** The
+prediction above was `x2._1` — a direct field read. What is actually
+emitted is
+
+```go
+x1 = func() Tuple3__R__R__R { _r1, _r2, _r3 := purego.SyscallN(getClass, Main_cstr("NSString")); return Tuple3__R__R__R{_1: _r1, _2: _r2, _3: _r3} }()
+var cls uintptr
+cls = x2._1.(uintptr)
+```
+
+with
+
+```go
+type Tuple3__R__R__R struct { _1 any; _2 any; _3 any }
+```
+
+So the slots are `any`, not `uintptr`. The cost of the materialized leg is
+therefore not "an allocation" but a boxing per slot plus the struct — three
+interface values built and one asserted back, for a call whose whole point
+is to be a bare register move. That also corrects this report's claim that
+"everything here is `uintptr`, so this spike does not exercise
+`TUPLE-REF-COMPONENT-ASSIGN`": the assertion is right there in the output.
+It is *sound* — `uintptr` is concrete, so the assertion cannot fail — which
+is why this is an optimization and not a correctness item, as ruled.
+
+Where that cost would show up is worth naming precisely, because the
+obvious place is the wrong one: the handset does not use purego at all
+(its FFI is cgo through `go-pkgs/audio`), so no handset profile will ever
+see this. The surface that would is the macOS/iOS client, where every
+AppKit call in a frame goes through `SyscallN`. Nothing there is written
+against this path yet.
+
+Arity is not a constraint here: `SyscallN` returns exactly 3, so the
+`> 3` tuple wall is not reachable from this spike.
+
 ## What this does NOT answer
 
 Leg 2, the callback half: `purego.NewCallback` takes a func value and

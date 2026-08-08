@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke
+ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -103,11 +103,14 @@ mac-leak *ARGS:
 fb-sim *ARGS:
     bash tools/fb-sim.sh {{ARGS}}
 
-# plan 0038 probe: can Sgola reach the C ABI with no Go of ours? (2 known gaps)
+# plan 0038 probe: can Sgola reach the C ABI with no Go of ours? (1 known gap)
 objc-spike:
-    # It does not build, and that IS the finding — tools/objc-spike/REPORT.md
-    # owns the expectation (go.Uintptr; discarding a Go func's extra results).
-    # Not in ci for the same reason.
+    # It BUILDS now (sgola 40cc1f8): a facade call's multi-result destructure —
+    # `val (cls, _, _) = go.purego.syscallN(…)` — compiles and links. Run by ci
+    # so it keeps doing so. The binary still panics at `cstr`, which is a `???`
+    # on purpose: taking a String's address is FFI-CSTR-ADDRESS, ruled
+    # separately because that is where GC liveness bites. tools/objc-spike/
+    # REPORT.md owns the expectation.
     cd tools/objc-spike && ../../tools/sgo build
 
 # plan 0038 gate: can a facade express AppKit geometry? (1 known gap)
