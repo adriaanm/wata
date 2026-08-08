@@ -244,10 +244,23 @@ facade params — which sgola's own `SAM-CLOSURE-LOWERING` suggests is a
 binding question rather than a lowering one, since closures already emit
 as plain Go func literals.
 
-`cstr` is also still `???`: taking the address of a NUL-terminated string
-is its own small question (Go's own answer is `unsafe.Pointer` +
-`syscall.BytePtrFromString`), deliberately left unanswered until the two
-gaps above close and it can be tried rather than guessed.
+`cstr` is also still `???`, and its RULING is now in (sgola, 2026-08-08,
+recorded in sgola's `docs/spec/15-the-go-boundary_sgola.md` + IOP-2):
+the literal signature `def cstr(s: String): go.Uintptr` is DECLINED
+permanently — a free uintptr keeps nothing alive across statements,
+which is the existence Go's own uintptr rules forbid. The supported
+shape is bracketed: `go.cstring(s) { p => body }`, where `p` addresses a
+NUL-terminated COPY of `s` (BytePtrFromString semantics; interior NUL
+panics), valid for exactly `body`'s extent — the emitted Go holds the
+copy live (`runtime.KeepAlive`) until `body` returns, so liveness is the
+compiler's obligation, and the callee contract is NON-RETENTION (a C
+function that stashes the pointer past the call is outside the
+guarantee; a retained C string would be a new ticket). Implementation is
+queued upstream (verdict A); the spike's call sites reshape to
+`go.cstring(sel) { p => syscallN(fn, p, …) }` (brackets nest for
+multiple string args) when the landing notice names a sha to repin —
+not before, since the spike's build is a ci step and `go.cstring` does
+not exist on the current pin.
 
 ## Running it
 
