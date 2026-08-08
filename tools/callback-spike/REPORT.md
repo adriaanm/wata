@@ -75,14 +75,14 @@ dependency-plumbing module; there is no Go code of ours in the chain.
   argument off — SyscallN zero-fills unsupplied registers. The `Int`
   admission covers callback *results and params*, not general
   `go.Uintptr` argument positions, so this convention stands.
-- **go.mod caveat, resolved upstream** (`GOMOD-PUREGO-REQUIRE-INJECT`
-  landed at sgola `870041f`): the driver now injects the purego require
-  when the emitted Go imports it. This spike was never affected — its
-  `go-pkgs/puredep` godep (a blank-import of purego with a committed
-  go.sum) puts purego in the module graph, and the injection dedups
-  against it. The discovered-module pipeline's analogous gap is queued
-  upstream (`GOMOD-DISCOVERED-PUREGO-PARITY`); see
-  docs/design/sgola-ffi.md's watch list.
+- **go.mod contract** (sgola `22a7c16`): the user owns go.mod — sgo
+  never injects a require, it CHECKS the declared requires against the
+  emitted import set and fails with a fix-menu error naming the exact
+  line if purego is missing. This spike's `go-pkgs/puredep` godep (a
+  blank-import of purego with a committed go.sum) is the correct
+  spelling under that rule, not a workaround; a direct require in the
+  module's go.mod would be equally first-class. See
+  docs/design/sgola-ffi.md.
 
 ## What this unblocks
 

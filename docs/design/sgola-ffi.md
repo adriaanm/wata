@@ -73,14 +73,17 @@ bracket does not exist here — the address is a free value.
   synchronizer) — callback bodies that need mutable state hoist it into
   `Atomic`/`Mutex` cells.
 
-The go.mod wrinkle is mostly gone: since sgola `870041f` the driver
-injects the purego require when the emitted Go imports it, so a fresh
-app built the pinned-checkout way builds clean. What remains open
-upstream is the *discovered-module* pipeline (a fresh app outside a
-pinned corpus layout — `GOMOD-DISCOVERED-PUREGO-PARITY`, queued there).
-Our spikes carry `go-pkgs/puredep` — a blank-import of purego with a
-committed go.sum — which covers wata either way; the injection dedups
-against it.
+The go.mod contract (permanent, not a wrinkle — sgola `22a7c16`,
+reversing an earlier injection approach): **the user owns go.mod, and
+sgo never writes a require you did not declare.** A module whose
+emitted Go imports an external module (today: purego, via
+`go.callback`) must declare the require itself; forget it and sgo
+fails with a fix-menu error naming the exact line to add (never Go's
+raw `no required module provides package`), and a declared-but-
+different version warns against the tested one. Our spikes carry
+`go-pkgs/puredep` — a blank-import of purego with a committed go.sum —
+which under this rule is simply the correct spelling; a direct require
+in the module's go.mod is equally first-class.
 
 ## Ruled and queued — what we know will be possible
 
@@ -238,10 +241,6 @@ verification.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
   (the wire's ~400 lines) and the shape of rung 2's geometry. Now the
   biggest open language gap on this frontier.
-- `GOMOD-DISCOVERED-PUREGO-PARITY` — the surviving half of the go.mod
-  wrinkle (`GOMOD-PUREGO-REQUIRE-INJECT` landed at `870041f`): only a
-  fresh *discovered-module* app hits it; our `go-pkgs/puredep` godep
-  covers wata regardless.
 - purego **v0.11.0** — the struct-by-value pin is on alphas (upstream
   issue #225, milestone v0.11.0; see docs/design/bindgen.md). Bump to
   the release when it ships.
