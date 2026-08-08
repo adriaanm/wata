@@ -176,7 +176,37 @@ class Refusals(unittest.TestCase):
         self.assertEqual(r["applyBits:"], "struct WFBits is refused: field flags is a bitfield")
         self.assertIn("add it to structs", r["applyRect:"])
         self.assertEqual(r["enumerateRanges:"], "struct in a block signature")
-        self.assertIn("callback signature", r["geom:didResize:"])
+
+    def test_struct_callbacks_are_typed(self) -> None:
+        """Structs cross protocol callbacks as the generated struct types, in
+        both directions, and the install carries the TRUE ObjC encoding."""
+        r = self.refusals("struct_by_value")
+        for sel in ("geom:didResize:", "geom:rangeForSpan:", "boxForGeom:", "geom:heightForBand:"):
+            self.assertNotIn(sel, r)
+        files, _ = generate(FIXTURES / "struct_by_value.json")
+        d = files["wfgeomdelegate.go"]
+        self.assertIn("GeomDidResize func(geom WFGeom, size WFSize)", d)
+        self.assertIn("GeomRangeForSpan func(geom WFGeom, span uint) WFRange", d)
+        self.assertIn("BoxForGeom func(geom WFGeom) WFBox", d)
+        self.assertIn('Enc: "v@:@{WFSize=dd}"', d)
+        self.assertIn('Enc: "{_WFRange=QQ}@:@Q"', d)
+        self.assertIn('Enc: "{_WFBox={WFSize=dd}q}@:@"', d)
+        # a method without a struct keeps the derived-encoding path (no Enc)
+        self.assertNotIn('Sel: "geomDidFinish:",\n\t\t\tEnc:', d)
+
+    def test_cgfloat_callback_return(self) -> None:
+        """A CGFloat callback return: the user field returns a plain float64,
+        the trampoline wraps it in objcrt.CGFloatRet (a one-member HFA,
+        returned in d0), and the registered encoding stays the true "d"."""
+        files, _ = generate(FIXTURES / "struct_by_value.json")
+        d = files["wfgeomdelegate.go"]
+        self.assertIn("GeomHeightForBand func(geom WFGeom, band int) float64", d)
+        self.assertIn('Enc: "d@:@q"', d)
+        self.assertIn("objcrt.CGFloatRet{V: d.GeomHeightForBand(", d)
+
+    def test_float32_callback_return_is_refused(self) -> None:
+        r = self.refusals("struct_by_value")
+        self.assertIn("float return from a callback", r["scaleForGeom:"])
 
     def test_unavailable_is_not_a_refusal(self) -> None:
         """NS_UNAVAILABLE says the method is not callable: skip it, silently."""

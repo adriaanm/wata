@@ -197,6 +197,7 @@
         {
           "kind": "ObjCMethodDecl",
           "name": "geom:didResize:",
+          "wataDoc": "A struct argument into a callback (HFA, rides d0-d1).",
           "returnType": {"qualType": "void"},
           "instance": true,
           "inner": [
@@ -204,6 +205,54 @@
              "type": {"qualType": "WFGeom *", "desugaredQualType": "WFGeom *"}},
             {"kind": "ParmVarDecl", "name": "size",
              "type": {"qualType": "WFSize", "desugaredQualType": "struct WFSize"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "geom:rangeForSpan:",
+          "wataDoc": "A struct RETURN from a callback (16 bytes, the GPR pair).",
+          "returnType": {"qualType": "WFRange", "desugaredQualType": "struct _WFRange"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "geom",
+             "type": {"qualType": "WFGeom *", "desugaredQualType": "WFGeom *"}},
+            {"kind": "ParmVarDecl", "name": "span",
+             "type": {"qualType": "NSUInteger", "desugaredQualType": "unsigned long"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "boxForGeom:",
+          "wataDoc": "A 24-byte struct return from a callback (the x8 indirect result).",
+          "returnType": {"qualType": "WFBox", "desugaredQualType": "struct _WFBox"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "geom",
+             "type": {"qualType": "WFGeom *", "desugaredQualType": "WFGeom *"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "geom:heightForBand:",
+          "wataDoc": "A CGFloat return from a callback: crosses as a one-field struct, encoding stays d.",
+          "returnType": {"qualType": "CGFloat", "desugaredQualType": "double"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "geom",
+             "type": {"qualType": "WFGeom *", "desugaredQualType": "WFGeom *"}},
+            {"kind": "ParmVarDecl", "name": "band",
+             "type": {"qualType": "NSInteger", "desugaredQualType": "long"}}
+          ]
+        },
+        {
+          "kind": "ObjCMethodDecl",
+          "name": "scaleForGeom:",
+          "wataDoc": "A float (float32) return from a callback stays refused.",
+          "returnType": {"qualType": "float"},
+          "instance": true,
+          "inner": [
+            {"kind": "ParmVarDecl", "name": "geom",
+             "type": {"qualType": "WFGeom *", "desugaredQualType": "WFGeom *"}}
           ]
         }
       ]

@@ -18,6 +18,18 @@ import (
 // A nil field is not installed on the synthesized class, which is exactly
 // ObjC's optional-method semantics: -respondsToSelector: answers NO for it.
 type WFGeomDelegate struct {
+	// A 24-byte struct return from a callback (the x8 indirect result).
+	// -[WFGeomDelegate boxForGeom:]
+	BoxForGeom func(geom WFGeom) WFBox
+	// A struct argument into a callback (HFA, rides d0-d1).
+	// -[WFGeomDelegate geom:didResize:]
+	GeomDidResize func(geom WFGeom, size WFSize)
+	// A CGFloat return from a callback: crosses as a one-field struct, encoding stays d.
+	// -[WFGeomDelegate geom:heightForBand:]
+	GeomHeightForBand func(geom WFGeom, band int) float64
+	// A struct RETURN from a callback (16 bytes, the GPR pair).
+	// -[WFGeomDelegate geom:rangeForSpan:]
+	GeomRangeForSpan func(geom WFGeom, span uint) WFRange
 	// -[WFGeomDelegate geomDidFinish:]
 	GeomDidFinish func(geom WFGeom)
 }
@@ -27,6 +39,42 @@ type WFGeomDelegate struct {
 // ObjC runtime cannot unregister a class.
 func NewWFGeomDelegate(d WFGeomDelegate) objc.ID {
 	var ms []objcrt.Method
+	if d.BoxForGeom != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "boxForGeom:",
+			Enc: "{_WFBox={WFSize=dd}q}@:@",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID) WFBox {
+				return d.BoxForGeom(WFGeom{a0})
+			},
+		})
+	}
+	if d.GeomDidResize != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "geom:didResize:",
+			Enc: "v@:@{WFSize=dd}",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 WFSize) {
+				d.GeomDidResize(WFGeom{a0}, a1)
+			},
+		})
+	}
+	if d.GeomHeightForBand != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "geom:heightForBand:",
+			Enc: "d@:@q",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 int) objcrt.CGFloatRet {
+				return objcrt.CGFloatRet{V: d.GeomHeightForBand(WFGeom{a0}, a1)}
+			},
+		})
+	}
+	if d.GeomRangeForSpan != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "geom:rangeForSpan:",
+			Enc: "{_WFRange=QQ}@:@Q",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 uint) WFRange {
+				return d.GeomRangeForSpan(WFGeom{a0}, a1)
+			},
+		})
+	}
 	if d.GeomDidFinish != nil {
 		ms = append(ms, objcrt.Method{
 			Sel: "geomDidFinish:",

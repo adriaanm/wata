@@ -13,5 +13,5 @@ generator should learn or a decl the allowlist should stop asking for.
 - `WFGeom` `applyMix:` — struct WFMix is refused: a C union has no Go spelling
 - `WFGeom` `applyRect:` — struct CGRect passed by value is not on the allowlist (add it to structs)
 - `WFGeom` `enumerateRanges:` — struct in a block signature
-- `WFGeomDelegate` `geom:didResize:` — struct in a callback signature (purego callbacks cannot carry structs)
+- `WFGeomDelegate` `scaleForGeom:` — float return from a callback (purego rejects plain float returns; no delegate has needed the one-field-struct spelling for float32)
 - `WFMix` `struct WFMix` — a C union has no Go spelling

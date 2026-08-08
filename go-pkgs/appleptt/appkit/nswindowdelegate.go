@@ -31,6 +31,12 @@ type NSWindowDelegate struct {
 	WindowStartCustomAnimationToEnterFullScreenWithDuration func(window NSWindow, duration float64)
 	// -[NSWindowDelegate window:startCustomAnimationToExitFullScreenWithDuration:]
 	WindowStartCustomAnimationToExitFullScreenWithDuration func(window NSWindow, duration float64)
+	// -[NSWindowDelegate window:willPositionSheet:usingRect:]
+	WindowWillPositionSheetUsingRect func(window NSWindow, sheet NSWindow, rect CGRect) CGRect
+	// -[NSWindowDelegate window:willResizeForVersionBrowserWithMaxPreferredSize:maxAllowedSize:]
+	WindowWillResizeForVersionBrowserWithMaxPreferredSizeMaxAllowedSize func(window NSWindow, maxPreferredFrameSize CGSize, maxAllowedFrameSize CGSize) CGSize
+	// -[NSWindowDelegate window:willUseFullScreenContentSize:]
+	WindowWillUseFullScreenContentSize func(window NSWindow, proposedSize CGSize) CGSize
 	// -[NSWindowDelegate windowDidBecomeKey:]
 	WindowDidBecomeKey func(notification NSNotification)
 	// -[NSWindowDelegate windowDidBecomeMain:]
@@ -79,6 +85,8 @@ type NSWindowDelegate struct {
 	WindowForSharingRequestFromWindow func(window NSWindow) NSWindow
 	// -[NSWindowDelegate windowShouldClose:]
 	WindowShouldClose func(sender NSWindow) bool
+	// -[NSWindowDelegate windowShouldZoom:toFrame:]
+	WindowShouldZoomToFrame func(window NSWindow, newFrame CGRect) bool
 	// -[NSWindowDelegate windowWillBeginSheet:]
 	WindowWillBeginSheet func(notification NSNotification)
 	// -[NSWindowDelegate windowWillClose:]
@@ -95,10 +103,14 @@ type NSWindowDelegate struct {
 	WindowWillMiniaturize func(notification NSNotification)
 	// -[NSWindowDelegate windowWillMove:]
 	WindowWillMove func(notification NSNotification)
+	// -[NSWindowDelegate windowWillResize:toSize:]
+	WindowWillResizeToSize func(sender NSWindow, frameSize CGSize) CGSize
 	// -[NSWindowDelegate windowWillReturnFieldEditor:toObject:]
 	WindowWillReturnFieldEditorToObject func(sender NSWindow, client objc.ID) objc.ID
 	// -[NSWindowDelegate windowWillStartLiveResize:]
 	WindowWillStartLiveResize func(notification NSNotification)
+	// -[NSWindowDelegate windowWillUseStandardFrame:defaultFrame:]
+	WindowWillUseStandardFrameDefaultFrame func(window NSWindow, newFrame CGRect) CGRect
 }
 
 // NewNSWindowDelegate synthesizes an ObjC object conforming to NSWindowDelegate
@@ -151,6 +163,33 @@ func NewNSWindowDelegate(d NSWindowDelegate) objc.ID {
 			Sel: "window:startCustomAnimationToExitFullScreenWithDuration:",
 			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 float64) {
 				d.WindowStartCustomAnimationToExitFullScreenWithDuration(NSWindow{a0}, a1)
+			},
+		})
+	}
+	if d.WindowWillPositionSheetUsingRect != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "window:willPositionSheet:usingRect:",
+			Enc: "{CGRect={CGPoint=dd}{CGSize=dd}}@:@@{CGRect={CGPoint=dd}{CGSize=dd}}",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 objc.ID, a2 CGRect) CGRect {
+				return d.WindowWillPositionSheetUsingRect(NSWindow{a0}, NSWindow{a1}, a2)
+			},
+		})
+	}
+	if d.WindowWillResizeForVersionBrowserWithMaxPreferredSizeMaxAllowedSize != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "window:willResizeForVersionBrowserWithMaxPreferredSize:maxAllowedSize:",
+			Enc: "{CGSize=dd}@:@{CGSize=dd}{CGSize=dd}",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 CGSize, a2 CGSize) CGSize {
+				return d.WindowWillResizeForVersionBrowserWithMaxPreferredSizeMaxAllowedSize(NSWindow{a0}, a1, a2)
+			},
+		})
+	}
+	if d.WindowWillUseFullScreenContentSize != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "window:willUseFullScreenContentSize:",
+			Enc: "{CGSize=dd}@:@{CGSize=dd}",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 CGSize) CGSize {
+				return d.WindowWillUseFullScreenContentSize(NSWindow{a0}, a1)
 			},
 		})
 	}
@@ -346,6 +385,15 @@ func NewNSWindowDelegate(d NSWindowDelegate) objc.ID {
 			},
 		})
 	}
+	if d.WindowShouldZoomToFrame != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "windowShouldZoom:toFrame:",
+			Enc: "B@:@{CGRect={CGPoint=dd}{CGSize=dd}}",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 CGRect) bool {
+				return d.WindowShouldZoomToFrame(NSWindow{a0}, a1)
+			},
+		})
+	}
 	if d.WindowWillBeginSheet != nil {
 		ms = append(ms, objcrt.Method{
 			Sel: "windowWillBeginSheet:",
@@ -410,6 +458,15 @@ func NewNSWindowDelegate(d NSWindowDelegate) objc.ID {
 			},
 		})
 	}
+	if d.WindowWillResizeToSize != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "windowWillResize:toSize:",
+			Enc: "{CGSize=dd}@:@{CGSize=dd}",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 CGSize) CGSize {
+				return d.WindowWillResizeToSize(NSWindow{a0}, a1)
+			},
+		})
+	}
 	if d.WindowWillReturnFieldEditorToObject != nil {
 		ms = append(ms, objcrt.Method{
 			Sel: "windowWillReturnFieldEditor:toObject:",
@@ -423,6 +480,15 @@ func NewNSWindowDelegate(d NSWindowDelegate) objc.ID {
 			Sel: "windowWillStartLiveResize:",
 			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID) {
 				d.WindowWillStartLiveResize(NSNotification{a0})
+			},
+		})
+	}
+	if d.WindowWillUseStandardFrameDefaultFrame != nil {
+		ms = append(ms, objcrt.Method{
+			Sel: "windowWillUseStandardFrame:defaultFrame:",
+			Enc: "{CGRect={CGPoint=dd}{CGSize=dd}}@:@{CGRect={CGPoint=dd}{CGSize=dd}}",
+			Fn: func(_ objc.ID, _ objc.SEL, a0 objc.ID, a1 CGRect) CGRect {
+				return d.WindowWillUseStandardFrameDefaultFrame(NSWindow{a0}, a1)
 			},
 		})
 	}

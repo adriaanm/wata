@@ -258,12 +258,26 @@ func (h *BlockHandle) invokePtr() uintptr {
 
 // Method is one selector of a synthesized delegate class.
 //
-// Fn must be func(self objc.ID, cmd objc.SEL, args...) — purego derives the
-// ObjC type encoding from its signature.
+// Fn must be func(self objc.ID, cmd objc.SEL, args...). With Enc empty,
+// purego derives the ObjC type encoding from Fn's signature. A method whose
+// signature carries a C struct by value (or a CGFloatRet return) must instead
+// set Enc to the TRUE ObjC type encoding — the frameworks and NSInvocation
+// marshal the call from it, and an encoding derived from the Go spelling
+// (a struct tag purego invents, "{CGFloatRet=d}" for what is really "d")
+// would be silently wrong. Such methods are registered via class_addMethod
+// with Enc verbatim.
 type Method struct {
 	Sel string
 	Fn  any
+	Enc string
 }
+
+// CGFloatRet spells a CGFloat return from a delegate callback. purego's
+// NewCallback rejects a plain float64 return, but a one-field struct is an
+// HFA of one member — returned in d0, ABI-identical to returning double —
+// while the registered method encoding stays the true "d". Generated
+// trampolines wrap the user func's float64 into it; user code never sees it.
+type CGFloatRet struct{ V float64 }
 
 var delegateSeq atomic.Uint64
 
@@ -283,7 +297,9 @@ var keepAlive []objc.ID
 func NewDelegate(base string, protocols []string, methods []Method) objc.ID {
 	defs := make([]objc.MethodDef, 0, len(methods))
 	for _, m := range methods {
-		defs = append(defs, objc.MethodDef{Cmd: objc.RegisterName(m.Sel), Fn: m.Fn})
+		if m.Enc == "" {
+			defs = append(defs, objc.MethodDef{Cmd: objc.RegisterName(m.Sel), Fn: m.Fn})
+		}
 	}
 	protos := make([]*objc.Protocol, 0, len(protocols))
 	for _, name := range protocols {
@@ -295,6 +311,19 @@ func NewDelegate(base string, protocols []string, methods []Method) objc.ID {
 	class, err := objc.RegisterClass(name, objc.GetClass("NSObject"), protos, nil, defs)
 	if err != nil {
 		panic("objcrt: registering " + name + ": " + err.Error())
+	}
+	// Methods carrying an explicit encoding go through class_addMethod so the
+	// runtime records the TRUE ObjC types (struct encodings, "d" for a
+	// CGFloatRet return) rather than an encoding derived from the Go
+	// signature. Adding to a registered class is ordinary ObjC (categories do
+	// the same), and these methods are only ever called after New returns.
+	for _, m := range methods {
+		if m.Enc == "" {
+			continue
+		}
+		if !class.AddMethod(objc.RegisterName(m.Sel), objc.IMP(purego.NewCallback(m.Fn)), m.Enc) {
+			panic("objcrt: adding " + m.Sel + " (" + m.Enc + ") to " + name)
+		}
 	}
 	obj := objc.ID(class).Send(selAlloc).Send(selInit)
 	keepAlive = append(keepAlive, obj)

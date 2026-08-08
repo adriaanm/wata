@@ -211,8 +211,8 @@ verification.
   keyview, menu synthesis and the objcrt split all unblock at once.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
   (the wire's ~400 lines) and the shape of rung 2's geometry.
-- `BINDGEN-TYPED-STRUCTS` (ours, unblocked) → collapses the decomposed
-  trampolines to v0.11 typed structs and lifts the struct/CGFloat
-  callback-return refusals — most of the remaining AppKit/UIKit
-  delegate surface, and a prerequisite for the UIKit interpreter's
-  delegates either way.
+- `BINDGEN-TYPED-STRUCTS` — **landed**: callbacks carry the generated
+  struct types directly and struct/CGFloat callback returns emit (the
+  `objcrt.CGFloatRet` spelling; true encodings via `class_addMethod`) —
+  most of the remaining AppKit/UIKit delegate surface, and the shape the
+  UIKit interpreter's delegates will ride on.

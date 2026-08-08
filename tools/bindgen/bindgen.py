@@ -646,6 +646,50 @@ TYPEDEFS = {
     "BOOL": "BOOL",
 }
 
+# ObjC @encode() spellings on arm64 darwin (LP64: long is 'q'; BOOL is a real
+# bool, 'B'), keyed like PRIMITIVES. A callback that carries a struct is
+# registered with the encoding built from these — the TRUE ObjC types — never
+# with one purego derives from the Go trampoline signature: the frameworks and
+# NSInvocation read the encoding to marshal the call.
+C_ENC = {
+    "void": "v",
+    "BOOL": "B",
+    "bool": "B",
+    "_Bool": "B",
+    "signed char": "c",
+    "char": "c",
+    "unsigned char": "C",
+    "short": "s",
+    "unsigned short": "S",
+    "int": "i",
+    "unsigned int": "I",
+    "long": "q",
+    "unsigned long": "Q",
+    "long long": "q",
+    "unsigned long long": "Q",
+    "float": "f",
+    "double": "d",
+}
+
+# The same encodings keyed by the Go type an enum's underlying maps to. The Go
+# underlying was itself produced from the C spelling via PRIMITIVES, so this is
+# the C truth carried through, not an encoding invented from Go.
+GO_ENC = {
+    "bool": "B",
+    "int8": "c",
+    "uint8": "C",
+    "int16": "s",
+    "uint16": "S",
+    "int32": "i",
+    "uint32": "I",
+    "int": "q",
+    "uint": "Q",
+    "int64": "q",
+    "uint64": "Q",
+    "float32": "f",
+    "float64": "d",
+}
+
 OBJ_PTR = re.compile(r"^(\w+)\s*(<[^<>]*>)?\s*\*$")
 
 
@@ -662,6 +706,7 @@ class GoType:
     is_struct: bool = False  # a C struct passed/returned by value
     needs_objcrt: bool = False
     block: "BlockType | None" = None
+    enc: str = ""  # the ObjC @encode() spelling; used for callback registration
 
     def into(self, expr: str) -> str:
         return self.to_objc.format(expr)
@@ -676,7 +721,7 @@ class BlockType:
     params: list[GoType]
 
 
-VOID = GoType(go="", abi="", is_void=True)
+VOID = GoType(go="", abi="", is_void=True, enc="v")
 
 
 class Mapper:
@@ -687,6 +732,7 @@ class Mapper:
         opaque: set[str],
         structs: dict[str, str] | None = None,
         bad_structs: dict[str, tuple[str, str]] | None = None,
+        struct_encs: dict[str, str] | None = None,
     ):
         self.classes = classes
         self.enums = enums  # name -> Go underlying type
@@ -695,6 +741,7 @@ class Mapper:
         # (NSRange) and the desugared record (struct _NSRange).
         self.structs = structs or {}  # spelling -> Go type name
         self.bad_structs = bad_structs or {}  # spelling -> (name, reason)
+        self.struct_encs = struct_encs or {}  # Go type name -> ObjC encoding
 
     def known_class(self, name: str) -> bool:
         return name in self.classes or name in self.opaque
@@ -717,22 +764,22 @@ class Mapper:
         if q in ("NSError * *", "NSError **"):
             if not out_param:
                 raise Unmappable("NSError ** is only mapped as a trailing out-parameter")
-            return GoType(go="error", abi="unsafe.Pointer", is_error_out=True, needs_objcrt=True)
+            return GoType(go="error", abi="unsafe.Pointer", is_error_out=True, needs_objcrt=True, enc="^@")
         if q in ("instancetype", "instancetype *") or d == "instancetype":
             if self_class is None:
                 raise Unmappable("instancetype outside a class")
             return self.wrapper(self_class)
         if q == "id" or d == "id" or re.match(r"^id\s*<[^<>]*>$", q):
-            return GoType(go="objc.ID", abi="objc.ID")
+            return GoType(go="objc.ID", abi="objc.ID", enc="@")
         if q == "Class":
-            return GoType(go="objc.Class", abi="objc.Class")
+            return GoType(go="objc.Class", abi="objc.Class", enc="#")
         if q == "SEL":
-            return GoType(go="objc.SEL", abi="objc.SEL")
+            return GoType(go="objc.SEL", abi="objc.SEL", enc=":")
 
         for cand in (q, d):
             if cand in self.structs:
                 name = self.structs[cand]
-                return GoType(go=name, abi=name, is_struct=True)
+                return GoType(go=name, abi=name, is_struct=True, enc=self.struct_encs.get(name, ""))
             if cand in self.bad_structs:
                 name, reason = self.bad_structs[cand]
                 raise Unmappable(f"struct {name} is refused: {reason}")
@@ -745,6 +792,7 @@ class Mapper:
                     abi=under,
                     to_objc=under + "({})",
                     from_objc=cand + "({})",
+                    enc=GO_ENC.get(under, ""),
                 )
 
         m = OBJ_PTR.match(q) or OBJ_PTR.match(d)
@@ -757,6 +805,7 @@ class Mapper:
                     to_objc="objcrt.NSString({})",
                     from_objc="objcrt.GoString({})",
                     needs_objcrt=True,
+                    enc="@",
                 )
             if name == "NSError":
                 return GoType(
@@ -765,6 +814,7 @@ class Mapper:
                     to_objc="objcrt.NSErrorID({})",
                     from_objc="objcrt.GoError({})",
                     needs_objcrt=True,
+                    enc="@",
                 )
             if self.known_class(name):
                 return self.wrapper(name)
@@ -773,7 +823,7 @@ class Mapper:
         for cand in (q, d, TYPEDEFS.get(q, ""), TYPEDEFS.get(d, "")):
             if cand in PRIMITIVES:
                 go, abi = PRIMITIVES[cand]
-                return GoType(go=go, abi=abi)
+                return GoType(go=go, abi=abi, enc=C_ENC[cand])
 
         for cand in (d, q):
             if cand.endswith("*"):
@@ -788,7 +838,7 @@ class Mapper:
         raise Unmappable(f"no Go mapping for {t.get('qualType', '?')!r}")
 
     def wrapper(self, name: str) -> GoType:
-        return GoType(go=name, abi="objc.ID", to_objc="{}.ID", from_objc=name + "{{{}}}")
+        return GoType(go=name, abi="objc.ID", to_objc="{}.ID", from_objc=name + "{{{}}}", enc="@")
 
     def block(self, sig: str, self_class: str | None) -> GoType:
         m = re.match(r"^(.*?)\s*\(\^\s*\)\s*\((.*)\)$", sig)
@@ -801,13 +851,16 @@ class Mapper:
         if any(p.block for p in params) or ret.block:
             raise Unmappable("nested block")
         if any(p.is_struct for p in params) or ret.is_struct:
-            # Both block directions ride on purego callbacks, which reject
-            # struct arguments; a by-value struct cannot cross a block yet.
+            # Blocks cross with encodings purego derives from the Go func
+            # (objc.NewBlock outgoing, BlockHandle.Invoke incoming); a by-value
+            # struct would need the true C encoding plumbed into the block
+            # descriptor, which nothing needs yet. Protocol callbacks DO carry
+            # structs — that path registers the true encoding via class_addMethod.
             raise Unmappable("struct in a block signature")
         go = "func(" + ", ".join(p.go for p in params) + ")"
         if not ret.is_void:
             go += " " + ret.go
-        return GoType(go=go, abi="objc.Block", block=BlockType(ret=ret, params=params))
+        return GoType(go=go, abi="objc.Block", block=BlockType(ret=ret, params=params), enc="@?")
 
 
 def _split_args(s: str) -> list[str]:
@@ -905,6 +958,7 @@ class Emitter:
             bad_structs={
                 sp: (st.name, reason) for st, reason in bad for sp in (st.name, st.record)
             },
+            struct_encs=self.struct_encs,
         )
 
     def _validate_structs(
@@ -923,6 +977,7 @@ class Emitter:
         bad: list[tuple[Struct, str]] = []
         clean = Mapper(classes=set(), enums={}, opaque=set()).clean
         spellings: dict[str, str] = {}  # use-site spelling -> Go type name
+        self.struct_encs: dict[str, str] = {}  # Go type name -> ObjC @encode()
 
         def field_type(f: StructField) -> str | None:
             q = clean(f.type.get("qualType", ""))
@@ -934,6 +989,26 @@ class Emitter:
                 if cand in PRIMITIVES and PRIMITIVES[cand][0]:
                     return PRIMITIVES[cand][0]
             return None
+
+        def field_enc(f: StructField) -> str:
+            q = clean(f.type.get("qualType", ""))
+            d = clean(f.type.get("desugaredQualType", "") or q)
+            for cand in (q, d):
+                if cand in spellings:
+                    return self.struct_encs[spellings[cand]]
+            for cand in (q, d, TYPEDEFS.get(q, ""), TYPEDEFS.get(d, "")):
+                if cand in C_ENC:
+                    return C_ENC[cand]
+            raise AssertionError(f"no encoding for mapped field {f.name}")
+
+        def struct_enc(st: Struct) -> str:
+            # @encode() spells the record's tag; an anonymous record is '?'.
+            # Marshalling reads only the field encodings, so a tag mismatch is
+            # harmless — but keep the real tag whenever the header names one.
+            tag = st.record.split(" ", 1)[1] if " " in st.record else st.record
+            if not re.fullmatch(r"\w+", tag):
+                tag = "?"
+            return "{" + tag + "=" + "".join(field_enc(f) for f in st.fields) + "}"
 
         def hard_reason(st: Struct) -> str | None:
             if st.union:
@@ -962,6 +1037,7 @@ class Emitter:
                     good[st.name] = (st, [(n, t) for n, t in fields if t])
                     spellings[st.name] = st.name
                     spellings[st.record] = st.name
+                    self.struct_encs[st.name] = struct_enc(st)
                     progress = True
                 else:
                     still.append(st)
@@ -1317,14 +1393,28 @@ class Emitter:
                     Refusal(proto.name, meth.sel, "callback returning a block")
                 )
                 continue
-            if any(t.is_struct for t in sig["types"]):
+            if sig["ret"].abi == "float32":
                 self.refusals.append(
                     Refusal(
                         proto.name, meth.sel,
-                        "struct in a callback signature (purego callbacks cannot carry structs)",
+                        "float return from a callback (purego rejects plain float returns; "
+                        "no delegate has needed the one-field-struct spelling for float32)",
                     )
                 )
                 continue
+            if sig["ret"].abi == "float64":
+                # A CGFloat return crosses as a ONE-FIELD struct: purego's
+                # NewCallback rejects a plain float64 return, but a one-member
+                # HFA is returned in d0 — ABI-identical to returning double.
+                # The user-facing field still returns float64; the trampoline
+                # wraps, and the registered encoding stays the true "d".
+                sig["ret"] = GoType(
+                    go="float64",
+                    abi="objcrt.CGFloatRet",
+                    to_objc="objcrt.CGFloatRet{{V: {}}}",
+                    needs_objcrt=True,
+                    enc="d",
+                )
             try:
                 sig["params"] = [
                     (n, self.incoming_block(t) if t.block else t) for n, t in sig["params"]
@@ -1335,13 +1425,27 @@ class Emitter:
             sig["types"] = [t for _, t in sig["params"]] + [sig["ret"]]
             for t in sig["types"]:
                 self._note_imports(t, imports)
+            # A struct anywhere in the trampoline (including the CGFloatRet
+            # spelling) must be registered with the TRUE ObjC type encoding —
+            # class_addMethod, not the encoding purego derives from the Go
+            # signature: the frameworks and NSInvocation marshal from it.
+            enc = ""
+            if any(t.is_struct for t in sig["types"]) or sig["ret"].abi == "objcrt.CGFloatRet":
+                parts = [sig["ret"].enc, "@", ":"] + [t.enc for _, t in sig["params"]]
+                if not all(parts):
+                    hole = next(n for n, t in sig["params"] if not t.enc)
+                    self.refusals.append(
+                        Refusal(proto.name, meth.sel, f"no ObjC type encoding for parameter {hole}")
+                    )
+                    continue
+                enc = "".join(parts)
             args = ", ".join(f"{n} {t.go}" for n, t in sig["params"])
             ret = "" if sig["ret"].is_void else " " + sig["ret"].go
             for ln in meth.doc.splitlines():
                 body.append(f"\t// {ln}")
             body.append(f"\t// -[{proto.name} {meth.sel}]")
             body.append(f"\t{name} func({args}){ret}")
-            installs.append(self.install(proto, meth, sig, name))
+            installs.append(self.install(proto, meth, sig, name, enc))
         body.append("}")
         body.append("")
         body.append(f"// New{proto.name} synthesizes an ObjC object conforming to {proto.name}")
@@ -1378,6 +1482,7 @@ class Emitter:
             abi="objc.Block",
             from_objc=name + "{{objcrt.CopyBlock({})}}",
             needs_objcrt=True,
+            enc="@?",
         )
 
     def emit_blocks(self) -> str:
@@ -1405,7 +1510,7 @@ class Emitter:
             body.append("")
         return self.header(sorted(imports)) + "\n".join(body).rstrip() + "\n"
 
-    def install(self, proto: Protocol, meth: Method, sig: dict, name: str) -> list[str]:
+    def install(self, proto: Protocol, meth: Method, sig: dict, name: str, enc: str = "") -> list[str]:
         params = sig["params"]
         ret = sig["ret"]
         args = ", ".join(f"a{i} {t.abi}" for i, (_, t) in enumerate(params))
@@ -1415,6 +1520,8 @@ class Emitter:
         call = f"d.{name}(" + ", ".join(t.outof(f"a{i}") for i, (_, t) in enumerate(params)) + ")"
         out = [f"\tif d.{name} != nil {{", "\t\tms = append(ms, objcrt.Method{"]
         out.append(f'\t\t\tSel: "{meth.sel}",')
+        if enc:
+            out.append(f'\t\t\tEnc: "{enc}",')
         out.append(head + " {")
         out.append("\t\t\t\t" + (call if ret.is_void else f"return {ret.into(call)}"))
         out.append("\t\t\t},")

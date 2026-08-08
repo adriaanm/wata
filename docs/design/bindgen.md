@@ -88,53 +88,48 @@ whether the header says `typedef struct _NSRange {…} NSRange` or names an
 anonymous record only by its typedef, and the mapper recognizes both the
 typedef and the desugared record spelling at use sites.
 
-**Structs into callbacks** (a delegate method receiving CGRect/NSRange by
-value — most of AppKit/UIKit's delegate surface) are still refused by the
-emitter, but the ground is proven and the mapping is settled
-(`tools/bindgen/spikes/structcb/`, `just bindgen-structcb`; both legs
-driven by real Foundation/AppKit callers — NSInvocation marshalling from
-the ObjC type encoding, and AppKit itself calling a synthesized
-`drawRect:` — with field values pinned exactly). Two shapes work on
-arm64 darwin:
+**Structs into callbacks** (a delegate method receiving or returning
+CGRect/CGSize/NSRange by value — most of AppKit/UIKit's delegate surface)
+are emitted **typed**: the protocol's func fields take and return the
+generated struct types themselves. purego v0.11 — the pin since the iOS
+spike (`tools/ios-spike/REPORT.md`: v0.10.2 also gates struct-by-value on
+`GOOS=="darwin"`, so every `CGRect` panics under `GOOS=ios`) — carries
+struct callback arguments and returns directly (upstream issue #225,
+milestone v0.11.0), in all three AAPCS64 conventions: arguments in
+registers (an HFA — all-float aggregate after flattening, ≤4 members, any
+size — rides d0–d3; a non-HFA ≤16 bytes a GPR pair; larger by reference),
+returns as the GPR pair, d0–d3, or the x8 indirect result.
 
-- **By register decomposition** (devised for v0.10.2, whose `NewCallback`
-  rejects struct parameters outright; still correct on the current pin
-  and still the shape specified for the emitter).
-  Its arm64 callback path
-  spills F0–F7 and R0–R7 and assigns Go parameters from the float and
-  integer register sequences independently — exactly AAPCS64's
-  classification. So the trampoline declares the scalars the struct's
-  registers hold and reassembles: an HFA (all-float aggregate after
-  flattening, ≤4 members, **any size** — CGRect is 32 bytes and rides
-  d0–d3) becomes one `float64`/`float32` per member; a non-HFA ≤16 bytes
-  becomes 1–2 `uintptr` holding the memory image (a double field arrives
-  as raw bits, `math.Float64frombits`); a non-HFA >16 bytes arrives as a
-  pointer to the caller's copy — one `uintptr`, copied eagerly. The ObjC
-  method must be registered with the *true* struct type encoding
-  (`class_addMethod` directly — the frameworks and NSInvocation read it),
-  never one derived from the decomposed Go signature. What decomposition
-  cannot express at all: struct or CGFloat *returns* from a callback —
-  the result travels only through x0 — so rect- and height-returning
-  delegate methods are refused for as long as the emitter uses this
-  shape.
-- **On purego v0.11, directly** — the pin since the iOS spike
-  (`tools/ios-spike/REPORT.md`: v0.10.2 gates struct-by-value on
-  `GOOS=="darwin"`, so every `CGRect` panics under `GOOS=ios`).
-  Upstream landed full callback struct support — arguments and returns,
-  including the x8 indirect return — for milestone v0.11.0 (issue #225).
-  There the callback takes the generated struct types themselves,
-  returns work in all three conventions (GPR pair, d0–d3, x8), and a
-  CGFloat return is spelled as a one-field struct (an HFA of 1, returned
-  in d0 — plain `float64` returns are still rejected).
+A **CGFloat return** is the one dressed-up case: purego still rejects a
+plain `float64` callback return, so the trampoline wraps the user func's
+result in `objcrt.CGFloatRet` — a one-field struct, an HFA of one member,
+returned in d0, ABI-identical to returning double — while the field the
+user installs stays a plain `func(…) float64`. (`float` — float32 —
+returns stay refused: no delegate has needed the same spelling for s0.)
 
-Both shapes work on the current pin — the decomposition arm of
-`just bindgen-structcb` is tested there, not on the version that forced
-it — so **collapsing the decomposed trampolines to typed ones is now a
-choice, not a deadline** (`BINDGEN-TYPED-STRUCTS` in the queue). What
-the collapse would buy is the refusals above: struct and CGFloat returns
-become expressible, which is most of the remaining AppKit/UIKit delegate
-surface. Encodings and struct types are shared by both shapes, so
-nothing is thrown away either way.
+Two invariants, both proven against real Foundation/AppKit callers in
+`tools/bindgen/spikes/structcb/` (`just bindgen-structcb`: NSInvocation
+marshalling from the ObjC type encoding, and AppKit itself calling a
+synthesized `drawRect:`, field values pinned exactly):
+
+- **The method is registered with the TRUE ObjC type encoding**, built
+  by the emitter from the C types (`{CGRect={CGPoint=dd}{CGSize=dd}}`;
+  `d` for a CGFloat return) — never derived from the Go trampoline
+  signature. The frameworks and NSInvocation marshal from the registered
+  encoding, so a Go-derived one (a struct tag purego invents,
+  `{CGFloatRet=d}` for what is really `d`) is silently wrong.
+  `objcrt.Method` carries it as `Enc`, and `NewDelegate` registers such
+  methods through `class_addMethod` directly; struct-free methods keep
+  purego's derived encodings.
+- arm64-only, deliberately, like struct dispatch generally.
+
+The spike's `decomp/` leg keeps the register-decomposition mapping —
+devised for v0.10.2, whose `NewCallback` rejected struct parameters
+outright — alive as ABI documentation and as proof the two shapes agree:
+per-register spills, the memory-image `uintptr` shapes, and why
+decomposition could never express a struct or CGFloat *return* (a
+v0.10.2 callback result traveled only through x0). The emitter never
+shipped it; the typed shape landed first.
 
 **Protocols are a struct of func fields**, not a Go interface:
 
@@ -198,9 +193,13 @@ or an allowlist entry that should go away. Shapes refused today: structs not
 on the allowlist ("add it to structs" — the message names the fix), structs
 with a bitfield, union or array field (refused once, per struct; every
 declaration using one points at that reason), a struct anywhere in a block
-signature or a protocol callback (the register-decomposition mapping that
-lifts this is proven and specified above, waiting on the emitter; the pin
-now also supports typed structs directly), raw
+signature (blocks cross with encodings purego derives from the Go func —
+`objc.NewBlock` outgoing, `BlockHandle.Invoke` incoming — and a by-value
+struct would need the true C encoding plumbed into the block descriptor,
+which nothing needs yet; the true-encoding path exists only for protocol
+callbacks), a `float` (float32) return from a callback (purego rejects
+plain float returns; the `CGFloatRet` spelling is emitted only for
+CGFloat/double), raw
 pointer pairs (`void *` + length), enums not on the allowlist, classes not on
 the allowlist, nested blocks, a non-trailing `NSError **`, an incoming block
 with a non-void return, and a callback returning a block.
@@ -374,12 +373,11 @@ per-setting enums nothing here reads.
 completionHandler:` and `addNotificationRequest:withCompletionHandler:` both
 bind, because their handlers are **outgoing** blocks — the app hands the
 framework a block, which the emitter has always mapped through
-`objc.NewBlock` (`func(bool, error)`, `func(error)`). What
-`BINDGEN-TYPED-STRUCTS` still gates is a struct or `CGFloat` **return from a
-callback**, and neither of these callbacks returns anything. Worth stating
+`objc.NewBlock` (`func(bool, error)`, `func(error)`). Worth stating
 because "the handler is a block" and "the handler is a refused shape" read
-alike and are not the same question: the refused axis is the *return*, not
-the direction.
+alike and are not the same question: the once-refused axis was a struct or
+`CGFloat` return from a *callback* (lifted with the typed struct
+trampolines), and a block direction never touched it.
 
 Growing any target is a reviewed diff of `bindgen.json` plus regenerated
 output. The UIKit views the iOS port will want are the next entries.
