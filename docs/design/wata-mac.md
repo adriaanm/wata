@@ -487,6 +487,11 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   package under an unchanged emitted tree skips the `go build` stage.
   `just mac-build` after a macshell/nativeui edit may need a manual
   `go build` in `wata-mac/.sgo/wata-mac` (or any Scala-side touch).
+  Fixed upstream 2026-08-08 (the stage hashes godep sources now, and its
+  SKIP line names input categories with counts); true until the repin,
+  tracked as `REPIN-GODEP-SOURCES-HASHED`. The tell is a Go BuildID that
+  does not move between two builds that should differ; the escape hatch
+  is deleting `.sgo/build-<goos>-<goarch>.hash`.
 - **A godep's `replace` lines don't reach the app**: Go honors `replace`
   only in the MAIN module's go.mod, so macshell's local-sibling deps
   (nativeui, appleptt) each need their own `godep` line in `sgo.build` —
@@ -495,6 +500,42 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
 - **Probing rendered output:** `bitmapImageRepForCachingDisplayInRect:`
   + `colorAtX:y:`, addressing through the rep's `pixelsWide/High` so a
   non-1 backing scale cannot skew probe coordinates (`render_test.go`).
+
+## Growth while idle — open (`MAC-IDLE-LEAK`)
+
+The app grows without bound while doing nothing. macOS paused a
+long-running instance at **26 GB** (owner, 2026-08-08). It is measured
+and reproducible; the cause is not yet found, and this section records
+what has been ruled out so the next session does not re-run the same
+eliminations.
+
+`just mac-leak` drives pure idle frames and samples three numbers,
+because it is reading them TOGETHER that localizes the growth:
+
+```
+RSS          43.0 MB -> 47.4 MB   (~400 MB/hour idle — ~60h to 26 GB)
+Go live heap  1 MB -> 2 MB        (flat, GODEBUG=gctrace=1)
+OS threads    6 -> 13             (monotonic, GODEBUG=schedtrace)
+```
+
+**Ruled out.** Go objects: the live heap is flat across the same window
+the RSS climbs. Retained ObjC objects: two `heap <pid>` censuses taken 60
+rounds apart are class-for-class identical (diff the `COUNT`/`BYTES`
+table under the `CLASS_NAME` header). So it is neither of the two heaps
+this app has.
+
+**The live lead** is the thread count, which is the only number moving
+with RSS. Threads that climb monotonically while both heaps stay flat
+mean goroutines that never finish, each pinning an M — a different bug
+from either heap leak, and one a goroutine dump names directly. Next
+probes, in order: SIGQUIT the app mid-run for that dump; then `vmmap` to
+see which region grows, separating thread stacks from a malloc zone.
+
+**The caveat that must survive.** `mac-leak` runs headless, where nothing
+drives an NSApplication runloop, so main-queue work is never drained and
+`nativeui/dispatch.go`'s `pending` map grows — a growth source the
+windowed app does not have. The 26 GB was the windowed app. A finding
+here is a lead; a fix has to be confirmed against a real windowed run.
 
 ## Verification
 
