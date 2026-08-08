@@ -75,14 +75,14 @@ dependency-plumbing module; there is no Go code of ours in the chain.
   argument off — SyscallN zero-fills unsupplied registers. The `Int`
   admission covers callback *results and params*, not general
   `go.Uintptr` argument positions, so this convention stands.
-- **go.mod caveat, until upstream `GOMOD-PUREGO-REQUIRE-INJECT` lands**:
-  the emitted glue imports `github.com/ebitengine/purego` but `sgo`'s
-  go.mod stage does not yet inject the require. This spike is unaffected
-  because its `go-pkgs/puredep` godep (a blank-import of purego) puts
-  purego in the module graph with a committed go.sum. A **fresh** app
-  calling `go.callback` without purego anywhere in its graph hits Go's
-  raw `no required module provides package` error — theirs, filed,
-  queued upstream.
+- **go.mod caveat, resolved upstream** (`GOMOD-PUREGO-REQUIRE-INJECT`
+  landed at sgola `870041f`): the driver now injects the purego require
+  when the emitted Go imports it. This spike was never affected — its
+  `go-pkgs/puredep` godep (a blank-import of purego with a committed
+  go.sum) puts purego in the module graph, and the injection dedups
+  against it. The discovered-module pipeline's analogous gap is queued
+  upstream (`GOMOD-DISCOVERED-PUREGO-PARITY`); see
+  docs/design/sgola-ffi.md's watch list.
 
 ## What this unblocks
 

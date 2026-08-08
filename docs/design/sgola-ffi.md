@@ -73,12 +73,14 @@ bracket does not exist here — the address is a free value.
   synchronizer) — callback bodies that need mutable state hoist it into
   `Atomic`/`Mutex` cells.
 
-One wrinkle a *fresh* consumer would hit: the emitted glue imports
-`github.com/ebitengine/purego` but `sgo`'s go.mod stage does not yet
-inject the require (upstream `GOMOD-PUREGO-REQUIRE-INJECT`, filed).
+The go.mod wrinkle is mostly gone: since sgola `870041f` the driver
+injects the purego require when the emitted Go imports it, so a fresh
+app built the pinned-checkout way builds clean. What remains open
+upstream is the *discovered-module* pipeline (a fresh app outside a
+pinned corpus layout — `GOMOD-DISCOVERED-PUREGO-PARITY`, queued there).
 Our spikes carry `go-pkgs/puredep` — a blank-import of purego with a
-committed go.sum — exactly to put purego in the module graph, so wata
-is unaffected.
+committed go.sum — which covers wata either way; the injection dedups
+against it.
 
 ## Ruled and queued — what we know will be possible
 
@@ -236,9 +238,10 @@ verification.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
   (the wire's ~400 lines) and the shape of rung 2's geometry. Now the
   biggest open language gap on this frontier.
-- `GOMOD-PUREGO-REQUIRE-INJECT` — a wrinkle only a *fresh* consumer
-  hits (raw `no required module provides package` for purego); our
-  `go-pkgs/puredep` godep covers wata until it lands.
+- `GOMOD-DISCOVERED-PUREGO-PARITY` — the surviving half of the go.mod
+  wrinkle (`GOMOD-PUREGO-REQUIRE-INJECT` landed at `870041f`): only a
+  fresh *discovered-module* app hits it; our `go-pkgs/puredep` godep
+  covers wata regardless.
 - purego **v0.11.0** — the struct-by-value pin is on alphas (upstream
   issue #225, milestone v0.11.0; see docs/design/bindgen.md). Bump to
   the release when it ships.
