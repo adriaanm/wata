@@ -10,19 +10,28 @@ read as a message arriving, one reads as "ready").
 The output format is the device's own — Ogg/Opus, mono, 48kHz — so the chirp
 plays through the same reader/decoder/playback path as a voice message.
 
-`-page_duration 20000` puts ONE 20ms Opus packet in each Ogg page. Our reader
-(`Ogg.readFrames`) treats a page's whole payload as a single frame, so an
-ffmpeg-default file, which packs many packets per page, is read as one
-2000-byte "frame" claiming 20ms. That reader limitation is tracked separately
-(OGG-MULTI-PACKET-PAGE); until it is fixed the flag is what keeps the asset
-inside what our own reader understands, and `wata-fb oggforeign` on the
-committed asset is the check that says so.
+`-page_duration 20000` puts ONE 20ms Opus packet in each Ogg page. That was
+once load-bearing: the reader took a page's whole payload as a single frame,
+so an ffmpeg-default file read as one oversized "frame" and played as a
+fraction of itself. `Ogg.readFrames` walks the lacing table now, so the flag
+no longer protects anything — it stays because the asset is committed as
+bytes and this recipe has to keep reproducing those bytes. Drop it whenever
+the asset is next regenerated from the source for some other reason.
+
+`--repage` is the other side of that fix: it re-muxes the committed asset
+with ffmpeg's DEFAULT paging, giving `wata-fb/assets/chirp-repaged.ogg` —
+the same 31 Opus packets over 3 pages instead of 33. Because it re-muxes
+rather than re-encodes, the two files differ in their lacing and in nothing
+else, so "the reader reports the same packets from both" is an exact
+property. wata-fb's smoke checks it (step 1e). This mode needs only the
+committed asset, not the owner's source.
 
 The output is byte-stable across runs, so a regenerated asset that differs
 from the committed one is a real change. The asset is committed precisely so
 a build never needs the source, which lives only on the owner's machine.
 
     tools/make-chirp.py [--source PATH] [--out PATH] [--check]
+    tools/make-chirp.py --repage [--check]
 
 `--check` regenerates to a temporary file and compares, without writing.
 """
@@ -39,6 +48,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = pathlib.Path.home() / "Downloads" / \
     "walkie-talkie-radio-signal-activation-bosnow-1-00-02.mp3"
 OUT = REPO / "wata-fb" / "assets" / "chirp.ogg"
+REPAGED = REPO / "wata-fb" / "assets" / "chirp-repaged.ogg"
 
 # The trim and the encode, recorded here rather than in someone's shell
 # history. `-vn` is load-bearing: the mp3 carries an embedded PNG cover, and
@@ -71,6 +81,19 @@ def encode(source: pathlib.Path, out: pathlib.Path) -> None:
                     *ENCODE, str(out)], check=True)
 
 
+def repage(src: pathlib.Path, out: pathlib.Path) -> None:
+    """Re-mux `src` with ffmpeg's default paging. `-c:a copy` moves the Opus
+    packets across untouched, so only the Ogg framing changes."""
+    if not src.exists():
+        sys.exit(f"make-chirp: {src} not found (the committed asset)")
+    if shutil.which("ffmpeg") is None:
+        sys.exit("make-chirp: ffmpeg not on PATH (brew install ffmpeg)")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src),
+                    "-c:a", "copy", "-fflags", "+bitexact",
+                    "-flags:a", "+bitexact", str(out)], check=True)
+
+
 def describe(path: pathlib.Path) -> str:
     data = path.read_bytes()
     return f"{len(data)} bytes  sha256 {hashlib.sha256(data).hexdigest()}"
@@ -82,7 +105,25 @@ def main() -> None:
     ap.add_argument("--out", type=pathlib.Path, default=OUT)
     ap.add_argument("--check", action="store_true",
                     help="regenerate to a temp file and diff, writing nothing")
+    ap.add_argument("--repage", action="store_true",
+                    help="re-mux the committed asset with default paging")
     args = ap.parse_args()
+
+    if args.repage:
+        if args.check:
+            with tempfile.TemporaryDirectory() as tmp:
+                probe = pathlib.Path(tmp) / "chirp-repaged.ogg"
+                repage(args.out, probe)
+                if probe.read_bytes() != REPAGED.read_bytes():
+                    sys.exit(f"make-chirp: {REPAGED} differs from a fresh remux\n"
+                             f"  committed: {describe(REPAGED)}\n"
+                             f"  fresh:     {describe(probe)}")
+                print(f"make-chirp: {REPAGED} matches a fresh remux "
+                      f"({describe(REPAGED)})")
+            return
+        repage(args.out, REPAGED)
+        print(f"make-chirp: wrote {REPAGED} — {describe(REPAGED)}")
+        return
 
     if args.check:
         with tempfile.TemporaryDirectory() as tmp:

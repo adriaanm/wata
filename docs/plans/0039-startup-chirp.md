@@ -55,12 +55,24 @@ Encoding with `-page_duration 20000` puts one 20ms packet in each page
 and the same oracle reads 31 packets. That is what the asset is built
 with.
 
-The reader limitation is **real and is not this plan's to fix**: a voice
-message from a foreign encoder that pages the same way would be mis-read
-the same way, which is a playback bug nobody has hit because the pinned
-fixture happens to be one-packet-per-page. Filed separately as
+The reader limitation was **real and was not this plan's to fix**: a
+voice message from a foreign encoder that pages the same way would be
+mis-read the same way, which is a playback bug nobody had hit because the
+pinned fixture happens to be one-packet-per-page. Filed separately as
 `OGG-MULTI-PACKET-PAGE`; noted here because the encoder flag is otherwise
 an unexplained incantation.
+
+**Fixed 2026-08-08.** `Ogg.readFrames` walks the lacing table, so the
+flag no longer protects anything and the asset would be correct without
+it. It stays only because the asset is committed as bytes and
+`make-chirp.py --check` has to keep reproducing them; drop it at the next
+regeneration from the source. What the fix did add here is
+`wata-fb/assets/chirp-repaged.ogg` — this same chirp re-muxed with
+ffmpeg's default paging (`make-chirp.py --repage`), 31 packets over 3
+pages instead of 33. Because a re-mux moves the Opus packets untouched,
+the two assets differ in their lacing and nothing else, so wata-fb's
+smoke can assert the exact property: the reader's report of the two is
+identical apart from the byte and page counts.
 
 ### Byte-stability needs one more flag
 
@@ -149,5 +161,6 @@ anyone tries to send anything. The durable fix stays that ticket's.
 - The PTT and roger beeps. The asset and `Chirp.play()` are shaped so they
   are a call site, not a redesign, but choosing when they fire is a
   product decision that belongs with `MSG-NOTIFICATION-DESIGN`.
-- Fixing `Ogg.readFrames` for multi-packet pages (`OGG-MULTI-PACKET-PAGE`).
+- Fixing `Ogg.readFrames` for multi-packet pages (`OGG-MULTI-PACKET-PAGE`)
+  — done separately on 2026-08-08, see above.
 - Any software volume control.

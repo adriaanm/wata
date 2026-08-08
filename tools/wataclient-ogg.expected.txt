@@ -16,6 +16,11 @@ roundtrip frames 5
 roundtrip exact true
 roundtrip bigframe 600
 reader empty 0
+packed frames 5
+packed exact true
+spanning frames 5
+spanning exact true
+truncated dropped 2
 byte narrow 44
 byte widen -56
 byte cmp true

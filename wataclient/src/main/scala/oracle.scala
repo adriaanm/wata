@@ -120,6 +120,34 @@ object OggOracle:
     b.append(Ogg.frameCount(Bytes.empty)) // 0
     b.append('\n')
 
+    // ---- a page is not a packet ----------------------------------------------
+    // Our writer emits one packet per page and never spans, so nothing it
+    // produces distinguishes a page-reading reader from a packet-reading one.
+    // These streams do: the same five frames, paged the way a foreign encoder
+    // pages them. Built here rather than pinned as a fixture so the shapes are
+    // visible, and so a spanning packet — which real encoders emit only for
+    // very large packets — can be exercised at all.
+    val packed = packedStream(ordered)
+    b.append("packed frames ")
+    b.append(Ogg.frameCount(packed)) // 5, all on ONE audio page
+    b.append('\n')
+    b.append("packed exact ")
+    b.append(boolStr(sameFrames(ordered, Ogg.readFrames(packed))))
+    b.append('\n')
+    val spanned = spannedStream(ordered)
+    b.append("spanning frames ")
+    b.append(Ogg.frameCount(spanned)) // 5, the 600-byte one split across pages
+    b.append('\n')
+    b.append("spanning exact ")
+    b.append(boolStr(sameFrames(ordered, Ogg.readFrames(spanned))))
+    b.append('\n')
+    // a stream cut mid-packet: the last page's lacing ends in 255 and no
+    // continuation page follows, so the half packet is dropped rather than
+    // handed to the decoder as if it were whole.
+    b.append("truncated dropped ")
+    b.append(Ogg.frameCount(truncatedStream(ordered))) // 2 — the whole ones only
+    b.append('\n')
+
     // ---- computed-Byte op surface ----------------------------------------------
     b.append("byte narrow ")
     b.append(mk(300).toInt) // 44
@@ -300,6 +328,175 @@ object OggOracle:
       k += 1
     v
 
+  // ---- foreign paging, built rather than pinned --------------------------------
+  // Our writer puts one packet on a page and never spans, so its output cannot
+  // tell a page-reading reader from a packet-reading one. These builders make
+  // the shapes a foreign encoder produces, out of the same frames, so the
+  // reader's contract is checked against something that disagrees with it when
+  // it is wrong.
+
+  /** the nth (0-based) frame, or empty. */
+  def nthFrame(xs: List[Bytes], n: Int): Bytes =
+    var cur = xs
+    var i = 0
+    var r = Bytes.empty
+    var going = true
+    while going do
+      if isEmpty(cur) then going = false
+      else if i == n then
+        r = headOf(cur)
+        going = false
+      else
+        cur = tailOf(cur)
+        i += 1
+    r
+
+  /** the first `n` frames, in order. */
+  def takeFrames(xs: List[Bytes], n: Int): List[Bytes] =
+    var cur = xs
+    var i = 0
+    var acc: List[Bytes] = Nil
+    var going = true
+    while going do
+      if i >= n then going = false
+      else if isEmpty(cur) then going = false
+      else
+        acc = headOf(cur) :: acc
+        cur = tailOf(cur)
+        i += 1
+    ListOps.reverse(acc)
+
+  /** everything after the first `n` frames. */
+  def dropFrames(xs: List[Bytes], n: Int): List[Bytes] =
+    var cur = xs
+    var i = 0
+    var going = true
+    while going do
+      if i >= n then going = false
+      else if isEmpty(cur) then going = false
+      else
+        cur = tailOf(cur)
+        i += 1
+    cur
+
+  /** the lacing segments a page needs to carry `packets` in order: each packet
+   *  contributes full 255s then a shorter segment that ends it — so a packet
+   *  whose length is a multiple of 255 contributes a trailing 0. */
+  def lacingFor(packets: List[Bytes]): Bytes =
+    val b = new BytesBuilder
+    var cur = packets
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          var rem = h.size
+          var more = true
+          while more do
+            if rem >= 255 then
+              b.addByte(255)
+              rem = rem - 255
+            else
+              b.addByte(rem)
+              more = false
+          cur = t
+        case Nil => going = false
+    b.result()
+
+  /** the concatenated payload of `packets`. */
+  def bodyFor(packets: List[Bytes]): Bytes =
+    val b = new BytesBuilder
+    var cur = packets
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          b.addBytes(h)
+          cur = t
+        case Nil => going = false
+    b.result()
+
+  /** one page with an EXPLICIT lacing table — the shape `Ogg.page` cannot
+   *  express, since it derives its lacing from a single payload. */
+  def pageOf(lacing: Bytes, payload: Bytes, granule: Long, headerType: Int, seq: Int): Bytes =
+    val pre = new BytesBuilder
+    pre.addAscii("OggS")
+    pre.addByte(0)
+    pre.addByte(headerType)
+    pre.addU64LE(granule)
+    pre.addU32LE(Ogg.SERIAL)
+    pre.addU32LE(seq)
+    pre.addU32LE(0)          // CRC placeholder
+    pre.addByte(lacing.size)
+    pre.addBytes(lacing)
+    pre.addBytes(payload)
+    val img = pre.result()
+    val crc = Crc.crc32(img)
+    val out = new BytesBuilder
+    out.addBytes(img.slice(0, 22))
+    out.addU32LE(crc.toInt)
+    out.addBytes(img.slice(26, img.size))
+    out.result()
+
+  /** the OpusHead/OpusTags pages every stream starts with. */
+  def headerPages(): Bytes =
+    val b = new BytesBuilder
+    b.addBytes(Ogg.page(Ogg.opusHead(), 0L, Ogg.FLAG_BOS, 0))
+    b.addBytes(Ogg.page(Ogg.opusTags(), 0L, 0, 1))
+    b.result()
+
+  /** every frame on ONE audio page — the ffmpeg-default shape, and the one
+   *  that read back as a single oversized "frame" before the reader walked
+   *  the lacing table. */
+  def packedStream(frames: List[Bytes]): Bytes =
+    val b = new BytesBuilder
+    b.addBytes(headerPages())
+    b.addBytes(pageOf(lacingFor(frames), bodyFor(frames), 4800L, 0, 2))
+    b.addBytes(Ogg.page(Bytes.empty, 4800L, Ogg.FLAG_EOS, 3))
+    b.result()
+
+  /** page A of the spanning stream: frames 0 and 1 whole, then the first 510
+   *  bytes of the 600-byte frame as two full 255 segments — which is how a
+   *  page says "this packet is not finished". */
+  def spanPageA(frames: List[Bytes]): Bytes =
+    val big = nthFrame(frames, 2)
+    val lace = new BytesBuilder
+    lace.addBytes(lacingFor(takeFrames(frames, 2)))
+    lace.addByte(255)
+    lace.addByte(255)
+    val body = new BytesBuilder
+    body.addBytes(bodyFor(takeFrames(frames, 2)))
+    body.addBytes(big.slice(0, 510))
+    pageOf(lace.result(), body.result(), 2880L, 0, 2)
+
+  /** the same frames with one packet SPLIT across a page boundary: page B is
+   *  flagged continued and its first segment finishes the big packet. */
+  def spannedStream(frames: List[Bytes]): Bytes =
+    val big = nthFrame(frames, 2)
+    val rest = big.slice(510, big.size)
+    val after = dropFrames(frames, 3)
+    val lace = new BytesBuilder
+    lace.addByte(rest.size)
+    lace.addBytes(lacingFor(after))
+    val body = new BytesBuilder
+    body.addBytes(rest)
+    body.addBytes(bodyFor(after))
+    val b = new BytesBuilder
+    b.addBytes(headerPages())
+    b.addBytes(spanPageA(frames))
+    b.addBytes(pageOf(lace.result(), body.result(), 4800L, Ogg.FLAG_CONT, 3))
+    b.addBytes(Ogg.page(Bytes.empty, 4800L, Ogg.FLAG_EOS, 4))
+    b.result()
+
+  /** the spanning stream cut after page A: the big packet is left unfinished
+   *  and nothing claims to continue it, so only the two whole packets before
+   *  it are frames. */
+  def truncatedStream(frames: List[Bytes]): Bytes =
+    val b = new BytesBuilder
+    b.addBytes(headerPages())
+    b.addBytes(spanPageA(frames))
+    b.addBytes(Ogg.page(Bytes.empty, 2880L, Ogg.FLAG_EOS, 3))
+    b.result()
+
   /** decoded samples at 48kHz for one frame of an Opus packet with TOC config
    *  `cfg` (RFC 6716 §3.1): SILK 10/20/40/60ms, hybrid 10/20ms, CELT
    *  2.5/5/10/20ms. Opus always decodes at the decoder rate (48k here). */
@@ -329,6 +526,8 @@ object OggOracle:
     var lastFlags = 0
     var lastPsize = 0
     var serial = 0L
+    var pendSize = 0   // bytes of a packet still being laced (spans pages)
+    var pendToc = 0    // its first byte, read where the packet started
     var going = true
     while going do
       if pos + 27 > data.size then going = false
@@ -345,22 +544,40 @@ object OggOracle:
         else
           if page == 0 then serial = ser
           val isBos = (flags & Ogg.FLAG_BOS) != 0
-          if !isBos && page != 1 && psize > 0 then
-            audio += 1
-            val toc = data(payloadStart)
-            val cfg = toc >> 3
-            b.append("packet ")
-            b.append(audio)
-            b.append(": ")
-            b.append(psize)
-            b.append("B toc-cfg ")
-            b.append(cfg)
-            b.append(" -> ")
-            b.append(cfgSamples48(cfg))
-            b.append(" samples@48k c=")
-            b.append(toc & 3)
-            b.append('\n')
-            samples48 = samples48 + cfgSamples48(cfg).toLong
+          // Walk the lacing table, not the page: a page carries as many
+          // packets as it has segments shorter than 255, and a packet whose
+          // last segment is a full 255 runs on to the next page. Header pages
+          // are skipped structurally (BOS flag, then the tags page), which
+          // keeps this independent of the reader's magic-based rule.
+          if isBos || page == 1 then
+            pendSize = 0
+          else
+            if (flags & Ogg.FLAG_CONT) == 0 then pendSize = 0
+            var off = payloadStart
+            var i = 0
+            while i < nseg do
+              val seg = data(segStart + i)
+              if pendSize == 0 && seg > 0 then pendToc = data(off)
+              pendSize = pendSize + seg
+              off = off + seg
+              if seg < 255 then
+                if pendSize > 0 then
+                  audio += 1
+                  val cfg = pendToc >> 3
+                  b.append("packet ")
+                  b.append(audio)
+                  b.append(": ")
+                  b.append(pendSize)
+                  b.append("B toc-cfg ")
+                  b.append(cfg)
+                  b.append(" -> ")
+                  b.append(cfgSamples48(cfg))
+                  b.append(" samples@48k c=")
+                  b.append(pendToc & 3)
+                  b.append('\n')
+                  samples48 = samples48 + cfgSamples48(cfg).toLong
+                pendSize = 0
+              i += 1
           lastGranule = granule
           lastFlags = flags
           lastPsize = psize

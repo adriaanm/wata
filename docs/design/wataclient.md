@@ -571,9 +571,31 @@ bytes over a socket":
     OpusTags page + one page per audio frame + an empty EOS page, with
     correct multi-segment lacing for frames over 255 bytes and a
     correctly patched-in page CRC.
-  - `Ogg.readFrames`/`frameCount`: extracts just the audio payload of each
-    page, skipping the BOS page, the second page (OpusTags, identified by
-    page count rather than content), and any empty page.
+  - `Ogg.readFrames`/`frameCount`: extracts the audio **packets**, which
+    is not the same as the audio pages. The lacing table divides a page's
+    payload into segments of at most 255 bytes, and a packet runs until a
+    segment shorter than 255 ends it — so one page may carry many packets
+    (ffmpeg's muxer defaults to about a second of them), and a packet
+    whose final segment is a full 255 continues onto the next page, which
+    flags itself `FLAG_CONT`. The reader walks the table, carries an
+    unfinished packet across the page boundary, and drops a carried
+    packet if the next page does not claim to continue it — a stream cut
+    mid-packet has half a packet, and half a packet is noise.
+
+    The two Opus headers are skipped by their 8-byte magic (`OpusHead`/
+    `OpusTags`) rather than by page ordinal, and only until the first
+    audio packet, so a foreign stream may place them where it likes,
+    including a tags packet long enough to span pages. Empty packets are
+    skipped, which is what retires the EOS page.
+
+    Our own writer emits exactly one packet per page and never spans, so
+    nothing it produces distinguishes a packet-reading reader from a
+    page-reading one. `OggOracle` therefore *builds* the foreign shapes
+    out of the same frames — `packedStream` (all frames on one page),
+    `spannedStream` (a 600-byte packet cut at a 255 boundary across two
+    pages) and `truncatedStream` (that cut left unfinished) — and checks
+    the frames come back identical. Against a page-reading reader those
+    report 1, 2 and 1 frames instead of 5, 5 and 2.
   This is consumed by the recording path (`AcRecordStart`/`AeRecordingDone`
   in `audiocmd.scala`, encoded to Ogg by the device audio thread) and the
   playback path (`ActPlay` in `runtime.scala` downloads Ogg bytes and

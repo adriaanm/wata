@@ -37,6 +37,7 @@ object Crc:
   def crc32(data: Bytes): Long = crc32Update(0L, data)
 
 object Ogg:
+  val FLAG_CONT: Int = 0x01
   val FLAG_BOS: Int = 0x02
   val FLAG_EOS: Int = 0x04
   val SERIAL: Int = 0x77617461     // "wata"
@@ -148,13 +149,45 @@ object Ogg:
       i += 1
     total
 
-  /** extract every AUDIO frame, skipping BOS/OpusTags/empty pages: BOS is
-   *  identified by its flag, OpusTags by being the second page, and empty
-   *  pages by payload size. */
+  /** `a` followed by `b`, cheap when either is empty. Only page-spanning
+   *  packets need it — a packet's segments are contiguous within one page, so
+   *  the common case is a single slice. */
+  def concat(a: Bytes, b: Bytes): Bytes =
+    if a.size == 0 then b
+    else if b.size == 0 then a
+    else
+      val out = new BytesBuilder
+      out.addBytes(a)
+      out.addBytes(b)
+      out.result()
+
+  /** the two Opus header packets, by their 8-byte magic. Identifying them by
+   *  content rather than by page ordinal is what lets a foreign stream put
+   *  them anywhere it likes — including a tags packet long enough to span
+   *  pages, which arrives here already reassembled. */
+  def isHeaderPacket(p: Bytes): Boolean =
+    p.size >= 8 && p(0) == 79 && p(1) == 112 && p(2) == 117 && p(3) == 115 &&
+      ((p(4) == 72 && p(5) == 101 && p(6) == 97 && p(7) == 100) ||  // OpusHead
+       (p(4) == 84 && p(5) == 97 && p(6) == 103 && p(7) == 115))    // OpusTags
+
+  /** extract every audio PACKET, skipping the Opus headers and empty packets.
+   *
+   *  A page is not a packet. The lacing table divides a page's payload into
+   *  segments of at most 255 bytes, and a packet runs until a segment shorter
+   *  than 255 ends it — so one page may carry many packets, and a packet whose
+   *  final segment is a full 255 continues onto the next page (which flags
+   *  itself `FLAG_CONT`). Our own writer emits exactly one packet per page and
+   *  never spans, but a foreign encoder pages normally: reading a whole payload
+   *  as one frame gives a decoder a run of concatenated packets it will treat
+   *  as one, and the message plays as a fraction of itself.
+   *
+   *  A page that does not claim continuation abandons any unfinished packet:
+   *  the stream was cut mid-packet, and half a packet is not decodable. */
   def readFrames(data: Bytes): List[Bytes] =
     var acc: List[Bytes] = Nil
     var pos = 0
-    var pagesRead = 0
+    var carry = Bytes.empty  // an unfinished packet, continued from the previous page
+    var sawAudio = false
     var going = true
     while going do
       if pos + 27 > data.size then going = false
@@ -171,13 +204,27 @@ object Ogg:
           if payloadEnd > data.size then going = false
           else
             val headerType = data(pos + 5)
+            var prefix = if (headerType & FLAG_CONT) != 0 then carry else Bytes.empty
+            var pktStart = payloadStart
+            var off = payloadStart
+            var i = 0
+            while i < nseg do
+              val seg = data(segStart + i)
+              off = off + seg
+              if seg < 255 then
+                val pkt = concat(prefix, data.slice(pktStart, off))
+                prefix = Bytes.empty
+                pktStart = off
+                if pkt.size == 0 then ()
+                else if !sawAudio && isHeaderPacket(pkt) then ()
+                else
+                  acc = pkt :: acc
+                  sawAudio = true
+              i += 1
+            // a trailing 255 segment means the last packet runs on; anything
+            // else leaves nothing behind (pktStart has caught up with off).
+            carry = concat(prefix, data.slice(pktStart, off))
             pos = payloadEnd
-            pagesRead = pagesRead + 1
-            val isBos = (headerType & FLAG_BOS) != 0
-            if isBos then ()
-            else if pagesRead == 2 then ()
-            else if psize == 0 then ()
-            else acc = data.slice(payloadStart, payloadEnd) :: acc
     ListOps.reverse(acc)
 
   /** the count of decoded audio frames (a convenience over `readFrames`). */
