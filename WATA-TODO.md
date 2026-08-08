@@ -131,7 +131,17 @@ blocks + git log; each entry cites where it was recorded.*
   instead of `==`) **stays** until the fix; its comment names this key.
   Shipping code is unaffected — wataui compares views via the
   hand-written `Views.eqView`, which exists for a semantic reason, not
-  as a workaround.
+  as a workaround. ACK 2026-08-08 (sgola `f277475`): both bugs confirmed
+  as ONE root — the machinery never consults a stub-and-map type's OWN
+  equality mapping, so `Bytes` fell into the generic zero-field
+  generator. Fix is QUEUE-TOP upstream as
+  `[STAMPED-EQUALS-STUB-TYPE-VACUOUS]`: an intrinsic mapping (`Bytes` →
+  `bytes.Equal` + content hash, JVM-oracled) consulted before any
+  generation, plus a hard rule that no helper is ever emitted over a
+  type with no Go def. Our repro is the scenario seed, and our
+  value-shaped-family observation gets a probe now rather than when
+  that wall lifts. On the landing notice: repin, delete `rootLen`, run
+  the eqcheck suite, send the real VERIFY.
 
 - **`TUPLE-REF-COMPONENT-ASSIGN`** — a tuple component whose type lowers
   to a Go interface (a sealed trait, a `List[T]`) is erased to `any` in
