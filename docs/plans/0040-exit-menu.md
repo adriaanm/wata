@@ -76,10 +76,14 @@ takes every key while open), it outlives no session, and making it an
 applet would put it in the left/right applet rotation, where it must not
 be. So `Ui` grows an exit-menu cell beside `quitArmC` — the same
 single-goroutine-per-cell discipline, since only the UI loop touches it
-— and `frameStep` routes input to it while it is open. `quitArmC` and
-`QUIT_ARM_S` are **replaced**, not kept: the two-step quit existed to
-stop a stray key from quitting, and a menu that needs a deliberate
-selection does that better.
+— and `frameStep` routes input to it while it is open.
+
+`quitArmC`/`QUIT_ARM_S` are **kept** (this changed during
+implementation; the plan first said replaced). They still do their
+original job — a single stray red key must not take over the screen —
+and what changed is only what the second press reaches. Removing them
+would have made one back-press open a full-frame menu, which is the
+behaviour the arm exists to prevent.
 
 Rendering follows Settings' menu drawing (`VISIBLE` window, selected row,
 detail line as the confirmation prompt). Five rows fit the 160×128 panel
@@ -90,14 +94,15 @@ without scrolling, which is why the action list stays at five.
 - `wata-fb/src/main/scala/ui.scala` — the exit-menu cell and its arming
   timeout; `frameStep` routes to it while open; the confirmed edge opens
   it instead of returning true. `quitArmC`/`QUIT_ARM_S`/`quitArmed` go.
-- `wata-fb/src/main/scala/applets.scala` — `ExitMenuState` + the pure
-  transition/render functions, in the same `*Logic` style as
-  `SettingsLogic`. `Restart app` is the only new action; the rest call
+- `wata-fb/src/main/scala/exitmenu.scala` (new) — `ExitMenuState` + the
+  pure transition/render functions, in the same `*Logic` style as
+  `SettingsLogic`. Its own file rather than `applets.scala`, which is
+  already 1700 lines and is about applets; this is not one. `Restart app` is the only new action; the rest call
   the existing `Diag` entry points, plus a `Diag.reboot()` for the plain
   reboot Settings does not have.
-- `wata-fb/src/main/scala/uiscript.scala` — the `quitarm` probe becomes
-  an exit-menu probe (open, selected row, confirm level), so the scripted
-  runs can drive and pin it.
+- `wata-fb/src/main/scala/uiscript.scala` — three exit-menu probes
+  (`exitopen`/`exitrow`/`exitconfirm`) beside the `quitarm` one, which
+  stays because the arm stays.
 - `docs/design/wata-fb.md` — the QUIT section describes the menu.
 
 ## How it is verified
