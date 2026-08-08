@@ -986,12 +986,46 @@ the baseline; the control reads 0.3x the baseline.
 
 On a cold boot the chirp can be inaudible while everything reports success:
 the codec resets `RX2 MIX1 INP1` to zero as the Q6 comes up, and `SetupMixer`
-runs once. That is `AUDIO-ROUTE-REAPPLY`, not a chirp defect — and the chirp
-makes it *audible*, which is the point: a missing hello is the cheapest
-signal that the route is wrong, available before anyone tries to send
-anything. There is no software volume anywhere in the client (`PlayVol` is a
+runs once. The route watchdog (below) puts it back at the next stream open,
+and the chirp still makes the underlying condition *audible*, which is the
+point: a missing hello is the cheapest signal that something is wrong with
+the route, available before anyone tries to send anything. There is no software volume anywhere in the client (`PlayVol` is a
 fixed 8192), so the hardware knob's off position silences the chirp by
 construction, exactly as it silences a message.
+
+**The route watchdog.** `SetupMixer` applies the routes once, and the codec
+does not keep them: when the Q6 comes up or restarts it resets `RX2 MIX1
+INP1` and `DEC1 MUX` to `ZERO` (index 0 in both; the wanted values are `RX1`
+at 3 and `ADC1` at 1). Neither failure announces itself. A zeroed playback
+mux is a dead speaker with every other control still reading correct; a
+zeroed capture mux is a microphone that records four seconds of digital
+silence which encodes, sends, arrives and plays as nothing, which looks
+exactly like a kid who did not speak — it cost a real message on 2026-08-07.
+
+`RouteCtl` (`go-pkgs/audio/audio_linux.go`) is a pre-opened handle in the
+shape `VolCtl` already established, and for the same reason: `mixer_open`
+enumerates ~700 controls on this codec and cannot sit in front of a stream.
+It resolves each mux's target enum *index* once at open, so the hot-path
+check is one ioctl per mux and no allocation, and `OpenPlaybackTuned` and
+`OpenCapture` call it before `pcm_open`. Opening fails if either control or
+either value is missing rather than watching one of the two — a half
+watchdog reporting "routes fine" is worse than none. A correction prints,
+because it is the only visible trace that the Q6 restarted.
+
+This complements rather than replaces bq268-alpine's `audio-mixer` service,
+which applies-verifies-and-watches both directions for two minutes after
+boot: that covers the boot race, this covers a Q6 restart *mid-session*,
+after the watcher has stopped, which would otherwise silence the app until
+someone rebooted the handset.
+
+Verified on the handset by forcing both muxes to `ZERO` and running
+`wata-fb --selftest echo`: the capture open put `DEC1 MUX` back and the
+playback open put `RX2 MIX1 INP1` back, each logging before its stage, and
+the run finished `SELFTEST PASS` with both controls reading their wanted
+values — recovered with no restart. (Note for anyone repeating it: an
+`amixer cset` on `DEC1 MUX` does not take while a capture stream is open,
+so break the muxes with no stream running, or expect only the playback
+correction to fire.)
 
 **The vendored tinyalsa patch.** `go-pkgs/audio/vendor/tinyalsa/src/pcm.c`
 carries a local patch (search for `SGOLA PATCH`) to `pcm_start` and
