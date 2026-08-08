@@ -802,18 +802,49 @@ queue commands. On-device passes still owed: the join verdict against a
 real mistyped PSK, and `wifi_off` proving the report rides cellular
 (WATA-TODO.md).
 
-### Quitting is two-step
+### The exit is a menu
 
-`back` on the contacts view is the only quit edge (`Ui.isQuitEdge`), and
+`back` on the contacts view is the only exit edge (`Ui.isQuitEdge`), and
 it takes two presses within `Ui.QUIT_ARM_S` (2s): the first arms the
 confirmation and the applet says so (on the boot screen and on the
-contact list footer, via `FrameCtx.quitArmed`), the second quits, and an
-unconfirmed arm ages out in `Ui.tickQuitArm`. The device boots straight
-into wata-fb and inittab respawns it, so quitting is not a user-facing
-action at all — a single stray red key used to leave a black screen on a
-device that looked dead. The ordinary in-session `back` (conversation ->
-contacts, settings -> wata) is untouched; only the quit edge is
-two-step.
+contact list footer, via `FrameCtx.quitArmed`), an unconfirmed arm ages
+out in `Ui.tickQuitArm`, and the second **opens the exit menu**. The
+ordinary in-session `back` (conversation -> contacts, settings -> wata)
+is untouched.
+
+The menu (`exitmenu.scala`, plan 0040) offers five actions: restart the
+app, reboot, power off, reboot to fastboot, reboot to EDL. It is modal —
+while it is open it takes every key and the shell sees none, so nothing
+moves under a person who is choosing how to leave — and it is the only
+thing that ends the frame loop, through `Restart app` alone (inittab
+respawns the app, which *is* the restart). The shell still updates behind
+it, since the sync loop keeps running and its state should not be stale
+when the menu closes; only the drawing is replaced.
+
+**What takes two confirmations, and why.** Not the most destructive
+actions — a reboot and a power-off are both fine, the handset comes back
+by pressing a button. The split is **who can undo it**. Fastboot and EDL
+end with a device that shows nothing, responds to nothing, and stays that
+way until somebody with a cable and a host machine intervenes, so those
+two need a second OK. `ExitMenuState.confirm` is a counter rather than
+Settings' `armed` Boolean because a second step needs a third value; any
+key other than OK returns it to 0, and it ages out (`ExitMenu.ARM_S`) so
+an abandoned menu never sits one keypress away from EDL. The two rows are
+drawn red even unselected: the menu should look different where it is
+different, before anyone presses anything.
+
+The actions themselves are `Diag`'s, shared with the Settings rows that
+keep them — two surfaces over the same actions is the intent, since
+somebody already in Settings should not have to leave to power off.
+`Diag.reboot` is the one this added.
+
+The oracle is the `exit-menu` scenario in `just fb-ui-tests`, and it
+exists for the case a handset cannot check: one OK on `Reboot to EDL`
+raises the counter to 1 and runs **nothing**, which the script asserts
+through the `exitopen`/`exitrow`/`exitconfirm` probes, with a golden per
+checkpoint. It also pins the negative — that any other key disarms —
+because a menu that silently stayed armed while the person thought they
+had left is the worst failure this screen has.
 
 ## Input
 

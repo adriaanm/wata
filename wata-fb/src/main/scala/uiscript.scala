@@ -496,6 +496,12 @@ object UiScript:
     else if name == "conntag" then Runtime.connTag(Ui.connection)
     else if name == "logins" then Runtime.loginAttempts
     else if name == "quitarm" then boolProbe(Ui.quitArmed)
+    // the exit menu (plan 0040): open, which row, and how many OKs have landed
+    // on it — `exitconfirm` is what pins the two-step rows, where the check is
+    // that ONE OK on "Reboot to EDL" runs nothing and only raises this to 1.
+    else if name == "exitopen" then boolProbe(Ui.exitMenuOpen)
+    else if name == "exitrow" then Ui.exitMenuRow
+    else if name == "exitconfirm" then Ui.exitMenuConfirm
     else if name == "unsent" then countKeys(Ui.unsentKeys)
     else if name == "undeliv" then countKeys(Ui.undeliveredKeys)
     else if name == "frames" then Ui.frames

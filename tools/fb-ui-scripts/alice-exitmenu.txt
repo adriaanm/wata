@@ -1,0 +1,77 @@
+# alice: the exit menu (plan 0040) — opening it, and the rule that separates
+# the actions a person can undo from the two that need somebody with a cable.
+#
+# Driven by `wata-fb uitest` (uiscript.scala). The point of this script is the
+# CONFIRM COUNTER: a one-step row runs on the first OK, a two-step row does not,
+# and the only way to see the difference without a handset is to press OK once
+# on "Reboot to EDL" and observe that nothing happened.
+
+wait syncing 1 900
+wait convs 2 900
+advance 30
+
+# ---- opening it ------------------------------------------------------------
+# back on the contacts view arms; a second back inside the window opens the
+# menu. One back alone must not.
+key back press
+key back release
+advance 2
+expect quitarm 1
+expect exitopen 0
+
+key back press
+key back release
+advance 2
+expect exitopen 1
+expect exitrow 0
+expect exitconfirm 0
+checkpoint alice-exit-open
+
+# ---- the two-step rows -----------------------------------------------------
+# down to "Reboot to EDL" (row 4), the furthest thing from a mistake anyone
+# should be able to make by accident.
+tap down
+tap down
+tap down
+tap down
+advance 2
+expect exitrow 4
+expect exitconfirm 0
+checkpoint alice-exit-edl
+
+# ONE OK on it. This is the whole test: the counter goes to 1 and the action
+# does NOT run — the menu is still open, still on the same row, asking again.
+key enter press
+key enter release
+advance 2
+expect exitconfirm 1
+expect exitopen 1
+expect exitrow 4
+checkpoint alice-exit-edl-armed
+
+# and any other key cancels it, which is what the prompt promises. A menu that
+# silently stayed armed while the person thought they had left would be the
+# worst possible failure of this screen.
+tap up
+advance 2
+expect exitconfirm 0
+expect exitrow 3
+checkpoint alice-exit-disarmed
+
+# ---- a one-step row --------------------------------------------------------
+# back up to "Reboot" (row 1) — one of the rows whose confirmation is a single
+# OK, so the counter must never reach 2 there.
+tap up
+tap up
+advance 2
+expect exitrow 1
+expect exitconfirm 0
+checkpoint alice-exit-reboot
+
+# ---- leaving ---------------------------------------------------------------
+# BACK closes the menu from any row and puts the shell back, unchanged.
+key back press
+key back release
+advance 30
+expect exitopen 0
+checkpoint alice-exit-closed

@@ -21,14 +21,16 @@ import sgo.add  // the Atomic[Int] add extension (the session tally cells)
  *  header for the single-goroutine-per-cell discipline). A sibling failure
  *  cancels the whole scope (structured concurrency).
  *
- *  QUIT: `back` from the contacts view is the only quit edge here — the
- *  device is otherwise meant to run until powered off; this gives a dev/ssh
- *  run a clean way to terminate. It is TWO-STEP (`QUIT_ARM_S`): the device
- *  boots straight into this app and inittab respawns it, so quitting is not a
- *  user-facing action and a single stray red key must not leave a black
- *  screen. Cleanup restores the backlight and tears the loops down through
- *  the ordinary stop edges (`Runtime.stopClient` is idempotent, so the
- *  Settings -> Network OFF path may already have run it). */
+ *  EXIT: `back` from the contacts view, twice inside `QUIT_ARM_S`, opens the
+ *  EXIT MENU (plan 0040) — it does not quit. The two-step arm survives because
+ *  the device boots straight into this app and a single stray red key should
+ *  not take over the screen; what changed is what the second press reaches. The
+ *  menu is modal and is the only thing that ends the loop, and only through its
+ *  `Restart app` row (inittab respawns the app, which IS the restart); its
+ *  other rows reboot, power off, or reach the two cable-only modes. Cleanup
+ *  restores the backlight and tears the loops down through the ordinary stop
+ *  edges (`Runtime.stopClient` is idempotent, so the Settings -> Network OFF
+ *  path may already have run it). */
 
 /** The FOUR device edges of the frame loop, behind one seam so the same loop
  *  drives real hardware, a terminal, and a deterministic script. Time is NOT
@@ -101,8 +103,14 @@ object Ui:
   // the two-step quit's arming window, in seconds remaining (0 = unarmed).
   // The device boots straight into wata-fb and inittab respawns it, so a
   // single stray red key on the contact list must not black the screen out —
-  // the first press arms and says so, a second one within the window quits.
+  // the first press arms and says so, a second one within the window OPENS
+  // THE EXIT MENU (plan 0040), which is where quitting now lives.
   private val quitArmC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
+  // the exit menu, or None while it is closed. A mode of the shell rather
+  // than an applet: it is modal, it outlives no session, and an applet would
+  // put it in the left/right rotation where it must not be. Touched only by
+  // the UI loop, like every other cell here.
+  private val exitC: sgo.Atomic[Option[ExitMenuState]] = sgo.atomic(None)
   // the outbox markers (plan 0022), refreshed from `EvOutbox` on the ordinary
   // event drain: the conversation keys with a send still queued, and the ones
   // that lost a message for good. Cells rather than a snapshot field because
@@ -139,6 +147,25 @@ object Ui:
   /** is the quit confirmation armed right now (what the applet draws its
    *  "again to exit" line from, and what a scripted run probes)? */
   def quitArmed: Boolean = quitArmC.get() > 0.0
+
+  /** the exit menu's state, or None while it is closed — what a scripted run
+   *  probes and what the frame renders instead of the shell. */
+  def exitMenu: Option[ExitMenuState] = exitC.get()
+
+  /** is the exit menu open? */
+  def exitMenuOpen: Boolean = exitMenu match
+    case _: Some[ExitMenuState] => true
+    case None                   => false
+
+  /** the row the exit menu is on, or -1 while it is closed. */
+  def exitMenuRow: scala.Int = exitMenu match
+    case s: Some[ExitMenuState] => s.value.selected
+    case None                   => -1
+
+  /** how many OK presses have landed on that row (0 while closed). */
+  def exitMenuConfirm: scala.Int = exitMenu match
+    case s: Some[ExitMenuState] => s.value.confirm
+    case None                   => 0
 
   def connOf(tag: scala.Int, live: ConnectionState): ConnectionState =
     if tag < 0 then live else stateOfTag(tag)
@@ -249,6 +276,7 @@ object Ui:
     frameC.set(0)
     connForceC.set(-1)
     quitArmC.set(0.0)
+    exitC.set(None)
     unsentC.set(Nil)
     undelivC.set(Nil)
     NetStatus.reset()
@@ -309,21 +337,27 @@ object Ui:
     val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts,
       unsentC.get(), undelivC.get(), quitArmed)
 
-    // poll input; a CONFIRMED quit edge (back twice in contacts) ends the loop
+    // poll input; only a confirmed `Restart app` in the exit menu ends the loop
     val keyEvents = dev.pollInput()
     val quit = handleFrameInput(keyEvents, ctx, dev)
     if !quit then
       // the quit confirmation ages out; a press this frame re-armed it, so
       // this runs after the input and one frame of dt never expires it
       tickQuitArm(dt)
+      tickExitMenu(dt)
       // screensaver idle timeout
       idleC.set(tickIdle(dt, keyEvents, dev))
-      // update + render + present (skip render when display off)
+      // update + render + present (skip render when display off). The shell
+      // still UPDATES behind an open menu — the sync loop keeps running and
+      // its state should not be stale when the menu closes — but the menu is
+      // what gets drawn, whole-frame: it is a decision, not an overlay.
       stateC.set(Shell.update(stateV, dt, ctx))
       stateC.set(Shell.withStatus(stateV, ShellStatus.fromNet(net, conn)))
       if !displayOff then
         Draw.clear(px, Color.black)
-        Shell.render(stateV, px, ctx)
+        exitMenu match
+          case s: Some[ExitMenuState] => ExitMenu.render(s.value, px, ctx)
+          case None                   => Shell.render(stateV, px, ctx)
         dev.present(px)
       dev.frameSleep(FRAME_MS)
     tally(frameC)
@@ -348,15 +382,47 @@ object Ui:
         case Nil => going = false
     quit
 
-  /** route one key event; `back` on the contacts view is the quit gesture —
-   *  TWO-STEP: the first press arms the confirmation (the applet then says
-   *  "again to exit"), a second press inside the window quits. Anything else
-   *  in between simply lets it age out. */
+  /** route one key event. The exit menu is MODAL — while it is open it takes
+   *  every key and the shell sees none of them, so nothing behind it moves
+   *  under a person who is choosing how to leave.
+   *
+   *  Otherwise `back` on the contacts view is the exit gesture, still TWO-STEP
+   *  (the applet says "again to exit"): the second press inside the window
+   *  opens the menu rather than quitting. Only the menu quits now. */
   def applyOne(ev: KeyEvent, ctx: FrameCtx): Boolean =
-    val quit = isQuitEdge(ev) && quitArmed
-    if isQuitEdge(ev) then quitArmC.set(QUIT_ARM_S)
-    stateC.set(Shell.handleInput(stateV, ev.key, ev.state, ctx))
-    quit
+    exitMenu match
+      case s: Some[ExitMenuState] => applyExitMenu(s.value, ev, ctx)
+      case None =>
+        if isQuitEdge(ev) && quitArmed then
+          quitArmC.set(0.0)
+          exitC.set(Some(ExitMenu.initial()))
+        else
+          if isQuitEdge(ev) then quitArmC.set(QUIT_ARM_S)
+          stateC.set(Shell.handleInput(stateV, ev.key, ev.state, ctx))
+        false
+
+  /** the menu's own key routing; true only when a confirmed `Restart app`
+   *  ends the frame loop. BACK closes the menu from any row, armed or not. */
+  def applyExitMenu(s: ExitMenuState, ev: KeyEvent, ctx: FrameCtx): Boolean =
+    if ExitMenu.closes(ev.key, ev.state) then
+      exitC.set(None)
+      false
+    else
+      val quit = Shell.isPressed(ev.state) && isOkKey(ev.key) && ExitMenu.quitsOnOk(s)
+      exitC.set(Some(ExitMenu.handleInput(s, ev.key, ev.state, ctx)))
+      if quit then exitC.set(None)
+      quit
+
+  def isOkKey(k: Key): Boolean = k match
+    case _: KEnter => true
+    case _         => false
+
+  /** age the exit menu's arming out. An armed menu left alone must not sit one
+   *  keypress away from EDL until the screensaver takes the panel. */
+  def tickExitMenu(dt: scala.Double): Unit =
+    exitMenu match
+      case s: Some[ExitMenuState] => exitC.set(Some(ExitMenu.update(s.value, dt)))
+      case None                   => ()
 
   /** age the quit confirmation out (0 = unarmed). */
   def tickQuitArm(dt: scala.Double): Unit =

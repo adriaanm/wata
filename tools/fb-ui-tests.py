@@ -94,6 +94,15 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0040: the exit menu. Pins the confirmation rule — one OK on a
+        # two-step row raises the counter and runs NOTHING — which is the part
+        # that cannot be checked on a handset without actually reaching EDL.
+        "name": "exit-menu",
+        "phases": [
+            ("alice", "alice-exitmenu.txt"),
+        ],
+    },
+    {
         "name": "conversation-actions",
         "phases": [
             ("alice", "alice-convo.txt"),

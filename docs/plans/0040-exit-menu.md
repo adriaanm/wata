@@ -1,6 +1,6 @@
 # 0040 — the exit is a menu, not a trapdoor
 
-Status: proposed
+Status: done
 
 ## The problem
 

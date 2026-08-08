@@ -351,6 +351,9 @@ object Diag:
 
   /** `poweroff` from $PATH — what system-menu's Power Off item runs. */
   def powerOff(): Unit = runOnDevice("poweroff")
+  /** an ordinary warm reboot back into Linux — the exit menu's middle rung,
+   *  between restarting the app and the two modes that need a cable. */
+  def reboot(): Unit = runOnDevice("reboot")
   /** reboot(RESTART2, "bootloader") via the device's helper binary — warm
    *  reset into fastboot (see bq268-alpine tools/src/reboot-bootloader.zig). */
   def rebootBootloader(): Unit = runOnDevice("/usr/local/bin/reboot-bootloader")
