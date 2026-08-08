@@ -4,19 +4,22 @@ The map of the language boundary under wata's Apple clients, kept
 current as rulings land. The evidence behind every row is a committed
 spike or a shipped module: [plan 0038](../plans/0038-ffi-in-sgola.md)
 (the two spikes and their tickets), [bindgen.md](bindgen.md) (the
-generated-Go layer), `tools/objc-spike/REPORT.md` and
-`tools/interp-spike/REPORT.md` (the exact walls, spelled the way the
-code wants to be). wata is sgola's proving ground, so "write that bit in
+generated-Go layer), `tools/objc-spike/REPORT.md`,
+`tools/callback-spike/REPORT.md` and `tools/interp-spike/REPORT.md`
+(the exact walls and crossings, spelled the way the code wants to be). wata is sgola's proving ground, so "write that bit in
 Go" is a *finding*, and this doc is where the findings add up.
 
 The one-paragraph summary: **calling C is closed; being called by C is
-ruled and queued.** Everything a call-out needs — open a library, find
-a symbol, make the call, pass a C string, carry the results — works on
-the current pin. Every remaining "must be Go" that is not a technology
-boundary (cgo, reflection, the Go runtime) traces to one feature —
-`go.callback`, a Go **func value crossing a facade** — whose shape is
-ruled (see "the call-in half") and whose implementation sits two deep
-in sgola's queue.
+closed.** Everything a call-out needs — open a library, find a symbol,
+make the call, pass a C string, carry the results — works on the
+current pin, and so does the reverse crossing: `go.callback` registers
+a Sgola literal as a C-callable address, proven end to end by
+`tools/callback-spike` (an ObjC method whose body is Sgola, asserted in
+ci). The biggest remaining language gap is now **by-value structs
+across facades** (`FACADE-VALUE-STRUCT`) — the blocker for the interp
+port and the frame wire's deletion; everything else that stays Go is a
+technology boundary (cgo, reflection, the Go runtime), not a compiler
+gap.
 
 ## What works today (on the current pin)
 
@@ -33,12 +36,49 @@ that everything *around* its two gaps was already right.
 | pointer-sized addresses | `go.Uintptr`, an **opaque** scalar — deliberately not a reference, keeps nothing alive | landed `b85a713`; objc-spike builds and runs |
 | dlopen / dlsym / syscall | `go.purego.dlopen/dlsym/syscallN` — purego's whole non-reflective surface | `tools/objc-spike` runs green |
 | C-string addresses | the bracket `go.cstring(s) { p => body }` — `p` addresses a NUL-terminated copy, live for exactly `body`'s extent (compiler-emitted `KeepAlive`), NON-RETENTION callee contract; nest for multiple string args; lint rejects `p` escaping the bracket | landed `1c6d6ed`; objc-spike runs, `length = 5` |
+| callbacks — control entering Sgola from C | `go.callback(literal): go.Uintptr` — a registration returning a free address, ordinary-value vocabulary (details below) | landed `cb15191`; callback-spike runs 42 in ci |
 | opaque handles + scalars + strings + bytes | the facade bread and butter | every shipped module |
 
 So an ObjC message send is expressible in Sgola **today** end to end —
 `objc_getClass`, `sel_registerName`, `objc_msgSend` through `syscallN`,
 C strings through the bracket — and `tools/objc-spike` proves it in ci:
-it runs the full round-trip and asserts `objc-spike: length = 5`.
+it runs the full round-trip and asserts `objc-spike: length = 5`. The
+reverse dispatch is equally proven: `tools/callback-spike` synthesizes
+an ObjC class whose method IMP is a `go.callback`-registered Sgola
+literal, and ci asserts the msgSend answers its 42.
+
+### The callback contract (landed `cb15191`, v1)
+
+`go.callback(f): go.Uintptr` deliberately inverts cstring's bracket: a
+purego trampoline has process lifetime (never released,
+platform-capped), so the liveness objection that forced `cstr` into a
+bracket does not exist here — the address is a free value.
+
+- `f` must be a **function literal with ascribed param types** in v1 —
+  the ascriptions read as the declared foreign signature (a named def
+  does not compile);
+- ordinary-value vocabulary, monomorphic: params `go.Uintptr | Int`,
+  result `go.Uintptr | Int | Unit`, arity ≤ 15 (purego's SyscallN
+  ceiling). The emitted trampoline is the uintptr-slotted func purego
+  requires and MARSHALS to the declared signature — void methods work
+  (the trampoline returns 0 uniformly; purego zero-result callbacks are
+  SysV-only, so the portable form was forced), a BOOL predicate
+  declares `Int` and answers 0/1, and a constant is simply an `Int`.
+  `go.Uintptr` stays fully opaque; conversions live only in the glue;
+- register at module/startup scope — the ~2000 trampoline cap makes
+  registration-in-a-loop fail loudly, so callbacks are never minted
+  per-frame;
+- the registration is a **crossing**: the literal's captures face the
+  same CONC-8 predicate a fork capture does (Shareable / pure /
+  synchronizer) — callback bodies that need mutable state hoist it into
+  `Atomic`/`Mutex` cells.
+
+One wrinkle a *fresh* consumer would hit: the emitted glue imports
+`github.com/ebitengine/purego` but `sgo`'s go.mod stage does not yet
+inject the require (upstream `GOMOD-PUREGO-REQUIRE-INJECT`, filed).
+Our spikes carry `go-pkgs/puredep` — a blank-import of purego with a
+committed go.sum — exactly to put purego in the module graph, so wata
+is unaffected.
 
 ## Ruled and queued — what we know will be possible
 
@@ -61,45 +101,8 @@ settled, only the landing is pending.
   stub-and-map core type (`VImage`'s `Bytes`) stamps an `equalsBytes`
   that names the unemitted `Bytes` type (build break) and compares zero
   fields — discrepancy reported upstream 2026-08-08, diff-spike's
-  workaround retained (see WATA-TODO.md). Consequence for FFI: this
-  landing moved `go.callback` to the FRONT of sgola's queue.
-
-## Ruled — the call-in half
-
-**Callbacks are RULED** (2026-08-08, sgola `29536af`):
-`go.callback(f): go.Uintptr` — a *registration* returning a **free**
-address value, deliberately inverting cstring's bracket: a purego
-trampoline has process lifetime (never released, platform-capped), so
-the liveness objection that forced `cstr` into a bracket does not exist
-here. The contract to build against, ahead of the landing:
-
-- register at module/startup scope — the platform cap makes
-  registration-in-a-loop fail loudly, so callbacks are never minted
-  per-frame;
-- `f` speaks ordinary values, monomorphic: params `go.Uintptr | Int`,
-  result `go.Uintptr | Int | Unit` (refined at sgola `a48248e` from
-  our `CALLBACK-RESULT-VOCABULARY` finding — the emitted trampoline is
-  the uintptr-slotted func purego requires and MARSHALS to the declared
-  signature, so void methods work, a BOOL predicate declares `Int` and
-  answers 0/1, and "a method body must be able to answer 0, 1 and 42"
-  is literally in the upstream scenario requirements; `go.Uintptr`
-  stays fully opaque, conversions live only in the emitted glue);
-- the registration is a **crossing**: `f`'s captures face the same
-  predicate a fork capture does (Shareable / pure / synchronizer) —
-  callback bodies that need mutable state hoist it into
-  `Atomic`/`Mutex` cells;
-- the returned address is opaque `go.Uintptr`, as ever.
-
-Implementation is now FIRST in sgola's queue (verdict A;
-`GENERIC-FAMILY-EQUALS`, which sat ahead of it, landed at `e036452`).
-Everything that *receives control from C* is
-this one feature wearing four costumes — `purego.NewCallback`,
-`objc.RegisterClass` method bodies, `MainQueue().Async` (the dispatch
-seam; `nativeui/dispatch.go` is the *purest* FFI file in the package,
-not the FFI-free one the first inventory claimed), and bindgen's
-protocol delegates. `tools/callback-spike` is pre-shaped against the
-contract (the interp-spike pattern: committed not-building, not in ci)
-so the landing day is a compile-and-run, not a design session.
+  workaround retained (see WATA-TODO.md). The fix is queue-top upstream
+  and dispatching now.
 
 ## What genuinely requires hand-written Go
 
@@ -119,14 +122,23 @@ Three categories, in decreasing permanence.
   heap profiler, anything touching `runtime`/`unsafe` — the measurement
   and plumbing layer under the app, a few dozen lines each.
 
-**Waiting on the call-in half — Go for now, portable after.**
-- `nativeui/dispatch.go` (94 lines): dlopen/dlsym it could do today;
-  the callback trampoline it cannot.
+**Unblocked — portable now.** Everything that receives control from C
+was one feature (`go.callback`) wearing four costumes; the feature
+landed and callback-spike proves the pattern, so these are Go by
+schedule, not by necessity — ports someone can plan, not ports this doc
+mandates (plan 0038's rule: a green spike is evidence, not a mandate).
+- `nativeui/dispatch.go` (94 lines): dlopen/dlsym was expressible after
+  leg 1; the callback trampoline — the remainder — is exactly what the
+  spike registers. The *purest* FFI file in the package, not the
+  FFI-free one the first inventory claimed.
 - `macshell/shell.go`'s FFI core and `nativeui/keyview.go` /
-  `macshell/menu.go` class synthesis: same single dependency.
+  `macshell/menu.go` class synthesis: callback-spike at scale —
+  synthesize the class, install literal-backed IMPs, register.
 - `objcrt` (the hand-written runtime under the bindings): autorelease
-  pool push/pop are plain calls a facade could bind now; class
-  registration needs callbacks. Splits when the feature lands.
+  pool push/pop are plain calls a facade can bind; class registration
+  was the callback half. The split can be scheduled.
+- bindgen's protocol delegates, further out — a record of literals,
+  each registered.
 
 **Waiting on by-value structs.**
 - `nativeui/interp.go` (359 lines) and with it `view/pixels/glyphs`
@@ -201,9 +213,9 @@ sketch stands on:
   reachable through them. Same single feature as everything else.
 - Class synthesis (`ObjcRt.registerClass`) — same again.
 
-So rung 2's gating set is: the cstring bracket (landed), func-typed
-params (leg 2), and a decision about struct-call ABI (keep a Go kernel
-vs a new primitive). Nothing else in the sketch is speculative — every
+So rung 2's gating set is: the cstring bracket (landed), callbacks
+(landed — leg 2, with the v1 literal-only note above), and a decision
+about struct-call ABI (keep a Go kernel vs a new primitive). Nothing else in the sketch is speculative — every
 other line is the objc-spike's proven vocabulary. The realistic end
 state is rung 2 **with a Go kernel**: ~a hundred lines of Go doing
 reflect-y struct dispatch and callback registration, everything above
@@ -225,12 +237,20 @@ verification.
   with the caveat that a cached value must be the bracket's *result*
   (the selector uintptr `sel_registerName` returns), never the bound
   `p` itself — the lint enforces exactly that.
-- `go.callback` lands (ruled 2026-08-08, now FIRST in sgola's queue —
-  `GENERIC-FAMILY-EQUALS` landed) → `tools/callback-spike` compiles and runs
-  leg 2's oracle; on a pass, dispatch, keyview, menu synthesis and the
-  objcrt split all unblock at once.
+- `go.callback` — **landed** (`cb15191`): callback-spike runs leg 2's
+  oracle green in ci; dispatch, keyview, menu synthesis and the objcrt
+  split are unblocked (see above). Watch the v1 literal-only rule
+  against the real ports — if reusing one body across selectors chafes,
+  that is fileable.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
-  (the wire's ~400 lines) and the shape of rung 2's geometry.
+  (the wire's ~400 lines) and the shape of rung 2's geometry. Now the
+  biggest open language gap on this frontier.
+- The `Bytes`-equality discrepancy fix (`GENERIC-FAMILY-EQUALS` on a
+  stub-and-map core type) — queue-top upstream; diff-spike's workaround
+  comes out when it lands.
+- `GOMOD-PUREGO-REQUIRE-INJECT` — a wrinkle only a *fresh* consumer
+  hits (raw `no required module provides package` for purego); our
+  `go-pkgs/puredep` godep covers wata until it lands.
 - `BINDGEN-TYPED-STRUCTS` — **landed**: callbacks carry the generated
   struct types directly and struct/CGFloat callback returns emit (the
   `objcrt.CGFloatRet` spelling; true encodings via `class_addMethod`) —

@@ -1,142 +1,109 @@
 # callback-spike — can an ObjC method's body be Sgola? (plan 0038, leg 2)
 
-The call-out leg is closed: `tools/objc-spike` does a real `objc_msgSend`
-round-trip from pure Sgola and runs green in ci. This spike is the other
-direction — control ENTERING Sgola from the ObjC runtime. It synthesizes a
-class at runtime (`objc_allocateClassPair` on NSObject), installs a Sgola
-function's address as the IMP of a method `wataProbe`
-(`class_addMethod(cls, sel, cbAddr, "L@:")`), registers the pair,
+**ANSWERED: yes.** On sgola `cb15191` (where `go.callback` landed, gate
+69/69) the spike compiles, runs, and its oracle holds — the first
+C-to-Sgola control transfer in the project. It synthesizes a class at
+runtime (`objc_allocateClassPair` on NSObject), installs the address
+`go.callback` returned as the IMP of a method `wataProbe`
+(`class_addMethod(cls, sel, cbAddr, "q@:")`), registers the pair,
 alloc/inits an instance and msgSends it the selector. The dispatch jumps
-into the Sgola function, and its return value comes back through
-`objc_msgSend`.
-
-Run it with `just callback-spike`. It does **not** build, and that is the
-finding — the spike is committed spelled the way the ruled contract says
-it will be spelled, so the landing day is a compile-and-run, not a design
-session.
-
-## The contract it is spelled against
-
-`go.callback` is **RULED** (sgola `29536af`, 2026-08-08; restated in
-`docs/design/sgola-ffi.md` "Ruled — the call-in half"):
-`go.callback(f): go.Uintptr` is a *registration* returning a **free**
-address value — deliberately inverting `go.cstring`'s bracket, because a
-purego trampoline has process lifetime and the liveness objection that
-forced `cstr` into a bracket does not exist here. The spike takes each
-clause literally:
-
-- **module/startup scope only** (the platform cap makes per-frame minting
-  fail loudly) → `val cbAddr: go.Uintptr = go.callback(onCall)` is a
-  module-scope val;
-- **address-sized vocabulary** (`go.Uintptr` params and result,
-  monomorphic) → `def onCall(self: go.Uintptr, cmd: go.Uintptr):
-  go.Uintptr`;
-- **captures face the fork predicate** → `onCall` captures nothing, so the
-  predicate is trivially satisfied;
-- the result is opaque `go.Uintptr`, consumed only as `class_addMethod`'s
-  IMP argument.
-
-`go.callback` is a language-provided form like `go.cstring`, not a facade
-binding — the registration is a crossing and only the compiler can check
-`f`'s captures — so the facade here is the objc-spike one **unchanged**:
-`Dlopen`/`Dlsym`/`SyscallN`, nothing added. `go-pkgs/puredep` is the same
-no-functions dependency-plumbing module; there is no Go code of ours
-anywhere in the chain.
-
-## The current wall — verbatim
-
-Implementation is queued upstream (verdict A, one behind
-`GENERIC-FAMILY-EQUALS`) and has **not** landed. On the current pin the
-build dies at exactly the registration site, and nowhere else:
-
-```
--- [E008] Not Found Error: …/tools/callback-spike/src/main/scala/main.scala:54:30
-54 |  val cbAddr: go.Uintptr = go.callback(onCall)
-   |                           ^^^^^^^^^^^
-   |                           value callback is not a member of go
-1 error found
-sgo: compile stage: frontend: callback-spike compile failed (exit 1)
-```
-
-One error, no second problem behind it: every other line — the seven
-dlsym'd symbols, five `go.cstring` brackets, the tuple-pattern discards,
-the all-underscore discard of `objc_registerClassPair`'s void call —
-already compiles on today's pin. The call-out vocabulary carries the
-whole class-synthesis dance; the missing piece is precisely the one the
-ruling names.
-
-## Two contract edges the spelling surfaced
-
-Findings from pre-shaping, worth carrying to the landing:
-
-1. **A callback cannot return a constant.** The natural oracle for this
-   spike is an IMP returning 42 — the classic distinctive value. It
-   cannot be spelled: `go.Uintptr` is opaque by its own safety argument
-   (no literals, no `Int`/`Long` conversions, gocore.scala), and the
-   ruled callback signature admits only `go.Uintptr`. So a callback body
-   can today produce a result ONLY from its parameters or from another
-   FFI call. The spike's oracle returns `self` instead — see below —
-   which is fine here, but real method bodies (`keyview.go` returns YES/
-   NO booleans; menu targets return void) will need either the
-   void-result form the ruling already defers to implementation, or a
-   story for small constants. Worth pinning alongside the arity bound.
-
-   **Answered upstream the same day** (sgola `a48248e`, replying to our
-   `CALLBACK-RESULT-VOCABULARY` note): the trampoline marshals to a
-   Scala-facing signature of ordinary values — params
-   `go.Uintptr | Int`, result `go.Uintptr | Int | Unit` — so void
-   methods are admitted, a BOOL predicate declares `Int` and answers
-   0/1, and constants are simply `Int`s. On the landing, this spike's
-   oracle should simplify to `def onCall(...): Int = 42` and assert the
-   42; the return-self spelling below is the pre-refinement record.
-   (`==` on `go.Uintptr` stays deliberately ungranted —
-   `UINTPTR-IDENTITY-COMPARE` upstream is the fileable-against key —
-   but the Int oracle removes this spike's need for it.)
-2. **Zero is spelled by omission.** `objc_allocateClassPair`'s
-   `extraBytes` argument is 0, and there is no `go.Uintptr` zero. The
-   spike leans on purego's `SyscallN` zero-filling the registers it is
-   not given, and simply omits the trailing argument. It works and is
-   honest, but it is a convention riding an ABI detail, and the same
-   constant problem as (1) in different clothes.
-
-## What PASS will look like
-
-The oracle is arithmetic and unforgiving, like the other spikes': `onCall`
-returns its receiver, so the msgSend's r1 must be exactly the address of
-the instance we just alloc/init'd. A mis-registered IMP — wrong
-trampoline ABI, wrong argument order, a callback table off by one — gives
-a crash or garbage, never the one address in play. Opaque `go.Uintptr`
-has no `==`, so the comparison goes through its render surface (string
-concat, which objc-spike already exercises):
+through purego's trampoline into the Sgola literal, and its return value
+comes back through `objc_msgSend`:
 
 ```
 callback-spike: added = 1
-callback-spike: inst  = <some address>
-callback-spike: probe = <the same address>
+callback-spike: probe = 42
 callback-spike: PASS
 ```
 
-## What unblocks on a pass
+Run it with `just callback-spike`, which builds, runs, and grep-asserts
+the exact `PASS` line; ci includes it, so ci asserts the oracle — same
+discipline as objc-spike. (No `os.Exit` in the dialect, so the process
+exit is 0 either way; the grep is the assertion.)
 
-Everything that receives control from C is this one feature (sgola-ffi.md
-"what to watch"):
+Together with `tools/objc-spike` (the call-out leg) this closes plan
+0038's spike phase: pure Sgola can both call the ObjC runtime and BE
+CALLED by it.
+
+## The landed v1 contract it exercises
+
+`go.callback((self: go.Uintptr, cmd: go.Uintptr) => 42): go.Uintptr` —
+a *registration* returning a **free** address value (a purego trampoline
+has process lifetime, so unlike `go.cstring` no bracket is needed). The
+clauses, as taken literally by the spike:
+
+- **function LITERAL required in v1, with ASCRIBED param types** — the
+  ascriptions read as the declared foreign signature (one generic member
+  upstream, so inference has nothing to work from). The pre-landing
+  spelling here was a named def (`go.callback(onCall)`); that does not
+  compile. If the literal-only rule chafes in the real ports —
+  dispatch/keyview reusing one body across selectors — that is a
+  fileable-against edge of the ruling, not a bug;
+- **ordinary-value vocabulary** (sgola `a48248e`, refined on this spike's
+  pre-shaping evidence): params `go.Uintptr | Int`, result
+  `go.Uintptr | Int | Unit`, arity ≤ 15 (purego's own SyscallN ceiling).
+  The trampoline marshals, so a constant result is simply an `Int` — the
+  oracle returns 42 directly, and the old return-self spelling (forced
+  when the vocabulary was `go.Uintptr`-only) is gone. Unit callbacks emit
+  a trampoline returning 0 uniformly (purego zero-result callbacks are
+  SysV-only, so the portable form was forced);
+- **module/startup scope only** — the ~2000 trampoline cap fails loudly
+  if minted per-frame; `cbAddr` is a module-scope val;
+- **captures face the CONC-8 fork predicate at the registration site** —
+  this literal captures nothing, so the predicate is trivially
+  satisfied. Real ports with mutable state hoist it into Atomic/Mutex
+  cells.
+
+The facade is the objc-spike one **unchanged** (`Dlopen`/`Dlsym`/
+`SyscallN`, nothing added) — `go.callback` is a language form like
+`go.cstring`, not a facade binding, because only the compiler can check
+the literal's captures. `go-pkgs/puredep` is the same no-functions
+dependency-plumbing module; there is no Go code of ours in the chain.
+
+## Notes the real ports will want
+
+- **Type encoding**: the method registers as `"q@:"` (long-long return,
+  receiver, selector) because the callback answers an integer. The
+  trampoline does the marshalling, but the encoding string is read by
+  the frameworks, so it says what the method returns. The pre-landing
+  `"L@:"` was not load-bearing; `"q"` matches a 64-bit integer result
+  honestly. BOOL predicates (keyview) would encode the ObjC BOOL and
+  answer 0/1 as `Int`; void menu targets encode `"v@:"` with a `Unit`
+  result.
+- **Zero is still spelled by omission** for `go.Uintptr` arguments:
+  `objc_allocateClassPair`'s `extraBytes` is 0 by leaving the trailing
+  argument off — SyscallN zero-fills unsupplied registers. The `Int`
+  admission covers callback *results and params*, not general
+  `go.Uintptr` argument positions, so this convention stands.
+- **go.mod caveat, until upstream `GOMOD-PUREGO-REQUIRE-INJECT` lands**:
+  the emitted glue imports `github.com/ebitengine/purego` but `sgo`'s
+  go.mod stage does not yet inject the require. This spike is unaffected
+  because its `go-pkgs/puredep` godep (a blank-import of purego) puts
+  purego in the module graph with a committed go.sum. A **fresh** app
+  calling `go.callback` without purego anywhere in its graph hits Go's
+  raw `no required module provides package` error — theirs, filed,
+  queued upstream.
+
+## What this unblocks
+
+Everything that receives control from C was waiting on this one feature;
+it is now portable (ports someone can schedule — a green spike is
+evidence, not a mandate):
 
 - `nativeui/dispatch.go` (94 lines) — the main-queue trampoline; its
   dlopen/dlsym half was expressible after leg 1, the callback was the
   remainder;
-- `nativeui/keyview.go` and `macshell/menu.go` — class synthesis with Go
-  func-value method bodies, which is *literally this spike* at scale;
+- `nativeui/keyview.go` and `macshell/menu.go` — class synthesis with
+  method bodies in our language, which is *literally this spike* at
+  scale;
 - the `objcrt` split — autorelease push/pop are plain calls a facade can
   already bind, class registration was the callback half; the
-  hand-written runtime under the bindings splits when this lands;
+  hand-written runtime under the bindings can split when a port is
+  scheduled;
 - bindgen's protocol delegates, further out.
-
-On the landing notice: repin, this spike must compile and print PASS, then
-wire `just callback-spike` into ci the way objc-spike is, and file the
-VERIFY ticket back.
 
 ## Running it
 
 ```
-just callback-spike     # dies at the go.callback site; that IS the finding
+just callback-spike     # build + run + grep-assert the PASS line (in ci)
 ```

@@ -1,6 +1,6 @@
 # 0038 — how far does Sgola reach into the FFI layer?
 
-Status: accepted (leg 1 CLOSED — oracle runs green; leg 2 open)
+Status: done (both legs CLOSED — each spike's oracle runs green in ci; see the 2026-08-08 addendum)
 
 ## The problem
 
@@ -237,3 +237,29 @@ the same shape as `BINDGEN-TYPED-STRUCTS`.
   becomes a real option; it is not an argument for doing it.
 - The chrome's `macui` bindgen target — needed for plan 0037 slices 4
   and 5 regardless, tracked there.
+
+## Addendum 2026-08-08 — leg 2 ANSWERED; the spike phase is COMPLETE
+
+`go.callback` landed upstream at sgola `cb15191` (gate 69/69); this repo
+repinned `e036452 -> cb15191` and reshaped `tools/callback-spike` to the
+landed v1 form (function literal with ascribed params, `Int` result, the
+`"q@:"` encoding). It compiled and ran on the first build:
+
+```
+callback-spike: added = 1
+callback-spike: probe = 42
+callback-spike: PASS
+```
+
+The first C-to-Sgola control transfer in the project: `objc_msgSend`
+dispatches a synthesized method whose IMP is a purego trampoline wrapping
+a Sgola literal, and the literal's 42 comes back through the send. The
+spike is now a ci-asserted oracle beside objc-spike (`just
+callback-spike`). Both legs are closed; the plan's spike phase is
+complete. The findings live in `docs/design/sgola-ffi.md` (the frontier
+map — call-out closed, call-in closed, `FACADE-VALUE-STRUCT` now the
+biggest open gap) and `tools/callback-spike/REPORT.md` (the v1 contract
+notes the real ports will want: literal-only, encoding choice, the
+go.mod/puredep wrinkle). Per this plan's own rule, the green spike is
+evidence, not a mandate — the dispatch/keyview/objcrt ports are
+unblocked, not scheduled.

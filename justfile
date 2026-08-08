@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike
+ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike callback-spike
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -133,12 +133,16 @@ interp-spike:
 
 # plan 0038 leg 2: an ObjC method whose body is Sgola (waiting on go.callback)
 callback-spike:
-    # It does not build, and that IS the finding — the spike is pre-shaped
-    # against the go.callback ruling (sgola 29536af) and dies at exactly that
-    # site until the implementation lands. tools/callback-spike/REPORT.md owns
-    # the expectation. Not in ci for the same reason; wire it in on the repin
-    # that makes it print `callback-spike: PASS`.
-    cd tools/callback-spike && ../../tools/sgo build
+    # Builds AND runs its oracle (sgola cb15191, where go.callback landed):
+    # an ObjC class synthesized at runtime dispatches a method whose IMP is a
+    # Sgola literal registered via go.callback, and the msgSend must answer
+    # exactly 42 — the first C-to-Sgola control transfer in the project.
+    # Run by ci, so ci asserts the oracle.
+    # tools/callback-spike/REPORT.md owns the expectation.
+    # The run's own exit is 0 even on the caught-error branch, so the grep is
+    # the assertion: the exact oracle line, or the recipe fails.
+    cd tools/callback-spike && ../../tools/sgo build && \
+      ./.sgo/callback-spike/callback-spike | tee /dev/stderr | grep -qx 'callback-spike: PASS'
 
 # UI layer: portability/dependency tripwires, the differ's round-trip oracle
 wataui-tests:
