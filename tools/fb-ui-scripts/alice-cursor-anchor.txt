@@ -1,0 +1,52 @@
+# cursor-anchor: the message cursor is anchored by EVENT ID, not index. The
+# list is newest-first, so an arrival puts a new row on top; an anchored
+# cursor (moved by up/down) must stay on the SAME message — its index grows
+# by one — while an idle cursor on row 0 keeps tracking newest. `msgsel`
+# reads the cursor's index; `expect` (>=) paired with `waitmax` (<=) pins it
+# exactly. Quiet mode keeps an arrival from auto-playing into the check.
+
+notifymode quiet
+wait syncing 1 900
+# [Family, Bob (roomless DM)]
+wait convs 2 900
+
+# seed the family room with two of bob's clips, out of band — the only shape
+# that raises alice's counts mid-session
+sendas bob
+wait msgs 1 2000
+sendas bob
+wait msgs 2 2000
+
+# open the family conversation: the cursor starts on row 0, the newest,
+# UNANCHORED — that row is the message to play next, so it tracks arrivals
+tap enter
+advance 5
+sendas bob
+wait msgs 3 2000
+waitmax msgsel 0 1
+
+# one row down: the cursor now HOLDS the second-newest message by event id
+tap down
+expect msgsel 1
+waitmax msgsel 1 1
+
+# the arrival pushes one row on top: same message, one index older
+sendas bob
+wait msgs 4 2000
+expect msgsel 2
+waitmax msgsel 2 1
+# let the seed banners age out before pinning the highlight row
+idle 150
+waitmax notifybanner 0 60
+advance 3
+checkpoint anchor-held
+
+# delete the anchored message (hold red past BACK_HOLD_DELETE): the anchor
+# vanished, so the cursor falls back to the nearest surviving row — the next
+# older message slides up into index 2 and becomes the new anchor
+key back press
+advance 30
+key back release
+waitmax msgs 3 2000
+expect msgsel 2
+waitmax msgsel 2 1

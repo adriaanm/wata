@@ -60,7 +60,13 @@ case class WataState(
   okHoldTime: scala.Double,
   // the recording meter's level (0..32), the peak of the last captured 40ms
   // period — fed by `AeCaptureLevel`, reset to 0 on PTT press (plan 0042).
-  captureLevel: scala.Int
+  captureLevel: scala.Int,
+  // the event id the message cursor is EXPLICITLY holding, or "" while the
+  // cursor sits on row 0 tracking the newest message. `msgSelected` stays the
+  // index the renderer draws; this is what re-locates it when the list shifts
+  // under the cursor — the list is newest-first, so every arrival would
+  // otherwise slide the selection one row older (`clampMessages`).
+  msgAnchorId: String
 )
 
 object WataLogic:
@@ -69,7 +75,7 @@ object WataLogic:
 
   def initial(): WataState =
     WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, 0.0,
-      false, 0.0, false, 0.0, 0)
+      false, 0.0, false, 0.0, 0, "")
 
   /** visible list rows between header and footer (bitmap grid). */
   def visibleRows(): scala.Int = FOOTER_ROW - FONT_ROWS_HEADER
@@ -78,11 +84,11 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** Opens at row 0, which is the NEWEST message now that the list comes back
    *  newest first — the one somebody just pressed the LED for. It used to be
@@ -90,27 +96,35 @@ object WataLogic:
    *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "")
 
+  /** cursor move that keeps the current anchor — the per-frame reconcile's
+   *  found-the-anchor path and every non-cursor wither go through here. */
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+
+  /** cursor move that also RE-DECIDES the anchor — what an explicit up/down
+   *  and the vanished-anchor fallback use. */
+  def withMsgAnchor(s: WataState, sel: scala.Int, scr: scala.Int, anchor: String): WataState =
+    WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** the recording meter's level — the only field `AeCaptureLevel` moves. */
   def withCapLevel(s: WataState, level: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId)
 
   /** `room`/`id` name what is playing, and are cleared when it stops — a
    *  playback target that outlives the playback would receipt the wrong
    *  message the next time audio ends. */
   def withPlaying(s: WataState, playing: Boolean, room: String, id: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** the full status-flash tuple (hold + timer + the three flash flags); the
    *  play-failure CAUSE rides along unchanged. */
@@ -118,7 +132,7 @@ object WataLogic:
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, timer, s.backHeld, s.backHoldTime,
-      s.okHeld, s.okHoldTime, s.captureLevel)
+      s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** a play that failed: the flash, its cause, and `playing` dropped — a
    *  playback indicator that outlives the playback is a lie. */
@@ -126,17 +140,17 @@ object WataLogic:
                   timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, timer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
-      s.backHeld, s.backHoldTime, held, hold, s.captureLevel)
+      s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
-      held, hold, s.okHeld, s.okHoldTime, s.captureLevel)
+      held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
   /** full input with per-frame context (snapshot + queues). Returns new state. */
@@ -268,7 +282,7 @@ object WataLogic:
    *  gesture (`okInput`), routed before the press-only dispatch. */
   def conversationInput(s: WataState, k: Key, ctx: FrameCtx): WataState = k match
     case _: KDown  => downMsg(s, ctx)
-    case _: KUp    => upMsg(s)
+    case _: KUp    => upMsg(s, ctx)
     case _: KF2    => deleteSelected(s, ctx)   // sim/script delete; no F2 key on the case
     case _           => s
 
@@ -278,15 +292,25 @@ object WataLogic:
       val sel = s.msgSelected + 1
       val vis = visibleRows()
       val scr = if sel >= s.msgScroll + vis then sel - vis + 1 else s.msgScroll
-      withMsgSel(s, sel, scr)
+      withMsgAnchor(s, sel, scr, anchorAt(ctx.snap, s.convContactIdx, sel))
     else s
 
-  def upMsg(s: WataState): WataState =
+  def upMsg(s: WataState, ctx: FrameCtx): WataState =
     if s.msgSelected > 0 then
       val sel = s.msgSelected - 1
       val scr = if sel < s.msgScroll then sel else s.msgScroll
-      withMsgSel(s, sel, scr)
+      withMsgAnchor(s, sel, scr, anchorAt(ctx.snap, s.convContactIdx, sel))
     else s
+
+  /** the anchor a cursor at `sel` carries: the message's own event id, or ""
+   *  on row 0 — the newest row is not anchored, it TRACKS newest, so a
+   *  cursor left where `enterConv` put it keeps pointing at each arrival
+   *  (the walkie-talkie default: the top row is the message to play next). */
+  def anchorAt(snap: StateSnapshot, convIdx: scala.Int, sel: scala.Int): String =
+    if sel <= 0 then ""
+    else selectedMsg(snap, convIdx, sel) match
+      case m: Some[VoiceMessage] => m.value.id
+      case None => ""
 
   /** OK on a message: download-and-play, remembering WHICH message so the
    *  receipt can follow the audio rather than the keypress. */
@@ -328,23 +352,44 @@ object WataLogic:
   def update(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
     clampSelection(tickTimers(s, dt, ctx), ctx)
 
-  /** Reconcile the cursors with the live snapshot. The lists shrink under the
-   *  cursor without any input — a redaction drops a message row, a peer
-   *  leaving drops a conversation — and a selection left past the end
-   *  highlights nothing and plays nothing. So each frame pulls both cursors
-   *  back onto the last row and drags the scroll window after them. */
+  /** Reconcile the cursors with the live snapshot. The lists change under the
+   *  cursor without any input — an arrival puts a new row on top (the list is
+   *  newest-first), a redaction drops one, a peer leaving drops a
+   *  conversation — and a selection left past the end highlights nothing and
+   *  plays nothing. So each frame re-locates the message cursor's ANCHOR and
+   *  pulls both cursors back inside the list, dragging the scroll windows
+   *  after them. */
   def clampSelection(s: WataState, ctx: FrameCtx): WataState =
     var out = clampContacts(s, convCount(ctx.snap))
-    out = clampMessages(out, msgCount(ctx.snap, out.convContactIdx))
+    out = clampMessages(out, ctx)
     out
 
   def clampContacts(s: WataState, count: scala.Int): WataState =
     val sel = clampIdx(s.selected, count)
     withSel(s, sel, clampScroll(s.scrollOffset, sel))
 
-  def clampMessages(s: WataState, count: scala.Int): WataState =
-    val sel = clampIdx(s.msgSelected, count)
-    withMsgSel(s, sel, clampScroll(s.msgScroll, sel))
+  /** The message cursor holds an INDEX (what renders) but is anchored by the
+   *  selected message's EVENT ID: an unanchored cursor ("" — row 0, where
+   *  `enterConv` starts it) just clamps, so it keeps tracking the newest
+   *  message as arrivals push rows down; an anchored one (moved by up/down)
+   *  is re-located by id each frame, so an arrival shifts the index and the
+   *  highlight stays on the SAME message. An anchor that vanished (its
+   *  message was redacted) falls back to the nearest surviving index —
+   *  clamped — and re-anchors there. */
+  def clampMessages(s: WataState, ctx: FrameCtx): WataState =
+    val count = msgCount(ctx.snap, s.convContactIdx)
+    var out = s
+    if s.msgAnchorId == "" then
+      val sel = clampIdx(s.msgSelected, count)
+      out = withMsgSel(s, sel, clampScroll(s.msgScroll, sel))
+    else
+      val at = msgIndexOf(ctx.snap, s.convContactIdx, s.msgAnchorId)
+      if at >= 0 then out = withMsgSel(s, at, clampScroll(s.msgScroll, at))
+      else
+        val sel = clampIdx(s.msgSelected, count)
+        out = withMsgAnchor(s, sel, clampScroll(s.msgScroll, sel),
+          anchorAt(ctx.snap, s.convContactIdx, sel))
+    out
 
   /** the last index, or 0 for an empty list (which renders no rows anyway). */
   def clampIdx(i: scala.Int, count: scala.Int): scala.Int =
@@ -970,6 +1015,31 @@ object WataLogic:
         case _ :: t => n += 1; cur = t
         case Nil  => going = false
     n
+
+  /** the index the event id sits at in the conversation's list, or -1 —
+   *  how the anchored message cursor re-finds its row after the list shifts. */
+  def msgIndexOf(snap: StateSnapshot, convIdx: scala.Int, id: String): scala.Int =
+    convAt(snap, convIdx) match
+      case c: Some[Conversation] => msgIndexIn(c.value.messages, id)
+      case None => -1
+
+  def msgIndexIn(ms: List[VoiceMessage], id: String): scala.Int =
+    var out = -1
+    var i = 0
+    var cur = ms
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          val hid: String = h.id
+          if hid == id then
+            out = i
+            going = false
+          else
+            i += 1
+            cur = t
+        case Nil => going = false
+    out
 
   def selectedMsg(snap: StateSnapshot, convIdx: scala.Int, msgIdx: scala.Int): Option[VoiceMessage] =
     convAt(snap, convIdx) match

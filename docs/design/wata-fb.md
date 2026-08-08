@@ -1333,10 +1333,24 @@ The message rows render the snapshot's list as it comes, and that list is
 **newest first** (see `docs/design/wataclient.md`), so row 0 — the top row,
 and the row `enterConv` puts the cursor on — is the message that just
 arrived — so opening a conversation puts the cursor on the message
-somebody just sent, and OK plays it. One thing to know before touching
-this view: every arrival inserts at index 0, so a cursor parked on an
-older row keeps its INDEX and slides one message older —
-`[FB-CURSOR-ANCHOR]`.
+somebody just sent, and OK plays it.
+
+**The message cursor is an index anchored by event id.** `msgSelected`
+stays the index the renderer and the scroll window read, but every
+arrival inserts a row at index 0 and shifts the rest down, so an index
+alone would slide the selection one message older per arrival — onto a
+row the user never chose, which PTT, favorite and delete would then act
+on. `WataState.msgAnchorId` carries the selected message's event id, and
+`clampMessages` re-locates it in each frame's snapshot, moving the index
+to wherever that message now sits. The anchor is `""` while the cursor is
+on row 0 where `enterConv` left it: that cursor is not holding a message,
+it is holding "the newest" — the walkie-talkie default, where the top row
+is the message to play next — so it keeps tracking each arrival. An
+explicit up/down sets the anchor to the row it lands on (and clears it
+again on returning to row 0); an anchor whose message vanished (redacted)
+falls back to the nearest surviving index, clamped, and re-anchors there.
+The `cursor-anchor` uiscript scenario pins all three rules through the
+`msgsel` probe.
 
 Playing a received clip is a full round-trip: `ActPlay(mxcUrl)` goes to
 `wataclient`, which downloads and hands PCM/Ogg bytes back through the
@@ -1463,13 +1477,14 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Nineteen scripted scenarios, each a fresh server and a sequence of
+Twenty-three scripted scenarios, each a fresh server and a sequence of
 one-user phases:
 
 | scenario | what it pins |
 |---|---|
 | `voice-alice-to-bob` | the send path end to end: the server-minted family room is there from boot (plan 0018 — no bootstrap phase exists anywhere in this suite), alice holds PTT and sends; bob runs, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
 | `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, redacts one by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, the starred row, and the played marks. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
+| `cursor-anchor` | the message cursor's event-id anchoring, via the `msgsel` probe: an idle cursor on row 0 stays on 0 through an arrival (tracking newest), a cursor moved one row down keeps the SAME message as an arrival shifts its index from 1 to 2, and redacting the anchored message falls back to the nearest surviving row. Goldens the held highlight two rows down. |
 | `group-list` | plan 0018's list rendering: the `group` directive mints "kids" through `POST /_wata/v1/group` (server-stamped, both members joined server-side), and the goldens pin the roster `[Family, kids, Bob]` and the opened group view titled by the stamp's name. |
 | `dm-roundtrip` | the canonical-DM flow (plan 0007) rendered: alice selects bob's ROOMLESS roster row, the first PTT send resolves the room through `POST /_wata/v1/dm`, bob receives with an unplayed badge, receipts, plays, replies, and alice's second session pins the reply and the badge clearing. Goldens the roster before/after, both conversation views, and the badge lifecycle. |
 | `family-three` | a third account (per-scenario `$WATA_USERS`), all three boot-joined by the server: all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
@@ -1604,6 +1619,7 @@ a rediscovery):
 | delete a message (hold-red redact) | `conversation-actions` |
 | favorite a message (hold-OK), star rendered on both sides | `conversation-actions` |
 | long conversation: scroll window, selection clamp | `conversation-actions` |
+| selection anchored across an arrival (same message, not same index) | `cursor-anchor` |
 | sender attribution, >2 participants, interleaved ordering | `family-three` |
 | send failure feedback (`SEND FAILED`) and recovery | `send-play-failed` |
 | play failure feedback (`PLAY FAILED`) and recovery | `send-play-failed` |
@@ -1709,13 +1725,14 @@ Three things worth stating outright:
   panel entirely. (The Zig client has the same arithmetic and loses
   its own fourth echo-test line to it.)
 - **The cursors are reconciled with the snapshot every frame.** Both
-  lists can shrink under the selection with no input at all — a
-  redaction drops a message row, a peer leaving drops a conversation —
-  and a selection left past the end highlights nothing and plays
-  nothing. `WataLogic.clampSelection`, called from `update`, pulls the
-  contact and message cursors back onto the last row and drags the
-  scroll window after them. The Zig client does not do this and has the
-  same dead cursor after its own `F2`.
+  lists change under the selection with no input at all — an arrival
+  puts a message row on top, a redaction drops one, a peer leaving
+  drops a conversation — and a selection left past the end highlights
+  nothing and plays nothing. `WataLogic.clampSelection`, called from
+  `update`, re-locates the message cursor's event-id anchor (see the
+  conversation view section), pulls both cursors back inside their
+  lists, and drags the scroll windows after them. The Zig client does
+  not do this and has the same dead cursor after its own `F2`.
 - **Every applet ticks every frame here; the Zig shell ticks only the
   active one.** That is a fix, not a divergence to undo: recording-done
   audio events must trigger the upload while the user is sitting in the
@@ -1902,18 +1919,6 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body. Beyond what `WATA-TODO.md` already tracks (the dot2/event-bus
 gap, the `/dev/shm`-only deploy), a few things stood out during this read:
-
-- **The message cursor anchors to an INDEX, not to a message**
-  `[FB-CURSOR-ANCHOR]`. With the list newest first, an arriving message
-  inserts at index 0 and shifts every row down, so a selection parked on
-  an older message quietly moves to the one after it — the row under the
-  finger changes without a keystroke. It is benign when the cursor is at
-  the top (index 0 stays "the newest", which is what you want to play),
-  and wrong when somebody is scrolled down browsing. The fix is to
-  remember the selected event id and re-find it in `clampMessages`,
-  falling back to the clamped index when that message is gone (redacted,
-  or aged out). Worth doing with `FB-REC-LEVEL-METER`-scale care: the
-  selection is also what PTT, favorite and delete act on.
 
 - **`Draw.newBuffer()` allocates a new 40960-byte buffer, but the UI
   loop only allocates it once** (`ui.scala:70`, passed into

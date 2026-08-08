@@ -249,6 +249,16 @@ SCENARIOS = [
         ],
     },
     {
+        # The message cursor's event-id anchoring: an arrival must not slide
+        # an explicitly moved selection onto a different message, while an
+        # idle cursor on row 0 keeps tracking newest. The probe assertions do
+        # the pinning; the golden shows the held highlight two rows down.
+        "name": "cursor-anchor",
+        "phases": [
+            ("alice", "alice-cursor-anchor.txt"),
+        ],
+    },
+    {
         # plan 0041: arrival notifications. Phase 1 pins quiet mode (banner +
         # LED-arbiter decisions + persistent highlight); phase 2 pins play-now
         # (the arrival auto-plays and the receipt raises `played`). The

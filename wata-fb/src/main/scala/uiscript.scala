@@ -111,8 +111,10 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  unplayed counts the LED/banner/highlight all derive from), notifyled (the
  *  green LED's computed policy: 0 off, 1 steady, 2 blinking), notifyred (1
  *  while the arbiter holds the red LED on), notifybanner (1 while the quiet
- *  banner is up), and caplevel (the wata applet's recording-meter level, what
- *  the `caplevel` directive set). */
+ *  banner is up), caplevel (the wata applet's recording-meter level, what
+ *  the `caplevel` directive set), and msgsel (the conversation view's message
+ *  cursor index — how a script observes the event-id anchoring across an
+ *  arrival). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -613,6 +615,11 @@ object UiScript:
     else if name == "notifybanner" then boolProbe(Ui.bannerOn)
     // the recording meter's level (plan 0042) — what `caplevel` just set.
     else if name == "caplevel" then Shell.wataState(Ui.shellState).captureLevel
+    // the message cursor's index — what pins the event-id anchoring: an
+    // arrival shifts an anchored cursor's index by one (same message), and
+    // leaves an idle cursor on 0 (tracking newest). Exactness comes from
+    // pairing `expect` (>=) with `waitmax` (<=) on the same value.
+    else if name == "msgsel" then Shell.wataState(Ui.shellState).msgSelected
     else -1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run
