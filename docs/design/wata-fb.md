@@ -1653,6 +1653,25 @@ that file carries the handset's minted identity, and an enrolled device
 must not be re-identified by a deploy. It ships `chirp.ogg` alongside the
 binary in both modes.
 
+A deploy is only as trustworthy as the binary the build stage hands it,
+and `sgo`'s go-build stage is a cache: it skips when its declared inputs
+are unchanged. Those inputs include each `godep`'s sources — the
+`go-pkgs/` trees — so editing `go-pkgs/audio` re-runs the stage. Its
+SKIP line names what it hashed, with counts:
+
+```
+sgo: go build  SKIP (unchanged: 54 emitted .go, go.mod, 5 godep trees/27 files)
+```
+
+Read that line rather than trusting the word SKIP: a stage that under-
+declares its inputs prints exactly the same cheerful SKIP as a correct
+one, which is how a deploy can carry code nobody wrote. `RUN` means the
+stage noticed a change; whether the *output* actually changed is a
+separate question, answered by `go tool buildid <binary>` — a comment-only
+edit legitimately produces `RUN` with an unmoved BuildID, because Go's own
+cache sees identical compiled output. After a change to Go-side code,
+check the BuildID moved before believing a device test.
+
 The kill is spelled `pkill -f 'wata-fb[ ]ui'`. Without the bracket the
 pattern matches the ssh session's own command line, which carries that text:
 the install kills its own remote shell, the deploy exits 255, and everything
