@@ -38,6 +38,14 @@ non-empty script on every run.
 | b | fresh new vs long-lived old, script held one iter (the app's shape) | ~350–450, spikes to 18 MB that vanish by the next sample |
 | c | both trees long-lived, nothing fresh walked | ~300–500, one-sample spikes, ends 504 |
 | d | as b, script dropped immediately | ~300–470, one-sample spikes |
+| e | old = last iteration's new (the pump's REAL `st.last` shape) | ~270–460, one-sample spikes, ends 271 |
+
+Arm e chains the trees the way the pump actually does — every tree is
+first the fresh argument, then the long-lived one — and it is as flat as
+the rest. A `big` second argument (`diff-spike e big`) grows the trees
+20x to 200 rows (~40 KB); arms b and e stay bounded there too (b ends
+788 KB, e ends 862 KB — proportional to the tree, not to the iteration
+count).
 
 The one-sample spikes are measurement noise, not retention: a re-run of
 arm b moved them to different iterations and shrank them (max 1 MB
@@ -52,17 +60,19 @@ but it is a plateau, not a line.
 
 ## What this means for MAC-IDLE-LEAK
 
-The leak needs something the app adds. The deltas between this loop and
-the pump's leaking bisect arm are the suspect list:
+The leak needs something the app adds. Two suspects are already
+eliminated by arms this spike grew while it was open: the `st.last`
+replacement chain (arm e — flat) and plain tree size (`big` — bounded,
+proportional to the tree). What remains of the delta between this loop
+and the pump's leaking bisect arm:
 
-- `st.last` REPLACED each frame (the spike's long-lived `old` is fixed;
-  the app's old is last frame's new, so the retained edge could be the
-  chain old→…→new if something links successive trees),
-- the real trees: bigger, deeper, `VImage`/`Bytes` leaves, strings out of
-  the client snapshot rather than constants,
+- the real trees' CONTENT: `VImage`/`Bytes` leaves, strings out of the
+  client snapshot rather than constants (this spike's leaves are
+  constants and small built strings),
 - whether the emitted pump code lets the patch list escape (this loop's
   scripts provably die),
-- the pump's goroutine/closure structure around the call.
+- the pump's goroutine/closure structure around the call — the diff runs
+  inside a closure the frame loop re-enters, not a flat `while`.
 
 ## Found en route: a sgola emitter bug (filed)
 
@@ -77,6 +87,7 @@ workaround (`rootLen` instead of `==`) names the key.
 ## Running it
 
 ```
-just diff-spike        # build + all four arms
+just diff-spike        # build + all five arms
 just diff-spike b      # one arm
+just diff-spike e big  # one arm, 200-row trees
 ```

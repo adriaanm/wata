@@ -116,11 +116,11 @@ objc-spike:
 # MAC-IDLE-LEAK arbiter: does Diff.diff retain the trees it walks? ANSWERED
 # no — every arm flat/bounded (tools/diff-spike/REPORT.md owns the series and
 # the verdict). Kept runnable so the answer can be re-taken after a repin.
-# `just diff-spike` runs all four arms; `just diff-spike b` runs one.
+# `just diff-spike` runs all five arms; `just diff-spike e big` runs one.
 diff-spike *ARGS:
     cd tools/diff-spike && ../../tools/sgo build && \
       if [ -n "{{ARGS}}" ]; then ./.sgo/diff-spike/diff-spike {{ARGS}}; \
-      else for a in a b c d; do ./.sgo/diff-spike/diff-spike $a; done; fi
+      else for a in a b c d e; do ./.sgo/diff-spike/diff-spike $a; done; fi
 
 # plan 0038 gate: can a facade express AppKit geometry? (1 known gap)
 interp-spike:

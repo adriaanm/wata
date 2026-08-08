@@ -1,9 +1,10 @@
 /** DIFF-RETAINS-REPRO — does `Diff.diff` retain the trees it walks?
  *
- *  Four arms, one loop each, run one per process (`diff-spike a|b|c|d`) so no
- *  arm's residue contaminates another's series. Every arm prints the same
- *  thing: the live heap (after a forced GC — see go.memprobe) every SAMPLE
- *  iterations. A leak is a straight line; a bounded working set plateaus.
+ *  Five arms, one loop each, run one per process (`diff-spike a|b|c|d|e`,
+ *  optional second arg `big`) so no arm's residue contaminates another's
+ *  series. Every arm prints the same thing: the live heap (after a forced
+ *  GC — see go.memprobe) every SAMPLE iterations. A leak is a straight
+ *  line; a bounded working set plateaus.
  *
  *  - a: build two trees per iteration, do NOT diff — the control. Must be
  *       flat, or the finding is about tree construction and the ticket is
@@ -15,6 +16,7 @@
  *       walked. If this leaks, retention is not about the argument's age.
  *  - d: as b, but the script is dropped immediately — whether holding the
  *       List[Patch] even one iteration matters.
+ *  - e: old is last iteration's new — the pump's real `st.last` shape.
  *
  *  The trees are shaped like the app's: a VGroup of KEYED rows (keys make the
  *  child scan take the keyed path), each row a group of a highlight VRect and
@@ -26,13 +28,13 @@ object Main:
 
   val Iters: Int = 100000
   val Sample: Int = 5000
-  val Rows: Int = 10
+
 
   /** the app-shaped tree: keyed rows over VRect/VText leaves. `tag` lands in
    *  row 0's text, so trees with different tags differ in exactly one leaf. */
-  def tree(tag: Int): View =
+  def tree(tag: Int, rows0: Int): View =
     var rows: List[Keyed] = Nil
-    var i = Rows - 1
+    var i = rows0 - 1
     while i >= 0 do
       val hl = VRect(0, i * 12, 160, 12, if i == 0 then 0x1234 else 0)
       val txt =
@@ -69,36 +71,36 @@ object Main:
 
   /** a: build both trees, never diff. The builds land in vars so nothing can
    *  elide them; the vars are read once after the loop. */
-  def runA(): Unit =
-    var lastOld: View = tree(0)
-    var lastNew: View = tree(1)
+  def runA(rows: Int): Unit =
+    var lastOld: View = tree(0, rows)
+    var lastNew: View = tree(1, rows)
     var i = 0
     while i < Iters do
-      lastOld = tree(0)
-      lastNew = tree(1)
+      lastOld = tree(0, rows)
+      lastNew = tree(1, rows)
       if i % Sample == 0 then sampleLine("a", i)
       i += 1
     sampleLine("a", Iters)
     println("arm=a done sink=" + (rootLen(lastOld) + rootLen(lastNew)))
 
   /** b: fresh new vs long-lived old; script held one iteration. */
-  def runB(): Unit =
-    val base = tree(0)
+  def runB(rows: Int): Unit =
+    val base = tree(0, rows)
     var held: List[Patch] = Nil
     var sink = 0
     var i = 0
     while i < Iters do
       sink += lenPatches(held)
-      held = Diff.diff(base, tree(1))
+      held = Diff.diff(base, tree(1, rows))
       if i % Sample == 0 then sampleLine("b", i)
       i += 1
     sampleLine("b", Iters)
     println("arm=b done sink=" + sink)
 
   /** c: both trees long-lived; nothing fresh is walked. */
-  def runC(): Unit =
-    val base = tree(0)
-    val other = tree(1)
+  def runC(rows: Int): Unit =
+    val base = tree(0, rows)
+    val other = tree(1, rows)
     var sink = 0
     var i = 0
     while i < Iters do
@@ -108,13 +110,32 @@ object Main:
     sampleLine("c", Iters)
     println("arm=c done sink=" + sink)
 
-  /** d: as b, script dropped immediately. */
-  def runD(): Unit =
-    val base = tree(0)
+  /** e: the pump's REAL shape — old is last iteration's new (`st.last`), so
+   *  every tree was once the fresh argument and then becomes the long-lived
+   *  one. Tags alternate so consecutive trees always differ. If this leaks
+   *  where b/c/d are flat, the retaining edge links successive trees. */
+  def runE(rows: Int): Unit =
+    var last: View = tree(0, rows)
+    var held: List[Patch] = Nil
     var sink = 0
     var i = 0
     while i < Iters do
-      sink += lenPatches(Diff.diff(base, tree(1)))
+      val n = tree(1 + i % 2, rows)
+      sink += lenPatches(held)
+      held = Diff.diff(last, n)
+      last = n
+      if i % Sample == 0 then sampleLine("e", i)
+      i += 1
+    sampleLine("e", Iters)
+    println("arm=e done sink=" + sink)
+
+  /** d: as b, script dropped immediately. */
+  def runD(rows: Int): Unit =
+    val base = tree(0, rows)
+    var sink = 0
+    var i = 0
+    while i < Iters do
+      sink += lenPatches(Diff.diff(base, tree(1, rows)))
       if i % Sample == 0 then sampleLine("d", i)
       i += 1
     sampleLine("d", Iters)
@@ -122,11 +143,15 @@ object Main:
 
   def main(args: Array[String]): Unit =
     val arm = if args.length > 0 then args(0) else ""
+    // `big` as a second argument makes the trees 20x (200 rows, ~40 KB) to
+    // probe whether retention needs app-sized trees
+    val rows = if args.length > 1 && args(1) == "big" then 200 else 10
     // one sanity print so a broken tree shape fails loudly, not silently flat
-    val script = Diff.diff(tree(0), tree(1))
+    val script = Diff.diff(tree(0, rows), tree(1, rows))
     println("arm=" + arm + " sanity patches=" + lenPatches(script) + " (must be >0)")
-    if arm == "a" then runA()
-    else if arm == "b" then runB()
-    else if arm == "c" then runC()
-    else if arm == "d" then runD()
-    else println("usage: diff-spike a|b|c|d")
+    if arm == "a" then runA(rows)
+    else if arm == "b" then runB(rows)
+    else if arm == "c" then runC(rows)
+    else if arm == "d" then runD(rows)
+    else if arm == "e" then runE(rows)
+    else println("usage: diff-spike a|b|c|d|e")
