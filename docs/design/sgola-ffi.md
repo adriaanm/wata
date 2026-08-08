@@ -94,15 +94,16 @@ settled, only the landing is pending.
   frame wire (`WIRE-DIES-INTERP-TO-SGOLA`); `tools/interp-spike` is
   committed not-building, spelled the way the interpreter wants it.
 - **Equality over generic families** (`GENERIC-FAMILY-EQUALS`, landed
-  at sgola `e036452`, repinned 2026-08-08). Not FFI, but it bit the FFI
-  spikes: `==` on a case class carrying `List[T]` was a loud DATA-4
-  wall; the stamped per-instantiation equals now answers it. Not yet
-  consumable by wataui's View family, though: a case carrying a
-  stub-and-map core type (`VImage`'s `Bytes`) stamps an `equalsBytes`
-  that names the unemitted `Bytes` type (build break) and compares zero
-  fields — discrepancy reported upstream 2026-08-08, diff-spike's
-  workaround retained (see WATA-TODO.md). The fix is queue-top upstream
-  and dispatching now.
+  and verified — sgola `7c228f9`, repinned 2026-08-08). Not FFI, but it
+  bit the FFI spikes: `==` on a case class carrying `List[T]` was a
+  loud DATA-4 wall; the stamped per-instantiation equals now answers
+  it, and both halves are consumed. The `Bytes` half is fixed too: a
+  stub-and-map core type maps to its declared content semantics
+  (`bytes.Equal`, content hash) before any generation, so `VImage`'s
+  case emits `bytes.Equal(x.pixels, y.pixels)` inline — no helper over
+  an unemitted type, ever. Verified by diff-spike's `eq` arm (eqcheck
+  suite green, Bytes-content cases included); the `rootLen` workaround
+  is deleted.
 
 ## What genuinely requires hand-written Go
 
@@ -232,27 +233,17 @@ not a mandate.
 Each landing below moves a row in this doc; the tickets name the
 verification.
 
-- `go.cstring` — **landed** (`1c6d6ed`): objc-spike closed leg 1 fully
-  (runs green, `length = 5`); `Sel`-style selector caching is writable,
-  with the caveat that a cached value must be the bracket's *result*
-  (the selector uintptr `sel_registerName` returns), never the bound
-  `p` itself — the lint enforces exactly that.
-- `go.callback` — **landed** (`cb15191`): callback-spike runs leg 2's
-  oracle green in ci; dispatch, keyview, menu synthesis and the objcrt
-  split are unblocked (see above). Watch the v1 literal-only rule
-  against the real ports — if reusing one body across selectors chafes,
-  that is fileable.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
   (the wire's ~400 lines) and the shape of rung 2's geometry. Now the
   biggest open language gap on this frontier.
-- The `Bytes`-equality discrepancy fix (`GENERIC-FAMILY-EQUALS` on a
-  stub-and-map core type) — queue-top upstream; diff-spike's workaround
-  comes out when it lands.
 - `GOMOD-PUREGO-REQUIRE-INJECT` — a wrinkle only a *fresh* consumer
   hits (raw `no required module provides package` for purego); our
   `go-pkgs/puredep` godep covers wata until it lands.
-- `BINDGEN-TYPED-STRUCTS` — **landed**: callbacks carry the generated
-  struct types directly and struct/CGFloat callback returns emit (the
-  `objcrt.CGFloatRet` spelling; true encodings via `class_addMethod`) —
-  most of the remaining AppKit/UIKit delegate surface, and the shape the
-  UIKit interpreter's delegates will ride on.
+- purego **v0.11.0** — the struct-by-value pin is on alphas (upstream
+  issue #225, milestone v0.11.0; see docs/design/bindgen.md). Bump to
+  the release when it ships.
+- `go.callback`'s v1 literal-only rule against the real ports — if
+  reusing one body across selectors chafes, that is fileable.
+  (`go.cstring` `1c6d6ed`, `go.callback` `cb15191` and
+  `BINDGEN-TYPED-STRUCTS` are landed and verified; their records live
+  in the sections above and in docs/design/bindgen.md.)

@@ -145,9 +145,11 @@ object Views:
         case Nil => going = false
     ListOps.reverse(acc)
 
-  /** structural equality over the whole tree. The generated `==` is not
-   *  leaned on: `VImage` carries a `Bytes`, whose identity is not its
-   *  contents. */
+  /** structural equality over the whole tree — the differ's explicit,
+   *  auditable comparator. The generated `==` now agrees (Bytes maps to
+   *  content equality, `bytes.Equal`; verified by diff-spike's eq arm);
+   *  this stays as the hand-written spelling the differ is read against,
+   *  not as a workaround. */
   def eqView(a: View, b: View): Boolean =
     var out = false
     a match

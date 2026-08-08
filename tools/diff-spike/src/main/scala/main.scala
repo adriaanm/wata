@@ -1,10 +1,13 @@
 /** DIFF-RETAINS-REPRO — does `Diff.diff` retain the trees it walks?
  *
- *  Five arms, one loop each, run one per process (`diff-spike a|b|c|d|e`,
- *  optional second arg `big`) so no arm's residue contaminates another's
- *  series. Every arm prints the same thing: the live heap (after a forced
- *  GC — see go.memprobe) every SAMPLE iterations. A leak is a straight
- *  line; a bounded working set plateaus.
+ *  Six memory arms, one loop each, run one per process (`diff-spike
+ *  a|b|c|d|e|f`, optional second arg `big`) so no arm's residue
+ *  contaminates another's series. Every arm prints the same thing: the
+ *  live heap (after a forced GC — see go.memprobe) every SAMPLE
+ *  iterations. A leak is a straight line; a bounded working set
+ *  plateaus. A seventh arm, `eq`, is not a memory probe: it asserts
+ *  structural `==` over the view family (the stamped generic-family
+ *  equality, including VImage's Bytes content semantics).
  *
  *  - a: build two trees per iteration, do NOT diff — the control. Must be
  *       flat, or the finding is about tree construction and the ticket is
@@ -63,17 +66,6 @@ object Main:
   def sampleLine(arm: String, i: Int): Unit =
     println("arm=" + arm + " iter=" + i + " liveKB=" + go.memprobe.liveHeap() / 1024)
 
-  /** the root's child count — the read that keeps a built tree from being
-   *  elidable without walking its nodes. NOT `==` on the views:
-   *  GENERIC-FAMILY-EQUALS — `==` over a case class carrying a generic
-   *  sealed-family field (List[Keyed]) is a loud upstream wall until the
-   *  reference-collapsed instantiation learns a real equals; sgola has it
-   *  queued (was EQUALS-LIST-EMIT-BROKEN-CONS, whose mangler half landed). */
-  def rootLen(v: View): Int =
-    v match
-      case VGroup(children) => Views.len(children)
-      case _ => 0
-
   /** a: build both trees, never diff. The builds land in vars so nothing can
    *  elide them; the vars are read once after the loop. */
   def runA(rows: Int): Unit =
@@ -86,7 +78,7 @@ object Main:
       if i % Sample == 0 then sampleLine("a", i)
       i += 1
     sampleLine("a", Iters)
-    println("arm=a done sink=" + (rootLen(lastOld) + rootLen(lastNew)))
+    println("arm=a done sink=" + (if lastOld == lastNew then 1 else 0))
 
   /** b: fresh new vs long-lived old; script held one iteration. */
   def runB(rows: Int): Unit =
@@ -148,6 +140,40 @@ object Main:
     sampleLine("f", Iters)
     println("arm=f done sink=" + sink)
 
+  /** eq: structural `==` over the view family — deep tree equality, keyed
+   *  order sensitivity, and VImage's Bytes content semantics (separately
+   *  constructed equal-content buffers must be ==; a one-byte diff must be
+   *  !=). Each check prints ok/WRONG; `eqcheck: PASS` only if all hold. */
+  def bytesOf(n: Int, v: Int): Bytes =
+    val b = new BytesBuilder
+    var i = 0
+    while i < n do
+      b.addByte(v)
+      i += 1
+    b.result()
+
+  def eqCheck(name: String, got: Boolean, want: Boolean): Boolean =
+    val ok = got == want
+    println("eqcheck " + name + ": " + (if ok then "ok" else "WRONG"))
+    ok
+
+  def runEq(): Unit =
+    var all = true
+    all = eqCheck("deep-equal-10", tree(0, 10) == tree(0, 10), true) && all
+    all = eqCheck("one-leaf-diff-10", tree(0, 10) == tree(1, 10), false) && all
+    all = eqCheck("deep-equal-200", tree(0, 200) == tree(0, 200), true) && all
+    all = eqCheck("length-mismatch", tree(0, 10) == tree(0, 200), false) && all
+    val kids1 = Keyed("a", VText(0, 0, "a", 1)) :: Keyed("b", VText(0, 1, "b", 1)) :: Nil
+    val kids2 = Keyed("b", VText(0, 1, "b", 1)) :: Keyed("a", VText(0, 0, "a", 1)) :: Nil
+    all = eqCheck("keyed-reorder", VGroup(kids1) == VGroup(kids2), false) && all
+    val bsA = bytesOf(4, 7)
+    val bsB = bytesOf(4, 7)
+    all = eqCheck("bytes-equal-content", VImage(0, 0, 2, 1, bsA) == VImage(0, 0, 2, 1, bsB), true) && all
+    val bb = new BytesBuilder
+    bb.addByte(7); bb.addByte(7); bb.addByte(8); bb.addByte(7)
+    all = eqCheck("bytes-one-byte-diff", VImage(0, 0, 2, 1, bsA) == VImage(0, 0, 2, 1, bb.result()), false) && all
+    println("eqcheck: " + (if all then "PASS" else "FAIL"))
+
   /** d: as b, script dropped immediately. */
   def runD(rows: Int): Unit =
     val base = tree(0, rows)
@@ -174,4 +200,5 @@ object Main:
     else if arm == "d" then runD(rows)
     else if arm == "e" then runE(rows)
     else if arm == "f" then runF(rows)
-    else println("usage: diff-spike a|b|c|d|e|f")
+    else if arm == "eq" then runEq()
+    else println("usage: diff-spike a|b|c|d|e|f|eq")

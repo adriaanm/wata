@@ -116,32 +116,19 @@ blocks + git log; each entry cites where it was recorded.*
   docs/design/wata-mac.md MAC-IDLE-LEAK section.
 
 - **`GENERIC-FAMILY-EQUALS`** (was `EQUALS-LIST-EMIT-BROKEN-CONS`) —
-  LANDED upstream at sgola `e036452` (repinned 2026-08-08) but **not yet
-  consumable here**: exercising `==` on our View trees found a
-  discrepancy in the stamped machinery. A family with a case carrying a
-  stub-and-map core type (`VImage`'s `Bytes` -> Go `[]byte`, class def
-  never emitted) stamps `func equalsBytes(a Bytes, b Bytes) bool {
-  return true }` — the signature names `Bytes` as a Go type (undefined:
-  the build breaks even though no `VImage` is ever constructed), and the
-  body compares zero fields where `Bytes.equals` is content equality
-  (`bytes.Equal` per core/bytes.scala). Reported upstream 2026-08-08
-  (`VERIFY-GENERIC-FAMILY-EQUALS` notice, minimal repro included: any
-  reference-shaped family with a `Bytes`-carrying case). The
-  `tools/diff-spike/main.scala` workaround (read a field via match
-  instead of `==`) **stays** until the fix; its comment names this key.
-  Shipping code is unaffected — wataui compares views via the
-  hand-written `Views.eqView`, which exists for a semantic reason, not
-  as a workaround. ACK 2026-08-08 (sgola `f277475`): both bugs confirmed
-  as ONE root — the machinery never consults a stub-and-map type's OWN
-  equality mapping, so `Bytes` fell into the generic zero-field
-  generator. Fix is QUEUE-TOP upstream as
-  `[STAMPED-EQUALS-STUB-TYPE-VACUOUS]`: an intrinsic mapping (`Bytes` →
-  `bytes.Equal` + content hash, JVM-oracled) consulted before any
-  generation, plus a hard rule that no helper is ever emitted over a
-  type with no Go def. Our repro is the scenario seed, and our
-  value-shaped-family observation gets a probe now rather than when
-  that wall lifts. On the landing notice: repin, delete `rootLen`, run
-  the eqcheck suite, send the real VERIFY.
+  RESOLVED at sgola `7c228f9` (repinned 2026-08-08). What it was: `==`
+  over a case class carrying a generic sealed-family field stamped no
+  usable equals, and a `Bytes`-carrying case (`VImage`) stamped a
+  vacuous `equalsBytes` naming the unemitted `Bytes` type (build break,
+  zero fields compared). One root: the machinery never consulted a
+  stub-and-map type's own equality mapping. Fixed upstream — `Bytes`
+  now maps to its declared content semantics (`bytes.Equal` / content
+  hash) before any generation; unmapped non-case-class types wall
+  loudly. Verified here: diff-spike's `rootLen` workaround deleted, its
+  `eq` arm's eqcheck suite fully green including the Bytes-content
+  cases (equal-content separately-built Bytes ==, one-byte diff !=);
+  the emitted Go inlines `bytes.Equal(x.pixels, y.pixels)` with no
+  `equalsBytes` helper at all.
 
 - **`TUPLE-REF-COMPONENT-ASSIGN`** — a tuple component whose type lowers
   to a Go interface (a sealed trait, a `List[T]`) is erased to `any` in

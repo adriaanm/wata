@@ -88,13 +88,15 @@ and the pump's leaking bisect arm:
 
 ## Found en route: a sgola emitter bug (filed)
 
-`==` between two `View` values emits an `equalsList` helper whose type
-switch names the cons class unmangled — `case *:::` / `b.(*::)` — which
-is not Go and fails the build. Unexercised elsewhere: wataui's oracle
-compares views via the hand-written `Views.eqView` (which exists for a
-semantic reason — `VImage`'s `Bytes` identity), so no shipping code hits
-the path. Filed as `EQUALS-LIST-EMIT-BROKEN-CONS`; the spike's
-workaround (`rootLen` instead of `==`) names the key.
+`==` between two `View` values emitted an `equalsList` helper whose type
+switch named the cons class unmangled — `case *:::` / `b.(*::)` — which
+is not Go and failed the build; the follow-up (a `Bytes`-carrying case
+stamping a vacuous `equalsBytes` over an unemitted type) broke it a
+second way. Filed as `EQUALS-LIST-EMIT-BROKEN-CONS`, then
+`GENERIC-FAMILY-EQUALS`; **fixed upstream** (sgola `7c228f9`) and
+verified by this spike's `eq` arm — the `rootLen` workaround is gone and
+`==` on the trees is exercised directly (`eqcheck` suite, including the
+Bytes content cases; emitted Go inlines `bytes.Equal`).
 
 ## Running it
 
