@@ -9,10 +9,10 @@ generated-Go layer), `tools/objc-spike/REPORT.md` and
 code wants to be). wata is sgola's proving ground, so "write that bit in
 Go" is a *finding*, and this doc is where the findings add up.
 
-The one-paragraph summary: **calling C is nearly closed; being called
-by C is the open half.** Everything a call-out needs — open a library,
-find a symbol, make the call, carry the results — works or has a ruled
-shape in the queue. Every remaining "must be Go" that is not a
+The one-paragraph summary: **calling C is closed; being called by C is
+the open half.** Everything a call-out needs — open a library, find a
+symbol, make the call, pass a C string, carry the results — works on
+the current pin. Every remaining "must be Go" that is not a
 technology boundary (cgo, reflection, the Go runtime) traces to one
 missing feature: a Go **func value crossing a facade**, which is what
 callbacks, ObjC class synthesis, and the main-queue seam all are.
@@ -30,28 +30,20 @@ that everything *around* its two gaps was already right.
 | multiple results | tuple correspondence, `flatten(R) ++ (error if throws)`; discard is the ordinary tuple pattern `val (r1, _, _) = …` | ruled 2026-08-07 (plan 0038); objc-spike compiles on it |
 | variadic Go functions | a Scala vararg emits the bare Go variadic call | `VARIADIC-FACADE-BIND` ruling; `syscallN(fn, args*)` |
 | pointer-sized addresses | `go.Uintptr`, an **opaque** scalar — deliberately not a reference, keeps nothing alive | landed `b85a713`; objc-spike builds and runs |
-| dlopen / dlsym / syscall | `go.purego.dlopen/dlsym/syscallN` — purego's whole non-reflective surface | `tools/objc-spike` (runs to the one remaining `???`) |
+| dlopen / dlsym / syscall | `go.purego.dlopen/dlsym/syscallN` — purego's whole non-reflective surface | `tools/objc-spike` runs green |
+| C-string addresses | the bracket `go.cstring(s) { p => body }` — `p` addresses a NUL-terminated copy, live for exactly `body`'s extent (compiler-emitted `KeepAlive`), NON-RETENTION callee contract; nest for multiple string args; lint rejects `p` escaping the bracket | landed `1c6d6ed`; objc-spike runs, `length = 5` |
 | opaque handles + scalars + strings + bytes | the facade bread and butter | every shipped module |
 
 So an ObjC message send is expressible in Sgola **today** end to end —
-`objc_getClass`, `sel_registerName`, `objc_msgSend` through `syscallN` —
-except for one thing: producing the address of a C string, which is the
-first row below.
+`objc_getClass`, `sel_registerName`, `objc_msgSend` through `syscallN`,
+C strings through the bracket — and `tools/objc-spike` proves it in ci:
+it runs the full round-trip and asserts `objc-spike: length = 5`.
 
 ## Ruled and queued — what we know will be possible
 
 These have designer rulings and sit in sgola's queue; the shape is
 settled, only the landing is pending.
 
-- **C-string addresses — the bracket** (`FFI-CSTR-ADDRESS`, ruled
-  2026-08-08). A free `def cstr(s: String): go.Uintptr` is declined
-  *permanently* — a uintptr keeps nothing alive, and that is the point
-  of its opacity. The supported form is bracketed:
-  `go.cstring(s) { p => body }` — `p` addresses a NUL-terminated copy,
-  live for exactly `body`'s extent (compiler-emitted `KeepAlive`), with
-  NON-RETENTION as the callee contract. Nesting covers multiple string
-  arguments. When it lands, the objc-spike's last `???` dissolves and
-  the call-out leg is closed.
 - **By-value structs across facades** (`FACADE-VALUE-STRUCT`, filed; no
   ruling yet). A facade class is always a Go pointer today, and cannot
   be constructed. AppKit geometry (`CGRect` and friends) and the ObjC
@@ -170,7 +162,7 @@ with `ObjcRt` a small generated (or once-written) Sgola module over
 sketch stands on:
 
 - `Sel.sel(...)` is `sel_registerName` over a C string — needs the
-  **cstring bracket** (ruled, queued). Selector caching in module vals
+  **cstring bracket** (landed `1c6d6ed`). Selector caching in module vals
   needs module-init effects, which the dialect already allows for
   `val`s.
 - `CGRect` as a constructible value — **FACADE-VALUE-STRUCT**, or in a
@@ -186,7 +178,7 @@ sketch stands on:
   reachable through them. Same single feature as everything else.
 - Class synthesis (`ObjcRt.registerClass`) — same again.
 
-So rung 2's gating set is: the cstring bracket (queued), func-typed
+So rung 2's gating set is: the cstring bracket (landed), func-typed
 params (leg 2), and a decision about struct-call ABI (keep a Go kernel
 vs a new primitive). Nothing else in the sketch is speculative — every
 other line is the objc-spike's proven vocabulary. The realistic end
@@ -205,8 +197,11 @@ not a mandate.
 Each landing below moves a row in this doc; the tickets name the
 verification.
 
-- `go.cstring` lands → objc-spike closes leg 1 fully; `Sel`-style
-  selector caching becomes writable; update "works today".
+- `go.cstring` — **landed** (`1c6d6ed`): objc-spike closed leg 1 fully
+  (runs green, `length = 5`); `Sel`-style selector caching is writable,
+  with the caveat that a cached value must be the bracket's *result*
+  (the selector uintptr `sel_registerName` returns), never the bound
+  `p` itself — the lint enforces exactly that.
 - func-typed facade params land → leg 2 runs; if it passes, dispatch,
   keyview, menu synthesis and the objcrt split all unblock at once.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`

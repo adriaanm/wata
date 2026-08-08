@@ -244,26 +244,50 @@ facade params — which sgola's own `SAM-CLOSURE-LOWERING` suggests is a
 binding question rather than a lowering one, since closures already emit
 as plain Go func literals.
 
-`cstr` is also still `???`, and its RULING is now in (sgola, 2026-08-08,
-recorded in sgola's `docs/spec/15-the-go-boundary_sgola.md` + IOP-2):
-the literal signature `def cstr(s: String): go.Uintptr` is DECLINED
-permanently — a free uintptr keeps nothing alive across statements,
-which is the existence Go's own uintptr rules forbid. The supported
-shape is bracketed: `go.cstring(s) { p => body }`, where `p` addresses a
-NUL-terminated COPY of `s` (BytePtrFromString semantics; interior NUL
-panics), valid for exactly `body`'s extent — the emitted Go holds the
-copy live (`runtime.KeepAlive`) until `body` returns, so liveness is the
+`cstr`'s RULING is in (sgola, 2026-08-08, recorded in sgola's
+`docs/spec/15-the-go-boundary_sgola.md` + IOP-2): the literal signature
+`def cstr(s: String): go.Uintptr` is DECLINED permanently — a free
+uintptr keeps nothing alive across statements, which is the existence
+Go's own uintptr rules forbid. The supported shape is bracketed:
+`go.cstring(s) { p => body }`, where `p` addresses a NUL-terminated COPY
+of `s` (BytePtrFromString semantics; interior NUL panics), valid for
+exactly `body`'s extent — the emitted Go holds the copy live
+(`runtime.KeepAlive`) until `body` returns, so liveness is the
 compiler's obligation, and the callee contract is NON-RETENTION (a C
 function that stashes the pointer past the call is outside the
-guarantee; a retained C string would be a new ticket). Implementation is
-queued upstream (verdict A); the spike's call sites reshape to
-`go.cstring(sel) { p => syscallN(fn, p, …) }` (brackets nest for
-multiple string args) when the landing notice names a sha to repin —
-not before, since the spike's build is a ci step and `go.cstring` does
-not exist on the current pin.
+guarantee; a retained C string would be a new ticket).
+
+## The bracket landed — the leg is CLOSED (2026-08-08, pin `1c6d6ed`)
+
+`go.cstring` landed upstream at `1c6d6ed`; the `cstr` stub is deleted and
+the four string sites are brackets. The spike **runs its oracle**:
+
+```
+objc-spike: length = 5
+```
+
+That is the first real `objc_msgSend` round-trip from pure Sgola — class
+lookup, two selector registrations, `stringWithUTF8String:` and `length`,
+with no Go code of ours anywhere in the chain. Exit status 0.
+
+Two bracket shapes are exercised: the plain form
+(`val (cls, _, _) = go.cstring("NSString") { p => syscallN(getClass, p) }`)
+and the bracket whose body's call also consumes results from earlier
+brackets (`go.cstring("hello") { p => syscallN(msgSend, cls, selStr, p) }`),
+both destructured through the tuple pattern.
+
+Both lint rules were provoked deliberately and both fire as compile
+errors citing the spec: returning `p` out of the bracket
+(`go.cstring(s) { p => p }` bound to a `go.Uintptr` val) is rejected at
+the bracket ("the address must not outlive the bracket … do the foreign
+call INSIDE the bracket and return its result"), and assigning `p` to an
+outer `var` is rejected at the assignment ("a stored address is a
+dangling `uintptr` the GC is free to invalidate"). Both diagnostics name
+`[IOP-2]` / `[FFI-CSTR-ADDRESS]` and the spec chapter. The correct
+spelling compiled first try; the lints were never in the way.
 
 ## Running it
 
 ```
-just objc-spike     # builds it; the two gaps are the expected output
+just objc-spike     # builds AND runs; must print `objc-spike: length = 5`
 ```

@@ -1,6 +1,6 @@
 # 0038 — how far does Sgola reach into the FFI layer?
 
-Status: accepted (leg 1 run — two gaps named, everything else works)
+Status: accepted (leg 1 CLOSED — oracle runs green; leg 2 open)
 
 ## The problem
 
@@ -126,6 +126,23 @@ it.
 obtaining a `uintptr` from a String's address is where GC liveness
 actually bites, so it gets its own ticket when the spike reaches it —
 carrying whatever we learn about what shape the address has to survive.
+
+**Addendum 2026-08-08 — the call-out leg is CLOSED.** `go.cstring`
+landed (sgola `1c6d6ed`, pinned here); the `cstr` stub is gone and the
+spike's string sites are brackets. It builds, runs, and prints its
+oracle:
+
+```
+objc-spike: length = 5
+```
+
+The first real `objc_msgSend` round-trip from pure Sgola. `just
+objc-spike` (in ci) now runs the binary and asserts that line, so leg 1
+stays answered. Both liveness lints (bracket result may not be
+`go.Uintptr`; `p` may not escape to an outer binding) were provoked
+deliberately and fire as spec-citing compile errors — detail in
+`tools/objc-spike/REPORT.md`. What remains of this plan is leg 2, the
+call-in half.
 
 **What this plan does NOT decide** is whether macshell should be ported.
 That question is downstream of the answer, and it changes shape depending

@@ -1,7 +1,7 @@
 import language.experimental.saferExceptions
 
 /** Plan 0038, the call-out leg: send an ObjC message from Sgola with no Go
- *  code of ours in between.
+ *  code of ours in between. This runs its oracle: `objc-spike: length = 5`.
  *
  *  The oracle is arithmetic and unforgiving. `[[NSString
  *  stringWithUTF8String:"hello"] length]` is 5; a mis-marshalled argument
@@ -9,6 +9,14 @@ import language.experimental.saferExceptions
  *  itself goes through `objc_msgSend`, reached by `dlsym` out of
  *  libobjc — which is exactly how purego's own objc package does it,
  *  minus the Go.
+ *
+ *  C-string addresses use the bracket, `go.cstring(s) { p => body }`:
+ *  `p` addresses a NUL-terminated COPY of `s`, valid for exactly the
+ *  bracket's extent (the emitted Go KeepAlives the copy until `body`
+ *  returns). That shape exists because a free uintptr keeps nothing
+ *  alive across statements — so the foreign call happens INSIDE the
+ *  bracket and the bracket returns the call's result. Semantics: sgola
+ *  spec ch.15 (`docs/spec/15-the-go-boundary_sgola.md`).
  */
 object Main:
 
@@ -28,15 +36,11 @@ object Main:
       // other two results of SyscallN are the ABI's second return register
       // and errno, and neither means anything here. Discarding them is the
       // tuple pattern, which emits Go's own `r1, _, _ := …`.
-      val (cls, _, _) = go.purego.syscallN(getClass, cstr("NSString"))
-      val (selStr, _, _) = go.purego.syscallN(regName, cstr("stringWithUTF8String:"))
-      val (selLen, _, _) = go.purego.syscallN(regName, cstr("length"))
-      val (str, _, _) = go.purego.syscallN(msgSend, cls, selStr, cstr("hello"))
+      val (cls, _, _) = go.cstring("NSString") { p => go.purego.syscallN(getClass, p) }
+      val (selStr, _, _) = go.cstring("stringWithUTF8String:") { p => go.purego.syscallN(regName, p) }
+      val (selLen, _, _) = go.cstring("length") { p => go.purego.syscallN(regName, p) }
+      val (str, _, _) = go.cstring("hello") { p => go.purego.syscallN(msgSend, cls, selStr, p) }
       val (len, _, _) = go.purego.syscallN(msgSend, str, selLen)
 
       println("objc-spike: length = " + len)
     catch case e: sgo.GoError => println("objc-spike: FAILED " + e.getMessage)
-
-  /** a NUL-terminated C string's address — the other thing an FFI layer
-   *  cannot do without. */
-  def cstr(s: String): go.Uintptr = ???

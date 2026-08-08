@@ -103,15 +103,17 @@ mac-leak *ARGS:
 fb-sim *ARGS:
     bash tools/fb-sim.sh {{ARGS}}
 
-# plan 0038 probe: can Sgola reach the C ABI with no Go of ours? (1 known gap)
+# plan 0038 probe: can Sgola reach the C ABI with no Go of ours? YES
 objc-spike:
-    # It BUILDS now (sgola 40cc1f8): a facade call's multi-result destructure —
-    # `val (cls, _, _) = go.purego.syscallN(…)` — compiles and links. Run by ci
-    # so it keeps doing so. The binary still panics at `cstr`, which is a `???`
-    # on purpose: taking a String's address is FFI-CSTR-ADDRESS, ruled
-    # separately because that is where GC liveness bites. tools/objc-spike/
-    # REPORT.md owns the expectation.
-    cd tools/objc-spike && ../../tools/sgo build
+    # Builds AND runs its oracle (sgola 1c6d6ed): the C-string bracket
+    # `go.cstring(s) { p => syscallN(…, p) }` closed the last gap, so the
+    # binary does a real objc_msgSend round-trip and must print
+    # `objc-spike: length = 5`. Run by ci, so ci asserts the oracle.
+    # tools/objc-spike/REPORT.md owns the expectation.
+    # The run's own exit is 0 even on the caught-error branch, so the grep is
+    # the assertion: the exact oracle line, or the recipe fails.
+    cd tools/objc-spike && ../../tools/sgo build && \
+      ./.sgo/objc-spike/objc-spike | tee /dev/stderr | grep -qx 'objc-spike: length = 5'
 
 # MAC-IDLE-LEAK arbiter: does Diff.diff retain the trees it walks? ANSWERED
 # no — every arm flat/bounded (tools/diff-spike/REPORT.md owns the series and

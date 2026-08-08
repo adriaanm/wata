@@ -262,7 +262,6 @@ justfile just gives it a name.
 | [docs/design/wata-mac.md](docs/design/wata-mac.md) | macOS client: the retained AppKit backend, the shared bodies, its smoke |
 | [docs/design/bindgen.md](docs/design/bindgen.md) | Apple bindings: the generator, the allowlist, refusals, how they are verified |
 | [docs/design/sgola-ffi.md](docs/design/sgola-ffi.md) | the FFI frontier: what Sgola reaches today, what is queued, what stays Go and why |
-| [docs/design/wata-mac.md](docs/design/wata-mac.md) | macOS client: the retained AppKit backend (`go-pkgs/nativeui`), its layers and gotchas |
 | [justfile](justfile) | every repeatable operation, one recipe each (`just` to list) |
 | [TODO.jsonl](TODO.jsonl) | the open-work queue (protocol above) |
 | [WATA-TODO.md](WATA-TODO.md) | known debt |
