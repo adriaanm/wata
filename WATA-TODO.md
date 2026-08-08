@@ -109,6 +109,17 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
+- **`SLAB-DEAD-CELLS-RETAIN`** (filed 2026-08-08) — the MAC-IDLE-LEAK
+  root cause: `slab List` (core/sgo.build, OPT-D) makes a slab as live
+  as its livest cell — dead cells' pointer fields are never zeroed and
+  the GC scans the 256-cell buffer as one object — so the diff's
+  transient mirror cells chain every frame's tree to the previous one.
+  Proven by removing the knob from the pinned core: the full app's
+  unbounded idle growth (26 GB observed) goes dead flat with nothing
+  else changed. No consumer-side workaround. Verify a fix with `just
+  mac-leak --arm diffonly` (the tight-loop spike does NOT reproduce the
+  chain). Detail: docs/design/wata-mac.md MAC-IDLE-LEAK section.
+
 - **`GENERIC-FAMILY-EQUALS`** (was `EQUALS-LIST-EMIT-BROKEN-CONS`; the
   landing notice split it 2026-08-08) — `==` between two values of a
   case class carrying a GENERIC sealed-family field (wataui's `VGroup`

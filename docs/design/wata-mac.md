@@ -501,13 +501,41 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   + `colorAtX:y:`, addressing through the rep's `pixelsWide/High` so a
   non-1 backing scale cannot skew probe coordinates (`render_test.go`).
 
-## Growth while idle — open (`MAC-IDLE-LEAK`)
+## Growth while idle — ROOT CAUSE FOUND, fix is upstream (`MAC-IDLE-LEAK`)
 
 The app grows without bound while doing nothing. macOS paused a
-long-running instance at **26 GB** (owner, 2026-08-08). It is measured
-and reproducible; the cause is not yet found, and this section records
-what has been ruled out so the next session does not re-run the same
-eliminations.
+long-running instance at **26 GB** (owner, 2026-08-08). **The cause is
+sgola's `slab List` allocator** (core/sgo.build, OPT-D tier), proven by a
+controlled on/off experiment: cons cells are carved 256 at a time out of
+one buffer, the GC scans a slab as ONE object, and a semantically dead
+cell's pointer fields are never zeroed — so a slab is as live as its
+livest cell, and dead cells' referents are retained with it. In the
+pump that composes into cross-generation chaining: frame N's live tree
+cells share slabs with frame N's transient diff-mirror cells, whose
+fields reference frame N-1's tree, which pins frame N-1's slabs, and so
+on — every frame's tree held forever. Removing `slab List` from the
+pinned core and rebuilding turns the diff-only arm's 1→9 MB climb and
+the full app's unbounded growth into a dead-flat `0 0 0 0 0 0 0 0`,
+with nothing else changed. Filed upstream as
+`SLAB-DEAD-CELLS-RETAIN`; no consumer-side workaround exists (the knob
+is core's), so the leak ships until a fix lands and the pin moves.
+
+The bisect arms that found it are COMMITTED, env-gated by
+`WATA_MAC_LEAK_ARM` and driven by `just mac-leak --arm
+build|diffonly|diffself|consttree`: build = tree only (flat), diffonly =
+diff against the previous frame, nothing sent (leaks — the profiling
+state), diffself = `Diff.diff(v, v)` (flat), consttree = the full
+pipeline over a constant tree (flat). Idle frames emit ZERO patches
+(consecutive trees are equal), the standalone differ loop is clean on
+every shape (`tools/diff-spike`, six arms), and the pump, seam and
+retained backend are all exonerated — the leak needed exactly: slabs
+on, real trees, and the previous frame as the `old` argument. Note for
+whoever verifies the upstream fix: the tight single-goroutine spike
+does NOT reproduce the chain even with slabs on — judge the fix on
+`just mac-leak --arm diffonly`, never on a microbenchmark.
+
+The rest of this section records what was ruled out along the way, so
+the eliminations survive.
 
 `just mac-leak` drives pure idle frames and samples three numbers,
 because it is reading them TOGETHER that localizes the growth:
@@ -567,11 +595,12 @@ reachable, and each frame's tree is then held forever. The pump retains
 exactly one (`st.last`), and `contactRowsView` builds only `visibleRows()`
 rows, so neither the tree nor the pump explains it.
 
-**What is not yet known** is the retaining edge. `wataui/diff.scala` has no
-global state — every binding in it is a local `var` — so the next step is a
-standalone repro: loop `Diff.diff` over two fixed trees with no app around
-it. If that leaks, this is below the Sgola source and belongs upstream as a
-compiler ticket rather than here.
+The retaining edge turned out to be BELOW all of this — the slab
+allocator, per the head of this section. `wataui/diff.scala` has no
+global state (every binding in it is a local `var`), the standalone
+differ loop is flat on every shape it can spell, and the diff call
+matters only because its transient mirror lists are what interleave
+references to the previous frame's tree into the live tree's slabs.
 
 **RSS here is a sawtooth, and that invalidates any short run.** It climbs
 for a couple of minutes and then the scavenger hands pages back, dropping
@@ -598,14 +627,15 @@ m=nil mp=nil [select]:`, not the `goroutine 12 [select]:` that
 `runtime.Stack` produces — a parser anchored to the latter reports an
 empty dump for a dump that arrived in full.)
 
-**Not ruled out — Go objects.** The earlier "live heap is flat at 1-2 MB"
-was measured over ~48s, which is too short: over 200s it reaches 3-10 MB.
-`--heap` writes periodic heap profiles and prints what grew between the
-first and last (`go tool pprof -base`, since a single profile is dominated
-by steady-state objects and says nothing). What it names is view-tree cons
-cells (`sgolaNewColon2__Keyed` under `Pump_frame`) — a few MB, transient in
-shape. That is smaller than the RSS trough rise, so the Go heap is part of
-the story and not all of it.
+**Go objects — confirmed, and now explained.** The earlier "live heap is
+flat at 1-2 MB" was measured over ~48s, which is too short: over 200s it
+reaches 3-10 MB. `--heap` writes periodic heap profiles and prints what
+grew between the first and last (`go tool pprof -base`, since a single
+profile is dominated by steady-state objects and says nothing). What it
+names is view-tree cons cells (`sgolaNewColon2__Keyed` under
+`Pump_frame`) — which is exactly what the slab mechanism at the head of
+this section retains: the profile's alloc sites are the trees, the
+retainer is their slabs.
 
 Retained ObjC objects stay ruled out: two `heap <pid>` censuses 60 rounds
 apart are class-for-class identical (diff the `COUNT`/`BYTES` table under

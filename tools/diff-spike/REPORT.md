@@ -1,9 +1,21 @@
 # diff-spike — does `Diff.diff` retain the trees it walks? (DIFF-RETAINS-REPRO)
 
 **Result: no. Every arm is flat or bounded; a bare loop over `Diff.diff`
-does not leak.** The wata-mac idle leak (MAC-IDLE-LEAK) therefore needs
-the app around it — the retaining edge is not below `wataui/diff.scala`,
-and this does not become a sgola ticket.
+does not leak.** The wata-mac idle leak (MAC-IDLE-LEAK) therefore needed
+the app around it — the retaining edge is not below `wataui/diff.scala`.
+
+**Postscript — the leak was found anyway, and this spike's clean bill of
+health is part of the finding.** The retainer is sgola's `slab List`
+allocator (`SLAB-DEAD-CELLS-RETAIN`, filed): a slab is one GC object, so
+dead cells' un-zeroed pointer fields are scanned as long as any cell in
+the slab is live, and in the app the diff's transient mirror cells chain
+each frame's tree to the previous one. This spike runs the SAME slab
+allocator and stays flat — six arms, including the pump's exact shapes —
+so a tight single-goroutine loop demonstrably does not produce the
+interleaving the chain needs. That is why the arms below stay useful:
+they prove any future "the differ leaks" reading is about the
+allocator's surroundings, and they are the wrong tool to verify the slab
+fix (use `just mac-leak --arm diffonly` for that).
 
 ## The question
 

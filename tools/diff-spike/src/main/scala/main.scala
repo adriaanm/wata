@@ -43,7 +43,8 @@ object Main:
       val txt =
         if i == 0 then VText(2, i, "row " + i + " v" + tag, 0xFFFF)
         else VText(2, i, "row " + i, 0xFFFF)
-      rows = Keyed("row-" + i, VGroup(Keyed("", hl) :: Keyed("", txt) :: Nil)) :: rows
+      val gl = VGlyph(150, i * 12, 0x80 + (if i == 0 then tag else 0), 0xFFFF)
+      rows = Keyed("row-" + i, VGroup(Keyed("", hl) :: Keyed("", txt) :: Keyed("", gl) :: Nil)) :: rows
       i -= 1
     VGroup(rows)
 

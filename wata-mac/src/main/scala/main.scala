@@ -648,9 +648,15 @@ object Pump:
    *  on a debug switch. Empty (the normal path) unless the env names one. */
   def leakArm(): String = go.sys.getenv("WATA_MAC_LEAK_ARM")
 
-  /** keep a bisect arm's diff result un-elidable without sending it. */
+  /** keep a bisect arm's diff result un-elidable without sending it — and
+   *  NAME it: an idle frame's script should be empty, so any non-empty one
+   *  says exactly which element changes every frame (the pinning suspect). */
   def leakSink(ps: List[Patch]): Unit =
-    if Wire.lenPatches(ps) < 0 then println("? leak arm")
+    val n = Wire.lenPatches(ps)
+    if n > 0 then
+      ps match
+        case p :: _ => println("leakdiff n=" + n + " first=" + DiffOracle.showPatch(p))
+        case Nil    => ()
 
   /** the constant spike-shaped tree (tools/diff-spike's): 10 keyed rows of a
    *  highlight VRect + a VText, row 0's text carrying `tag` so consecutive
