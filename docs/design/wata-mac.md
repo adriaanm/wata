@@ -520,6 +520,17 @@ on the same pin, including the objc-spike oracle. The rest of this
 section is the record of the mechanism and the eliminations; the bisect
 arms below stay committed for regression re-checks.
 
+Long-horizon confirmation (2026-08-08, pin `7c228f9`): a 20000-round
+windowed soak — ~16000s of frames — held the live heap after GC at
+0 MB -> 0 MB across 783 collections:
+
+```
+live heap after each GC (MB): 0 0 0 0 0 0 0 0 0 0 0
+```
+
+RSS fell over the run, 84.0 -> 60.6 MB (peak 89.0 reclaimed). Verdict
+steady.
+
 The app grew without bound while doing nothing. macOS paused a
 long-running instance at **26 GB** (owner, 2026-08-08). **The cause is
 sgola's `slab List` allocator** (core/sgo.build, OPT-D tier), proven by a

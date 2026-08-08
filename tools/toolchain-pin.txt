@@ -8,4 +8,4 @@
 # Bump with:  tools/toolchain.py pin <sha>   (then re-run tools/toolchain.py sync)
 #
 repo   https://github.com/adriaanm/sgola.git
-commit 7c228f9
+commit 22a7c16
