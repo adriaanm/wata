@@ -76,6 +76,12 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              (refused|ok|auto), then one frame — the real
  *                              one comes from an iroh dial refusal, which a
  *                              hermetic run cannot provoke
+ *    caplevel <n>              post `AeCaptureLevel(n)` (0..32) through the
+ *                              real audio-event mailbox, then one frame — the
+ *                              recording meter pinned at a known level.
+ *                              SimAudio's recording is instantaneous by
+ *                              design, so a script injects the tick a real
+ *                              record loop would post
  *    notifymode <play|quiet>   force the arrival-notification mode's cell
  *                              (plan 0041) with no config I/O — what a
  *                              notify leg sets instead of walking Settings
@@ -105,7 +111,8 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  unplayed counts the LED/banner/highlight all derive from), notifyled (the
  *  green LED's computed policy: 0 off, 1 steady, 2 blinking), notifyred (1
  *  while the arbiter holds the red LED on), notifybanner (1 while the quiet
- *  banner is up). */
+ *  banner is up), and caplevel (the wata applet's recording-meter level, what
+ *  the `caplevel` directive set). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -260,6 +267,8 @@ object UiScript:
       err = enrolStateDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "notifymode" then
       err = notifyModeDirective(nth(ts, 1))
+    else if cmd == "caplevel" then
+      err = capLevelDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "sendas" then
       err = sendAs(nth(ts, 1))
     else err = "unknown directive '" + cmd + "'"
@@ -443,6 +452,22 @@ object UiScript:
     else FbConfig.forceNotifyMode(Notify.parseMode(name))
     err
 
+  /** post one capture-level tick through the REAL audio-event mailbox — the
+   *  same channel the frame loop drains — then advance one frame so the
+   *  drained level is what the next checkpoint draws. SimAudio's recording is
+   *  deliberately instantaneous (fixed RecordMs, byte-reproducible frames),
+   *  so the meter is pinned by injecting the tick a real record loop posts at
+   *  25 Hz (plan 0042). */
+  def capLevelDirective(arg: String, c: MatrixClient, clock: Clock,
+                        evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
+    var err = ""
+    val n = num(arg, -1)
+    if arg == "" || n < 0 || n > 32 then err = "caplevel wants <0..32>"
+    else
+      evts.trySend(AeCaptureLevel(n))
+      step(c, clock, evts, dev, px)
+    err
+
   /** txn ids for `sendas` sends — each direct login is its own device, so
    *  these only have to be distinct within one script. */
   private val txnC: sgo.Atomic[scala.Int] = sgo.atomic(9000)
@@ -586,6 +611,8 @@ object UiScript:
     else if name == "notifyled" then Ui.ledGreenNow
     else if name == "notifyred" then boolProbe(Ui.ledRedNow)
     else if name == "notifybanner" then boolProbe(Ui.bannerOn)
+    // the recording meter's level (plan 0042) — what `caplevel` just set.
+    else if name == "caplevel" then Shell.wataState(Ui.shellState).captureLevel
     else -1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run

@@ -32,6 +32,11 @@ sealed trait AudioEvt
 /** recording finished — Ogg/Opus bytes ready for upload. */
 case class AeRecordingDone(ogg: Bytes, durationMs: Long) extends AudioEvt
 case class AeRecordingError() extends AudioEvt
+/** live capture level while recording: the peak absolute sample of one 40ms
+ *  period, scaled 0..32. Posted once per period (25 Hz) from the record loop
+ *  only — a dropped tick is harmless, and a loop that stops reading stops
+ *  ticking, so the meter doubles as a liveness signal (plan 0042). */
+case class AeCaptureLevel(level: Int) extends AudioEvt
 case class AePlaybackDone() extends AudioEvt
 case class AePlaybackError() extends AudioEvt
 case class AeEchoRecording() extends AudioEvt

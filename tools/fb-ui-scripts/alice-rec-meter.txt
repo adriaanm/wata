@@ -1,0 +1,27 @@
+# alice: the recording meter (plan 0042). Hold PTT, inject capture levels
+# through the `caplevel` directive — the tick a real record loop posts at
+# 25 Hz — and pin the meter rect at each: 24 draws a wide bright bar, 0 the
+# minimum sliver a dead microphone shows while the clock counts up anyway.
+#
+# Driven by `wata-fb uitest` (uiscript.scala) — see that file's header for the
+# directive vocabulary.
+
+wait syncing 1 900
+wait convs 2 900
+advance 30
+
+# press only: the overlay appears with the meter at its level-0 sliver, and
+# stays up (SimAudio answers nothing until the release).
+key ptt press
+advance 5
+caplevel 24
+expect caplevel 24
+checkpoint alice-rec-meter-wide
+caplevel 0
+waitmax caplevel 0 5
+checkpoint alice-rec-meter-flat
+
+# release sends the canned recording; wait for the echo so the session winds
+# down with nothing in flight.
+key ptt release
+wait msgs 1 1500

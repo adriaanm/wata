@@ -185,10 +185,13 @@ object DevCli:
     recDurC.set(d.durationMs)
     1
 
-  /** 0 continue, 1 done (recOgg/recDur stashed), 2 error. */
+  /** 0 continue, 1 done (recOgg/recDur stashed), 2 error. The recording
+   *  meter's `AeCaptureLevel` ticks ride this same mailbox at 25 Hz — never
+   *  terminal, explicitly 0. */
   def recEvtOf(e: AudioEvt): Int = e match
     case d: AeRecordingDone  => stashRec(d)
     case _: AeRecordingError => 2
+    case _: AeCaptureLevel   => 0
     case _                   => 0
 
   /** wait for the recording to finish; empty Bytes = failure. */

@@ -1,6 +1,6 @@
 # 0042 — a live capture-level meter in the recording bar (FB-REC-LEVEL-METER)
 
-Status: accepted
+Status: done
 
 ## The problem
 

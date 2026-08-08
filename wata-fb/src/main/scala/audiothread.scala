@@ -161,6 +161,10 @@ object AudioThread:
         going = false
       else
         val n = cap.readFrames(buf)
+        // the recording meter's tick (plan 0042): the level is computed here,
+        // between the read and the encode, because this is where the PCM
+        // already is — no Go change, no facade change.
+        evts.trySend(AeCaptureLevel(periodLevel(buf, n)))
         val f0 = enc.encodeFrameAt(buf, 0)
         val f1 = enc.encodeFrameAt(buf, 1)
         frames = GoBytes.toPortable(f0) :: frames
@@ -168,6 +172,23 @@ object AudioThread:
         total = total + n.toLong
     if code == CodeDone then finishRecording(evts, frames, total)
     code
+
+  /** the peak absolute sample of one captured period, scaled to 0..32 for the
+   *  recording meter (`level = peak * 32 / 32767`; 32767 -> 32, 0 -> 0). `n`
+   *  is FRAMES read; S16_LE mono, so the first `n * 2` bytes of `buf` are
+   *  valid, little-endian, sign carried by the high byte. */
+  def periodLevel(buf: go.Bytes, n: Int): Int =
+    var peak = 0
+    val valid = n * 2
+    var i = 0
+    while i + 1 < valid do
+      val lo = buf(i).toInt & 0xff
+      val hi = buf(i + 1).toInt // sign-extends: Byte -> Int
+      val s = (hi << 8) | lo
+      val a = if s < 0 then -s else s
+      if a > peak then peak = a
+      i = i + 2
+    peak * 32 / 32767
 
   def finishRecording(evts: sgo.Chan[AudioEvt], frames: List[Bytes], totalSamples: Long): Unit =
     val ogg = Ogg.writeStream(ListOps.reverse(frames))

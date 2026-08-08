@@ -57,7 +57,10 @@ case class WataState(
   backHeld: Boolean,
   backHoldTime: scala.Double,
   okHeld: Boolean,
-  okHoldTime: scala.Double
+  okHoldTime: scala.Double,
+  // the recording meter's level (0..32), the peak of the last captured 40ms
+  // period — fed by `AeCaptureLevel`, reset to 0 on PTT press (plan 0042).
+  captureLevel: scala.Int
 )
 
 object WataLogic:
@@ -66,7 +69,7 @@ object WataLogic:
 
   def initial(): WataState =
     WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, 0.0,
-      false, 0.0, false, 0.0)
+      false, 0.0, false, 0.0, 0)
 
   /** visible list rows between header and footer (bitmap grid). */
   def visibleRows(): scala.Int = FOOTER_ROW - FONT_ROWS_HEADER
@@ -75,11 +78,11 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
 
   /** Opens at row 0, which is the NEWEST message now that the list comes back
    *  newest first — the one somebody just pressed the LED for. It used to be
@@ -87,22 +90,27 @@ object WataLogic:
    *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
 
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
+
+  /** the recording meter's level — the only field `AeCaptureLevel` moves. */
+  def withCapLevel(s: WataState, level: scala.Int): WataState =
+    WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level)
 
   /** `room`/`id` name what is playing, and are cleared when it stops — a
    *  playback target that outlives the playback would receipt the wrong
    *  message the next time audio ends. */
   def withPlaying(s: WataState, playing: Boolean, room: String, id: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
 
   /** the full status-flash tuple (hold + timer + the three flash flags); the
    *  play-failure CAUSE rides along unchanged. */
@@ -110,7 +118,7 @@ object WataLogic:
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, timer, s.backHeld, s.backHoldTime,
-      s.okHeld, s.okHoldTime)
+      s.okHeld, s.okHoldTime, s.captureLevel)
 
   /** a play that failed: the flash, its cause, and `playing` dropped — a
    *  playback indicator that outlives the playback is a lie. */
@@ -118,17 +126,17 @@ object WataLogic:
                   timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, timer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
-      s.backHeld, s.backHoldTime, held, hold)
+      s.backHeld, s.backHoldTime, held, hold, s.captureLevel)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
-      held, hold, s.okHeld, s.okHoldTime)
+      held, hold, s.okHeld, s.okHoldTime, s.captureLevel)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
   /** full input with per-frame context (snapshot + queues). Returns new state. */
@@ -191,7 +199,9 @@ object WataLogic:
     var out = s
     if !s.pttHeld then
       ctx.audioCmds.trySend(AcRecordStart())
-      out = withPtt(s, true, 0.0)
+      // level 0 until the first period's tick arrives — a stale level from
+      // the previous recording must not open the meter wide.
+      out = withCapLevel(withPtt(s, true, 0.0), 0)
     out
 
   def pttRelease(s: WataState, ctx: FrameCtx): WataState =
@@ -383,6 +393,8 @@ object WataLogic:
       uploadRecording(ctx, s, d.ogg, d.durationMs)
       s
     case _: AeRecordingError => withFlash(s, s.pttHoldTime, 2.0, true, s.sendOk, s.playError)
+    // the record loop's 25 Hz level tick — the recording meter's only feed.
+    case l: AeCaptureLevel   => withCapLevel(s, l.level)
     // the clip played to the end, which is what "heard" means here: receipt
     // now, and only now. A playback that ERRORED sends nothing — a broken
     // speaker must not tell the sender their message got through.
@@ -693,16 +705,27 @@ object WataLogic:
   def playErrMsg(s: WataState): String =
     if s.noAudio then "NO AUDIO" else "PLAY FAILED"
 
-  /** the recording bar: a red band across the bottom with the elapsed time
-   *  centered on it — the rectangle first, since it sits behind the text. */
+  /** the recording bar: a red band across the bottom with the live capture
+   *  meter and the elapsed time over it — paint order back to front. The
+   *  meter (plan 0042) is one bright rect whose width is the level: the
+   *  elapsed time animates on the CLOCK and counts up identically over a dead
+   *  microphone, so the meter is the one thing on this bar that proves sound
+   *  is arriving — flat sliver = dead mic. */
   def recordingView(s: WataState): View =
     val barY = Display.H - 24
     val secs = s.pttHoldTime.toInt
     val tenths = (s.pttHoldTime * 10.0).toInt % 10
     val txt = "REC " + secs + "." + tenths + "s"
     VGroup(Keyed("bar", VRect(0, barY, Display.W, 24, Color.red)) ::
-      (Keyed("time", VText(FbPaint.centerCol(txt), (barY + 8) / Font.GLYPH_H, txt,
-        Color.white)) :: Nil))
+      (Keyed("lvl", VRect(4, barY + 9, levelWidth(s.captureLevel), 6, Color.green)) ::
+        (Keyed("time", VText(FbPaint.centerCol(txt), (barY + 8) / Font.GLYPH_H, txt,
+          Color.white)) :: Nil)))
+
+  /** the meter's width in px: level 0..32 across the bar's inner span, min 1
+   *  so silence is a visible sliver rather than absence. */
+  def levelWidth(level: scala.Int): scala.Int =
+    val w = level * (Display.W - 8) / 32
+    if w < 1 then 1 else w
 
   /** THE BOOT SCREEN — what the applet shows from session start until the link
    *  has been live once (`NetStatus.everLive`). The device boots into wata

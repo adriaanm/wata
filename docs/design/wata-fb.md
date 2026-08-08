@@ -261,6 +261,25 @@ the pixel buffer from an applet. The exception is deliberate: the snake
 keeps its own painter, because it is a game surface rather than a wata
 screen and no second backend will ever render it.
 
+**The recording bar carries a live capture meter** (plan 0042). The red
+band's elapsed time animates on the CLOCK (`tickTimers`), so it counts up
+identically over a live microphone and a dead one — which is exactly how a
+zeroed `DEC1 MUX` cost a real message (the route-watchdog section below
+tells that story). The meter is the audio-driven counterpart: the record
+loop computes the peak absolute sample of each 40ms period right between
+the read and the encode (`AudioThread.periodLevel`), scales it to 0..32,
+and posts `AeCaptureLevel` on the existing event mailbox once per period
+(25 Hz, `trySend` — a dropped tick is harmless). The wata applet keeps it
+as `WataState.captureLevel` (reset to 0 on PTT press) and draws one bright
+green rect keyed `"lvl"` inside the bar, width `level * (W-8) / 32`, min 1
+— so a dead mic is a visible flat sliver while the clock counts happily,
+and a bar that moves when the kid speaks is proof sound is arriving. It is
+also an implicit liveness signal: a record loop that stops reading stops
+ticking. Both clients share the bar (the shared `applets.scala` /
+`audiothread.scala`); scripted runs pin it with the `caplevel` uiscript
+directive (the `rec-meter` scenario), and mac-smoke asserts the exact rect
+the fake mic's constant-amplitude tone produces (level 15).
+
 ### The settings device rows
 
 The settings applet is the whole of what system-menu offered a parent

@@ -333,14 +333,26 @@ def run(tmp):
         sess.cmd("key space press", lambda l: l == "key ok")
         held = sess.cmd("wait 1200", lambda l: l == "waited 1200")
         hp = [l for l in held if l.startswith("patch ")]
+        # the overlay inserts with the meter at its level-0 sliver (width 1):
+        # PTT press resets the level, and the first capture period has not
+        # ticked yet on the frame that shows the bar.
         c.ok(hp[:1] == ['patch insert [] 1 rec:group[bar:rect(0,104,160,24,63488) '
-                        'time:text(9,14,"REC 0.0s",65535)]'],
+                        'lvl:rect(4,113,1,6,2016) time:text(9,14,"REC 0.0s",65535)]'],
              f"record: want the recording overlay inserted first, got {hp[:1]!r}")
-        c.line(hp, lambda l: l == 'patch set [1.1] text(9,14,"REC 1.0s",65535)',
+        c.line(hp, lambda l: l == 'patch set [1.2] text(9,14,"REC 1.0s",65535)',
                "record: the overlay's elapsed time never reached 1.0s")
+        # the capture meter (plan 0042): the fake mic is a constant-amplitude
+        # 16000 sine, so its peak-of-period level is constant — 16000*32/32767
+        # = 15, width max(1, 15*152/32) = 71 — and the meter widens EXACTLY
+        # once. A flat bar here would be the dead-mic signature this meter
+        # exists to show.
+        c.line(hp, lambda l: l == 'patch set [1.1] rect(4,113,71,6,2016)',
+               f"record: the meter never showed the fake mic's level 15, got {hp!r}")
         t5 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
         c.line(t5, lambda l: l.strip() == 'NSBox 0 0 160 24',
                "tree 5: no recording bar while PTT is held")
+        c.line(t5, lambda l: l.strip() == 'NSBox 4 9 71 6',
+               "tree 5: no capture-meter rect at the fake mic's level")
         c.line(t5, lambda l: re.fullmatch(r'NSTextField 54 7 48 8 "REC 1\.\ds"', l.strip()),
                "tree 5: no recording elapsed-time label")
 

@@ -240,6 +240,15 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0042: the recording level meter. The `caplevel` directive
+        # injects the tick a live record loop would post; the goldens pin the
+        # wide bar and the dead-mic sliver inside the red recording overlay.
+        "name": "rec-meter",
+        "phases": [
+            ("alice", "alice-rec-meter.txt"),
+        ],
+    },
+    {
         # plan 0041: arrival notifications. Phase 1 pins quiet mode (banner +
         # LED-arbiter decisions + persistent highlight); phase 2 pins play-now
         # (the arrival auto-plays and the receipt raises `played`). The

@@ -67,7 +67,8 @@ object Selftest:
 
   /** integer tags for AudioEvt (target/error comparison without an eq surface):
    *  1 playback_done, 2 playback_error, 3 recording_done, 4 echo_done,
-   *  5 echo_recording, 6 echo_playing, 7 echo_error, 8 recording_error. */
+   *  5 echo_recording, 6 echo_playing, 7 echo_error, 8 recording_error,
+   *  9 capture_level (the recording meter's 25 Hz tick — never a target). */
   def evtTag(e: AudioEvt): Int = e match
     case _: AePlaybackDone   => 1
     case _: AePlaybackError  => 2
@@ -77,6 +78,7 @@ object Selftest:
     case _: AeEchoPlaying    => 6
     case _: AeEchoError      => 7
     case _: AeRecordingError => 8
+    case _: AeCaptureLevel   => 9
 
   def evtName(e: AudioEvt): String = e match
     case _: AePlaybackDone   => "playback_done"
@@ -87,6 +89,7 @@ object Selftest:
     case _: AeEchoPlaying    => "echo_playing"
     case _: AeEchoError      => "echo_error"
     case _: AeRecordingError => "recording_error"
+    case _: AeCaptureLevel   => "capture_level"
 
   def isErrTag(t: Int): Boolean = t == 2 || t == 7 || t == 8
 

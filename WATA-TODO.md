@@ -27,6 +27,15 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## client / device
 
+- **The recording level meter needs its device pass** (plan 0042,
+  2026-08-08): gate-proven only (the `rec-meter` fb-ui-tests scenario and
+  mac-smoke's exact fake-mic rect) and rides the next `fb-deploy`. On the
+  handset: hold PTT and speak — the bright bar inside the red recording
+  band moves with the voice; cover the microphone and it drops to the
+  minimum sliver; force `DEC1 MUX` to `ZERO` with no stream open (see the
+  route-watchdog notes in docs/design/wata-fb.md for the amixer gotcha)
+  and the bar staying flat while REC counts up is the failure this meter
+  exists to make visible.
 - **Arrival notifications need their device pass** (plan 0041,
   2026-08-08): the presentation is gate-proven only (`arrival-notify`
   in fb-ui-tests: probes, goldens, decision lines) and rides the next
