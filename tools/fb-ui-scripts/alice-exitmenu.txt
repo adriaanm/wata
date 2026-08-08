@@ -58,6 +58,28 @@ expect exitconfirm 0
 expect exitrow 3
 checkpoint alice-exit-disarmed
 
+# ---- the LONGEST armed prompt ----------------------------------------------
+# row 3 is "Reboot to fastboot", whose armed line is "OK again: reboot to
+# fastboot" — 28 characters on a 26-column panel. The label itself fits, so
+# checking labels alone says this screen is fine; it is the ARMED prompt that
+# is the longest string this menu can draw, and drawText truncates at the
+# panel edge without a word about it. This checkpoint is here so that string
+# is rendered by a golden at all.
+key enter press
+key enter release
+advance 2
+expect exitrow 3
+expect exitconfirm 1
+checkpoint alice-exit-fastboot-armed
+
+# cancel and come back to the same row, so the rest of the script sees the
+# state it saw before this block was inserted.
+tap up
+tap down
+advance 2
+expect exitrow 3
+expect exitconfirm 0
+
 # ---- a one-step row --------------------------------------------------------
 # back up to "Reboot" (row 1) — one of the rows whose confirmation is a single
 # OK, so the counter must never reach 2 there.

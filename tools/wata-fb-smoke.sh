@@ -34,6 +34,15 @@ PNGOUT="$("$FB_EMIT/$FB_BIN" pngtest)" || { echo "wata-fb pngtest run failed"; e
 printf '%s\n' "$PNGOUT" | sed 's/^/   /'
 printf '%s\n' "$PNGOUT" | grep -qF "pngtest: PASS" || { echo "wata-fb: pngtest did not PASS"; exit 1; }
 
+# The exit menu's text fit: drawText stops at the panel edge without a word
+# about it, so an overlong prompt renders as a shorter sentence. The goldens
+# cover only the frames a script walks to, and the longest string is not one
+# of them by default (exitmenu.scala fitCheck header).
+echo "-- wata-fb (1b2): exit-menu text fit (exitfit) --"
+FITOUT="$("$FB_EMIT/$FB_BIN" exitfit)" || { echo "wata-fb exitfit run failed"; exit 1; }
+printf '%s\n' "$FITOUT" | sed 's/^/   /'
+printf '%s\n' "$FITOUT" | grep -qF "exitfit: PASS" || { echo "wata-fb: exitfit did not PASS"; exit 1; }
+
 # -- (1c) the Gio blit pipeline (plan 0023 M2): the RGB565->RGBA conversion and
 # the integer nearest-neighbour scaler that go-pkgs/gioshell blits the panel
 # with. Pure Go, no window and no GPU — this is the assertion that the window

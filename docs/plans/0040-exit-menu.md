@@ -117,6 +117,21 @@ without scrolling, which is why the action list stays at five.
   a menu that silently stays armed while the person thinks they left.
 - **`just golden`** stays byte-exact for the frames that do not involve
   the menu — the exit path is the only thing moving.
+- **The text fits the panel** (`wata-fb exitfit`, run by the fb smoke).
+  The longest string this screen draws is not a label — it is the ARMED
+  prompt, `"OK again: " + verb`, ten columns of prefix on a 26-column
+  panel. `"OK again: reboot to fastboot"` was 28, and shipped reading
+  `"OK again: reboot to fastbo"`: `Font.drawText` stops at the panel
+  edge in silence, so an overlong prompt does not look broken, it looks
+  like a shorter sentence. Six goldens did not catch it because none of
+  them armed that row — a golden pins the frames somebody thought to
+  produce, and the longest string is rarely the one a script walks to.
+  The two cable rows' verbs are now `fastboot` and `EDL`, dropping the
+  "reboot to" the highlighted label directly above already says; the
+  scenario arms row 3 so the string is rendered by a golden at all; and
+  `exitfit` enumerates every string the screen can draw, which does not
+  depend on being walked to.
+
 - **On the handset**: open the menu and take `Restart app` and `Reboot`.
   Fastboot and EDL are exercised only as far as the second prompt — the
   actions themselves are already proven (Settings has been running them),

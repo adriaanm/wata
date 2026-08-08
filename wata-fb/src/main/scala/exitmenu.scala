@@ -184,12 +184,19 @@ object ExitMenu:
       lines("OK: " + verb(s.selected), Color.midGray, hint(s.selected), Color.midGray)
     else lines("OK again: " + verb(s.selected), Color.red, "other keys cancel", Color.midGray)
 
+  /** The panel is 26 columns (`Font.COLS`), and the longest thing this screen
+   *  draws is not a label but the ARMED prompt — `"OK again: " + verb`, ten
+   *  characters of prefix. So a verb has 16 columns, and the two cable rows
+   *  drop the "reboot to" the highlighted label directly above already says.
+   *  `drawText` stops at the panel edge without a word about it, so an
+   *  overlong verb does not look broken — it looks like a shorter sentence,
+   *  on the confirmation for the actions that most need reading. */
   def verb(i: scala.Int): String =
     if i == RESTART_APP then "restart app"
     else if i == REBOOT then "reboot"
     else if i == POWER_OFF then "power off"
-    else if i == REBOOT_BL then "reboot to fastboot"
-    else "reboot to EDL"
+    else if i == REBOOT_BL then "fastboot"
+    else "EDL"
 
   /** the unarmed second line: for the two cable-only rows, what the person is
    *  actually choosing — not "are you sure" but what the device will be. */
@@ -198,6 +205,37 @@ object ExitMenu:
     else if i == REBOOT_EDL then "needs a USB cable"
     else if i == RESTART_APP then "the app comes back"
     else ""
+
+  /** Every string this screen can draw, checked against the panel's 26
+   *  columns (`wata-fb exitfit`, run by the fb smoke).
+   *
+   *  This exists because the failure is silent: `Font.drawText` stops at the
+   *  panel edge, so an overlong prompt renders as a shorter sentence rather
+   *  than as anything visibly wrong. "OK again: reboot to fastboot" shipped
+   *  reading "OK again: reboot to fastbo" past six goldens, because none of
+   *  them armed that row — a golden only pins the frames somebody thought to
+   *  produce, and the longest string is rarely the one a script walks to. A
+   *  check that enumerates the strings does not depend on being walked to. */
+  def fitCheck(): Unit =
+    var ok = true
+    var i = 0
+    while i <= REBOOT_EDL do
+      if !fits("label", itemLabel(i)) then ok = false
+      if !fits("unarmed", "OK: " + verb(i)) then ok = false
+      if !fits("armed", "OK again: " + verb(i)) then ok = false
+      if !fits("hint", hint(i)) then ok = false
+      i += 1
+    if !fits("cancel", "other keys cancel") then ok = false
+    if !fits("nothing", "nothing happened") then ok = false
+    if ok then println("exitfit: PASS")
+    else println("exitfit: FAIL")
+
+  def fits(what: String, s: String): Boolean =
+    val n = go.bytes(s).length
+    if n > Font.COLS then
+      println("exitfit " + what + " FAIL: " + n + " > " + Font.COLS + " cols: " + s)
+      false
+    else true
 
   def lines(l1: String, c1: scala.Int, l2: String, c2: scala.Int): View =
     var kids: List[Keyed] = Nil

@@ -59,6 +59,10 @@ object Main:
     // the PNG stored-block selfcheck (png.scala PngCheck header): exercises
     // Png.zlib past the 65535-byte stored-block cap; run by fb-smoke.
     else if args.length > 0 && args(0) == "pngtest" then PngCheck.run()
+    // the exit menu's text-fit selfcheck (exitmenu.scala fitCheck header):
+    // every string that screen can draw against the panel's 26 columns, since
+    // drawText truncates at the edge in silence; run by fb-smoke.
+    else if args.length > 0 && args(0) == "exitfit" then ExitMenu.fitCheck()
     else if args.length > 1 && args(0) == "syncfix" then
       SyncFixDriver.run(args)
     else if args.length > 2 && args(0) == "integ" then
