@@ -80,6 +80,18 @@ Findings from pre-shaping, worth carrying to the landing:
    NO booleans; menu targets return void) will need either the
    void-result form the ruling already defers to implementation, or a
    story for small constants. Worth pinning alongside the arity bound.
+
+   **Answered upstream the same day** (sgola `a48248e`, replying to our
+   `CALLBACK-RESULT-VOCABULARY` note): the trampoline marshals to a
+   Scala-facing signature of ordinary values — params
+   `go.Uintptr | Int`, result `go.Uintptr | Int | Unit` — so void
+   methods are admitted, a BOOL predicate declares `Int` and answers
+   0/1, and constants are simply `Int`s. On the landing, this spike's
+   oracle should simplify to `def onCall(...): Int = 42` and assert the
+   42; the return-self spelling below is the pre-refinement record.
+   (`==` on `go.Uintptr` stays deliberately ungranted —
+   `UINTPTR-IDENTITY-COMPARE` upstream is the fileable-against key —
+   but the Int oracle removes this spike's need for it.)
 2. **Zero is spelled by omission.** `objc_allocateClassPair`'s
    `extraBytes` argument is 0, and there is no `go.Uintptr` zero. The
    spike leans on purego's `SyscallN` zero-filling the registers it is

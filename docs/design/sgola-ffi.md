@@ -70,9 +70,14 @@ here. The contract to build against, ahead of the landing:
 - register at module/startup scope — the platform cap makes
   registration-in-a-loop fail loudly, so callbacks are never minted
   per-frame;
-- `f` is restricted to the address-sized vocabulary (`go.Uintptr`
-  params and result, monomorphic; the void-result form and exact arity
-  bound are being pinned at implementation);
+- `f` speaks ordinary values, monomorphic: params `go.Uintptr | Int`,
+  result `go.Uintptr | Int | Unit` (refined at sgola `a48248e` from
+  our `CALLBACK-RESULT-VOCABULARY` finding — the emitted trampoline is
+  the uintptr-slotted func purego requires and MARSHALS to the declared
+  signature, so void methods work, a BOOL predicate declares `Int` and
+  answers 0/1, and "a method body must be able to answer 0, 1 and 42"
+  is literally in the upstream scenario requirements; `go.Uintptr`
+  stays fully opaque, conversions live only in the emitted glue);
 - the registration is a **crossing**: `f`'s captures face the same
   predicate a fork capture does (Shareable / pure / synchronizer) —
   callback bodies that need mutable state hoist it into
