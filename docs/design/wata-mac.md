@@ -501,9 +501,26 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   + `colorAtX:y:`, addressing through the rep's `pixelsWide/High` so a
   non-1 backing scale cannot skew probe coordinates (`render_test.go`).
 
-## Growth while idle — ROOT CAUSE FOUND, fix is upstream (`MAC-IDLE-LEAK`)
+## Growth while idle — CLOSED (`MAC-IDLE-LEAK`)
 
-The app grows without bound while doing nothing. macOS paused a
+**Resolution (2026-08-08): sgola retired `slab List` from core's default
+build, landed at `65e8bae`; the pin moved `1c6d6ed -> 65e8bae` and the
+verdict series is flat.** With the new pin, `sgolaSlabPool` no longer
+appears anywhere in wata-mac's emitted Go (was 60 occurrences), and the
+committed judge — the live heap after each GC — reads dead flat on both
+the diffonly arm and the full untouched app:
+
+```
+diffonly:  live heap after each GC (MB): 0 0 0 0 0 0 0 0
+full app:  live heap after each GC (MB): 0 0 0 0 0 0 0 0
+```
+
+(Pre-fix, diffonly read `1 1 1 2 2 3 3 4 5 6 5 7 8 9 10`.) Full ci green
+on the same pin, including the objc-spike oracle. The rest of this
+section is the record of the mechanism and the eliminations; the bisect
+arms below stay committed for regression re-checks.
+
+The app grew without bound while doing nothing. macOS paused a
 long-running instance at **26 GB** (owner, 2026-08-08). **The cause is
 sgola's `slab List` allocator** (core/sgo.build, OPT-D tier), proven by a
 controlled on/off experiment: cons cells are carved 256 at a time out of
@@ -517,8 +534,9 @@ on — every frame's tree held forever. Removing `slab List` from the
 pinned core and rebuilding turns the diff-only arm's 1→9 MB climb and
 the full app's unbounded growth into a dead-flat `0 0 0 0 0 0 0 0`,
 with nothing else changed. Filed upstream as
-`SLAB-DEAD-CELLS-RETAIN`; no consumer-side workaround exists (the knob
-is core's), so the leak ships until a fix lands and the pin moves.
+`SLAB-DEAD-CELLS-RETAIN`; no consumer-side workaround existed (the knob
+was core's), so the leak shipped until the retirement landed and the
+pin moved (the resolution above).
 
 The bisect arms that found it are COMMITTED, env-gated by
 `WATA_MAC_LEAK_ARM` and driven by `just mac-leak --arm
