@@ -47,3 +47,12 @@ type VolCtl struct{}
 func OpenVolCtl() (*VolCtl, error) { return nil, errStub }
 func (v *VolCtl) Apply(int) int    { return -1 }
 func (v *VolCtl) Close()           {}
+
+// The route watchdog watches a codec that only the handset has, so off-device
+// there is nothing to correct and the count is always 0.
+type RouteCtl struct{}
+
+func OpenRouteCtl() (*RouteCtl, error) { return nil, errStub }
+func (r *RouteCtl) Reassert() int      { return 0 }
+func (r *RouteCtl) Close()             {}
+func RouteCorrections() int            { return 0 }

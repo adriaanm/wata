@@ -29,6 +29,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 )
 
@@ -151,6 +152,7 @@ func OpenPlayback(startThreshold uint) (*Playback, error) {
 // OpenPlaybackTuned opens playback with an explicit ring geometry. chunkPeriods
 // is the pcm_writei chunk size (periods); startThreshold is in frames.
 func OpenPlaybackTuned(periodSize, periodCount, chunkPeriods, startThreshold uint) (*Playback, error) {
+	reassertRoutes()
 	cfg := baseConfig()
 	cfg.period_size = C.uint(periodSize)
 	cfg.period_count = C.uint(periodCount)
@@ -225,6 +227,7 @@ func (p *Playback) Close() {
 type Capture struct{ pcm *C.struct_pcm }
 
 func OpenCapture() (*Capture, error) {
+	reassertRoutes()
 	cfg := baseConfig()
 	pcm := C.pcm_open(0, 0, C.PCM_IN, &cfg)
 	if pcm == nil || C.pcm_is_ready(pcm) == 0 {
@@ -256,6 +259,10 @@ func (c *Capture) Close() {
 // SetupMixer applies the one-time playback+capture route (alsa.zig setupMixer):
 // PRI_MI2S_RX ← MultiMedia1, RX2/HPHR/Ext-Spk on, mic decimator on. Called once
 // after boot; no per-mode switching (avoids ADSP churn).
+//
+// It also pre-opens the route watchdog (see RouteCtl): the codec resets the two
+// mux controls when the Q6 comes up, so "applied once at startup" is not the
+// same as "in force when a stream opens".
 func SetupMixer() {
 	mixer := C.mixer_open(0)
 	if mixer == nil {
@@ -272,6 +279,150 @@ func SetupMixer() {
 	setEnum(mixer, "DEC1 MUX", "ADC1")
 	setInt(mixer, "ADC1 Volume", 6)
 	setInt(mixer, "DEC1 Volume", 104)
+
+	if rc, err := OpenRouteCtl(); err == nil {
+		routes = rc
+	}
+}
+
+// ---- the route watchdog ---------------------------------------------------
+
+// routes is the process-wide pre-opened watchdog, set by SetupMixer. nil means
+// SetupMixer never ran or the controls are absent — reassertRoutes is then a
+// no-op, which is what the host builds and the pre-mixer chirp want.
+var routes *RouteCtl
+
+// RouteCtl is a pre-opened handle on the two codec muxes that carry the audio
+// path, held for the life of the process so re-checking them costs two ioctls
+// rather than a mixer_open (which enumerates ~700 controls on this codec and is
+// far too slow to sit in front of a stream).
+//
+// Both are reset to ZERO when the Q6 comes up or restarts, and each failure is
+// silent in a way that looks like something else:
+//
+//   - "RX2 MIX1 INP1" ← "RX1" is playback. Zeroed, the speaker is dead while
+//     every other control still reads correct.
+//   - "DEC1 MUX" ← "ADC1" is capture. Zeroed, the microphone records four
+//     seconds of digital silence that encodes, sends, arrives and plays as
+//     nothing — indistinguishable from a kid who did not speak. That cost a
+//     real message on 2026-08-07.
+//
+// bq268-alpine's audio-mixer service applies-verifies-and-watches both for two
+// minutes after boot, which covers the boot race. This covers the other one: a
+// Q6 restart mid-session, after the watcher has stopped, which would otherwise
+// silence the app until someone rebooted the handset.
+type RouteCtl struct {
+	mu    sync.Mutex
+	mixer *C.struct_mixer
+
+	rxCtl  *C.struct_mixer_ctl // "RX2 MIX1 INP1"
+	rxWant C.int               // the enum index of "RX1"
+
+	decCtl  *C.struct_mixer_ctl // "DEC1 MUX"
+	decWant C.int               // the enum index of "ADC1"
+
+	corrections int
+}
+
+// enumIndex is the index of `want` in a mixer enum control, or -1. The route is
+// checked by INDEX rather than by string so the hot path is one ioctl and no
+// allocation; resolving the index is done once, here.
+func enumIndex(ctl *C.struct_mixer_ctl, want string) C.int {
+	n := int(C.mixer_ctl_get_num_enums(ctl))
+	for i := 0; i < n; i++ {
+		if C.GoString(C.mixer_ctl_get_enum_string(ctl, C.uint(i))) == want {
+			return C.int(i)
+		}
+	}
+	return -1
+}
+
+// OpenRouteCtl pre-opens both mux controls and resolves the enum index each one
+// must hold. It fails if either control or either value is missing — a partial
+// watchdog would report "routes fine" while watching one of them.
+func OpenRouteCtl() (*RouteCtl, error) {
+	mixer := C.mixer_open(0)
+	if mixer == nil {
+		return nil, errors.New("mixer_open(0) failed")
+	}
+	r := &RouteCtl{mixer: mixer}
+	var err error
+	r.rxCtl, r.rxWant, err = enumCtl(mixer, "RX2 MIX1 INP1", "RX1")
+	if err == nil {
+		r.decCtl, r.decWant, err = enumCtl(mixer, "DEC1 MUX", "ADC1")
+	}
+	if err != nil {
+		C.mixer_close(mixer)
+		return nil, err
+	}
+	return r, nil
+}
+
+func enumCtl(mixer *C.struct_mixer, name, want string) (*C.struct_mixer_ctl, C.int, error) {
+	cn := C.CString(name)
+	defer C.free(unsafe.Pointer(cn))
+	ctl := C.mixer_get_ctl_by_name(mixer, cn)
+	if ctl == nil {
+		return nil, 0, fmt.Errorf("control %q not found", name)
+	}
+	idx := enumIndex(ctl, want)
+	if idx < 0 {
+		return nil, 0, fmt.Errorf("control %q has no value %q", name, want)
+	}
+	return ctl, idx, nil
+}
+
+// Reassert reads both muxes and rewrites any that no longer holds its route.
+// Returns the number it had to correct: 0 on every healthy call, and nonzero
+// exactly when something reset the codec under us.
+//
+// A correction prints, on the app's own log: it is the only visible trace that
+// the Q6 restarted, and the failure it prevents (a recording of digital
+// silence) is one that leaves no other evidence anywhere.
+func (r *RouteCtl) Reassert() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fixed := 0
+	if C.mixer_ctl_get_value(r.rxCtl, 0) != r.rxWant {
+		C.mixer_ctl_set_value(r.rxCtl, 0, r.rxWant)
+		fmt.Println("audio: playback route 'RX2 MIX1 INP1' had been reset — put back")
+		fixed++
+	}
+	if C.mixer_ctl_get_value(r.decCtl, 0) != r.decWant {
+		C.mixer_ctl_set_value(r.decCtl, 0, r.decWant)
+		fmt.Println("audio: capture route 'DEC1 MUX' had been reset — put back (the mic was dead)")
+		fixed++
+	}
+	r.corrections += fixed
+	return fixed
+}
+
+func (r *RouteCtl) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.mixer != nil {
+		C.mixer_close(r.mixer)
+		r.mixer = nil
+		r.rxCtl, r.decCtl = nil, nil
+	}
+}
+
+// reassertRoutes is the one-line guard the stream-open paths call.
+func reassertRoutes() {
+	if routes != nil {
+		routes.Reassert()
+	}
+}
+
+// RouteCorrections is the running total of muxes this process has had to put
+// back, for the log line that says the Q6 restarted under us. Diagnostics only.
+func RouteCorrections() int {
+	if routes == nil {
+		return 0
+	}
+	routes.mu.Lock()
+	defer routes.mu.Unlock()
+	return routes.corrections
 }
 
 // SetPlaybackVolume sets the Q6 ASM soft "Playback 0 Volume" (0..8192-ish);
