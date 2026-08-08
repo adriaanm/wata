@@ -513,29 +513,70 @@ eliminations.
 because it is reading them TOGETHER that localizes the growth:
 
 ```
-RSS          43.0 MB -> 47.4 MB   (~400 MB/hour idle — ~60h to 26 GB)
-Go live heap  1 MB -> 2 MB        (flat, GODEBUG=gctrace=1)
-OS threads    6 -> 13             (monotonic, GODEBUG=schedtrace)
+RSS          43.0 MB -> 53.8 MB   (peak 54.3, trough after peak 53.8)
+Go live heap  1 MB -> 10 MB       (GODEBUG=gctrace=1)
+OS threads    6 -> 14             (monotonic, GODEBUG=schedtrace)
+VERDICT: GROWING
+  (low-water 43.0 MB -> 50.4 MB: the troughs rise)
 ```
 
-**Ruled out.** Go objects: the live heap is flat across the same window
-the RSS climbs. Retained ObjC objects: two `heap <pid>` censuses taken 60
-rounds apart are class-for-class identical (diff the `COUNT`/`BYTES`
-table under the `CLASS_NAME` header). So it is neither of the two heaps
-this app has.
+**RSS here is a sawtooth, and that invalidates any short run.** It climbs
+for a couple of minutes and then the scavenger hands pages back, dropping
+it to near where it started. A 60-round run is ~48 seconds and sits
+entirely on a rising edge, so it reads GROWING every single time, and
+first-minus-last over such a run is the slope of that edge rather than a
+leak rate. An earlier reading of "+4-5 MB per ~40s, so ~400 MB/hour, so
+~60h to 26 GB, which matches the uptime" was that arithmetic done on a
+rising edge; the agreement with the uptime was a coincidence. What
+separates a leak from the sawtooth is whether the TROUGHS rise, which is
+what the verdict now compares (low-water of the first quarter against the
+last), and a run with no reclaim in it at all now reports INCONCLUSIVE
+rather than GROWING. The default is 200 rounds because fewer cannot
+contain a reclaim.
 
-**The live lead** is the thread count, which is the only number moving
-with RSS. Threads that climb monotonically while both heaps stay flat
-mean goroutines that never finish, each pinning an M — a different bug
-from either heap leak, and one a goroutine dump names directly. Next
-probes, in order: SIGQUIT the app mid-run for that dump; then `vmmap` to
-see which region grows, separating thread stacks from a malloc zone.
+**Ruled out — goroutines.** `just mac-leak --goroutines` SIGQUITs the app
+at the end and groups the dump by creation site. There are **23**
+goroutines after a full run and the largest group is the runtime's own 8
+GC workers; every application site appears once or twice. So the thread
+count is not goroutines that never finish, which was the leading
+hypothesis, and threads climbing to 14 and stopping is a plateau rather
+than a leak. (A signal traceback spells its header `goroutine 12 gp=0x…
+m=nil mp=nil [select]:`, not the `goroutine 12 [select]:` that
+`runtime.Stack` produces — a parser anchored to the latter reports an
+empty dump for a dump that arrived in full.)
 
-**The caveat that must survive.** `mac-leak` runs headless, where nothing
-drives an NSApplication runloop, so main-queue work is never drained and
-`nativeui/dispatch.go`'s `pending` map grows — a growth source the
-windowed app does not have. The 26 GB was the windowed app. A finding
-here is a lead; a fix has to be confirmed against a real windowed run.
+**Not ruled out — Go objects.** The earlier "live heap is flat at 1-2 MB"
+was measured over ~48s, which is too short: over 200s it reaches 3-10 MB.
+`--heap` writes periodic heap profiles and prints what grew between the
+first and last (`go tool pprof -base`, since a single profile is dominated
+by steady-state objects and says nothing). What it names is view-tree cons
+cells (`sgolaNewColon2__Keyed` under `Pump_frame`) — a few MB, transient in
+shape. That is smaller than the RSS trough rise, so the Go heap is part of
+the story and not all of it.
+
+Retained ObjC objects stay ruled out: two `heap <pid>` censuses 60 rounds
+apart are class-for-class identical (diff the `COUNT`/`BYTES` table under
+the `CLASS_NAME` header).
+
+`--vmmap` diffs the dirty size of each region between two points in the
+run, which separates thread stacks from a malloc zone from the Go arenas.
+
+**The caveat that did NOT survive.** It used to be recorded here, and in
+the ticket, that `mac-leak` runs headless where main-queue work is never
+drained, so `nativeui/dispatch.go`'s `pending` map grows — a growth source
+the windowed app lacks. **That is false.** Both `MainQueue().Async` call
+sites in this package (`shell.go`'s `onStage` and `login.go`'s
+`onStageSync`) open with `if hl { … ; return }` and hand the work to the
+headless stage thread over a channel instead, so headless never reaches
+the main queue at all and `pending` never grows there. The caveat was
+costing the harness credibility it had not lost.
+
+What remains true is the narrower half: headless draws no real view tree
+and runs no runloop, and the 26 GB was a **windowed** run. That is why the
+heap profiler is in this package behind `WATA_MAC_HEAP_PROFILE` rather
+than in the harness — a profile that can only be taken headless cannot
+settle a windowed bug. Pointing it at a windowed run over hours is the
+next probe, and the only one that can.
 
 ## Verification
 
