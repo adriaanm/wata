@@ -2,6 +2,13 @@
 # family 1, DM 2 — and leaves its session in $WATA_FB_CONFIG for phase 4 to
 # resume. The waits walk the selection down to the DM and back so the probe
 # (which reads the SELECTED conversation) sees both counts before the dump.
+#
+# quiet: priming happens on the first non-empty snapshot, so a backlog that
+# syncs in across two snapshots would count its tail as an arrival — and
+# play mode would auto-play and RECEIPT it, dropping a badge this phase's
+# golden pins (observed once under full-ci load: the Alice row read 1, not
+# 2). See bob-dm-roundtrip.txt.
+notifymode quiet
 
 wait syncing 1 900
 # [Family, Alice-DM]
@@ -10,5 +17,9 @@ wait msgs 1 2000
 tap down
 wait msgs 2 2000
 tap up
+# gate on the summed badge state itself (family 1 + DM 2), then outlast any
+# quiet banner a raced arrival raised; both are 0-frame no-ops normally.
+wait unplayed 3 2000
+waitmax notifybanner 0 200
 advance 30
 checkpoint badges-before

@@ -1,11 +1,21 @@
 # dm-roundtrip, phase 4: alice's second session pins bob's reply and the
 # badge lifecycle — the roster shows one unplayed for the reply, opening the
 # conversation receipts it, and the roster afterwards shows no badge.
+#
+# quiet: a split-backlog sync would otherwise count bob's reply as an
+# arrival and play-mode auto-play would receipt it before the badge
+# checkpoint (see bob-dm-roundtrip.txt).
+notifymode quiet
 
 wait syncing 1 900
 wait convs 2 900
 tap down
 wait msgs 2 2000
+# same gate as dm-bob-roster: the checkpoint shows the badge for bob's reply,
+# so wait for the badge state itself before shooting the frame, then outlast
+# any quiet banner a raced arrival raised.
+wait unplayed 1 2000
+waitmax notifybanner 0 200
 advance 30
 checkpoint dm-alice-badge
 

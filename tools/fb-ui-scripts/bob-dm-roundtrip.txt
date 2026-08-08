@@ -1,12 +1,28 @@
 # dm-roundtrip, phase 3: bob sees the DM arrive with an unplayed badge,
 # opens it (read receipt -> played mark), plays it, and replies into the
 # same canonical room.
+#
+# quiet, NOT the play default: notify priming happens on the first non-empty
+# snapshot, so under load a backlog that syncs in across two snapshots turns
+# its tail into an "arrival" — and play mode then auto-plays and RECEIPTS it,
+# eating the badge this phase's goldens pin (and poisoning the receipt state
+# every later phase reads). Quiet mode banners instead, and the banner is
+# waited out below.
+notifymode quiet
 
 wait syncing 1 900
 # [Family, Alice-DM]: the canonical room synced in with its net.wata.dm stamp
 wait convs 2 900
 tap down
 wait msgs 1 2000
+# gate on the badge itself, not just the message count: the checkpoint shows
+# the unplayed badge on the Alice row, and `unplayed` is the summed count the
+# badge renders from — selection-independent, so the shot cannot land on a
+# frame where the arrival is countable but the badge state is not yet up.
+# Then outlast the quiet banner a raced split-backlog arrival raises (~122
+# frames of frame time); both waits are 0-frame no-ops on the common path.
+wait unplayed 1 2000
+waitmax notifybanner 0 200
 advance 30
 checkpoint dm-bob-roster
 

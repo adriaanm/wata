@@ -2,6 +2,12 @@
 # every slot), resumes on the stored token, and the same two badges come
 # back — unplayed state is server-side receipt state, so a restart cannot
 # lose it. Then one conversation is played out, and only ITS badge clears.
+#
+# quiet: the resumed session re-primes on its first non-empty snapshot, so a
+# split backlog would count its tail as an arrival and play-mode auto-play
+# would receipt a message this phase's badges depend on staying unplayed.
+# See bob-dm-roundtrip.txt.
+notifymode quiet
 
 wait syncing 1 900
 wait convs 2 900
@@ -9,6 +15,10 @@ wait msgs 1 2000
 tap down
 wait msgs 2 2000
 tap up
+# gate on the summed badge state itself (family 1 + DM 2), then outlast any
+# quiet banner a raced arrival raised; both are 0-frame no-ops normally.
+wait unplayed 3 2000
+waitmax notifybanner 0 200
 advance 30
 checkpoint badges-restored
 

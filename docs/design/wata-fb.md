@@ -1153,6 +1153,24 @@ unplayed count RISING, priming is once per session.
   until played, because it renders the count, not the edge. An arrival
   never wakes the screen: a handset in a dark bedroom staying dark is a
   feature.
+- **Priming is "first non-empty snapshot", which makes the backlog's
+  shape timing-dependent** `[FB-UI-PRIME-SPLIT-AUTOPLAY]`. A session's
+  pre-existing backlog is supposed to prime silently, but the sync
+  engine can deliver it across more than one snapshot; everything after
+  the first non-empty one counts as an arrival, and in play mode an
+  "arrival" that is really old backlog gets auto-played and receipted.
+  In scripted runs this raced badge goldens under full-ci load (a badge
+  read 1 where the golden pins 2 — the receipt ate it), so every fb-ui
+  receiving phase whose golden depends on backlog staying unplayed opens
+  with `notifymode quiet` and gates its badge checkpoints on
+  `wait unplayed N` + `waitmax notifybanner 0` (see
+  `bob-dm-roundtrip.txt` for the full rationale). The open question is
+  the device's: a slow first sync can auto-play stale backlog on a real
+  handset too. Fixing that means priming on sync-caught-up rather than
+  first-snapshot, which is `wataclient`'s (and the mac's) to decide —
+  and the remaining receiving-phase scripts that pin played-state
+  goldens without forcing quiet (`bob-view`, `bob-play`, `family3-*`)
+  carry the same latent exposure until then.
 - **Every arrival prints one decision line** to the app log:
   `notify: play|quiet|suppressed "<title>" "<body>" unplayed=<n>` —
   the assertable half of the presentation (`suppressed` = the person was
