@@ -1,0 +1,12 @@
+# sgo.build — plan 0038's call-in leg. Can an ObjC method's BODY be Sgola?
+# The spike registers a callback (`go.callback`, ruled sgola 29536af, not yet
+# landed), installs its address as an IMP on a runtime-synthesized class, and
+# msgSends the method — control enters Sgola from the ObjC runtime. Like the
+# call-out spike, no Go code of ours sits in the chain: `go-pkgs/puredep` is
+# the same no-functions dependency-plumbing module, and `purego` is reached
+# through a facade in the app's own sources.
+mode app
+emitname callback-spike
+binname callback-spike
+gomod callbackspike
+godep github.com/adriaanm/wata/go-pkgs/puredep ../go-pkgs/puredep

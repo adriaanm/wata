@@ -10,12 +10,13 @@ code wants to be). wata is sgola's proving ground, so "write that bit in
 Go" is a *finding*, and this doc is where the findings add up.
 
 The one-paragraph summary: **calling C is closed; being called by C is
-the open half.** Everything a call-out needs — open a library, find a
-symbol, make the call, pass a C string, carry the results — works on
-the current pin. Every remaining "must be Go" that is not a
-technology boundary (cgo, reflection, the Go runtime) traces to one
-missing feature: a Go **func value crossing a facade**, which is what
-callbacks, ObjC class synthesis, and the main-queue seam all are.
+ruled and queued.** Everything a call-out needs — open a library, find
+a symbol, make the call, pass a C string, carry the results — works on
+the current pin. Every remaining "must be Go" that is not a technology
+boundary (cgo, reflection, the Go runtime) traces to one feature —
+`go.callback`, a Go **func value crossing a facade** — whose shape is
+ruled (see "the call-in half") and whose implementation sits two deep
+in sgola's queue.
 
 ## What works today (on the current pin)
 
@@ -57,26 +58,36 @@ settled, only the landing is pending.
   carrying `List[T]` is a loud DATA-4 wall until the reference-collapsed
   instantiation learns a real equals.
 
-## Believed possible — the call-in half
+## Ruled — the call-in half
 
-**Func-typed facade parameters** (`OBJC-SPIKE-CALLBACK-LEG`, blocked on
-sgola's `SAM-CLOSURE-LOWERING`) is the load-bearing unknown. Everything
-that *receives control from C* needs it, and it is one feature wearing
-four costumes:
+**Callbacks are RULED** (2026-08-08, sgola `29536af`):
+`go.callback(f): go.Uintptr` — a *registration* returning a **free**
+address value, deliberately inverting cstring's bracket: a purego
+trampoline has process lifetime (never released, platform-capped), so
+the liveness objection that forced `cstr` into a bracket does not exist
+here. The contract to build against, ahead of the landing:
 
-- `purego.NewCallback(fn)` — a C-callable pointer to Sgola code;
-- `objc.RegisterClass` — an ObjC method whose body is Sgola;
-- `MainQueue().Async(work)` — the dispatch seam (`nativeui/dispatch.go`
-  is the *purest* FFI file in the package, not the FFI-free one the
-  first inventory claimed);
-- bindgen's protocol delegates — a struct of func fields, one IMP per
-  non-nil field.
+- register at module/startup scope — the platform cap makes
+  registration-in-a-loop fail loudly, so callbacks are never minted
+  per-frame;
+- `f` is restricted to the address-sized vocabulary (`go.Uintptr`
+  params and result, monomorphic; the void-result form and exact arity
+  bound are being pinned at implementation);
+- the registration is a **crossing**: `f`'s captures face the same
+  predicate a fork capture does (Shareable / pure / synchronizer) —
+  callback bodies that need mutable state hoist it into
+  `Atomic`/`Mutex` cells;
+- the returned address is opaque `go.Uintptr`, as ever.
 
-The evidence it is small: sgola's own notes describe closures as
-already emitting plain Go func literals — the *representation* is
-right, what is missing is the *binding* of a func-typed parameter. But
-it is a belief, not a ruling; leg 2 of the objc-spike exists to convert
-it into a wall with a diagnostic or a pass.
+Implementation is queued (verdict A, one behind
+`GENERIC-FAMILY-EQUALS`). Everything that *receives control from C* is
+this one feature wearing four costumes — `purego.NewCallback`,
+`objc.RegisterClass` method bodies, `MainQueue().Async` (the dispatch
+seam; `nativeui/dispatch.go` is the *purest* FFI file in the package,
+not the FFI-free one the first inventory claimed), and bindgen's
+protocol delegates. `tools/callback-spike` is pre-shaped against the
+contract (the interp-spike pattern: committed not-building, not in ci)
+so the landing day is a compile-and-run, not a design session.
 
 ## What genuinely requires hand-written Go
 
@@ -202,8 +213,10 @@ verification.
   with the caveat that a cached value must be the bracket's *result*
   (the selector uintptr `sel_registerName` returns), never the bound
   `p` itself — the lint enforces exactly that.
-- func-typed facade params land → leg 2 runs; if it passes, dispatch,
-  keyview, menu synthesis and the objcrt split all unblock at once.
+- `go.callback` lands (ruled 2026-08-08, queued one behind
+  `GENERIC-FAMILY-EQUALS`) → `tools/callback-spike` compiles and runs
+  leg 2's oracle; on a pass, dispatch, keyview, menu synthesis and the
+  objcrt split all unblock at once.
 - `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
   (the wire's ~400 lines) and the shape of rung 2's geometry.
 - `BINDGEN-TYPED-STRUCTS` — **landed**: callbacks carry the generated

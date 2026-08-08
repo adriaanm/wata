@@ -131,6 +131,15 @@ interp-spike:
     # be constructed). Not in ci for the same reason.
     cd tools/interp-spike && ../../tools/sgo build
 
+# plan 0038 leg 2: an ObjC method whose body is Sgola (waiting on go.callback)
+callback-spike:
+    # It does not build, and that IS the finding — the spike is pre-shaped
+    # against the go.callback ruling (sgola 29536af) and dies at exactly that
+    # site until the implementation lands. tools/callback-spike/REPORT.md owns
+    # the expectation. Not in ci for the same reason; wire it in on the repin
+    # that makes it print `callback-spike: PASS`.
+    cd tools/callback-spike && ../../tools/sgo build
+
 # UI layer: portability/dependency tripwires, the differ's round-trip oracle
 wataui-tests:
     bash tools/wataui-tests.sh
