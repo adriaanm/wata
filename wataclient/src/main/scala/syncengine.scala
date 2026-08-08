@@ -49,6 +49,10 @@ object SyncEngine:
   private val roomsC: sgo.Atomic[List[RoomState]] = sgo.atomic(Nil)
   private val selfUserIdC: sgo.Atomic[String] = sgo.atomic("")
   private val batchC: sgo.Atomic[String] = sgo.atomic("")
+  // true once the FIRST /sync response has been fully processed; the
+  // snapshot carries it as `caughtUp`, which is what the notify model
+  // primes on (plan 0043).
+  private val syncedOnceC: sgo.Atomic[Boolean] = sgo.atomic(false)
   private def rooms: List[RoomState] = roomsC.get()
   private def selfUserId: String = selfUserIdC.get()
   private def batch: String = batchC.get()
@@ -57,6 +61,7 @@ object SyncEngine:
     roomsC.set(Nil)
     selfUserIdC.set("")
     batchC.set("")
+    syncedOnceC.set(false)
 
   /** set after login/whoami. */
   def setSelfUser(uid: String): Unit = selfUserIdC.set(uid)
@@ -244,6 +249,8 @@ object SyncEngine:
     val roomsJ = WJson.objField(resp, "rooms")
     evs = joinMapLoop(WJson.objField(roomsJ, "join"), evs)
     evs = inviteMapLoop(WJson.objField(roomsJ, "invite"), evs)
+    // the round is fully processed: from here on, snapshots are caught up.
+    syncedOnceC.set(true)
     ListOps.reverse(evs)
 
   // ---- json string arrays -----------------------------------------------------
@@ -671,7 +678,7 @@ object SyncEngine:
       conversations = familyConv(family.id) :: conversations
       conversations = roomlessFamilyConvs(family, conversations)
     StateSnapshot(Syncing(), selfUserId != "", User(selfUserId, resolveSelfDisplay()),
-      contacts, conversations, hasFamily, family)
+      contacts, conversations, hasFamily, family, syncedOnceC.get())
 
   // ---- conversations from the classified DM rooms ---------------------------------
 

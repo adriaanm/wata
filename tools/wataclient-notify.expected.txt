@@ -36,3 +36,22 @@
 9b no family name: arrival
   arrival room=!fam event=$e2 mxc=mxc://wata/$e2 title="Bob" body="sent a voice message to Family"
   badge=1
+== notify: priming and backfill ==
+10 split backlog: partial, not caught up
+  (none)
+  badge=1
+10b split backlog: complete, caught up
+  (none)
+  badge=2
+11 backfill raises the count, newest unchanged
+  (none)
+  badge=3
+11b a live arrival after the backfill
+  arrival room=!fam event=$e4 mxc=mxc://wata/$e4 title="Bob" body="sent a voice message to Moors"
+  badge=4
+12 fresh account: empty and caught up
+  (none)
+  badge=0
+12b the first message ever
+  arrival room=!dm event=$d1 mxc=mxc://wata/$d1 title="Bob" body="sent you a voice message"
+  badge=1

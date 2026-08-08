@@ -8,20 +8,30 @@
  *  client's (a macOS banner and a Dock badge; the handset's LED, speaker and
  *  screen state), the model is not.
  *
- *  THE ARRIVAL EDGE is the per-conversation unplayed count RISING. That count
- *  is already what the sync engine computes and already what the contact list
- *  badges, so notifying on its edge means the banner and the badge can never
- *  disagree with the screen — there is one number, not a second notification
- *  channel threaded through the sync engine to drift away from it.
+ *  THE ARRIVAL EDGE is the per-conversation unplayed count RISING *and* the
+ *  newest unplayed message CHANGING. The count is already what the sync
+ *  engine computes and already what the contact list badges, so notifying on
+ *  its edge means the banner and the badge can never disagree with the
+ *  screen — there is one number, not a second notification channel threaded
+ *  through the sync engine to drift away from it. The newest-id half exists
+ *  because the runtime's backfill walk appends OLDER unplayed messages long
+ *  after a room's first snapshot: that raises the count with no live event
+ *  behind it, and the newest message stays the newest — so a backfill-raised
+ *  count moves the badge and announces nothing. A real arrival is by
+ *  definition a new newest.
  *
- *  PRIMING is once per session, not once per conversation. The first snapshot
- *  that carries any conversations at all records their counts and announces
- *  nothing — a client opening with a backlog must badge it, not banner every
- *  message in it. After that a conversation seen for the first time counts
- *  from zero, because a DM ROOM IS CREATED BY ITS FIRST MESSAGE: the room, the
- *  conversation and the message all appear in the same snapshot, and priming
- *  per-conversation would make the one arrival most worth announcing — the
- *  first thing anyone ever says to you — the one that is always silent. */
+ *  PRIMING is once per session, not once per conversation, and it latches on
+ *  the first snapshot with `caughtUp` true — the first fully processed
+ *  `/sync` round — whether or not any conversations exist yet. Priming on
+ *  the caught-up round rather than on first-non-empty means a first sync
+ *  that reaches the client in more than one snapshot primes on the complete
+ *  picture, not a partial one whose tail would read as arrivals. A fresh
+ *  account primes on an EMPTY picture, so the first thing anyone ever says
+ *  still announces. After priming, a conversation seen for the first time
+ *  counts from zero, because a DM ROOM IS CREATED BY ITS FIRST MESSAGE: the
+ *  room, the conversation and the message all appear in the same snapshot,
+ *  and priming per-conversation would make the one arrival most worth
+ *  announcing — the first thing anyone ever says to you — always silent. */
 
 /** how an arriving message is presented. */
 sealed trait NotifyMode
@@ -41,10 +51,15 @@ case class Arrival(
   place: String
 )
 
-/** the marks the edge is measured against: one unplayed count per room id, as
- *  of the last step, and whether this session has seen a snapshot with any
- *  conversations in it yet. */
-case class NotifyState(primed: Boolean, marks: List[(String, Int)])
+/** one room's mark as of the last step: its unplayed count and the event id
+ *  of its newest unplayed message not our own ("" when there is none) — the
+ *  same message `newest` selects for announcing, so the id the edge compares
+ *  is the id an announcement would name. */
+case class NotifyMark(roomId: String, count: Int, newestId: String)
+
+/** the marks the edge is measured against, and whether this session has seen
+ *  a caught-up snapshot yet. */
+case class NotifyState(primed: Boolean, marks: List[NotifyMark])
 
 /** one step's answer: the marks to carry forward, and what arrived.
  *
@@ -91,10 +106,13 @@ object Notify:
         case Nil => going = false
     n
 
-  /** one step: the new marks, and the conversations whose unplayed count rose.
+  /** one step: the new marks, and the conversations that saw a real arrival —
+   *  the unplayed count ROSE and the newest unplayed message CHANGED. Either
+   *  guard alone has a hole: the count alone reads backfilled history as
+   *  arrivals, the newest-id alone reads a split first sync's tail as one.
    *  Pure — the caller decides what an arrival means. */
   def step(st: NotifyState, snap: StateSnapshot): NotifyStep =
-    var marks: List[(String, Int)] = Nil
+    var marks: List[NotifyMark] = Nil
     var out: List[Arrival] = Nil
     var cur = snap.conversations
     var going = true
@@ -107,26 +125,39 @@ object Notify:
           val conv = c.head
           var was = markOf(st.marks, conv.roomId)
           if was < 0 then was = 0
-          if !priming && conv.unplayedCount > was then
-            newest(conv, selfId(snap)) match
-              case m: Some[VoiceMessage] =>
+          val wasNewest = markNewestOf(st.marks, conv.roomId)
+          var newestId = ""
+          newest(conv, selfId(snap)) match
+            case m: Some[VoiceMessage] =>
+              newestId = m.value.id
+              if !priming && conv.unplayedCount > was && newestId != wasNewest then
                 out = Arrival(conv.roomId, m.value.id, m.value.mxcUrl,
                   senderName(m.value), placeName(conv, snap)) :: out
-              case None => ()
-          marks = (conv.roomId, conv.unplayedCount) :: marks
+            case None => ()
+          marks = NotifyMark(conv.roomId, conv.unplayedCount, newestId) :: marks
           cur = c.tail
         case Nil => going = false
-    NotifyStep(NotifyState(st.primed || snap.conversations != Nil, marks), reverse(out))
+    NotifyStep(NotifyState(st.primed || snap.caughtUp, marks), reverse(out))
 
-  /** the mark for a room, or -1 for "not seen before" — which the caller
-   *  reads as zero once the session is primed. */
-  def markOf(marks: List[(String, Int)], roomId: String): Int = marks match
+  /** the mark's count for a room, or -1 for "not seen before" — which the
+   *  caller reads as zero once the session is primed. */
+  def markOf(marks: List[NotifyMark], roomId: String): Int = marks match
     case p :: t => markStep(p, t, roomId)
     case Nil    => -1
 
-  def markStep(p: (String, Int), t: List[(String, Int)], roomId: String): Int =
-    val k: String = p._1 // bind to a String local so `==` stays native
-    if k == roomId then p._2 else markOf(t, roomId)
+  def markStep(p: NotifyMark, t: List[NotifyMark], roomId: String): Int =
+    val k: String = p.roomId // bind to a String local so `==` stays native
+    if k == roomId then p.count else markOf(t, roomId)
+
+  /** the mark's newest unplayed id for a room, "" for "not seen before" or
+   *  "none was unplayed" — either way, any real newest differs from it. */
+  def markNewestOf(marks: List[NotifyMark], roomId: String): String = marks match
+    case p :: t => markNewestStep(p, t, roomId)
+    case Nil    => ""
+
+  def markNewestStep(p: NotifyMark, t: List[NotifyMark], roomId: String): String =
+    val k: String = p.roomId
+    if k == roomId then p.newestId else markNewestOf(t, roomId)
 
   def selfId(snap: StateSnapshot): String =
     if snap.hasSelfUser then snap.selfUser.id else ""

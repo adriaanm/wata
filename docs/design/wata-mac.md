@@ -134,20 +134,27 @@ Settings — play it right away, or announce it and let the user press OK.
 questions — which arrival is worth announcing, and what an arrival *does* —
 so the handset half reuses this and only the presentation differs.
 
-- **The edge is the unplayed count rising.** That count is what the sync
-  engine already computes and what the contact list already badges, so the
-  banner, the Dock badge and the screen cannot disagree — there is one
-  number, not a second notification channel through the sync engine to
-  drift away from it. The pump carries the previous counts in `PumpSt.marks`
-  and runs `Notify.step` once a frame, off the snapshot the frame already
-  read.
-- **Priming is once per session, not once per conversation.** The first
-  snapshot with any conversations records their counts silently, so a launch
-  with a backlog badges it instead of bannering every message in it. After
-  that a room seen for the first time counts from zero — which matters more
-  than it looks: **a DM room is created by its first message**, so the room,
-  the conversation and the message all appear together, and priming
-  per-conversation would silence exactly the arrival most worth having.
+- **The edge is the unplayed count rising with a NEW newest unplayed
+  message** (plan 0043). The count is what the sync engine already computes
+  and what the contact list already badges, so the banner, the Dock badge
+  and the screen cannot disagree — there is one number, not a second
+  notification channel through the sync engine to drift away from it. The
+  newest-id half is what keeps backfill quiet: the runtime's backfill walk
+  appends older unplayed history long after a room's first snapshot, raising
+  the count with no live event behind it — the newest stays the newest, so
+  the badge moves and nothing announces. The pump carries the previous marks
+  in `PumpSt.marks` and runs `Notify.step` once a frame, off the snapshot
+  the frame already read.
+- **Priming is once per session, latched on sync-caught-up.** The first
+  snapshot with `caughtUp` true — the first fully processed `/sync` round,
+  conversations or not — records the marks silently, so a launch with a
+  backlog badges it instead of bannering every message in it, even when the
+  engine delivers that backlog across several snapshots. A fresh account
+  primes on an empty picture. After priming, a room seen for the first time
+  counts from zero — which matters more than it looks: **a DM room is
+  created by its first message**, so the room, the conversation and the
+  message all appear together, and priming per-conversation would silence
+  exactly the arrival most worth having.
 - **Frontmost silences the banner, not the walkie-talkie.** Someone looking
   at the window has already been told, and an app that banners over itself is
   what people turn notifications off for. Playing is different: a

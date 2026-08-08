@@ -1122,7 +1122,8 @@ answer "which arrival is worth announcing" identically and only the
 presentation differs. The frame loop steps it once per frame off the
 snapshot the frame already read (`Ui.notifyFrame`, marks carried in
 `notifyC` beside the other pump cells); the edge is a conversation's
-unplayed count RISING, priming is once per session.
+unplayed count RISING with a NEW newest unplayed message, priming is
+once per session.
 
 - **Play-now is the walkie-talkie default** (`notify_mode` absent =
   `play`; the mac defaults to `quiet` — a desktop is not a
@@ -1153,24 +1154,21 @@ unplayed count RISING, priming is once per session.
   until played, because it renders the count, not the edge. An arrival
   never wakes the screen: a handset in a dark bedroom staying dark is a
   feature.
-- **Priming is "first non-empty snapshot", which makes the backlog's
-  shape timing-dependent** `[FB-UI-PRIME-SPLIT-AUTOPLAY]`. A session's
-  pre-existing backlog is supposed to prime silently, but the sync
-  engine can deliver it across more than one snapshot; everything after
-  the first non-empty one counts as an arrival, and in play mode an
-  "arrival" that is really old backlog gets auto-played and receipted.
-  In scripted runs this raced badge goldens under full-ci load (a badge
-  read 1 where the golden pins 2 — the receipt ate it), so every fb-ui
-  receiving phase whose golden depends on backlog staying unplayed opens
-  with `notifymode quiet` and gates its badge checkpoints on
-  `wait unplayed N` + `waitmax notifybanner 0` (see
-  `bob-dm-roundtrip.txt` for the full rationale). The open question is
-  the device's: a slow first sync can auto-play stale backlog on a real
-  handset too. Fixing that means priming on sync-caught-up rather than
-  first-snapshot, which is `wataclient`'s (and the mac's) to decide —
-  and the remaining receiving-phase scripts that pin played-state
-  goldens without forcing quiet (`bob-view`, `bob-play`, `family3-*`)
-  carry the same latent exposure until then.
+- **Priming latches on sync-caught-up, and an arrival is a NEW newest
+  message** (plan 0043, `notify.scala`). The session primes on the first
+  snapshot with `caughtUp` true — the first fully processed `/sync`
+  round, conversations or not — so a first sync the engine delivers
+  across several snapshots primes on the complete picture and none of
+  its pieces read as arrivals; a fresh account primes on an empty
+  picture, so the first thing anyone ever says still announces. And
+  announcing takes the count rising AND the newest unplayed message
+  changing, so the backfill walk appending older history (which raises
+  the count with no live event behind it) moves the badge and stays
+  silent. Either guard alone leaves a hole — backfill runs long after
+  the first round, and a split first sync's tail IS a new newest. The
+  fb-ui receiving phases that force `notifymode quiet` before badge
+  checkpoints keep doing so: they pin the real invariant that badge
+  state does not depend on notify mode, and cost nothing.
 - **Every arrival prints one decision line** to the app log:
   `notify: play|quiet|suppressed "<title>" "<body>" unplayed=<n>` —
   the assertable half of the presentation (`suppressed` = the person was

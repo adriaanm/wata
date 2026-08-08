@@ -133,7 +133,10 @@ case class RoomState(
 )
 
 /** the immutable UI view, built by the engine. Optional `User`/`Family`
- *  values are represented as has-flag pairs (this subset has no nullable). */
+ *  values are represented as has-flag pairs (this subset has no nullable).
+ *  `caughtUp` is true once the FIRST `/sync` response has been fully
+ *  processed — the notify model primes on it, so a first sync that reaches
+ *  the client in more than one piece cannot read as arrivals. */
 case class StateSnapshot(
   connection: ConnectionState,
   hasSelfUser: Boolean,
@@ -141,7 +144,8 @@ case class StateSnapshot(
   contacts: List[Contact],
   conversations: List[Conversation],
   hasFamily: Boolean,
-  family: Family
+  family: Family,
+  caughtUp: Boolean
 )
 
 // ---- emitted sync events ---------------------------------------------------------

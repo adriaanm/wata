@@ -1,6 +1,6 @@
 # 0043 — arrival priming that survives a split backlog (FB-UI-PRIME-SPLIT-AUTOPLAY)
 
-Status: accepted
+Status: done
 
 ## The problem
 

@@ -5,12 +5,17 @@
  *
  *  What the scenarios are here to pin, because each is a rule a client would
  *  otherwise re-derive (and get wrong differently):
- *   - the session PRIMES once, on the first snapshot that has any
- *     conversations in it, and announces nothing however much backlog it
- *     carries — but a room appearing AFTER that counts from zero, because a DM
- *     room is created by its first message;
- *   - the edge is the count RISING, so a count that stays put or falls (a
- *     message played) is silent;
+ *   - the session PRIMES once, on the first snapshot with `caughtUp` true
+ *     (the first fully processed /sync round, conversations or not), and
+ *     announces nothing however much backlog it carries — a first sync split
+ *     across snapshots stays silent through every piece, and a fresh
+ *     account's empty caught-up picture primes too, so the first thing
+ *     anyone ever says still announces (a DM room is created by its first
+ *     message, and a room appearing after priming counts from zero);
+ *   - the edge is the count RISING *and* the newest unplayed message
+ *     CHANGING, so a count that stays put or falls (a message played) is
+ *     silent, and so is a backfill-raised count (older history appended:
+ *     badge moves, newest unchanged, no announcement);
  *   - the message named is the newest one that is unplayed and not ours,
  *     which is one of the ones the count moved for;
  *   - a DM names no place, the family thread names the family, a group names
@@ -26,9 +31,14 @@ object NotifyOracle:
            ms: List[VoiceMessage], unplayed: Int): Conversation =
     Conversation(roomId, ct, false, Contact(User("", "")), ms, unplayed, name)
 
+  /** caught-up by default: most scenarios are about what happens after the
+   *  first /sync round; the priming scenarios pass `caughtUp` explicitly. */
   def snap(convs: List[Conversation], famName: String): StateSnapshot =
+    snapCU(convs, famName, true)
+
+  def snapCU(convs: List[Conversation], famName: String, caughtUp: Boolean): StateSnapshot =
     StateSnapshot(Syncing(), true, User("@alice:localhost", "Alice"), Nil, convs,
-      famName != "", Family("!fam", famName, Nil))
+      famName != "", Family("!fam", famName, Nil), caughtUp)
 
   /** one line per arrival, in the order `step` reports them. */
   def showArrivals(as: List[Arrival]): String =
@@ -151,6 +161,41 @@ object NotifyOracle:
     r = show("9b no family name: arrival", st2,
       snap(conv("!fam", FamilyConv(), "", bobNew :: Nil, 1) :: Nil, ""))
     out = out + r._1; st2 = r._2
+    out = out + "== notify: priming and backfill ==\n"
+
+    val bobOlder = msg("$e0", "@bob:localhost", "Bob", false)
+
+    // 10. a first sync split across two snapshots: the partial piece is not
+    //     caught up, so it does not prime, and the complete piece is the one
+    //     that does — no announcement either step, however much of the
+    //     backlog each carries. Badge tracks each snapshot as it stands.
+    var st3 = Notify.initial()
+    r = show("10 split backlog: partial, not caught up", st3,
+      snapCU(conv("!fam", FamilyConv(), "", bobOld :: Nil, 1) :: Nil, "Moors", false))
+    out = out + r._1; st3 = r._2
+    r = show("10b split backlog: complete, caught up", st3,
+      snapCU(conv("!fam", FamilyConv(), "", bobNew :: bobOld :: Nil, 2) :: Nil, "Moors", true))
+    out = out + r._1; st3 = r._2
+    // 11. backfill appends OLDER unplayed history after priming: the count
+    //     rises but the newest unplayed message is still the newest, so the
+    //     badge moves and nothing announces.
+    r = show("11 backfill raises the count, newest unchanged", st3,
+      snapCU(conv("!fam", FamilyConv(), "", bobNew :: bobOld :: bobOlder :: Nil, 3) :: Nil, "Moors", true))
+    out = out + r._1; st3 = r._2
+    // 11b. and a live arrival right after the backfill still announces: the
+    //      count rose and the newest changed.
+    r = show("11b a live arrival after the backfill", st3,
+      snapCU(conv("!fam", FamilyConv(), "", bob3 :: bobNew :: bobOld :: bobOlder :: Nil, 4) :: Nil, "Moors", true))
+    out = out + r._1; st3 = r._2
+    // 12. a fresh account: the caught-up first round carries NO conversations
+    //     and still primes, so the first thing anyone ever says announces.
+    var st4 = Notify.initial()
+    r = show("12 fresh account: empty and caught up", st4,
+      snapCU(Nil, "", true))
+    out = out + r._1; st4 = r._2
+    r = show("12b the first message ever", st4,
+      snap(conv("!dm", DmConv(), "", dm1 :: Nil, 1) :: Nil, ""))
+    out = out + r._1; st4 = r._2
     out
 
   def boolStr(x: Boolean): String = if x then "true" else "false"

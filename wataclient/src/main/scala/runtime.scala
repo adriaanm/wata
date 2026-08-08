@@ -752,7 +752,7 @@ object Runtime:
 
   def emptySnapshot(): StateSnapshot =
     StateSnapshot(Disconnected(), false, User("", ""), Nil,
-      Nil, false, Family("", "", Nil))
+      Nil, false, Family("", "", Nil), false)
 
   /** non-blocking stop probe (a CLOSED channel's receive is always ready).
    *  select-as-EXPRESSION: the taken arm's value IS the answer, no cell.
