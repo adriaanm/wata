@@ -570,7 +570,12 @@ bytes over a socket":
   - `Ogg.writeStream(frames: List[Bytes]): Bytes`: OpusHead page (BOS) +
     OpusTags page + one page per audio frame + an empty EOS page, with
     correct multi-segment lacing for frames over 255 bytes and a
-    correctly patched-in page CRC.
+    correctly patched-in page CRC. A packet whose length is an exact
+    multiple of 255 needs a **trailing zero segment**: the segment
+    shorter than 255 is what ends a packet, so `[255, 255]` alone says
+    "continues on the next page" and a reader that walks the table drops
+    it. `OggOracle` carries a frame of exactly 2*255 for that reason —
+    it is the one length the rule is visible at.
   - `Ogg.readFrames`/`frameCount`: extracts the audio **packets**, which
     is not the same as the audio pages. The lacing table divides a page's
     payload into segments of at most 255 bytes, and a packet runs until a
