@@ -136,33 +136,44 @@ blocks + git log; each entry cites where it was recorded.*
   workaround taken — the alternative is a pointer-shaped Go shim in front
   of the generated bindings, which is the layer the port exists to delete.
 
-- **`FACADE-UINTPTR-TYPE`** and **`FACADE-DISCARD-EXTRA-RESULTS`** — the
-  two gaps plan 0038's call-out spike walked into, with a live repro in
-  `tools/objc-spike` (`just objc-spike`) and the diagnostics in its
-  REPORT.md. Between them they are the whole distance from here to "an
-  FFI layer written in Sgola": everything ELSE the spike needed already
-  works — `(uintptr, error)` rides the `throws` lowering unchanged, and
-  the variadic facade binding emits a bare Go variadic call.
-  - `go.Uintptr`: Go's pointer-sized integer, absent from `gocore.scala`
-    AND the emitter. Every FFI value is one, and it is neither `Int` nor
-    `Long` — Go rejects both. **RULED A**: an opaque address-sized
-    scalar — bindable and passable, nothing else. (The ticket cited
-    `go.Int`'s opaque IOP-2 posture as precedent; that citation was
-    WRONG — IOP-2 was revised 2026-07-12 and opaque `go.Int` is retired,
-    `int` maps to `Int`. Do not reason from it again. The ruling rests
-    opacity on the semantics instead: a uintptr is not a reference and
-    does not keep its referent alive.)
-  - Discarding extra results: `SyscallN(…) (r1, r2, err uintptr)` is
-    unbindable because `throws`→`(T, error)` is the only multi-result
-    shape. Asked as a DISCARD rule (`r1, _, _ :=`), not as N-tuple
-    support — nothing wants `r2`, tuples would need a representation,
-    and the emitter change is one line at the call site. **RULED A and
-    EXPLICIT** — `@go.discardResults`, loud by default, which was our
-    lean for our reason. Refined on one point we had wrong:
-    trailing-only does not compose with `throws`, since `(T, U, error)`
-    puts the discard in the MIDDLE. Declared results bind left-to-right
-    from the FRONT, `throws` claims the trailing `error`, the annotation
-    authorizes dropping what is unclaimed between.
+- **`FACADE-DISCARD-EXTRA-RESULTS`** — the one gap plan 0038's call-out
+  spike still stands on, with a live repro in `tools/objc-spike`
+  (`just objc-spike`) and the diagnostics in its REPORT.md. It is the
+  whole remaining distance from here to "an FFI layer written in Sgola":
+  everything ELSE the spike needs already works — `(uintptr, error)`
+  rides the `throws` lowering unchanged, and the variadic facade binding
+  emits a bare Go variadic call.
+  - **`FACADE-UINTPTR-TYPE` is FIXED** (upstream `b85a713`, pinned here
+    at `e35b162`) and verified in the spike: all seven `[E008]` sites are
+    gone, the compile stage passes, and `go.Uintptr` binds as parameter,
+    result and variadic element. (The ticket cited `go.Int`'s opaque
+    IOP-2 posture as precedent; that citation was WRONG — IOP-2 was
+    revised 2026-07-12 and opaque `go.Int` is retired, `int` maps to
+    `Int`. Do not reason from it again. The ruling rests opacity on the
+    semantics instead: a uintptr is not a reference and does not keep its
+    referent alive.)
+  - Discarding extra results: `SyscallN(…) (r1, r2, err uintptr)` was
+    unbindable because `throws`→`(T, error)` was the only multi-result
+    shape. We asked for a DISCARD rule and argued against N-tuples on the
+    grounds that they would force a representation decision. **That
+    premise was stale and the ruling went the other way**: tuples already
+    have a Go struct representation, so a method's Go results are simply
+    `flatten(R) ++ (error if throws)` — one level, both directions,
+    unambiguous because Go has no tuple type. `@go.discardResults` is
+    DEAD. Discarding is Scala's own tuple-pattern binding, character for
+    character Go's: `val (r1, _, _) = syscallN(…)`. "Want `r2` not `r1`"
+    stops being a wall, and the composition worry about `throws` putting
+    a discard in the middle dissolves — the tuple accounts for every
+    result before the trailing `error`.
+  - The spike is **spelled that way in the tree** as of 2026-08-08, so it
+    is a standing pre-fix repro (filed back as
+    `REPRO-FACADE-TUPLE-RESULTS-PREFIX`). Against the pin it shows both
+    legs at once: `assignment mismatch: 1 variable but purego.SyscallN
+    returns 3 values` (leg 1, the call still emits single-valued) and
+    `undefined: Tuple3__R__R__R` — a facade result type does not reach
+    whatever mints the `TupleN__…` struct, so even the materialized leg
+    has nothing to build. When it lands, `just objc-spike` compiling IS
+    leg 1's answer; repin, then send the verification ticket.
   - Filed 2026-08-07, with a third file alongside them:
     `VERIFY-VARIADIC-FACADE-BIND`, the other direction of the loop —
     `VARIADIC-FACADE-BIND` was minted from this inbox on 2026-08-05 and

@@ -16,7 +16,10 @@ import language.experimental.saferExceptions
  *     and out. It is a distinct Go type — not `int`, not `int64` — so it
  *     cannot be spelled with what sgola has.
  *  2. `SyscallN` returns THREE values (`r1, r2, err uintptr`) and the FFI
- *     caller wants only the first. Go writes that `r1, _, _ := …`. */
+ *     caller wants only the first. A method's Go results are the components
+ *     of its result tuple, so three results are a 3-tuple, and dropping the
+ *     two the caller does not want is Scala's own tuple-pattern binding —
+ *     `val (r1, _, _) = …`, character for character Go's. */
 @go.path("github.com/ebitengine/purego")
 object purego:
   /** `Dlopen(path string, mode int) (uintptr, error)` — the `(T, error)`
@@ -28,6 +31,6 @@ object purego:
   @go.name("Dlsym") def dlsym(handle: go.Uintptr, name: String): go.Uintptr throws sgo.GoError = ???
 
   /** `SyscallN(fn uintptr, args ...uintptr) (r1, r2, err uintptr)` — the
-   *  variadic is fine (VARIADIC-FACADE-BIND, ruled from this repo's inbox);
-   *  the three results are not. */
-  @go.name("SyscallN") def syscallN(fn: go.Uintptr, args: go.Uintptr*): go.Uintptr = ???
+   *  variadic is fine (VARIADIC-FACADE-BIND, ruled from this repo's inbox),
+   *  and the three results are a 3-tuple (FACADE-DISCARD-EXTRA-RESULTS). */
+  @go.name("SyscallN") def syscallN(fn: go.Uintptr, args: go.Uintptr*): (go.Uintptr, go.Uintptr, go.Uintptr) = ???

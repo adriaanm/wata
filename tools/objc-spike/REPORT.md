@@ -65,15 +65,9 @@ Worth stating as a discard rule rather than as "support N-tuples":
 nothing wants `r2` or `err` here, tuples would need a representation, and
 the emitter change is one line at the call site.
 
-**RULED A and EXPLICIT** (same drain): loud by default, opt in with
-`@go.discardResults`. One refinement on the rule as sketched —
-trailing-only does not compose with `throws`, because `(T, U, error)`
-puts the discard in the MIDDLE. The ruled rule: declared results bind
-left-to-right **from the front**, `throws` claims the trailing `error`,
-and the annotation authorizes dropping whatever is left unclaimed in
-between. That covers `r1, _, _` and the throws shape both. Wanting `r2`
-but not `r1` stays a loud wall, and tuples stay refused on the grounds
-the ticket gave.
+**RULED A** (same drain) — but not as this section asked. The annotation
+is dead and the ruling is a tuple correspondence; see "Gap 2 is respelled"
+below, which is the shape the spike now carries.
 
 ## What already works — the more useful half of the result
 
@@ -127,32 +121,60 @@ compiles as a declaration, so the type is no longer what stops it; the
 liveness question that ticket exists for is untouched, since nothing has
 called it into a real address yet.
 
-Gap 2 remains, alone, with nothing behind it:
-
-```
-./main.go:39:13: assignment mismatch: 1 variable but purego.SyscallN returns 3 values
-```
+## Gap 2 is respelled — the tuple ruling, in the tree 2026-08-08
 
 Its ruling is in and is **not** the annotation this report's ticket asked
 for. A Scala tuple in a result type *is* Go's result parameters — a
 method's Go results are `flatten(R) ++ (error if throws)`, one level, in
-both directions. So when it lands this spike is respelled
+both directions, unambiguous because Go has no tuple type. So the spike is
+respelled, and now carries
 
 ```scala
 def syscallN(fn: go.Uintptr, args: go.Uintptr*): (go.Uintptr, go.Uintptr, go.Uintptr)
 val (r1, _, _) = purego.syscallN(msgSend, cls, sel)
 ```
 
-which emits `r1, _, _ := purego.SyscallN(…)`. Scala's discard spelling and
-Go's are the same spelling, so nothing had to be invented, and
-destructuring at the binding site allocates nothing because no tuple
-struct is ever built. Two things follow: "want `r2` but not `r1`" is just
-`val (_, r2, _) = …`, no wall; and the **destructured** form is the one to
-use for anything reference-shaped, because the bound-whole leg depends on
-`TUPLE-REF-COMPONENT-ASSIGN` (a tuple component lowering to a Go interface
-erases to `any` and the assertion is missing at assignments — wata hit
-that independently the same day, from `wataclient`'s notification edge
-detector).
+which is to emit `r1, _, _ := purego.SyscallN(…)`. Scala's discard spelling
+and Go's are the same spelling, so nothing had to be invented. Two things
+follow: "want `r2` but not `r1`" is just `val (_, r2, _) = …`, no wall; and
+the **destructured** form is the one to use for anything reference-shaped,
+because the bound-whole leg depends on `TUPLE-REF-COMPONENT-ASSIGN` (a
+tuple component lowering to a Go interface erases to `any` and the
+assertion is missing at assignments — wata hit that independently the same
+day, from `wataclient`'s notification edge detector). Everything here is
+`uintptr`, so this spike does not exercise that.
+
+Against the pin (`e35b162`, pre-fix) the wall is now Gap 2 alone and it is
+worth reading, because it shows both legs of the ruling in one output. The
+compile stage passes — the facade's tuple result type is accepted — and
+`go build` reports two distinct failures:
+
+```
+./main.go:38:15: undefined: Tuple3__R__R__R
+./main.go:41:7: assignment mismatch: 1 variable but purego.SyscallN returns 3 values
+```
+
+The second is leg (1): the facade call is still emitted as a single-valued
+Go call. The first says the tuple type the result now names is never
+instantiated — a facade result type does not reach whatever mints the
+`TupleN__…` struct, so even the materialized leg has nothing to build. And
+the emitted body shows leg (2)'s target sitting there fully formed:
+
+```go
+_2_ = func() Tuple3__R__R__R {
+	var x1 Tuple3__R__R__R
+	x1 = purego.SyscallN(getClass, Main_cstr("NSString"))
+	var x2 Tuple3__R__R__R
+	x2 = x1
+	var cls uintptr
+	cls = x2._1
+	…
+```
+
+That is dotc's tuple-pattern desugaring verbatim — temp val, alias, `._N`
+selection — which is exactly the shape leg (2) collapses into a direct
+multi-assign. The unread slots are already `_`-shaped in the source, so the
+`_` columns should fall out of the existing unread-locals scan.
 
 This report's ticket argued against tuples on the grounds that they would
 force a representation and allocation decision. The representation was

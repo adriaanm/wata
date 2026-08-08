@@ -94,18 +94,33 @@ without anyone having to reconstruct what it was asking.
 
 **Both RULED A the same day** (sgola inbox drain 2026-08-07, minted at
 the top of its queue; Sonnet-tier, serialized behind each other, no date
-promised). `go.Uintptr` becomes an opaque address-sized scalar, and the
-discard becomes explicit — `@go.discardResults`, loud by default. Two
-things to carry forward from the ruling:
+promised). `go.Uintptr` becomes an opaque address-sized scalar — landed
+`b85a713`, pinned here at `e35b162`, and verified: all seven `[E008]`
+sites are gone and the compile stage passes. Carry forward that the
+ticket's precedent citation was **wrong** — IOP-2 was revised 2026-07-12
+and opaque `go.Int` is retired. The opacity stands on its own semantics:
+a `uintptr` is not a reference and does not keep its referent alive.
 
-- The ticket's precedent citation was **wrong**: IOP-2 was revised
-  2026-07-12 and opaque `go.Int` is retired. The opacity stands on its
-  own semantics — a `uintptr` is not a reference and does not keep its
-  referent alive.
-- Trailing-only discard does not compose with `throws`, because
-  `(T, U, error)` puts the discard in the MIDDLE. Ruled: results bind
-  left-to-right from the front, `throws` claims the trailing `error`,
-  the annotation authorizes what is unclaimed between.
+The discard ruling is **not** the annotation this plan first recorded.
+`@go.discardResults(n)` is dead, rejected for asking new syntax to
+express what the language already has. What was ruled instead is a tuple
+correspondence: a method's Go result parameters are `flatten(R) ++ (error
+if throws)`, one level only, unambiguous because Go has no tuple type,
+and running in both directions. So discarding is Scala's ordinary
+tuple-pattern binding, which is character-for-character Go's:
+
+```scala
+def syscallN(fn: go.Uintptr, args: go.Uintptr*): (go.Uintptr, go.Uintptr, go.Uintptr)
+val (r1, _, _) = purego.syscallN(msgSend, cls, sel)   // -> r1, _, _ := purego.SyscallN(…)
+```
+
+Two consequences for this plan. "Want `r2` but not `r1`" is no longer a
+wall — it is `val (_, r2, _) = …`. And the composition worry about
+`throws` putting a discard in the middle dissolves: `throws` claims the
+trailing `error` and the tuple accounts for every result before it, so
+there is no unclaimed middle to authorize. The spike is spelled this way
+in the tree; the wall it now hits is the ticket itself, not a guess about
+it.
 
 `cstr` was deliberately NOT ruled, and leaving it `???` was endorsed:
 obtaining a `uintptr` from a String's address is where GC liveness

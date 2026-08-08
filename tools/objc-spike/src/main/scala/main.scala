@@ -23,11 +23,16 @@ object Main:
       val regName = go.purego.dlsym(libobjc, "sel_registerName")
 
       // NSString.stringWithUTF8String_("hello").length
-      val cls = go.purego.syscallN(getClass, cstr("NSString"))
-      val selStr = go.purego.syscallN(regName, cstr("stringWithUTF8String:"))
-      val selLen = go.purego.syscallN(regName, cstr("length"))
-      val str = go.purego.syscallN(msgSend, cls, selStr, cstr("hello"))
-      val len = go.purego.syscallN(msgSend, str, selLen)
+      //
+      // `objc_msgSend` and friends return in the first register only; the
+      // other two results of SyscallN are the ABI's second return register
+      // and errno, and neither means anything here. Discarding them is the
+      // tuple pattern, which emits Go's own `r1, _, _ := …`.
+      val (cls, _, _) = go.purego.syscallN(getClass, cstr("NSString"))
+      val (selStr, _, _) = go.purego.syscallN(regName, cstr("stringWithUTF8String:"))
+      val (selLen, _, _) = go.purego.syscallN(regName, cstr("length"))
+      val (str, _, _) = go.purego.syscallN(msgSend, cls, selStr, cstr("hello"))
+      val (len, _, _) = go.purego.syscallN(msgSend, str, selLen)
 
       println("objc-spike: length = " + len)
     catch case e: sgo.GoError => println("objc-spike: FAILED " + e.getMessage)
