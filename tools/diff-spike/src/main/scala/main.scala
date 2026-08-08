@@ -1,0 +1,132 @@
+/** DIFF-RETAINS-REPRO — does `Diff.diff` retain the trees it walks?
+ *
+ *  Four arms, one loop each, run one per process (`diff-spike a|b|c|d`) so no
+ *  arm's residue contaminates another's series. Every arm prints the same
+ *  thing: the live heap (after a forced GC — see go.memprobe) every SAMPLE
+ *  iterations. A leak is a straight line; a bounded working set plateaus.
+ *
+ *  - a: build two trees per iteration, do NOT diff — the control. Must be
+ *       flat, or the finding is about tree construction and the ticket is
+ *       misaimed.
+ *  - b: diff a fresh tree against one allocated once outside the loop — the
+ *       app's shape (`old` is the long-lived st.last, `new` is each frame's).
+ *       The returned script is held one iteration, as the app's frame does.
+ *  - c: diff two trees BOTH allocated outside the loop — nothing fresh is
+ *       walked. If this leaks, retention is not about the argument's age.
+ *  - d: as b, but the script is dropped immediately — whether holding the
+ *       List[Patch] even one iteration matters.
+ *
+ *  The trees are shaped like the app's: a VGroup of KEYED rows (keys make the
+ *  child scan take the keyed path), each row a group of a highlight VRect and
+ *  a VText, with one row's text differing between old and new so the script
+ *  is non-empty — an empty diff may take a path that never walks the nodes,
+ *  which would be a clean false negative.
+ */
+object Main:
+
+  val Iters: Int = 100000
+  val Sample: Int = 5000
+  val Rows: Int = 10
+
+  /** the app-shaped tree: keyed rows over VRect/VText leaves. `tag` lands in
+   *  row 0's text, so trees with different tags differ in exactly one leaf. */
+  def tree(tag: Int): View =
+    var rows: List[Keyed] = Nil
+    var i = Rows - 1
+    while i >= 0 do
+      val hl = VRect(0, i * 12, 160, 12, if i == 0 then 0x1234 else 0)
+      val txt =
+        if i == 0 then VText(2, i, "row " + i + " v" + tag, 0xFFFF)
+        else VText(2, i, "row " + i, 0xFFFF)
+      rows = Keyed("row-" + i, VGroup(Keyed("", hl) :: Keyed("", txt) :: Nil)) :: rows
+      i -= 1
+    VGroup(rows)
+
+  def lenPatches(xs: List[Patch]): Int =
+    var n = 0
+    var cur = xs
+    var going = true
+    while going do
+      cur match
+        case _ :: t =>
+          n += 1
+          cur = t
+        case Nil => going = false
+    n
+
+  def sampleLine(arm: String, i: Int): Unit =
+    println("arm=" + arm + " iter=" + i + " liveKB=" + go.memprobe.liveHeap() / 1024)
+
+  /** the root's child count — the read that keeps a built tree from being
+   *  elidable without walking its nodes. NOT `==` on the views:
+   *  EQUALS-LIST-EMIT-BROKEN-CONS — universal equality over a List-bearing
+   *  case class emits Go naming the `::` class unmangled (`case *:::`), which
+   *  does not compile; sgola ticket filed. */
+  def rootLen(v: View): Int =
+    v match
+      case VGroup(children) => Views.len(children)
+      case _ => 0
+
+  /** a: build both trees, never diff. The builds land in vars so nothing can
+   *  elide them; the vars are read once after the loop. */
+  def runA(): Unit =
+    var lastOld: View = tree(0)
+    var lastNew: View = tree(1)
+    var i = 0
+    while i < Iters do
+      lastOld = tree(0)
+      lastNew = tree(1)
+      if i % Sample == 0 then sampleLine("a", i)
+      i += 1
+    sampleLine("a", Iters)
+    println("arm=a done sink=" + (rootLen(lastOld) + rootLen(lastNew)))
+
+  /** b: fresh new vs long-lived old; script held one iteration. */
+  def runB(): Unit =
+    val base = tree(0)
+    var held: List[Patch] = Nil
+    var sink = 0
+    var i = 0
+    while i < Iters do
+      sink += lenPatches(held)
+      held = Diff.diff(base, tree(1))
+      if i % Sample == 0 then sampleLine("b", i)
+      i += 1
+    sampleLine("b", Iters)
+    println("arm=b done sink=" + sink)
+
+  /** c: both trees long-lived; nothing fresh is walked. */
+  def runC(): Unit =
+    val base = tree(0)
+    val other = tree(1)
+    var sink = 0
+    var i = 0
+    while i < Iters do
+      sink += lenPatches(Diff.diff(base, other))
+      if i % Sample == 0 then sampleLine("c", i)
+      i += 1
+    sampleLine("c", Iters)
+    println("arm=c done sink=" + sink)
+
+  /** d: as b, script dropped immediately. */
+  def runD(): Unit =
+    val base = tree(0)
+    var sink = 0
+    var i = 0
+    while i < Iters do
+      sink += lenPatches(Diff.diff(base, tree(1)))
+      if i % Sample == 0 then sampleLine("d", i)
+      i += 1
+    sampleLine("d", Iters)
+    println("arm=d done sink=" + sink)
+
+  def main(args: Array[String]): Unit =
+    val arm = if args.length > 0 then args(0) else ""
+    // one sanity print so a broken tree shape fails loudly, not silently flat
+    val script = Diff.diff(tree(0), tree(1))
+    println("arm=" + arm + " sanity patches=" + lenPatches(script) + " (must be >0)")
+    if arm == "a" then runA()
+    else if arm == "b" then runB()
+    else if arm == "c" then runC()
+    else if arm == "d" then runD()
+    else println("usage: diff-spike a|b|c|d")

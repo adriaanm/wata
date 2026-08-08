@@ -1,0 +1,5 @@
+# In-link libraries above the implicit prelude (core). The spike links wataui
+# ONLY — the module under test, backend-free by design. Named by explicit
+# relpath: the bare-name search covers the declaring module's parent dir
+# (tools/) and the toolchain home, and wataui lives at this repo's root.
+wataui ../../wataui

@@ -1,0 +1,12 @@
+# sgo.build — DIFF-RETAINS-REPRO. Does `Diff.diff` retain the trees it walks?
+# The wata-mac idle leak bisected to the diff call: with it skipped the live
+# heap is flat, with it running — nothing encoded, nothing handed to the
+# backend — every frame's view tree stays reachable. This module is the
+# standalone arbiter: wataui's differ, a loop, and a heap probe, with NO app
+# around it. If a bare loop leaks here, the retaining edge is below
+# wataui/diff.scala and the finding goes upstream to sgola.
+mode app
+emitname diff-spike
+binname diff-spike
+gomod diffspike
+godep github.com/adriaanm/wata/go-pkgs/memprobe ../go-pkgs/memprobe

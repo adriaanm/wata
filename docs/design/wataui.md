@@ -99,22 +99,25 @@ plan calls: these lists are at most a dozen rows, and a minimal-move
 script (an LIS over the key positions) buys nothing perceivable at the
 price of the one part of the module that would be hard to read.
 
-### Open: diffing appears to retain the trees it walks (`DIFF-RETAINS-REPRO`)
+### The differ does NOT retain what it walks (settled by `tools/diff-spike`)
 
-wata-mac leaks while idle at ~200 MB/hour, and the pump bisect lands here:
-running `Diff.diff` on each frame's tree is what makes that tree stay
-reachable. With the diff skipped the live heap after GC is flat; with it
-running — and with nothing encoded and nothing handed to the backend — the
-heap climbs in a straight line, and the retained objects are the VIEW
-nodes, not the patches (`Diff` itself is ~515 kB of `pathOf` path lists).
-The full bisect table is in [wata-mac.md](wata-mac.md).
+When the wata-mac idle leak (~200 MB/hour) bisected to the diff call, the
+suspicion was that running `Diff.diff` on a tree is what made that tree
+stay reachable — the heap profile showed the retained objects were the
+VIEW nodes, not the patches, and nothing in `diff.scala` could explain it
+(no global state, every binding a local `var`, `Patch` values ordinary
+immutable composites the caller drops).
 
-Nothing in `diff.scala` explains it: the module has no global state, every
-binding in it is a local `var`, and `Patch` values are ordinary immutable
-composites that the caller drops. That is exactly why the next step is a
-STANDALONE repro rather than more app-level bisecting — if a bare loop over
-two fixed trees leaks, the retaining edge is below this source and the
-finding belongs upstream in sgola, not here.
+The standalone arbiter, `tools/diff-spike` (`just diff-spike`), answered
+**no**: four arms — build-only control, fresh-vs-long-lived (the app's
+shape), both-long-lived, result-dropped — all flat or bounded over 100k
+iterations, judged on live heap after a forced GC, never RSS. Diffing
+carries a bounded working set (~350 KB vs the control's ~190 KB) but no
+arm climbs; if the walk retained its arguments the series would end near
+200 MB, and it ends under 0.6 MB. So the retaining edge is not below this
+module, the finding stays out of sgola, and the leak hunt moved back into
+what the app adds — `tools/diff-spike/REPORT.md` owns the series, the
+noise analysis, and the suspect list handed back to MAC-IDLE-LEAK.
 
 **The framebuffer backend does not use the differ.** It clears and
 repaints the whole tree every frame, exactly as before views were data —

@@ -109,6 +109,17 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
+- **`EQUALS-LIST-EMIT-BROKEN-CONS`** (filed 2026-08-08) — `==` between
+  two values of a case-class family carrying List fields (wataui's
+  `View`) emits an `equalsList` helper whose type switch names the cons
+  class unmangled (`case *:::` / `b.(*::)`), which is not Go; the go
+  build stage fails with a bare syntax error naming neither the `==`
+  site nor the cause. No shipping code hits it — wataui compares views
+  via the hand-written `Views.eqView`, which exists for a semantic
+  reason (a `Bytes`'s identity is not its contents), not as a
+  workaround. **Workaround taken** in `tools/diff-spike/main.scala`
+  (read a field via match instead of `==`); the comment names the key.
+
 - **`TUPLE-REF-COMPONENT-ASSIGN`** — a tuple component whose type lowers
   to a Go interface (a sealed trait, a `List[T]`) is erased to `any` in
   the emitted tuple struct, and the type assertion that puts it back is
