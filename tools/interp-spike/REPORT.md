@@ -57,11 +57,13 @@ handle. Two spellings were tried:
   `stage = appkit_CGRect{appkit_CGPoint{0.0, 0.0}, …}` → `undefined:
   appkit_CGRect`. The `@go.name`s on the class and its fields are ignored on
   this path (field reads came out `f.size.width`, not `f.Size.Width`).
-- `final class CGRect(@go.name("Origin") val origin: …)` with `new` **crashes
-  the plugin**: `sgola: unsupported expression (Apply)` followed by
-  `unhandled exception ... in the compiler plugin named "sgolaBackend"`, with
-  the `New(TypeTree[...])` tree dumped. A refusal would be fine; a crash is
-  not.
+- `final class CGRect(@go.name("Origin") val origin: …)` with `new` is
+  **walled**: a positioned sgola diagnostic at the `new` site saying facade
+  classes are bound, not constructed, and naming `FACADE-VALUE-STRUCT` as
+  the pending ruling on by-value construction. (When this spike first ran,
+  the same expression escaped the plugin as a crash — `sgola: unsupported
+  expression (Apply)`; sgola `b3863d3` turned that into the diagnostic.
+  The gate answer is unchanged.)
 
 Both sizes are one feature: a facade class whose Go type is used **by value**,
 and which Sgola can build. Filed upstream as `FACADE-VALUE-STRUCT`.
