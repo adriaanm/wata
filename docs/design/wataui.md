@@ -99,6 +99,23 @@ plan calls: these lists are at most a dozen rows, and a minimal-move
 script (an LIS over the key positions) buys nothing perceivable at the
 price of the one part of the module that would be hard to read.
 
+### Open: diffing appears to retain the trees it walks (`DIFF-RETAINS-REPRO`)
+
+wata-mac leaks while idle at ~200 MB/hour, and the pump bisect lands here:
+running `Diff.diff` on each frame's tree is what makes that tree stay
+reachable. With the diff skipped the live heap after GC is flat; with it
+running — and with nothing encoded and nothing handed to the backend — the
+heap climbs in a straight line, and the retained objects are the VIEW
+nodes, not the patches (`Diff` itself is ~515 kB of `pathOf` path lists).
+The full bisect table is in [wata-mac.md](wata-mac.md).
+
+Nothing in `diff.scala` explains it: the module has no global state, every
+binding in it is a local `var`, and `Patch` values are ordinary immutable
+composites that the caller drops. That is exactly why the next step is a
+STANDALONE repro rather than more app-level bisecting — if a bare loop over
+two fixed trees leaks, the retaining edge is below this source and the
+finding belongs upstream in sgola, not here.
+
 **The framebuffer backend does not use the differ.** It clears and
 repaints the whole tree every frame, exactly as before views were data —
 which is what makes golden-equivalence a byte-identical claim rather
