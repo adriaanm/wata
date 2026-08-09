@@ -133,6 +133,44 @@
       ]
     },
     {
+      "package": "uikit",
+      "out": "go-pkgs/appleptt/uikit",
+      "sdk": "iphonesimulator",
+      "triple": "arm64-apple-ios26.2-simulator",
+      "frameworks": [
+        "UIKit"
+      ],
+      "imports": [
+        "Foundation/Foundation.h",
+        "UIKit/UIKit.h"
+      ],
+      "classes": [
+        "NSArray",
+        "UIApplication",
+        "UIColor",
+        "UIFont",
+        "UIImage",
+        "UIImageView",
+        "UILabel",
+        "UIScreen",
+        "UIView",
+        "UIWindow"
+      ],
+      "enums": [
+        "UIViewContentMode"
+      ],
+      "structs": [
+        "CGPoint",
+        "CGSize",
+        "CGRect"
+      ],
+      "opaque": [
+        "NSData",
+        "NSDictionary",
+        "UIViewController"
+      ]
+    },
+    {
       "package": "foundation",
       "out": "go-pkgs/appleptt/foundation",
       "sdk": "macosx",

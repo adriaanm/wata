@@ -246,6 +246,7 @@ Two rules the bridging assumes, both ordinary ObjC contracts:
 |-----|---------|-------|
 | generator unit tests | `just bindgen-tests` (in `just ci`) | nothing |
 | regenerate + gofmt + `go vet` + ios/arm64 build | `just bindgen` | Xcode |
+| the uikit package for the simulator sysroot | `just ios-build-check` | Xcode |
 | the ObjC runtime, for real | `just bindgen-runtime` | macOS |
 | struct args/returns in callbacks | `just bindgen-structcb` | macOS arm64 |
 | the PushToTalk hello | `just ptt-hello` | Xcode (+ a phone to run it) |
@@ -379,8 +380,36 @@ alike and are not the same question: the once-refused axis was a struct or
 `CGFloat` return from a *callback* (lifted with the typed struct
 trampolines), and a block direction never touched it.
 
+`uikit` (iPhoneSimulator SDK, `frameworks: ["UIKit"]`): the iOS client's
+retained-backend surface (plan 0044, stage 1) — `UIApplication`, `UIWindow`,
+`UIScreen`, `UIView`, `UILabel`, `UIImageView`, `UIColor`, `UIFont`,
+`UIImage`, `NSArray` (hierarchy walks, as in `appkit`); `UIViewContentMode`;
+the `CGPoint`/`CGSize`/`CGRect` structs; `NSData`, `NSDictionary`,
+`UIViewController` (so `UIWindow.rootViewController` maps) opaque. Everything
+appkit.scala's facade uses has a direct analogue: `initWithFrame`/`frame`/
+`bounds`/`addSubview`/`subviews`, UILabel `text`/`font`/`textColor`,
+UIImageView `image` + UIView `contentMode`, `colorWithRed:green:blue:alpha:`
+(extended sRGB on iOS), `monospacedSystemFontOfSize:weight:`,
+`UIScreen.bounds`, `UIWindow.makeKeyAndVisible`. ~225 refusals; two shape
+what the iOS glue must carry, both the same CoreFoundation boundary appkit
+hit with CALayer:
+
+- **UIColor has no component reads.** AppKit's `redComponent` probes have no
+  UIKit analogue: `getRed:green:blue:alpha:` takes `CGFloat *` out-pointers
+  (a refused shape) and `CGColor` is a CF struct pointer. Render probes on
+  iOS must come from outside the color object — the simulator screenshot
+  path the ios spike already uses, or an offscreen render in Go glue.
+- **`UIImage` construction from pixels is out of reach** (`CGImage` is a
+  CGImageRef): raw-RGBA-to-UIImage is stage 2's Go glue
+  (CGBitmapContext), exactly as nativeui does for NSImage.
+
+Superclass non-inheritance is load-bearing here too: `UIWindow` and the
+view subclasses bind only their own declarations, so `initWithFrame:` and
+the geometry live on `UIView` and reach the subclasses via cast facets
+(`UIView{ID: w.ID}`), the appkit pattern.
+
 Growing any target is a reviewed diff of `bindgen.json` plus regenerated
-output. The UIKit views the iOS port will want are the next entries.
+output.
 
 ## The landscape this design sits in
 
