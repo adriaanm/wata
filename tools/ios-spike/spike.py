@@ -38,6 +38,9 @@ import time
 import zlib
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+import iosenv  # noqa: E402  (tools/iosenv.py — the shared GOOS=ios build env)
+
 OUT = HERE / "out"
 APP = OUT / "WataIosSpike.app"
 BUNDLE_ID = "dev.wata.iosspike"
@@ -73,24 +76,13 @@ def run(cmd, **kw):
     return subprocess.run(cmd, check=True, **kw)
 
 
-def sdk_paths(sdk):
-    def x(*a):
-        return subprocess.run(["xcrun", "--sdk", sdk, *a],
-                              capture_output=True, text=True, check=True).stdout.strip()
-    return x("--show-sdk-path"), x("--find", "clang")
-
-
-def go_ios_build(sdk, minflag, out):
-    """The GOOS=ios cross-build, one slice. This is exactly the env gomobile's
-    appleEnv sets (x/mobile/cmd/gomobile/env.go) for the matching target,
-    minus gomobile: `gomobile build -target=ios` itself just runs `go build`
-    and hands the resulting executable to an Xcode project for packaging."""
-    root, clang = sdk_paths(sdk)
-    flags = f"-isysroot {root} {minflag}={MIN_IOS} -arch arm64"
-    env = dict(os.environ,
-               GOWORK="off", GOOS="ios", GOARCH="arm64", CGO_ENABLED="1",
-               CC=clang, CXX=clang + "++",
-               CGO_CFLAGS=flags, CGO_CXXFLAGS=flags, CGO_LDFLAGS=flags)
+def go_ios_build(sdk, out):
+    """The GOOS=ios cross-build, one slice. The env (tools/iosenv.py) is
+    exactly what gomobile's appleEnv sets (x/mobile/cmd/gomobile/env.go) for
+    the matching target, minus gomobile: `gomobile build -target=ios` itself
+    just runs `go build` and hands the resulting executable to an Xcode
+    project for packaging."""
+    env = iosenv.go_env(sdk, MIN_IOS)
     t0 = time.time()
     run(["go", "build", "-tags", "ios", "-ldflags=-w", "-o", str(out), "."],
         cwd=HERE / "app", env=env)
@@ -106,14 +98,12 @@ def go_ios_build(sdk, minflag, out):
 
 def stage_build():
     OUT.mkdir(exist_ok=True)
-    if go_ios_build("iphonesimulator", "-mios-simulator-version-min",
-                    OUT / BIN) != "IOSSIMULATOR":
+    if go_ios_build("iphonesimulator", OUT / BIN) != "IOSSIMULATOR":
         sys.exit("spike: binary is not an iOS-simulator Mach-O")
     # The device slice is COMPILED ONLY: no device and no signing identity are
     # available here, so nothing has executed it. It is built anyway because a
     # failure to even compile would be a real finding about (A) on hardware.
-    if go_ios_build("iphoneos", "-miphoneos-version-min",
-                    OUT / (BIN + "-device")) != "IOS":
+    if go_ios_build("iphoneos", OUT / (BIN + "-device")) != "IOS":
         sys.exit("spike: device binary is not an iOS Mach-O")
     print("spike: NOTE the device slice is compiled, never executed "
           "(no hardware, no signing identity)")

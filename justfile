@@ -169,6 +169,11 @@ bindgen-tests:
 bindgen *FLAGS:
     tools/bindgen/regen.sh {{FLAGS}}
 
+# iOS client (plan 0044): go vet + go build of the generated UIKit bindings
+# for GOOS=ios/arm64 against the iphonesimulator sysroot. Needs Xcode; not in ci.
+ios-build-check:
+    tools/ios-build-check.py
+
 # Apple bindings: the runtime leg — the generated Foundation wrappers driven
 # against this Mac's ObjC runtime (dispatch, blocks, NSError**, and a
 # synthesized delegate class Foundation itself calls). Needs macOS; not in ci.
