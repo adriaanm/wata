@@ -175,14 +175,19 @@ bindgen *FLAGS:
 bindgen-runtime:
     cd go-pkgs/appleptt && GOWORK=off go test -tags objcruntime ./...
 
-# the retained AppKit backend (plan 0032): go-pkgs/nativeui's unit tests —
-# the native hierarchy mirrors wataui's applyAll for build-from-scratch and
-# patch scripts, the offscreen render probes, the dispatch seam, the key view,
-# all headless — plus go-pkgs/macshell's wire-grammar tests.
+# the retained AppKit backend (plans 0032/0038): the Sgola interpreter's own
+# suite (`wata-mac interptest` — the native hierarchy mirrors wataui's
+# applyAll for build-from-scratch and patch scripts, in-place mutation vs
+# replace, paint order, the offscreen render probes, the pure
+# pixel/glyph/key tables), plus the remaining Go tests: nativeui's dispatch
+# seam and raw-code key view, macshell's chrome (login/menu/devices).
+# The binary exits 0 either way, so the grep IS the assertion.
 # Needs macOS (like bindgen-runtime); not in ci.
 nativeui-tests:
     cd go-pkgs/nativeui && GOWORK=off go test ./...
     cd go-pkgs/macshell && GOWORK=off go test ./...
+    cd wata-mac && ../tools/sgo build && \
+      ./.sgo/wata-mac/wata-mac interptest | tee /dev/stderr | grep -qx 'interptest: PASS'
 
 # the macOS audio backend (plan 0033): go-pkgs/macaudio's unit tests — the
 # AudioToolbox opus round trip and the foreign-encoder fixture judged by tone

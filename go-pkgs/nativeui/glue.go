@@ -211,6 +211,11 @@ func SubviewAt(v appkit.NSView, i int) appkit.NSView {
 	return appkit.NSView{ID: v.Subviews().ObjectAtIndex(uint(i))}
 }
 
+// SameView answers whether two handles are the SAME native object — the
+// facade's zero-field bound-subset `==` cannot say (no bound fields), and
+// the in-place-mutation test needs exactly this.
+func SameView(a, b appkit.NSView) bool { return a.ID == b.ID }
+
 // RepPixelsWide / RepPixelsHigh read a bitmap rep's TRUE pixel size, so a
 // probe on a non-1 backing scale cannot skew its address (render tests).
 func RepPixelsWide(rep appkit.NSBitmapImageRep) int {

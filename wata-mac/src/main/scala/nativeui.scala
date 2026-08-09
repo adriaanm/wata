@@ -42,6 +42,8 @@ object nativeui:
 
   // ---- ObjC-runtime reads (the interp tests' assertion surface) -------------
   @go.name("ViewClassName") def viewClassName(v: appkit.NSView): String = ???
+  /** the SAME native object? (the zero-field facade's `==` cannot say) */
+  @go.name("SameView") def sameView(a: appkit.NSView, b: appkit.NSView): Boolean = ???
   @go.name("SubviewCount") def subviewCount(v: appkit.NSView): scala.Int = ???
   @go.name("SubviewAt") def subviewAt(v: appkit.NSView, i: scala.Int): appkit.NSView = ???
   @go.name("RepPixelsWide") def repPixelsWide(rep: appkit.NSBitmapImageRep): scala.Int = ???

@@ -50,6 +50,14 @@ import language.experimental.saferExceptions
  *  session. */
 object Main:
   def main(args: Array[String]): Unit =
+    // the retained interpreter's test suite as an argv mode (the wata-fb
+    // difftest idiom): no server, no login, no window — the recipe greps
+    // the printed verdict (interptest.scala).
+    if args.length > 0 && args(0) == "interptest" then
+      val failures = InterpTest.run()
+    else runClient(args)
+
+  def runClient(args: Array[String]): Unit =
     val hs = pick(args, 0, "WATA_MAC_HS", "")
     val user = pick(args, 1, "WATA_MAC_USER", "")
     val passIn = pick(args, 2, "WATA_MAC_PASS", "")
