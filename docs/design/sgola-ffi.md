@@ -182,8 +182,11 @@ category), and two filed gaps:
   and Go consts bind as parameterless defs. Scala-side minting needs an
   `inline def apply` companion (a plain def on a mapped-not-emitted
   facade object is called but never defined). Grounds `Int`/`Long` in
-  v1 — Go `uint`-grounded enums land on `Int` fine (the minted
-  conversions are ordinary Go numeric conversions). One wall to know: a
+  v1 — and the ground deliberately need NOT equal the Go type's
+  underlying kind: it is chosen by the VALUES (Int where Go's docs
+  bound them, which an enumeration always does), so `uint`-grounded Go
+  enums on the `Int` ground are the intended spelling, ruled in
+  contract (spec sentence at sgola `19eb1e6`). One wall to know: a
   member returning a defined scalar AND declaring `throws` is walled.
   The enum-typed glue wrappers are gone; what remains of that block is
   the pure cast facets (`AsBox`/`AsImageView`).
