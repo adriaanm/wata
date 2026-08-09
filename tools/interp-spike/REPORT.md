@@ -16,10 +16,11 @@ The oracle is arithmetic, like the objc spike's: a view initialised with
 `{{0,0},{160,128}}` reports a frame 160 wide and 128 high, and a struct
 marshalled wrong gives zeros or garbage rather than a near miss.
 
-Run it with `just interp-spike`. It does **not** build, and that is the
-finding — the spike is left spelled the way the interpreter wants it.
+Run it with `just interp-spike`. It builds AND runs its oracle — see the
+resolution at the bottom. The wall it was written to hit is kept below as
+the record of what `FACADE-VALUE-STRUCT` was.
 
-## Result: one gap, in two sizes
+## Result (pre-ruling): one gap, in two sizes
 
 Everything else works. Method binding, chained calls, nested field reads and
 the `@go.name` mapping are all exactly right; the emitted line
@@ -82,3 +83,31 @@ The `image/png` half of the gate is untouched here: `interp.go` encodes
 dependency, not an AppKit one, and it is answered by picking a different
 `NSImage` constructor (`NSBitmapImageRep` over raw RGBA is already in the
 bindings), not by the compiler.
+
+## Resolution: `FACADE-VALUE-STRUCT` landed (sgola `329656e`, IOP-6)
+
+The ruling (ratified 2026-08-09): a facade `case class` is a Go **value
+struct** — bare pkg-qualified type, named-field composite-literal
+construction, by-value crossing, Go `==` — and a plain `final class` stays
+the opaque pointer handle. The spike is now spelled that way:
+`CGPoint`/`CGSize`/`CGRect` are facade case classes, and the ObjC handles
+(`NSView`, `NSViewClass` — `struct{ objc.ID }` in Go) are bound-subset case
+classes with no bound fields and a `private[go]` constructor, so only the
+bindings mint one. Every facade case class carries the mandatory
+`override def toString: String = go.native` opt-in.
+
+With construction available the spike runs the full gate it always wanted:
+build `{{0,0},{160,128}}` from nested composite literals, pass it through
+`initWithFrame:` **by value**, read it back from `frame`, and compare with
+`==` (Go struct equality, nested). First build after the repin:
+
+```
+interp-spike: frame = 160.0x128.0 at 0.0,0.0
+interp-spike: PASS
+```
+
+Run by ci, so ci asserts the oracle. One authoring contract to carry into
+the port (upstream `FACADE-POINTER-RECEIVER-BINDING`, ruling pending): do
+NOT bind a Go pointer-receiver (`*T`) method on a value facade — it would
+mutate a copy silently. The `appkit` bindings are value receivers
+throughout, so nothing here trips it.

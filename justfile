@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike callback-spike
+ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike callback-spike interp-spike
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -124,12 +124,15 @@ diff-spike *ARGS:
       if [ -n "{{ARGS}}" ]; then ./.sgo/diff-spike/diff-spike {{ARGS}}; \
       else for a in a b c d e; do ./.sgo/diff-spike/diff-spike $a; done; fi
 
-# plan 0038 gate: can a facade express AppKit geometry? (1 known gap)
+# plan 0038 gate: can a facade express AppKit geometry? YES (IOP-6)
 interp-spike:
-    # It does not build, and that IS the finding — tools/interp-spike/REPORT.md
-    # owns the expectation (a facade class is always a Go POINTER, and cannot
-    # be constructed). Not in ci for the same reason.
-    cd tools/interp-spike && ../../tools/sgo build
+    # Builds AND runs its oracle (sgola 329656e, where FACADE-VALUE-STRUCT
+    # landed): CGRect/CGPoint/CGSize as facade value structs, constructed in
+    # Sgola, passed through initWithFrame: by value and read back from frame.
+    # Run by ci, so ci asserts the oracle.
+    # tools/interp-spike/REPORT.md owns the expectation.
+    cd tools/interp-spike && ../../tools/sgo build && \
+      ./.sgo/interp-spike/interp-spike | tee /dev/stderr | grep -qx 'interp-spike: PASS'
 
 # plan 0038 leg 2: an ObjC method whose body is Sgola (waiting on go.callback)
 callback-spike:
