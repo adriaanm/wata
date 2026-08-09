@@ -11,11 +11,10 @@ import "errors"
 
 var errDarwinOnly = errors.New("macshell: darwin only — wata-mac needs macOS")
 
-func StartHeadless(scale int)          {}
+func StartHeadless()                   {}
 func Start(scale int, title string)    {}
 func RunApp()                          {}
 func Terminate()                       {}
-func Apply(wire string) error          { return errDarwinOnly }
 func NextKey() int                     { return -1 }
 func PushKeyCode(code int, phase int)  {}
 func TreeDump() (string, error)        { return "", errDarwinOnly }

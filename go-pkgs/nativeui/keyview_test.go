@@ -1,20 +1,32 @@
 // The synthesized key view, driven headlessly: acceptsFirstResponder through
 // the ObjC dispatcher, and keyDown:/keyUp: fed a stand-in event object — a
-// second synthesized class answering keyCode/isARepeat — so the translation
-// and the press/release/repeat phases are pinned without a window or a real
-// event loop.
+// second synthesized class answering keyCode/isARepeat — so the RAW-code
+// forwarding and the press/release/repeat phases are pinned without a window
+// or a real event loop. (Key TRANSLATION is the Sgola side's now —
+// wata-mac/src/main/scala/mackeys.scala, covered by `wata-mac interptest`.)
 
 //go:build darwin
 
 package nativeui
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 
 	"github.com/adriaanm/wata/go-pkgs/appleptt/appkit"
 	"github.com/ebitengine/purego/objc"
 )
+
+// onAppKit runs f on a locked OS thread inside an autorelease pool.
+func onAppKit(t *testing.T, f func()) {
+	t.Helper()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	pool := PoolPush()
+	defer PoolPop(pool)
+	f()
+}
 
 // fakeKeyEvent synthesizes an object answering keyCode/isARepeat — the two
 // messages dispatchKeyEvent sends — with canned values.
@@ -46,27 +58,28 @@ func fakeKeyEvent(code uint16, repeat bool) objc.ID {
 	return objc.ID(fakeEventClass).Send(selAllocKV).Send(objc.RegisterName("init"))
 }
 
-func TestKeyViewTranslatesAndPhases(t *testing.T) {
+func TestKeyViewForwardsRawCodesAndPhases(t *testing.T) {
 	onAppKit(t, func() {
 		fakeMu.Lock()
 		defer fakeMu.Unlock()
 		type got struct {
-			k     Key
+			code  int
 			phase int
 		}
 		var events []got
 		v := NewKeyView(appkit.CGRect{Size: appkit.CGSize{Width: 100, Height: 100}},
-			func(k Key, phase int) { events = append(events, got{k, phase}) })
+			func(code, phase int) { events = append(events, got{code, phase}) })
 
-		if got := className(v.ID); got != "WataKeyView" {
+		if got := ViewClassName(v); got != "WataKeyView" {
 			t.Fatalf("class = %q, want WataKeyView", got)
 		}
 		if !objc.Send[bool](v.ID, selAcceptsFirst) {
 			t.Fatalf("acceptsFirstResponder answered NO")
 		}
 
-		// press, autorepeat, release of the space bar (PTT), then an arrow
-		// press and a key the table does not know (must be swallowed).
+		// press, autorepeat, release of the space bar, then an arrow press
+		// and a key wata's table does not know — which is FORWARDED now
+		// (the Sgola translation drops it; the view carries raw codes).
 		v.ID.Send(selKeyDown, fakeKeyEvent(49, false))
 		v.ID.Send(selKeyDown, fakeKeyEvent(49, true))
 		v.ID.Send(selKeyUp, fakeKeyEvent(49, false))
@@ -74,10 +87,11 @@ func TestKeyViewTranslatesAndPhases(t *testing.T) {
 		v.ID.Send(selKeyDown, fakeKeyEvent(12 /* kVK_ANSI_Q */, false))
 
 		want := []got{
-			{KeyPtt, PhasePress},
-			{KeyPtt, PhaseRepeat},
-			{KeyPtt, PhaseRelease},
-			{KeyUp, PhasePress},
+			{49, PhasePress},
+			{49, PhaseRepeat},
+			{49, PhaseRelease},
+			{126, PhasePress},
+			{12, PhasePress},
 		}
 		if len(events) != len(want) {
 			t.Fatalf("events = %v, want %v", events, want)

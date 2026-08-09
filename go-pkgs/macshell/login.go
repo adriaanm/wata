@@ -30,7 +30,6 @@ import (
 
 	"github.com/adriaanm/wata/go-pkgs/appleptt/appkit"
 	"github.com/adriaanm/wata/go-pkgs/appleptt/objcrt"
-	"github.com/adriaanm/wata/go-pkgs/nativeui"
 	"github.com/ebitengine/purego/objc"
 )
 
@@ -53,29 +52,9 @@ const (
 	sheetH  = numRows*rowH + (numRows-1)*rowGap
 )
 
-// onStageSync runs f where the stage lives and WAITS for it. Headless that is
-// the stage's own thread; windowed it is the main queue. Never call it from
-// the main thread itself — the wait would never be satisfied.
-func onStageSync(f func()) {
-	mu.Lock()
-	hl := headless
-	w := work
-	mu.Unlock()
-	if hl {
-		done := make(chan struct{})
-		w <- func() { f(); close(done) }
-		<-done
-		return
-	}
-	done := make(chan struct{})
-	nativeui.MainQueue().Async(func() {
-		pool := poolPush()
-		f()
-		poolPop(pool)
-		close(done)
-	})
-	<-done
-}
+// onStageSync lives in shell.go now: headless the caller IS the stage's
+// thread (the locked main goroutine), so the work runs inline; windowed it
+// hops to the main queue and waits.
 
 func newTextField(x, y, w, h float64, secure bool) objc.ID {
 	class := "NSTextField"

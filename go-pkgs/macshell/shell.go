@@ -1,26 +1,28 @@
-// The macOS shell around nativeui's retained stage: the window (or the
-// headless stage), the AppKit-thread seam, the key queue, and the wire
-// decode. This is the package the wata-mac Sgola app binds (`go.macshell`);
-// the surface is primitive-typed — strings and ints — the same discipline
-// go-pkgs/audio and go-pkgs/gioshell keep.
+// The macOS shell around the Sgola-side retained stage: the window (or the
+// headless flag), the AppKit-thread seam for the CHROME, the raw key queue,
+// and the TreeDump assertion surface. This is the package the wata-mac Sgola
+// app binds (`go.macshell`); the surface is primitive-typed — strings and
+// ints — plus the appkit handle for the stage root, which the Sgola
+// interpreter (wata-mac/src/main/scala/interp.scala) now owns and builds.
 //
-// TWO MODES, one Apply path:
+// TWO MODES, and who owns which thread:
 //
 //   - WINDOWED. Start must run on the process's main thread (the package
 //     init locks the main goroutine there, so the Sgola main simply calls it
-//     first); it brings up NSApplication, the window, the stage and the
-//     first-responder key view (nativeui.NewKeyView). RunApp is
-//     NSApplication.run and never returns; the frame pump runs on a forked
-//     goroutine and Apply submits each frame's mutation to the MAIN QUEUE
-//     asynchronously (nativeui.MainQueue), one frame per queue turn — the
-//     threading rule wata-mac.md pins.
+//     first); it brings up NSApplication, the window and the first-responder
+//     key view (nativeui.NewKeyView, raw keyCodes). The Sgola side then
+//     creates its stage on the same main goroutine and hands the root over
+//     (AdoptRoot), forks the pump, and calls RunApp = NSApplication.run,
+//     which never returns. Frame applies hop to the MAIN QUEUE through
+//     nativeui.OnMain — the pump publishes a frame, a `go.callback`
+//     trampoline applies it on the AppKit thread, one frame per queue turn.
 //
-//   - HEADLESS (WATA_MAC_HEADLESS). No NSApplication, no window, no runloop:
-//     a dedicated locked OS thread owns the stage (chunk 1 proved offscreen
-//     AppKit work is safe there), Apply runs on it SYNCHRONOUSLY, and
-//     TreeDump walks the live NSView hierarchy after it — which is what
-//     makes the mac smoke's assertions coherent: when `wait` returns, the
-//     native tree IS the state the printed patches produced.
+//   - HEADLESS (WATA_MAC_HEADLESS). No NSApplication, no window, no runloop,
+//     and no second thread either: the main goroutine IS the locked main OS
+//     thread, the Sgola stage lives on it, applies run inline (bracketed in
+//     nativeui.PoolPush/PoolPop), and TreeDump walks the adopted root
+//     synchronously — when the REPL's `wait` returns, the native tree IS the
+//     state the printed patches produced.
 //
 // Every AppKit excursion is wrapped in an autorelease pool (the caller's
 // job, per wata-mac.md).
@@ -37,9 +39,7 @@ import (
 	"sync"
 
 	"github.com/adriaanm/wata/go-pkgs/appleptt/appkit"
-	"github.com/adriaanm/wata/go-pkgs/appleptt/objcrt"
 	"github.com/adriaanm/wata/go-pkgs/nativeui"
-	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 )
 
@@ -50,70 +50,53 @@ func init() {
 	runtime.LockOSThread()
 }
 
-var poolPush func() uintptr
-var poolPop func(p uintptr)
-var poolOnce sync.Once
-
-func poolInit() {
-	poolOnce.Do(func() {
-		lib, err := purego.Dlopen("/usr/lib/libobjc.A.dylib", purego.RTLD_GLOBAL|purego.RTLD_LAZY)
-		if err != nil {
-			panic("macshell: dlopen libobjc: " + err.Error())
-		}
-		purego.RegisterLibFunc(&poolPush, lib, "objc_autoreleasePoolPush")
-		purego.RegisterLibFunc(&poolPop, lib, "objc_autoreleasePoolPop")
-	})
-}
+func poolPush() uintptr    { return nativeui.PoolPush() }
+func poolPop(pool uintptr) { nativeui.PoolPop(pool) }
 
 const keyQueueCap = 256
 
 var (
 	mu       sync.Mutex
-	stage    *nativeui.Stage
 	headless bool
-	work     chan func() // headless: the dedicated AppKit thread's inbox
 	keys     chan int
 	win      appkit.NSWindow
+	keyView  appkit.NSView
+	root     appkit.NSView // the Sgola stage's container, once adopted
+	hasRoot  bool
 )
 
-var errNotStarted = errors.New("macshell: Start/StartHeadless has not run")
+var errNotStarted = errors.New("macshell: no stage root adopted yet")
 
-// packKey packs a nativeui.Key and a phase (nativeui.Phase*) into one int:
-// key*4 + phase. -1 = queue empty. The Sgola side rebuilds its KeyEvent.
-func packKey(k nativeui.Key, phase int) int { return int(k)*4 + phase }
+// packKey packs a RAW macOS virtual key code and a phase (nativeui.Phase*)
+// into one int: code*4 + phase. -1 = queue empty. Translation into wata's
+// key model is the Sgola side's (mackeys.scala).
+func packKey(code int, phase int) int { return code*4 + phase }
 
-func pushKey(k nativeui.Key, phase int) {
+func pushKey(code int, phase int) {
 	select {
-	case keys <- packKey(k, phase):
+	case keys <- packKey(code, phase):
 	default: // a pump that stopped draining is already broken; drop, not block
 	}
 }
 
-// StartHeadless creates the stage on a dedicated locked OS thread. No window,
-// no runloop; Apply and TreeDump run synchronously on that thread.
-func StartHeadless(scale int) {
-	poolInit()
+// StartHeadless arms headless mode: just the key queue and the flag — the
+// Sgola side creates its stage on the calling goroutine (the locked main OS
+// thread) and hands the root to AdoptRoot for TreeDump.
+func StartHeadless() {
 	mu.Lock()
 	headless = true
 	keys = make(chan int, keyQueueCap)
-	work = make(chan func(), 16)
 	mu.Unlock()
-	go func() {
-		runtime.LockOSThread()
-		for f := range work {
-			pool := poolPush()
-			f()
-			poolPop(pool)
-		}
-	}()
-	onStage(func() { stage = nativeui.NewStage(scale) })
 }
 
-// Start brings up NSApplication, the window, the stage and the key view.
-// MAIN THREAD ONLY (the init lock guarantees the Sgola main is there); call
-// it before forking the pump, then call RunApp last.
+// Start brings up NSApplication, the window and the key view — no stage:
+// the Sgola side builds one next and hands its root to AdoptRoot. MAIN
+// THREAD ONLY (the init lock guarantees the Sgola main is there); call it
+// before forking the pump, then call RunApp last.
 func Start(scale int, title string) {
-	poolInit()
+	if scale < 1 {
+		scale = 1
+	}
 	mu.Lock()
 	headless = false
 	keys = make(chan int, keyQueueCap)
@@ -131,20 +114,18 @@ func Start(scale int, title string) {
 	// that interrupts the moment a message lands. A no-op unbundled.
 	RequestNotifyAuth()
 
-	s := nativeui.NewStage(scale)
 	stageRect := appkit.CGRect{Size: appkit.CGSize{
-		Width:  float64(nativeui.StageW * s.Scale),
-		Height: float64(nativeui.StageH * s.Scale),
+		Width:  float64(nativeui.StageW * scale),
+		Height: float64(nativeui.StageH * scale),
 	}}
 	style := appkit.NSWindowStyleMaskTitled | appkit.NSWindowStyleMaskClosable |
 		appkit.NSWindowStyleMaskMiniaturizable
 	w := appkit.NSWindow{ID: appkit.GetNSWindowClass().Alloc().ID}.
 		InitWithContentRectStyleMaskBackingDefer(stageRect, style, appkit.NSBackingStoreBuffered, false)
 	w.SetTitle(title)
-	w.ContentView().AddSubview(s.Root())
-	// The key view spans the stage ON TOP of it (later subview = above);
-	// it draws nothing and owns first responder, so every key lands in the
-	// translation table and the queue.
+	// The key view spans the stage and stays ON TOP of it (AdoptRoot splices
+	// the stage root BELOW it); it draws nothing and owns first responder, so
+	// every key lands in the queue as a raw code.
 	kv := nativeui.NewKeyView(stageRect, pushKey)
 	w.ContentView().AddSubview(kv)
 	w.SetInitialFirstResponder(kv)
@@ -154,9 +135,29 @@ func Start(scale int, title string) {
 	app.ActivateIgnoringOtherApps(true)
 
 	mu.Lock()
-	stage = s
 	win = w
+	keyView = kv
 	mu.Unlock()
+}
+
+// AdoptRoot takes the Sgola stage's container view: windowed it goes into
+// the window's content view BELOW the key view (later subview = above);
+// both modes remember it as TreeDump's walk root. Call on the thread that
+// owns the stage (the main goroutine, in both modes, before the pump forks).
+func AdoptRoot(v appkit.NSView) {
+	mu.Lock()
+	hl := headless
+	w := win
+	kv := keyView
+	root = v
+	hasRoot = true
+	mu.Unlock()
+	if hl {
+		return
+	}
+	pool := poolPush()
+	defer poolPop(pool)
+	nativeui.AddSubviewBelow(w.ContentView(), v, kv)
 }
 
 // RunApp is NSApplication.run: main thread only, never returns.
@@ -169,20 +170,35 @@ func Terminate() {
 	appkit.GetNSApplicationClass().SharedApplication().Terminate(objc.ID(0))
 }
 
-// onStage runs f on whatever thread owns the stage: the headless AppKit
-// thread (synchronously), or the main queue (asynchronously — one frame per
-// queue turn, drained under NSApplication.run).
-func onStage(f func()) {
+// onStageSync runs f where AppKit work is safe and WAITS for it — the
+// CHROME's seam (login sheet, Settings, Devices). Headless the caller IS
+// the stage's thread (the locked main goroutine), so f runs inline;
+// windowed it hops to the main queue and blocks until the queue turn ran —
+// so windowed, never call it from the main thread itself.
+func onStageSync(f func()) {
 	mu.Lock()
 	hl := headless
-	w := work
 	mu.Unlock()
 	if hl {
-		done := make(chan struct{})
-		w <- func() { f(); close(done) }
-		<-done
+		pool := poolPush()
+		f()
+		poolPop(pool)
 		return
 	}
+	done := make(chan struct{})
+	nativeui.MainQueue().Async(func() {
+		pool := poolPush()
+		f()
+		poolPop(pool)
+		close(done)
+	})
+	<-done
+}
+
+// onMainAsync enqueues chrome work on the main queue without waiting —
+// windowed-only fire-and-forget (the Dock badge). Headless callers return
+// before reaching it.
+func onMainAsync(f func()) {
 	nativeui.MainQueue().Async(func() {
 		pool := poolPush()
 		f()
@@ -190,30 +206,7 @@ func onStage(f func()) {
 	})
 }
 
-// Apply decodes one wire message (wire.go) and applies it to the stage —
-// SetTree for a whole tree, Apply for a script, in script order.
-func Apply(wire string) error {
-	msg, err := DecodeMsg(wire)
-	if err != nil {
-		return err
-	}
-	mu.Lock()
-	s := stage
-	mu.Unlock()
-	if s == nil {
-		return errNotStarted
-	}
-	onStage(func() {
-		if msg.IsTree {
-			s.SetTree(msg.Tree)
-		} else {
-			s.Apply(msg.Patches)
-		}
-	})
-	return nil
-}
-
-// NextKey pops one pending key event (key*4+phase), or -1 — never blocks.
+// NextKey pops one pending key event (rawCode*4+phase), or -1 — never blocks.
 func NextKey() int {
 	mu.Lock()
 	k := keys
@@ -229,56 +222,46 @@ func NextKey() int {
 	}
 }
 
-// PushKeyCode injects a macOS virtual key code through the SAME translation
-// table the key view uses (nativeui.TranslateKeyCode) — the headless smoke's
-// way of exercising the key path end to end. Unknown codes are swallowed
-// exactly as the key view swallows them.
+// PushKeyCode injects a RAW macOS virtual key code into the same queue the
+// key view feeds — the headless smoke's way of exercising the key path end
+// to end (the Sgola drain runs the same translation table either way).
 func PushKeyCode(code int, phase int) {
-	k := nativeui.TranslateKeyCode(uint16(code))
-	if k == nativeui.KeyNone {
-		return
-	}
 	mu.Lock()
 	q := keys
 	mu.Unlock()
 	if q != nil {
-		pushKey(k, phase)
+		pushKey(code, phase)
 	}
 }
 
-// TreeDump walks the live native hierarchy — class, frame (AppKit
-// coordinates, bottom-left origin), and a text field's string — one line per
-// view, children indented, in subview (= paint) order. Headless only: it is
-// the smoke's assertion surface, read on the stage's own thread.
+// TreeDump walks the live native hierarchy from the adopted root — class,
+// frame (AppKit coordinates, bottom-left origin), and a text field's string —
+// one line per view, children indented, in subview (= paint) order. Headless
+// only: it is the smoke's assertion surface, and headless the caller IS the
+// stage's thread, so the walk is inline and coherent with the applies before
+// it.
 func TreeDump() (string, error) {
 	mu.Lock()
-	s := stage
-	hl := headless
+	ok := hasRoot && headless
+	r := root
 	mu.Unlock()
-	if s == nil || !hl {
+	if !ok {
 		return "", errNotStarted
 	}
-	var out string
-	done := make(chan struct{})
-	work <- func() {
-		pool := poolPush()
-		var b strings.Builder
-		dumpView(&b, s.Root(), 0)
-		out = b.String()
-		poolPop(pool)
-		close(done)
-	}
-	<-done
-	return out, nil
+	pool := poolPush()
+	defer poolPop(pool)
+	var b strings.Builder
+	dumpView(&b, r, 0)
+	return b.String(), nil
 }
 
 func dumpView(b *strings.Builder, v appkit.NSView, depth int) {
 	f := v.Frame()
-	cls := viewClassName(v.ID)
+	cls := nativeui.ViewClassName(v)
 	fmt.Fprintf(b, "%s%s %d %d %d %d", strings.Repeat("  ", depth), cls,
 		int(f.Origin.X), int(f.Origin.Y), int(f.Size.Width), int(f.Size.Height))
 	if cls == "NSTextField" {
-		fmt.Fprintf(b, " %q", appkit.NSControl{ID: v.ID}.StringValue())
+		fmt.Fprintf(b, " %q", nativeui.LabelText(v))
 	}
 	b.WriteString("\n")
 	// Descend only into plain NSViews — the stage, the groups, the key view's
@@ -287,15 +270,8 @@ func dumpView(b *strings.Builder, v appkit.NSView, depth int) {
 	if cls != "NSView" {
 		return
 	}
-	subs := v.Subviews()
-	n := int(subs.Count())
+	n := nativeui.SubviewCount(v)
 	for i := 0; i < n; i++ {
-		dumpView(b, appkit.NSView{ID: subs.ObjectAtIndex(uint(i))}, depth+1)
+		dumpView(b, nativeui.SubviewAt(v, i), depth+1)
 	}
-}
-
-// viewClassName asks the ObjC runtime what an object is (the class object's
-// description is its name).
-func viewClassName(id objc.ID) string {
-	return objcrt.GoString(objc.ID(id.Class()).Send(objc.RegisterName("description")))
 }

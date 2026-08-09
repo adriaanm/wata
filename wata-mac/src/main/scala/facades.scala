@@ -24,21 +24,26 @@ object bufio:
 
   @go.name("NewScanner") def newScanner(r: go.io.Reader): go.bufio.Scanner = ???
 
-/** `go.macshell` — the AppKit shell (go-pkgs/macshell): the window or the
- *  headless stage, the wire-encoded frame handoff, and the key queue. The
- *  surface is strings and ints only; the wire grammar lives in macshell's
- *  wire.go and this module's wire.scala, which must agree byte for byte.
+/** `go.macshell` — the AppKit shell (go-pkgs/macshell): the window (or the
+ *  headless flag), the raw key queue, the chrome, and TreeDump. The frame
+ *  handoff is NOT here any more: the retained interpreter is Sgola
+ *  (interp.scala), so frames cross by direct call — the shell only adopts
+ *  the stage's root view.
  *
  *  THREADING (wata-mac.md): `start` must be the Sgola main's FIRST device
  *  call (macshell's package init pins the main goroutine to the main OS
- *  thread), `runApp` is NSApplication.run — call it last, it never returns —
- *  and `apply` may be called from the pump goroutine in both modes: windowed
- *  it dispatches to the main queue, headless it runs on the stage's own
- *  locked thread. */
+ *  thread), then `MacStage.create` + `adoptRoot` on that same thread, then
+ *  fork the pump and call `runApp` (NSApplication.run — it never returns)
+ *  last. Headless there is no second thread at all: the main goroutine IS
+ *  the stage's thread. */
 @go.bind("github.com/adriaanm/wata/go-pkgs/macshell")
 object macshell:
-  /** windowed init: NSApplication + window + stage + key view. Main thread. */
+  /** windowed init: NSApplication + window + key view (no stage — that is
+   *  `MacStage.create`'s). Main thread. */
   @go.name("Start") def start(scale: scala.Int, title: String): Unit = ???
+  /** take the Sgola stage's root: windowed, into the content view below the
+   *  key view; both modes, as TreeDump's walk root. Stage thread. */
+  @go.name("AdoptRoot") def adoptRoot(v: go.appkit.NSView): Unit = ???
 
   /** the login sheet (plan 0037): an NSAlert with server/name/password
    *  fields and a "stay signed in" checkbox, prefilled with what is passed.
@@ -51,19 +56,19 @@ object macshell:
    *  `homeserver 	 user 	 password 	 0|1` — the flag being the checkbox.
    *  Strings only, like the rest of this facade. */
   @go.name("Login") def login(hs: String, user: String): String = ???
-  /** headless init: the stage on a dedicated locked OS thread. */
-  @go.name("StartHeadless") def startHeadless(scale: scala.Int): Unit = ???
+  /** headless init: just the flag and the key queue — the stage lives on
+   *  the calling goroutine (the locked main OS thread). */
+  @go.name("StartHeadless") def startHeadless(): Unit = ???
   /** NSApplication.run — never returns. */
   @go.name("RunApp") def runApp(): Unit = ???
   /** [NSApp terminate:] — the windowed quit edge; does not return. */
   @go.name("Terminate") def terminate(): Unit = ???
-  /** apply one wire message (a whole tree or a differ script). */
-  @go.name("Apply") def applyWire(wire: String): Unit throws sgo.GoError = ???
-  /** one pending key event as `key*4 + phase` (phase 0 release / 1 press /
-   *  2 repeat), or -1 — never blocks. */
+  /** one pending key event as `rawCode*4 + phase` (phase 0 release / 1 press
+   *  / 2 repeat), or -1 — never blocks. Codes are RAW macOS virtual key
+   *  codes; `MacKeys.translate` runs at the drain. */
   @go.name("NextKey") def nextKey(): scala.Int = ???
-  /** inject a macOS virtual key code through the real translation table —
-   *  the headless smoke's key path. */
+  /** inject a raw macOS virtual key code into the same queue the key view
+   *  feeds — the headless smoke's key path. */
   @go.name("PushKeyCode") def pushKeyCode(code: scala.Int, phase: scala.Int): Unit = ???
   /** the live native hierarchy, one view per line (headless only). */
   @go.name("TreeDump") def treeDump(): String throws sgo.GoError = ???

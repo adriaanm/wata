@@ -1,6 +1,9 @@
 // The first-responder key view: a synthesized NSView subclass whose
-// keyDown:/keyUp: feed the pure key table (keys.go) and hand the shell one
-// (key, phase) pair per event.
+// keyDown:/keyUp: hand the shell one RAW (keyCode, phase) pair per event.
+// Translation into wata's five-key model is the Sgola side's
+// (wata-mac/src/main/scala/mackeys.scala): this view forwards every code and
+// the Sgola input drain drops the ones the table does not know — the seam
+// carries raw macOS virtual key codes, nothing translated.
 //
 // Synthesis follows bindgen.md "Structs into callbacks": a method's ObjC
 // type encoding must be the TRUE one. keyDown:/keyUp: take only an object
@@ -15,8 +18,8 @@
 // the first press — the walkie-talkie key model (PTT press/release, tap vs
 // hold) needs the edges, and a repeat is not an edge.
 //
-// Keys the table does not know (KeyNone) are swallowed, not forwarded: the
-// stage is the whole UI, and there is no text field for AppKit to want them.
+// Nothing is forwarded up the responder chain either way: the stage is the
+// whole UI, and there is no text field for AppKit to want a key for.
 
 //go:build darwin
 
@@ -41,7 +44,7 @@ var (
 	keyViewClass objc.Class
 
 	keyHandlersMu sync.Mutex
-	keyHandlers   = map[objc.ID]func(k Key, phase int){}
+	keyHandlers   = map[objc.ID]func(code int, phase int){}
 
 	selKeyCode      = objc.RegisterName("keyCode")
 	selIsARepeat    = objc.RegisterName("isARepeat")
@@ -49,7 +52,6 @@ var (
 	selKeyDown      = objc.RegisterName("keyDown:")
 	selKeyUp        = objc.RegisterName("keyUp:")
 	selAcceptsFirst = objc.RegisterName("acceptsFirstResponder")
-	selRetain       = objc.RegisterName("retain")
 )
 
 func registerKeyViewClass() {
@@ -72,10 +74,7 @@ func registerKeyViewClass() {
 }
 
 func dispatchKeyEvent(self, event objc.ID, down bool) {
-	k := TranslateKeyCode(objc.Send[uint16](event, selKeyCode))
-	if k == KeyNone {
-		return
-	}
+	code := int(objc.Send[uint16](event, selKeyCode))
 	phase := PhaseRelease
 	if down {
 		phase = PhasePress
@@ -87,16 +86,16 @@ func dispatchKeyEvent(self, event objc.ID, down bool) {
 	h := keyHandlers[self]
 	keyHandlersMu.Unlock()
 	if h != nil {
-		h(k, phase)
+		h(code, phase)
 	}
 }
 
 // NewKeyView creates a WataKeyView spanning frame. onKey is called on the
-// AppKit thread for every translated key event; it must not block (push to a
-// queue and return — the shell's frame loop drains it). Make the view the
-// window's initialFirstResponder (or send makeFirstResponder:) so keyDown:
-// reaches it. AppKit thread only.
-func NewKeyView(frame appkit.CGRect, onKey func(k Key, phase int)) appkit.NSView {
+// AppKit thread for every key event, RAW keyCode and all; it must not block
+// (push to a queue and return — the shell's frame loop drains it). Make the
+// view the window's initialFirstResponder (or send makeFirstResponder:) so
+// keyDown: reaches it. AppKit thread only.
+func NewKeyView(frame appkit.CGRect, onKey func(code int, phase int)) appkit.NSView {
 	registerKeyViewClass()
 	// -init may return a different object than -alloc did; adopt the return.
 	v := appkit.NSView{ID: objc.ID(keyViewClass).Send(selAllocKV)}.InitWithFrame(frame)

@@ -17,9 +17,11 @@ import language.experimental.saferExceptions
  *  drain the audio thread's `AudioEvt` queue, tick `WataLogic.update`, read
  *  the handle's snapshot/connection, run `WataLogic.body` — the SAME body the
  *  device runs — then diff against the last tree (`Diff.diff`) and hand the
- *  script to the shell as one wire message. Bodies and the diff stay on the
- *  pump goroutine; only the shell's apply touches AppKit (wata-mac.md's
- *  threading rule — macshell routes it to the right thread per mode).
+ *  script to the retained interpreter (`MacStage`, interp.scala) by DIRECT
+ *  call. Bodies and the diff stay on the pump goroutine; only the stage
+ *  apply touches AppKit (wata-mac.md's threading rule — `MacStage.submit*`
+ *  routes it to the right thread per mode: windowed it publishes and a
+ *  main-queue callback applies, headless it applies inline).
  *
  *  AUDIO (plan 0033): the client is `Runtime.makeWithAudio` and each driver
  *  forks wata-fb's OWN audio thread (`audiothread.scala`, symlinked in) into
@@ -160,6 +162,14 @@ object Pump:
 
   def runWindowed(cfg: ClientConfig, scale: scala.Int): Unit =
     go.macshell.start(scale, "Wata")
+    // The stage is Sgola's (interp.scala) and is built HERE, on the main
+    // goroutine — macshell's init pinned it to the main OS thread — then the
+    // window adopts its root below the key view. After this, only the main
+    // queue touches it (MacStage.submit* publish; the callback applies).
+    val pool = go.nativeui.poolPush()
+    val root = MacStage.create(scale, true)
+    go.nativeui.poolPop(pool)
+    go.macshell.adoptRoot(root)
     // The session runs on the pump goroutine, INCLUDING the login sheet: a
     // modal has to go on the main queue, and that queue only drains once
     // `runApp` is going. So the client is built here rather than on the main
@@ -282,7 +292,14 @@ object Pump:
     case _                   => false
 
   def runHeadless(cfg: ClientConfig, scale: scala.Int, sc: go.bufio.Scanner): Unit =
-    go.macshell.startHeadless(scale)
+    go.macshell.startHeadless()
+    // No second thread headless: this goroutine (locked to the main OS
+    // thread by macshell's init) IS the stage's thread — applies run inline,
+    // and TreeDump's walk is coherent with them by construction.
+    val pool = go.nativeui.poolPush()
+    val root = MacStage.create(scale, false)
+    go.nativeui.poolPop(pool)
+    go.macshell.adoptRoot(root)
     NetStatus.reset()
     Devices.resume()
     val h = startAudioClient(cfg)
@@ -652,7 +669,7 @@ object Pump:
    *  NAME it: an idle frame's script should be empty, so any non-empty one
    *  says exactly which element changes every frame (the pinning suspect). */
   def leakSink(ps: List[Patch]): Unit =
-    val n = Wire.lenPatches(ps)
+    val n = lenPatches(ps)
     if n > 0 then
       ps match
         case p :: _ => println("leakdiff n=" + n + " first=" + DiffOracle.showPatch(p))
@@ -674,18 +691,26 @@ object Pump:
     VGroup(rows)
 
   def setTree(v: View, verbose: Boolean): Unit =
-    try
-      go.macshell.applyWire(Wire.encodeTree(v))
-      if verbose then println("tree set")
-    catch case e: sgo.GoError => println("? apply: " + e.message)
+    MacStage.submitTree(v)
+    if verbose then println("tree set")
 
   def patchTo(old: View, v: View, verbose: Boolean): Unit =
     val ps = Diff.diff(old, v)
-    if Wire.lenPatches(ps) > 0 then
-      try
-        go.macshell.applyWire(Wire.encodeScript(ps))
-        if verbose then printPatches(ps)
-      catch case e: sgo.GoError => println("? apply: " + e.message)
+    if lenPatches(ps) > 0 then
+      MacStage.submitScript(ps)
+      if verbose then printPatches(ps)
+
+  def lenPatches(ps: List[Patch]): Int =
+    var n = 0
+    var cur = ps
+    var going = true
+    while going do
+      cur match
+        case _ :: t =>
+          n += 1
+          cur = t
+        case Nil => going = false
+    n
 
   def printPatches(ps: List[Patch]): Unit =
     var cur = ps
@@ -701,29 +726,30 @@ object Pump:
 
   /** drain the shell's key queue into the applet — and run the two-step quit
    *  edge exactly as the device loop does (Back on the contact list arms;
-   *  a second press inside the window quits). */
+   *  a second press inside the window quits). The queue carries RAW macOS
+   *  virtual key codes now; `MacKeys.translate` runs here, so the window
+   *  path and the harness's `pushKeyCode` share one table, and a code the
+   *  table does not know is dropped at the drain. */
   def applyKeys(st0: PumpSt, ctx: FrameCtx): PumpSt =
     var st = st0
     var going = true
     while going do
       val packed = go.macshell.nextKey()
       if packed < 0 then going = false
-      else st = applyKey(st, decode(packed), ctx)
+      else
+        val k = MacKeys.translate(packed / 4)
+        if k != MacKeys.NONE then
+          st = applyKey(st, KeyEvent(keyOf(k), stateOf(packed % 4)), ctx)
     st
 
-  /** `key*4 + phase` back into a KeyEvent (macshell's packing; the key
-   *  numbering is nativeui's — None/Up/Down/Left/Right/Enter/Back/Ptt). */
-  def decode(packed: scala.Int): KeyEvent =
-    KeyEvent(keyOf(packed / 4), stateOf(packed % 4))
-
   def keyOf(code: scala.Int): Key =
-    if code == 1 then KUp()
-    else if code == 2 then KDown()
-    else if code == 3 then KLeft()
-    else if code == 4 then KRight()
-    else if code == 5 then KEnter()
-    else if code == 6 then KBack()
-    else if code == 7 then KPtt()
+    if code == MacKeys.UP then KUp()
+    else if code == MacKeys.DOWN then KDown()
+    else if code == MacKeys.LEFT then KLeft()
+    else if code == MacKeys.RIGHT then KRight()
+    else if code == MacKeys.ENTER then KEnter()
+    else if code == MacKeys.BACK then KBack()
+    else if code == MacKeys.PTT then KPtt()
     else KUnknown()
 
   def stateOf(phase: scala.Int): KeyState =

@@ -165,7 +165,7 @@ func SetBadge(n int) {
 	if n > 0 {
 		label = strconv.Itoa(n)
 	}
-	onStage(func() {
+	onMainAsync(func() {
 		appkit.GetNSApplicationClass().SharedApplication().DockTile().SetBadgeLabel(label)
 	})
 }
