@@ -91,8 +91,13 @@ in the module's go.mod is equally first-class.
 
 Since pin `f46551f` the DRF crossing checker (CONC-8..11) runs
 default-on in consumer builds (it had been in-tree-only since M9); the
-whole tree is clean under it — zero crossing walls, so no
-`.sgo/crossings-*.txt` inventories are even written. Escapes exist
+whole tree is clean under it — zero crossing walls. No
+`.sgo/crossings-*.txt` inventories are written today; upstream ruled
+that a DEFECT on our report (`CROSSING-INVENTORY-EMPTY-FILE`, queued
+there): a clean module should write an explicit `total=0` inventory,
+because absence-of-file cannot distinguish "clean" from "checker
+silently off". When it lands, our ci grows an inventory-exists
+assertion (`CI-ASSERT-CROSSING-INVENTORY` in the queue). Escapes exist
 (`SGOLA_NOCROSSING=1` module-wide, `SGOLA_XCROSS=<key>` per-site) and
 are unused. Captures wall at the EXPANSION site of an inline helper —
 relevant only if we ever wrap `sgo.fork` in inline helpers of our own.
