@@ -32,8 +32,44 @@ object MacCaps:
    *  route to the Pi. */
   def httpDo(): HttpDo =
     val irohCfg = go.sys.getenv("WATA_IROH_CONFIG")
-    if irohCfg == "" then MacHttp(go.net.http.DefaultClient)
+    if irohCfg == "" then MacHttp(go.httpc.newClient(timeoutMs()))
     else MacHttp(irohClient(irohCfg))
+
+  /** per-request deadline (plan 0045 slice 1 — wata-fb's shape). Without one
+   *  a hung server freezes the state machine in Connecting/Syncing forever;
+   *  with it the round fails, becomes ConnError + backoff, and every surface
+   *  downstream tells the truth. 30s clears the server's ~25s sync long-poll,
+   *  which the client caps itself (`ClientConfig.syncTimeoutMs`);
+   *  `WATA_HTTP_TIMEOUT_MS` overrides so a hung-server test does not wait
+   *  out a real one. */
+  val DEFAULT_TIMEOUT_MS: Long = 30000L
+
+  def timeoutMs(): Long =
+    val raw = go.sys.getenv("WATA_HTTP_TIMEOUT_MS")
+    var out = DEFAULT_TIMEOUT_MS
+    if raw != "" then out = parseMs(raw, DEFAULT_TIMEOUT_MS)
+    out
+
+  /** decimal milliseconds, falling back on anything unparseable. */
+  def parseMs(s: String, dflt: Long): Long =
+    var out = 0L
+    var ok = s.length > 0
+    var i = 0
+    while i < s.length do
+      val d = digitOf(s.substring(i, i + 1))
+      if d < 0 then ok = false else out = out * 10L + d.toLong
+      i = i + 1
+    var res = dflt
+    if ok then res = out
+    res
+
+  def digitOf(ch: String): scala.Int =
+    var i = 0
+    var out = -1
+    while i < 10 do
+      if ch == "" + i then out = i
+      i = i + 1
+    out
 
   /** the iroh-backed client, or — on a failed init (bad config, a build
    *  without the `iroh` tag) — a loud line, a LATCHED "transport unavailable"
@@ -50,7 +86,7 @@ object MacCaps:
     var out = go.net.http.DefaultClient
     try out = go.irohnet.newHTTPClient(cfgPath)
     catch case e: sgo.GoError => noteTransportDown(e.message)
-    out
+    go.httpc.withTimeout(out, timeoutMs())
 
   def noteTransportDown(msg: String): Unit =
     println("irohnet: client init failed: " + msg)

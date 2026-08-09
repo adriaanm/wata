@@ -384,7 +384,11 @@ declarations are otherwise identical to wata-fb's `audio.scala`.
 
 `WATA_IROH_CONFIG=<path>` swaps the `go.net.http.Client` under `HttpDo`
 for one whose connections are iroh bidirectional streams to the peer the
-config names (`MacCaps.httpDo`); unset is the plain `DefaultClient`.
+config names (`MacCaps.httpDo`); unset is a plain-TCP client. Either
+way the client carries a per-request timeout (plan 0045: 30s default,
+`WATA_HTTP_TIMEOUT_MS` override, `go.httpc` — wata-fb's shape), so a
+hung server becomes `ConnError` + backoff instead of freezing the state
+machine in `Connecting` forever.
 Nothing above the capability line knows, which is the whole seam —
 wata-tui's, copied. `wata-mac/src/main/scala/irohnet.scala` is the
 facade, held declaration-identical to wata-tui's by `just facade-check`

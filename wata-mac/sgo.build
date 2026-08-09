@@ -31,3 +31,8 @@ godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet
 # The Keychain (plan 0036): the access token and the password live in the
 # login keychain, not in the environment and not in the config file.
 godep github.com/adriaanm/wata/go-pkgs/mackeychain go-pkgs/mackeychain
+
+# the timeout-carrying http.Client constructor (plan 0045 slice 1) — the
+# net/http facade binds the Client type, not its fields, so the per-request
+# Timeout comes from this tiny Go package, same as wata-fb
+godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc
