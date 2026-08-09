@@ -10,16 +10,20 @@ generated-Go layer), `tools/objc-spike/REPORT.md`,
 Go" is a *finding*, and this doc is where the findings add up.
 
 The one-paragraph summary: **calling C is closed; being called by C is
-closed.** Everything a call-out needs — open a library, find a symbol,
-make the call, pass a C string, carry the results — works on the
-current pin, and so does the reverse crossing: `go.callback` registers
-a Sgola literal as a C-callable address, proven end to end by
-`tools/callback-spike` (an ObjC method whose body is Sgola, asserted in
-ci). The biggest remaining language gap is now **by-value structs
-across facades** (`FACADE-VALUE-STRUCT`) — the blocker for the interp
-port and the frame wire's deletion; everything else that stays Go is a
-technology boundary (cgo, reflection, the Go runtime), not a compiler
-gap.
+closed; by-value structs are closed and consumed at scale.** Everything
+a call-out needs — open a library, find a symbol, make the call, pass a
+C string, carry the results — works on the current pin, and so does the
+reverse crossing: `go.callback` registers a Sgola literal as a
+C-callable address, proven end to end by `tools/callback-spike` and now
+LIVE in the shipping mac client (the windowed frame hop). And
+`FACADE-VALUE-STRUCT` landed and paid off immediately: the retained
+AppKit interpreter is Sgola (`wata-mac`'s `MacStage`, plan 0038's
+combined move), the frame wire's ~400 lines are deleted, and the whole
+generated-appkit surface the interpreter needs binds through value
+facades. What stays Go is a technology boundary (cgo, reflection, the
+Go runtime, raw-pointer shapes bindgen refuses) plus two small filed
+gaps (`FACADE-GO-NAMED-SCALAR`, `SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`
+— below), not a wall.
 
 ## What works today (on the current pin)
 
@@ -91,16 +95,16 @@ These have designer rulings and sit in sgola's queue; the shape is
 settled, only the landing is pending.
 
 - **By-value structs across facades** (`FACADE-VALUE-STRUCT`,
-  **ratified 2026-08-09**, sgola `49411be`; implementation dispatched,
-  landing notice with a pinnable sha to follow). The ruling: a facade
-  `case class` is a Go **value struct** — named-field composite-literal
-  construction, by-value crossing, Go `==` — and a plain `final class`
-  stays the opaque pointer handle. This unblocks AppKit geometry
-  (`CGRect` and friends) and the ObjC handle types (`struct{ objc.ID }`),
-  the single blocker for porting `nativeui/interp.go` and deleting the
-  frame wire (`WIRE-DIES-INTERP-TO-SGOLA`); `tools/interp-spike` is
-  committed not-building, spelled the way the interpreter wants it.
-  Terms our side must meet when consuming the fix:
+  ratified 2026-08-09 at sgola `49411be`, **LANDED at the current pin
+  `329656e` and CONSUMED**): a facade `case class` is a Go **value
+  struct** — named-field composite-literal construction, by-value
+  crossing, Go `==` — and a plain `final class` stays the opaque
+  pointer handle. `tools/interp-spike` builds and runs green in ci, and
+  the real consumer shipped: `wata-mac`'s appkit facade
+  (`wata-mac/src/main/scala/appkit.scala`) binds geometry and ObjC
+  handles as value structs and the Sgola interpreter runs the mac
+  client on them (`WIRE-DIES-INTERP-TO-SGOLA` done — interp ported,
+  frame wire deleted). Terms met when consuming the fix:
   - every facade case class must carry
     `override def toString: String = go.native` (opt-in, js.native
     style; missing it is a loud wall) — bindgen's facade emission must
@@ -158,11 +162,29 @@ mandates (plan 0038's rule: a green spike is evidence, not a mandate).
 - bindgen's protocol delegates, further out — a record of literals,
   each registered.
 
-**Waiting on by-value structs.**
-- `nativeui/interp.go` (359 lines) and with it `view/pixels/glyphs`
-  (397 lines of zero-FFI logic that ride with their consumer), plus
-  both halves of the frame wire (~400 lines) — deleted, not ported,
-  when the seam disappears.
+**Done — the interp port (2026-08-09, `WIRE-DIES-INTERP-TO-SGOLA`).**
+`nativeui/interp.go`, `view/pixels/glyphs` and `keys` are Sgola
+(`wata-mac`'s `MacStage` + `pixels/glyphs/mackeys.scala`); the frame
+wire (~400 lines, both halves) was deleted, not ported. What remains in
+`go-pkgs/nativeui` is exactly this doc's frontier, one function per
+reason (`glue.go`'s header names them): the dispatch seam + pool
+brackets and `OnMain` (the callback machinery above — and the windowed
+frame hop is the first SHIPPING `go.callback` consumer), the
+synthesized key view (class synthesis, now forwarding raw codes),
+cross-class casts (a zero-field bound-subset facade cannot adopt
+another class's id), the raw-RGBA bitmap crossing
+(`initWithBitmapDataPlanes:` is a bindgen refusal — objcrt.NSData's
+category), and two filed gaps:
+- `FACADE-GO-NAMED-SCALAR`: a facade cannot pass a Go **defined scalar
+  type** (`NSBoxType`, `NSWindowOrderingMode`, `NSImageScaling` — the
+  generated bindings' enum params), so each enum-typed method is
+  wrapped in a plain-typed glue func. Recurs on every generated Apple
+  surface; filed 2026-08-09.
+- `SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`: a sealed-trait case
+  carrying `List[Patch]` emits an unparameterized `List` field in the
+  flattened sum struct (loud at go build). Worked around by dissolving
+  the sum (`MacStage`'s pending cell is a flat `List[Patch]`); filed
+  2026-08-09.
 
 The chrome (`macshell/login,menu,prefs`, 581 lines of raw `objc.Send`
 sites) is in none of these categories: raw messaging is not a compiler
@@ -250,9 +272,11 @@ not a mandate.
 Each landing below moves a row in this doc; the tickets name the
 verification.
 
-- `FACADE-VALUE-STRUCT` ruling → decides `WIRE-DIES-INTERP-TO-SGOLA`
-  (the wire's ~400 lines) and the shape of rung 2's geometry. Now the
-  biggest open language gap on this frontier.
+- `FACADE-GO-NAMED-SCALAR` and `SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`
+  (filed 2026-08-09) → each landing deletes glue/workaround sites named
+  by its key (grep the tree). (`FACADE-VALUE-STRUCT` landed and is
+  consumed — the record moved to the sections above; the interp port
+  and the wire deletion it gated are done.)
 - purego **v0.11.0** — the struct-by-value pin is on alphas (upstream
   issue #225, milestone v0.11.0; see docs/design/bindgen.md). Bump to
   the release when it ships.

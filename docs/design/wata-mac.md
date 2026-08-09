@@ -1,11 +1,12 @@
 # wata-mac — design notes
 
 The macOS client (plan 0032): every wata screen is already a pure
-`wataui` body, `go-pkgs/nativeui` renders those bodies as a retained
-NSView tree on a scaled 160×128 stage, and `wata-mac/` is the Sgola app
-that drives it — the SAME `WataLogic` bodies and input logic the device
-runs, a frame pump over `ClientHandle`, and `go-pkgs/macshell` as the
-AppKit shell. Audio is real (plan 0033): the device's own audio thread
+`wataui` body, and the retained interpreter that renders those bodies
+as an NSView tree on a scaled 160×128 stage is Sgola too — `MacStage`
+(`wata-mac/src/main/scala/interp.scala`, plan 0038), over facades on
+the generated appkit bindings. `wata-mac/` drives it with the SAME
+`WataLogic` bodies and input logic the device runs, a frame pump over
+`ClientHandle`, and `go-pkgs/macshell` as the thin AppKit shell. Audio is real (plan 0033): the device's own audio thread
 over a macOS backend. Transport is plain TCP by default and embedded
 iroh when configured (plan 0034, below) — which is the case the mac
 exists for: a parent away from home, behind a NAT, with no route to the
@@ -16,10 +17,10 @@ family's Pi.
 | layer | what it is |
 |---|---|
 | `go-pkgs/appleptt/appkit` | generated AppKit bindings (bindgen target `appkit`; see [bindgen.md](bindgen.md) for what was refused and why it shaped the backend) |
-| `go-pkgs/nativeui` | plain Go: the algebra mirror, the retained interpreter (`Stage`), pixels, glyphs, the key table + the synthesized key view, the dispatch seam |
-| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — window/headless stage, the wire decoder, the key queue, the per-mode apply seam, and the NATIVE CHROME (login sheet, menu bar, Settings and Devices windows, notifications + Dock badge) |
+| `go-pkgs/nativeui` | plain Go GLUE under the Sgola interpreter: the dispatch seam + pool brackets, the raw-code key view, and `glue.go` (cross-class casts, named-scalar wrappers, the raw-RGBA bitmap crossing) — each function's header states why it cannot be a facade binding |
+| `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — the window (or the headless flag), the raw key queue, TreeDump, and the NATIVE CHROME (login sheet, menu bar, Settings and Devices windows, notifications + Dock badge) |
 | `go-pkgs/macaudio` | plain Go, no cgo: the Opus codec (AudioToolbox's C AudioConverter over purego) and the capture/playback engine (AVFAudio), presenting `go-pkgs/audio`'s API |
-| `wata-mac/` | the Sgola module: caps, the frame pump, the wire encoder, the headless command loop |
+| `wata-mac/` | the Sgola module: caps, the frame pump, the retained interpreter (`MacStage` + pixels/glyphs/keys), the appkit + glue facades, the headless command loop, `interptest` |
 
 ## Running it
 
@@ -279,26 +280,33 @@ the oracle.
 ## The frame pump (`main.scala`, `Pump`)
 
 One pump shape, two drivers. Each frame: drain macshell's key queue
-into `WataLogic.handleInput`, tick `WataLogic.update`, read
-`Handle.snapshot()`/`connection()`, run `NetStatus.poll`, build the
-body, then `Diff.diff` against the last tree and hand the script to the
-shell as ONE wire message (`wire.scala` encodes; macshell's `wire.go`
-decodes — the grammar is pinned in both headers and in
-`macshell/wire_test.go`). Bodies and the diff run on the pump
-goroutine; only the shell's apply touches AppKit.
+into `WataLogic.handleInput` (the queue carries RAW macOS virtual key
+codes; `MacKeys.translate` runs at the drain, so the window path and
+the harness's injected codes share one table), tick `WataLogic.update`,
+read `Handle.snapshot()`/`connection()`, run `NetStatus.poll`, build
+the body, then `Diff.diff` against the last tree and hand the script to
+`MacStage` by DIRECT call (`submitTree`/`submitScript` — the interpreter
+is Sgola, so nothing is encoded; the frame wire is gone). Bodies and
+the diff run on the pump goroutine; only the stage apply touches
+AppKit.
 
 - **Windowed** (the default): `macshell.Start` runs on the main
   goroutine — macshell's package init pins it to the main OS thread —
-  then the pump is forked and `macshell.RunApp` (NSApplication.run)
-  owns the main thread. Frames tick on `Handle.waitEvent(33ms)`: the
-  dirty-flag channel is the wake-up, the deadline keeps held-key timers
-  advancing. Apply is dispatched to the MAIN QUEUE asynchronously, one
-  frame per queue turn. The two-step quit (Back on the contact list,
-  again within 2s — the device's own gesture) leaves through
-  `macshell.Terminate`.
+  then `MacStage.create` builds the stage on that same thread and
+  `macshell.AdoptRoot` splices its root below the key view; the pump is
+  forked and `macshell.RunApp` (NSApplication.run) owns the main
+  thread. Frames tick on `Handle.waitEvent(33ms)`: the dirty-flag
+  channel is the wake-up, the deadline keeps held-key timers advancing.
+  An apply PUBLISHES its patches into `MacStage`'s pending cell and
+  `nativeui.OnMain` dispatches a module-registered `go.callback`
+  trampoline onto the MAIN QUEUE, which drains and applies — one frame
+  per queue turn, each inside the dispatcher's autorelease pool. The
+  two-step quit (Back on the contact list, again within 2s — the
+  device's own gesture) leaves through `macshell.Terminate`.
 - **Headless** (`WATA_MAC_HEADLESS=1`): no NSApplication, no window, no
-  runloop. The stage lives on macshell's dedicated locked OS thread,
-  applies run there SYNCHRONOUSLY, and the main goroutine is a line
+  runloop — and no second thread: the main goroutine (locked by
+  macshell's init) IS the stage's thread. Applies run INLINE,
+  pool-bracketed, and the main goroutine is a line
   command loop: `wait <ms>` pumps frames and prints every applied patch
   (`patch <script line>`, `DiffOracle.showPatch`'s own rendering — the
   smoke's window onto the differ), `tree` prints the live NATIVE
@@ -424,21 +432,38 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   wata-mac/.sgo/wata-mac/wata-mac-iroh http://wata.iroh
 ```
 
-## The retained interpreter (`nativeui.Stage`)
+## The retained interpreter (`MacStage`, Sgola — plan 0038)
 
-- **The stage is the unit.** `NewStage(scale)` makes one container NSView
-  of `scale·160 × scale·128` (default scale 4 → 640×512); `SetTree`
-  mounts a view tree, `Apply` runs a differ script in script order.
-  `Mirror()` is the plain view tree the native tree currently shows —
-  `Patches.applyAll` semantics, ported (`view.go`), and the invariant the
-  tests hold against the real hierarchy.
+The interpreter is Sgola (`wata-mac/src/main/scala/interp.scala`),
+consuming wataui's `View`/`Patch` directly over facades on the
+generated appkit bindings: `appkit.scala` is the FACADE-VALUE-STRUCT
+spelling (geometry as value-struct case classes, ObjC handles as
+zero-field bound-subset case classes), and `go.nativeui` binds the Go
+glue for what a facade cannot say — cross-class casts, methods whose Go
+signatures carry defined scalar types (FACADE-GO-NAMED-SCALAR), the
+raw-RGBA bitmap crossing, the pool brackets and the main-queue seam.
+There is NO mirror of the algebra anywhere and no wire: the differ's
+script is applied as the values it already is.
+
+- **The stage is the unit.** `MacStage.create(scale, windowed)` makes
+  one container NSView of `scale·160 × scale·128` (default scale 4 →
+  640×512); `submitTree` mounts a view tree (a root `PSet` in the patch
+  vocabulary), `submitScript` runs a differ script in script order.
+  The retained node tree is IMMUTABLE (`MacNode` — view, native handle,
+  kids), rebuilt along the patched spine; the whole stage state lives
+  in one atomic cell only the stage's thread touches. `mirror()` is the
+  plain view tree the native tree currently shows — `Patches.applyOne`
+  per patch, and the invariant `interptest` holds against the real
+  hierarchy.
 - **Element table:** VText/VGlyph → `NSTextField` label, VRect → `NSBox`
   (custom, borderless, `fillColor`; NOT a layer-backed view — CGColorRef
   is unmappable, and NSBox draws via `drawRect:` so offscreen renders
   work), VImage → `NSImageView` over RGB565→RGBA widening +
-  nearest-neighbour pre-scaling + PNG → `initWithData:` (raw bitmap
-  planes are refused pointers), VGroup → plain container NSView spanning
-  the full stage.
+  nearest-neighbour pre-scaling (pixels.scala), handed across as raw
+  RGBA into ONE `NSBitmapImageRep` (`glue.ImageFromRGBA` — the
+  `initWithBitmapDataPlanes:` shape is a bindgen refusal, so this is
+  the one raw-pointer crossing, in objcrt style; the PNG detour is
+  gone), VGroup → plain container NSView spanning the full stage.
 - **Geometry:** semantic coordinates exactly as wataui defines them
   (VText on the 26×15 grid of 6×8 cells, text rows starting 1px down;
   the rest on stage pixels), scaled by the integer factor, then y-flipped
@@ -451,54 +476,64 @@ WATA_IROH_CONFIG=~/.wata/iroh.json WATA_MAC_USER=… \
   framed from its own grid cell. Only intra-string width shrinks, and
   the semantic oracle for appearance stays the fb goldens.
 - **Glyphs:** icon codes past 0x7F map to Unicode equivalents
-  (`glyphs.go`: ✓ ▶ ★ ↑ ⚠ ≈ Ψ for the codes wata's bodies emit);
+  (`glyphs.scala`: ✓ ▶ ★ ↑ ⚠ ≈ Ψ for the codes wata's bodies emit);
   anything unmapped renders `□`, visibly wrong on purpose.
 - **Paint order = subview order**, AppKit's own rule; `PInsert` uses
   `addSubview:positioned:NSWindowBelow relativeTo:` to splice at an
   index, `PSet` mutates properties in place when the constructor is
   unchanged and `replaceSubview:with:` otherwise.
-- **The key view** (`keyview.go`): a synthesized `WataKeyView` NSView
-  subclass — acceptsFirstResponder YES, keyDown:/keyUp: through the pure
-  table (`keys.go`: arrows, return/keypad-enter, esc, space=PTT) with
-  press/release/repeat phases (autorepeat arrives as `PhaseRepeat`, not
-  a second press — the hold gestures need real edges). Synthesis follows
+- **The key view** (`keyview.go`, still Go — class synthesis): a
+  synthesized `WataKeyView` NSView subclass — acceptsFirstResponder
+  YES, keyDown:/keyUp: forwarding RAW keyCodes with press/release/
+  repeat phases (autorepeat arrives as `PhaseRepeat`, not a second
+  press — the hold gestures need real edges). Synthesis follows
   bindgen.md's encoding rules: these selectors take only objects/BOOL,
-  so purego's derived encodings ARE the true ones. Unknown keys are
-  swallowed. macshell overlays it on the stage and makes it the window's
-  first responder.
+  so purego's derived encodings ARE the true ones. Translation is the
+  Sgola drain's (`mackeys.scala`: arrows, return/keypad-enter, esc,
+  space=PTT); codes the table does not know are dropped there, and
+  nothing is forwarded up the responder chain either way. macshell
+  overlays the view on the stage and makes it the window's first
+  responder.
 
 ## Threading and lifetime facts
 
-- **`Stage` methods run on the AppKit thread and never hop by
-  themselves.** macshell owns the seam per mode: main queue
+- **`MacStage` functions run on the AppKit thread and never hop by
+  themselves.** `submit*` owns the seam per mode: windowed, the pump
+  publishes into the pending cell and `nativeui.OnMain` dispatches the
+  module-registered `go.callback` trampoline onto the main queue
   (`nativeui.MainQueue().Async`, libdispatch over purego — proven
-  headless on a private serial queue in `dispatch_test.go`) under the
-  windowed runloop; the dedicated locked thread headless.
+  headless on a private serial queue in `dispatch_test.go`); headless,
+  the caller IS the stage's thread and the apply runs inline. The
+  chrome's `onStageSync` follows the same per-mode rule (inline
+  headless, main-queue-and-wait windowed).
 - **Headless AppKit works.** View construction, mutation and
   `cacheDisplayInRect:` offscreen rendering all run with NO
-  NSApplication, no runloop, no window, on a locked non-main OS thread
-  inside an autorelease pool — `mac-smoke` asserts hierarchies without
-  ever opening a window.
+  NSApplication, no runloop, no window, on a locked OS thread inside an
+  autorelease pool — `mac-smoke` and `interptest` assert hierarchies
+  without ever opening a window. (Headless there is no second thread at
+  all any more: the locked main goroutine is the stage's thread, which
+  is what makes TreeDump-after-`wait` coherent by construction.)
 - **Autorelease pools are the caller's job**, one per frame/apply —
-  macshell wraps every excursion. Corollary found the first time two
-  pools ran: an object the stage KEEPS must not be autoreleased-only.
-  `NewStage`'s font comes from a factory (autoreleased) and is now
-  explicitly retained; everything else the interpreter holds is either
+  the Go dispatcher wraps the windowed callback, `MacStage.submit`
+  brackets the headless inline apply, macshell wraps every chrome
+  excursion. Corollary found the first time two pools ran: an object
+  the stage KEEPS must not be autoreleased-only. `MacStage.create`'s
+  font comes from a factory (autoreleased) and is explicitly retained
+  (`glue.RetainFont`); everything else the interpreter holds is either
   `-alloc`-owned or retained by its superview before the pool pops.
   Chunk 1's tests never caught this because each test ran inside one
   pool — a one-pool suite cannot see cross-pool lifetime bugs.
 - **`-init` may return a different object than `-alloc`** — always adopt
   the returned id (the interpreter and macshell do; new wiring code must
   too).
-- **`sgo build` does not see godep-only changes**: editing a `go-pkgs/*`
-  package under an unchanged emitted tree skips the `go build` stage.
-  `just mac-build` after a macshell/nativeui edit may need a manual
-  `go build` in `wata-mac/.sgo/wata-mac` (or any Scala-side touch).
-  Fixed upstream 2026-08-08 (the stage hashes godep sources now, and its
-  SKIP line names input categories with counts); true until the repin,
-  tracked as `REPIN-GODEP-SOURCES-HASHED`. The tell is a Go BuildID that
-  does not move between two builds that should differ; the escape hatch
-  is deleting `.sgo/build-<goos>-<goarch>.hash`.
+- **`sgo build` sees godep-only changes now** (fixed upstream
+  2026-08-08, consumed by the current pin): the go-build stage hashes
+  godep sources, and its SKIP line names input categories with counts
+  (`… 6 godep trees/146 files`) — verified live during the interp port.
+  The old failure mode (a stale binary after a `go-pkgs/*` edit) is
+  history; the tell, if it ever recurs, is a Go BuildID that does not
+  move between two builds that should differ, and the escape hatch is
+  deleting `.sgo/build-<goos>-<goarch>.hash`.
 - **A godep's `replace` lines don't reach the app**: Go honors `replace`
   only in the MAIN module's go.mod, so macshell's local-sibling deps
   (nativeui, appleptt) each need their own `godep` line in `sgo.build` —
@@ -700,13 +735,18 @@ next probe, and the only one that can.
 ## Verification
 
 - `just nativeui-tests` (macOS-only, beside `bindgen-runtime`; not in
-  ci — ci has no darwin-only leg): the retained invariant on the real
-  toolkit (hierarchy classes/order/frames/labels mirror `applyAll`
-  after both build-from-scratch and patch scripts), patch splicing and
-  in-place mutation, the offscreen probe render, the dispatch seam, the
-  key view's translation and phases (driven by a synthesized stand-in
-  event class), the pure pixel/glyph/key tables, macshell's wire
-  grammar, the login sheet's controls (`login_test.go`), and the menu bar
+  ci — ci has no darwin-only leg). Two halves now. The Sgola half is
+  `wata-mac interptest` (interptest.scala, an argv mode of the app
+  binary — the binary exits 0 either way, so the recipe greps the exact
+  verdict line): the retained invariant on the real toolkit (hierarchy
+  classes/order/frames/labels mirror `applyAll` after both
+  build-from-scratch and patch scripts), patch splicing and in-place
+  mutation (native identity via `glue.SameView`), the offscreen probe
+  render, the applyAll hand-expectation cases, and the pure
+  pixel/glyph/key tables. The Go half: the dispatch seam
+  (`dispatch_test.go`), the key view's RAW-code forwarding and phases
+  (`keyview_test.go`, driven by a synthesized stand-in event class),
+  the login sheet's controls (`login_test.go`), and the menu bar
   + Settings content (`menu_test.go`: every item's title and key
   equivalent, that Quit reaches `terminate:` through the responder chain
   while ours target our own object, that Edit's items target nil so they

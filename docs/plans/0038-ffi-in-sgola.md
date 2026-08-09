@@ -263,3 +263,22 @@ notes the real ports will want: literal-only, encoding choice, the
 go.mod/puredep wrinkle). Per this plan's own rule, the green spike is
 evidence, not a mandate — the dispatch/keyview/objcrt ports are
 unblocked, not scheduled.
+
+## Addendum 2026-08-09 — the combined move SHIPPED; this plan is closed end to end
+
+`FACADE-VALUE-STRUCT` landed (pinned at `329656e`, interp-spike green in
+ci) and `WIRE-DIES-INTERP-TO-SGOLA` executed the corrected staging in
+one move: `interp.go` became `MacStage` (wata-mac, over the interp-spike
+facade spelling), `view/pixels/glyphs/keys` crossed with it — the mirror
+types DISSOLVED into wataui's own, as predicted — and the frame wire
+(`wire.go` + `wire.scala` + `wire_test.go`) is deleted. The image path
+is `NSBitmapImageRep` over raw RGBA through one Go glue function
+(`initWithBitmapDataPlanes:` is a bindgen refusal, so the raw-pointer
+crossing stays Go, as this plan's gate note said). The windowed frame
+hop is the first shipping `go.callback` consumer. Two new tickets came
+out of the move (`FACADE-GO-NAMED-SCALAR`,
+`SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`); the frontier record lives in
+docs/design/sgola-ffi.md, the interpreter's description in
+docs/design/wata-mac.md, and the tests in `wata-mac interptest`.
+Verified by the plan's own oracles: `just nativeui-tests` and
+`just mac-smoke` green across the move, full ci green at the close.

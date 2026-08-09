@@ -197,25 +197,25 @@ with its row for free.
 
 ## The AppKit backend
 
-`go-pkgs/nativeui` (plain Go, plan 0032) is the retained arm the differ
-exists for: a Go-side mirror of the five constructors and the patch
-vocabulary (`view.go`, field-for-field with this module — a field added
-here must be mirrored there in the same change), and a `Stage` that
-builds an NSView tree from a view tree and applies patch scripts to it in
-script order. Its per-constructor element table, geometry (the scaled
-stage, the y flip, the 6x8 grid), glyph mapping and threading rule are
-documented in the package and in
+The retained arm the differ exists for is Sgola now (plans 0032/0038):
+`MacStage` (`wata-mac/src/main/scala/interp.scala`) builds an NSView
+tree from a view tree and applies patch scripts to it in script order,
+consuming THIS module's `View`, `Patch` and `Patches.applyOne` directly
+— there is no mirror of the algebra anywhere. (The Go mirror `view.go`
+and the frame wire that fed it existed only because the interpreter was
+Go; both were deleted when it crossed.) The per-constructor element
+table, geometry (the scaled stage, the y flip, the 6x8 grid), glyph
+mapping and threading rule are documented in `interp.scala` and in
 [wata-mac.md](wata-mac.md); its tests hold the retained invariant — the
-native hierarchy after `Apply` mirrors what `Patches.applyAll` says —
-on the real toolkit (`just nativeui-tests`, macOS-only).
+native hierarchy after an applied script mirrors what
+`Patches.applyAll` says — on the real toolkit (`wata-mac interptest`,
+run by `just nativeui-tests`, macOS-only).
 
 The `wata-mac` app is the arm's driver: its pump runs the same bodies
-the framebuffer runs, calls THIS module's `Diff.diff` each frame, and
-hands the script across the facade as one wire message
-(`wata-mac/src/main/scala/wire.scala` encoding, `go-pkgs/macshell`
-decoding into the Go mirror). So the differ's script vocabulary is now
-a cross-language contract, exercised end to end by `just mac-smoke`,
-which asserts the exact script a mid-session sync change produces.
+the framebuffer runs, calls `Diff.diff` each frame, and hands the
+script to `MacStage` by direct call. `just mac-smoke` exercises it end
+to end and asserts the exact script a mid-session sync change
+produces.
 
 ## The oracle
 
