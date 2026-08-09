@@ -157,7 +157,7 @@ func AdoptRoot(v appkit.NSView) {
 	}
 	pool := poolPush()
 	defer poolPop(pool)
-	nativeui.AddSubviewBelow(w.ContentView(), v, kv)
+	w.ContentView().AddSubviewPositionedRelativeTo(v, appkit.NSWindowBelow, kv)
 }
 
 // RunApp is NSApplication.run: main thread only, never returns.

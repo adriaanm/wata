@@ -15,11 +15,11 @@ package go
  *     `type NSView struct{ objc.ID }`, spelled as bound-subset case classes
  *     (no fields bound — the `objc.ID` stays Go-side), constructor
  *     `private[go]` so only the bindings mint one.
- *  3. **Only plain-typed, value-receiver methods are bound.** A method whose
- *     Go signature carries a defined scalar type (`NSBoxType`,
- *     `NSWindowOrderingMode`, …) or that needs a cross-class cast
- *     (`NSView{ID: box.ID}`) goes through `go.nativeui`'s Go glue instead —
- *     see FACADE-GO-NAMED-SCALAR there.
+ *  3. **Defined scalar types are opaque types over the ground scalar.**
+ *     `@go.name("NSBoxType") opaque type NSBoxType = Int` — the emitter
+ *     mints the boundary conversions, and the Go consts bind as
+ *     parameterless defs. Only cross-class casts (`NSView{ID: box.ID}`)
+ *     still need `go.nativeui`'s Go glue (the cast facets).
  *
  *  Every facade case class carries the mandatory
  *  `override def toString: String = go.native` opt-in (a facade case class
@@ -53,6 +53,8 @@ object appkit:
     @go.name("AddSubview") def addSubview(view: NSView): Unit = ???
     @go.name("RemoveFromSuperview") def removeFromSuperview(): Unit = ???
     @go.name("ReplaceSubviewWith") def replaceSubviewWith(oldView: NSView, newView: NSView): Unit = ???
+    @go.name("AddSubviewPositionedRelativeTo")
+    def addSubviewPositionedRelativeTo(view: NSView, place: NSWindowOrderingMode, otherView: NSView): Unit = ???
     @go.name("BitmapImageRepForCachingDisplayInRect")
     def bitmapImageRepForCachingDisplayInRect(rect: CGRect): NSBitmapImageRep = ???
     @go.name("CacheDisplayInRectToBitmapImageRep")
@@ -90,6 +92,38 @@ object appkit:
       blue: scala.Double, alpha: scala.Double): NSColor = ???
 
   @go.name("GetNSColorClass") def getNSColorClass(): NSColorClass = ???
+
+  // ---- defined scalar types (the enum-newtype shape): an opaque type over
+  // the ground scalar, `@go.name` pinning the Go defined type; the consts
+  // bind as parameterless defs. The Go grounds here are uint/int — both land
+  // on the Int ground, and the emitter's minted conversions are ordinary Go
+  // numeric conversions.
+
+  @go.name("NSBoxType") opaque type NSBoxType = scala.Int
+  @go.name("NSTitlePosition") opaque type NSTitlePosition = scala.Int
+  @go.name("NSImageScaling") opaque type NSImageScaling = scala.Int
+  @go.name("NSWindowOrderingMode") opaque type NSWindowOrderingMode = scala.Int
+
+  @go.name("NSBoxCustom") def nsBoxCustom: NSBoxType = ???
+  @go.name("NSNoTitle") def nsNoTitle: NSTitlePosition = ???
+  @go.name("NSImageScaleAxesIndependently") def nsImageScaleAxesIndependently: NSImageScaling = ???
+  @go.name("NSWindowBelow") def nsWindowBelow: NSWindowOrderingMode = ???
+
+  /** Go `appkit.NSBox` — the VRect element's class, reached from the NSView
+   *  the interpreter holds via `go.nativeui.asBox` (the cast is Go's). */
+  case class NSBox private[go] ():
+    override def toString: String = go.native
+    @go.name("SetBoxType") def setBoxType(v: NSBoxType): Unit = ???
+    @go.name("SetTitlePosition") def setTitlePosition(v: NSTitlePosition): Unit = ???
+    @go.name("SetBorderWidth") def setBorderWidth(v: scala.Double): Unit = ???
+    @go.name("SetFillColor") def setFillColor(v: NSColor): Unit = ???
+
+  /** Go `appkit.NSImageView` — the VImage element's class, reached via
+   *  `go.nativeui.asImageView`. */
+  case class NSImageView private[go] ():
+    override def toString: String = go.native
+    @go.name("SetImageScaling") def setImageScaling(v: NSImageScaling): Unit = ???
+    @go.name("SetImage") def setImage(v: NSImage): Unit = ???
 
   /** Go `appkit.NSImage` — held only to hand to an image view (`go.nativeui`
    *  glue mints one from raw RGBA). */

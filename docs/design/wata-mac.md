@@ -17,7 +17,7 @@ family's Pi.
 | layer | what it is |
 |---|---|
 | `go-pkgs/appleptt/appkit` | generated AppKit bindings (bindgen target `appkit`; see [bindgen.md](bindgen.md) for what was refused and why it shaped the backend) |
-| `go-pkgs/nativeui` | plain Go GLUE under the Sgola interpreter: the dispatch seam + pool brackets, the raw-code key view, and `glue.go` (cross-class casts, named-scalar wrappers, the raw-RGBA bitmap crossing) — each function's header states why it cannot be a facade binding |
+| `go-pkgs/nativeui` | plain Go GLUE under the Sgola interpreter: the dispatch seam + pool brackets, the raw-code key view, and `glue.go` (cross-class casts, the raw-RGBA bitmap crossing) — each function's header states why it cannot be a facade binding |
 | `go-pkgs/macshell` | plain Go: the shell `wata-mac` binds — the window (or the headless flag), the raw key queue, TreeDump, and the NATIVE CHROME (login sheet, menu bar, Settings and Devices windows, notifications + Dock badge) |
 | `go-pkgs/macaudio` | plain Go, no cgo: the Opus codec (AudioToolbox's C AudioConverter over purego) and the capture/playback engine (AVFAudio), presenting `go-pkgs/audio`'s API |
 | `wata-mac/` | the Sgola module: caps, the frame pump, the retained interpreter (`MacStage` + pixels/glyphs/keys), the appkit + glue facades, the headless command loop, `interptest` |
@@ -438,9 +438,12 @@ The interpreter is Sgola (`wata-mac/src/main/scala/interp.scala`),
 consuming wataui's `View`/`Patch` directly over facades on the
 generated appkit bindings: `appkit.scala` is the FACADE-VALUE-STRUCT
 spelling (geometry as value-struct case classes, ObjC handles as
-zero-field bound-subset case classes), and `go.nativeui` binds the Go
-glue for what a facade cannot say — cross-class casts, methods whose Go
-signatures carry defined scalar types (FACADE-GO-NAMED-SCALAR), the
+zero-field bound-subset case classes, and the bindings' defined scalar
+types — `NSBoxType` and friends — as `@go.name`d opaque types over the
+ground scalar, with the Go consts bound as parameterless defs), and
+`go.nativeui` binds the Go glue for what a facade cannot say —
+cross-class casts (including the `asBox`/`asImageView` facets the
+interpreter drives the box/image-view properties through), the
 raw-RGBA bitmap crossing, the pool brackets and the main-queue seam.
 There is NO mirror of the algebra anywhere and no wire: the differ's
 script is applied as the values it already is.

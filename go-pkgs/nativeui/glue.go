@@ -8,11 +8,6 @@
 //   - cross-class casts (`appkit.NSView{ID: box.ID}`): a facade handle is a
 //     bound-subset case class with a private constructor, so adopting one
 //     class's id as another's is Go's;
-//   - FACADE-GO-NAMED-SCALAR: methods whose Go signature carries a defined
-//     scalar type (`NSBoxType`, `NSWindowOrderingMode`, `NSImageScaling`) —
-//     a facade Int does not convert to a Go named type, so those calls are
-//     wrapped here (ticket filed in the sgola inbox; grep the key to find
-//     every site this unblocks);
 //   - raw-pointer crossings the bindings refuse (`initWithBitmapDataPlanes:`
 //     — see appkit/REFUSALS.md), the same category objcrt.NSData exists for;
 //   - the ObjC runtime reads the tests and TreeDump assert with
@@ -88,7 +83,7 @@ func OnMain(fn uintptr) {
 	})
 }
 
-// ---- cross-class casts + named-scalar wrappers -------------------------------
+// ---- cross-class casts -------------------------------------------------------
 
 // AllocBoxAsView allocates an NSBox, adopted as the NSView the interpreter
 // holds (init comes from the Sgola side; -init may return a different object
@@ -102,42 +97,13 @@ func AllocImageViewAsView() appkit.NSView {
 	return appkit.NSView{ID: appkit.GetNSImageViewClass().Alloc().ID}
 }
 
-// SetupBox makes an initialised NSBox the interpreter's VRect element:
-// custom/borderless, filled. FACADE-GO-NAMED-SCALAR: boxType and
-// titlePosition are Go named scalars.
-func SetupBox(v appkit.NSView, fill appkit.NSColor) {
-	box := appkit.NSBox{ID: v.ID}
-	box.SetBoxType(appkit.NSBoxCustom)
-	box.SetTitlePosition(appkit.NSNoTitle)
-	box.SetBorderWidth(0)
-	box.SetFillColor(fill)
-}
+// AsBox / AsImageView adopt the NSView the interpreter holds as its concrete
+// class — the cast is Go's; the interpreter drives the facet through the
+// facade's own bindings (boxType, imageScaling and their consts bind
+// directly as defined scalars).
+func AsBox(v appkit.NSView) appkit.NSBox { return appkit.NSBox{ID: v.ID} }
 
-// SetBoxFill recolors a VRect's box (the PSet fast path).
-func SetBoxFill(v appkit.NSView, fill appkit.NSColor) {
-	appkit.NSBox{ID: v.ID}.SetFillColor(fill)
-}
-
-// SetupImageView configures a fresh NSImageView: never interpolate (the
-// pixels arrive pre-scaled), then show img. FACADE-GO-NAMED-SCALAR:
-// imageScaling is a Go named scalar.
-func SetupImageView(v appkit.NSView, img appkit.NSImage) {
-	iv := appkit.NSImageView{ID: v.ID}
-	iv.SetImageScaling(appkit.NSImageScaleAxesIndependently)
-	iv.SetImage(img)
-}
-
-// SetImageViewImage swaps the image (the PSet fast path).
-func SetImageViewImage(v appkit.NSView, img appkit.NSImage) {
-	appkit.NSImageView{ID: v.ID}.SetImage(img)
-}
-
-// AddSubviewBelow splices child into parent's subviews BELOW other —
-// earlier in subview order = painted first. FACADE-GO-NAMED-SCALAR:
-// the ordering mode is a Go named scalar.
-func AddSubviewBelow(parent, child, other appkit.NSView) {
-	parent.AddSubviewPositionedRelativeTo(child, appkit.NSWindowBelow, other)
-}
+func AsImageView(v appkit.NSView) appkit.NSImageView { return appkit.NSImageView{ID: v.ID} }
 
 // NewLabel is `+[NSTextField labelWithString:]`, adopted as an NSView.
 func NewLabel(text string) appkit.NSView {

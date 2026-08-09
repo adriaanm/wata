@@ -175,11 +175,18 @@ cross-class casts (a zero-field bound-subset facade cannot adopt
 another class's id), the raw-RGBA bitmap crossing
 (`initWithBitmapDataPlanes:` is a bindgen refusal — objcrt.NSData's
 category), and two filed gaps:
-- `FACADE-GO-NAMED-SCALAR`: a facade cannot pass a Go **defined scalar
-  type** (`NSBoxType`, `NSWindowOrderingMode`, `NSImageScaling` — the
-  generated bindings' enum params), so each enum-typed method is
-  wrapped in a plain-typed glue func. Recurs on every generated Apple
-  surface; filed 2026-08-09.
+- `FACADE-GO-NAMED-SCALAR`: RESOLVED same-day at sgola `47b2758`
+  (repinned 2026-08-09). The spelling: `@go.name("NSBoxType") opaque
+  type NSBoxType = Int` inside the facade object; members type
+  params/results with it, the emitter mints the conversions both ways,
+  and Go consts bind as parameterless defs. Scala-side minting needs an
+  `inline def apply` companion (a plain def on a mapped-not-emitted
+  facade object is called but never defined). Grounds `Int`/`Long` in
+  v1 — Go `uint`-grounded enums land on `Int` fine (the minted
+  conversions are ordinary Go numeric conversions). One wall to know: a
+  member returning a defined scalar AND declaring `throws` is walled.
+  The enum-typed glue wrappers are gone; what remains of that block is
+  the pure cast facets (`AsBox`/`AsImageView`).
 - `SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`: RESOLVED same-day at sgola
   `fb9621c` (repinned 2026-08-09) — the sum shape compiles now. The
   dissolved-sum design stays on its own merits: a whole-tree handoff is

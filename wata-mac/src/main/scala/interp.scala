@@ -257,7 +257,7 @@ object MacStage:
             // below the current occupant of idx: earlier in subviews =
             // painted first
             val fresh = build(s, k.view)
-            go.nativeui.addSubviewBelow(n.native, fresh.native, at.value.native)
+            n.native.addSubviewPositionedRelativeTo(fresh.native, go.appkit.nsWindowBelow, at.value.native)
             MacNode(n.view, n.native, insertNodeAt(n.kids, idx, fresh))
           case None =>
             val fresh = build(s, k.view)
@@ -313,11 +313,19 @@ object MacStage:
       // -init may return a different object than -alloc did; always adopt
       // the returned id.
       val native = go.nativeui.allocBoxAsView().initWithFrame(frame(s, x.x, x.y, x.w, x.h))
-      go.nativeui.setupBox(native, color(x.color))
+      // the VRect element: a custom/borderless NSBox, filled
+      val box = go.nativeui.asBox(native)
+      box.setBoxType(go.appkit.nsBoxCustom)
+      box.setTitlePosition(go.appkit.nsNoTitle)
+      box.setBorderWidth(0.0)
+      box.setFillColor(color(x.color))
       MacNode(v, native, Nil)
     case x: VImage =>
       val native = go.nativeui.allocImageViewAsView().initWithFrame(frame(s, x.x, x.y, x.w, x.h))
-      go.nativeui.setupImageView(native, image(s, x))
+      // never interpolate: the pixels arrive pre-scaled
+      val iv = go.nativeui.asImageView(native)
+      iv.setImageScaling(go.appkit.nsImageScaleAxesIndependently)
+      iv.setImage(image(s, x))
       MacNode(v, native, Nil)
 
   /** update one native view's properties in place when the new view has the
@@ -339,13 +347,13 @@ object MacStage:
       case _ => None
     case old: VRect => v match
       case x: VRect =>
-        if x.color != old.color then go.nativeui.setBoxFill(n.native, color(x.color))
+        if x.color != old.color then go.nativeui.asBox(n.native).setFillColor(color(x.color))
         n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
         Some(MacNode(v, n.native, n.kids))
       case _ => None
     case old: VImage => v match
       case x: VImage =>
-        go.nativeui.setImageViewImage(n.native, image(s, x))
+        go.nativeui.asImageView(n.native).setImage(image(s, x))
         n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
         Some(MacNode(v, n.native, n.kids))
       case _ => None

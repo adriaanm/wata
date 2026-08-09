@@ -138,14 +138,12 @@ blocks + git log; each entry cites where it was recorded.*
   root `PSet`; patch scripts concatenate) — the gap closed, the design
   stays; the workaround comment is deleted per convention.
 
-- **`FACADE-GO-NAMED-SCALAR`** (filed 2026-08-09, during the interp
-  port; RULED upstream — facade opaque type over the ground scalar with
-  `@go.name` pinning the Go defined type — and queued, landing notice to
-  follow): a facade cannot pass a Go defined scalar type (`NSBoxType`,
-  `NSWindowOrderingMode`, `NSImageScaling` — the generated bindings'
-  enum params), so every enum-typed appkit method is wrapped in
-  `go-pkgs/nativeui/glue.go` instead of bound (comment key at the wrap
-  sites). Will recur for every generated Apple binding surface.
+- **`FACADE-GO-NAMED-SCALAR`** — RESOLVED at sgola `47b2758` (repinned
+  2026-08-09, same day it was filed): defined scalar types bind as
+  `@go.name`d opaque types over the ground scalar. The enum-typed glue
+  wrappers are unwrapped to direct facade bindings (`appkit.scala`'s
+  defined-scalar block); glue keeps only the pure cast facets. Record:
+  docs/design/sgola-ffi.md.
 
 - **`SLAB-DEAD-CELLS-RETAIN`** — RESOLVED at sgola `65e8bae` (slab List
   retired from core's default build; repinned 2026-08-08): the

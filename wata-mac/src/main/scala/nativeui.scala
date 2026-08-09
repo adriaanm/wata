@@ -18,15 +18,13 @@ object nativeui:
    *  the windowed frame hop. */
   @go.name("OnMain") def onMain(fn: go.Uintptr): Unit = ???
 
-  // ---- cross-class casts + named-scalar wrappers ----------------------------
+  // ---- cross-class casts ----------------------------------------------------
   @go.name("AllocBoxAsView") def allocBoxAsView(): appkit.NSView = ???
   @go.name("AllocImageViewAsView") def allocImageViewAsView(): appkit.NSView = ???
-  @go.name("SetupBox") def setupBox(v: appkit.NSView, fill: appkit.NSColor): Unit = ???
-  @go.name("SetBoxFill") def setBoxFill(v: appkit.NSView, fill: appkit.NSColor): Unit = ???
-  @go.name("SetupImageView") def setupImageView(v: appkit.NSView, img: appkit.NSImage): Unit = ???
-  @go.name("SetImageViewImage") def setImageViewImage(v: appkit.NSView, img: appkit.NSImage): Unit = ???
-  /** splice child below other in parent's subviews (earlier = painted first). */
-  @go.name("AddSubviewBelow") def addSubviewBelow(parent: appkit.NSView, child: appkit.NSView, other: appkit.NSView): Unit = ???
+  /** adopt the interpreter's NSView as its concrete class — the cast is
+   *  Go's; everything driven THROUGH the facet is the facade's own binding. */
+  @go.name("AsBox") def asBox(v: appkit.NSView): appkit.NSBox = ???
+  @go.name("AsImageView") def asImageView(v: appkit.NSView): appkit.NSImageView = ???
   @go.name("NewLabel") def newLabel(text: String): appkit.NSView = ???
   @go.name("SetLabelFont") def setLabelFont(v: appkit.NSView, f: appkit.NSFont): Unit = ???
   @go.name("SetLabelText") def setLabelText(v: appkit.NSView, s: String): Unit = ???
