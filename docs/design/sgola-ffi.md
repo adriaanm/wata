@@ -90,14 +90,26 @@ in the module's go.mod is equally first-class.
 These have designer rulings and sit in sgola's queue; the shape is
 settled, only the landing is pending.
 
-- **By-value structs across facades** (`FACADE-VALUE-STRUCT`, filed; no
-  ruling yet). A facade class is always a Go pointer today, and cannot
-  be constructed. AppKit geometry (`CGRect` and friends) and the ObjC
-  handle types themselves (`struct{ objc.ID }`) are values, so *every*
-  crossing into the generated `appkit` surface mismatches. This is the
-  single blocker for porting `nativeui/interp.go` and deleting the
+- **By-value structs across facades** (`FACADE-VALUE-STRUCT`,
+  **ratified 2026-08-09**, sgola `49411be`; implementation dispatched,
+  landing notice with a pinnable sha to follow). The ruling: a facade
+  `case class` is a Go **value struct** — named-field composite-literal
+  construction, by-value crossing, Go `==` — and a plain `final class`
+  stays the opaque pointer handle. This unblocks AppKit geometry
+  (`CGRect` and friends) and the ObjC handle types (`struct{ objc.ID }`),
+  the single blocker for porting `nativeui/interp.go` and deleting the
   frame wire (`WIRE-DIES-INTERP-TO-SGOLA`); `tools/interp-spike` is
   committed not-building, spelled the way the interpreter wants it.
+  Terms our side must meet when consuming the fix:
+  - every facade case class must carry
+    `override def toString: String = go.native` (opt-in, js.native
+    style; missing it is a loud wall) — bindgen's facade emission must
+    include it;
+  - `hashCode`/`##` are synthesized faithfully, nothing to do;
+  - Go **pointer-receiver methods** on a value facade wall loudly in
+    v1 — if a binding needs one, that type stays a handle;
+  - the documented handle-ergonomics idiom is an opaque type over the
+    case class plus extension methods — no new facade machinery.
 - **Equality over generic families** (`GENERIC-FAMILY-EQUALS`, landed
   and verified — sgola `7c228f9`, repinned 2026-08-08). Not FFI, but it
   bit the FFI spikes: `==` on a case class carrying `List[T]` was a
