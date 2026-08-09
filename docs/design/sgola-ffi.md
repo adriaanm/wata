@@ -89,6 +89,14 @@ different version warns against the tested one. Our spikes carry
 which under this rule is simply the correct spelling; a direct require
 in the module's go.mod is equally first-class.
 
+Since pin `f46551f` the DRF crossing checker (CONC-8..11) runs
+default-on in consumer builds (it had been in-tree-only since M9); the
+whole tree is clean under it — zero crossing walls, so no
+`.sgo/crossings-*.txt` inventories are even written. Escapes exist
+(`SGOLA_NOCROSSING=1` module-wide, `SGOLA_XCROSS=<key>` per-site) and
+are unused. Captures wall at the EXPANSION site of an inline helper —
+relevant only if we ever wrap `sgo.fork` in inline helpers of our own.
+
 ## Ruled and queued — what we know will be possible
 
 These have designer rulings and sit in sgola's queue; the shape is
