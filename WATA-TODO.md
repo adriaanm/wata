@@ -130,17 +130,18 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
-- **`SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`** (filed 2026-08-09, during
-  the interp port): a sealed-trait case whose field is `List[Patch]`
-  emits an unparameterized `List` field in the flattened sum struct
-  (`undefined: List` at go build) — the same type elsewhere emits
-  `List__R` fine. Workaround: `MacStage`'s pending-frame cell carries a
-  flat `List[Patch]` instead of a two-case sum (a whole-tree handoff is
-  a root `PSet`); comment key `SUM-CASE-GENERIC-FIELD` in
-  `wata-mac/src/main/scala/interp.scala`.
+- **`SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`** — RESOLVED at sgola
+  `fb9621c` (repinned 2026-08-09, same day it was filed): field types of
+  value-shaped family structs now render through the shared funnel, so a
+  sealed case carrying `List[Patch]` compiles. The dissolved-sum design
+  in `MacStage` is KEPT on its own merits (a whole-tree handoff is a
+  root `PSet`; patch scripts concatenate) — the gap closed, the design
+  stays; the workaround comment is deleted per convention.
 
 - **`FACADE-GO-NAMED-SCALAR`** (filed 2026-08-09, during the interp
-  port): a facade cannot pass a Go defined scalar type (`NSBoxType`,
+  port; RULED upstream — facade opaque type over the ground scalar with
+  `@go.name` pinning the Go defined type — and queued, landing notice to
+  follow): a facade cannot pass a Go defined scalar type (`NSBoxType`,
   `NSWindowOrderingMode`, `NSImageScaling` — the generated bindings'
   enum params), so every enum-typed appkit method is wrapped in
   `go-pkgs/nativeui/glue.go` instead of bound (comment key at the wrap

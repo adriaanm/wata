@@ -80,10 +80,7 @@ object MacStage:
    *  yet, NEWEST FIRST (drain reverses back to publish order). One flat
    *  patch list, not a list of frames: scripts concatenate soundly (each is
    *  written against the tree the previous ones produced), and a whole-tree
-   *  handoff IS a root `PSet` in the patch vocabulary.
-   *  SUM-CASE-GENERIC-FIELD: a dedicated sum type here (a case carrying
-   *  `List[Patch]`) emits an unparameterized `List` field — flat patches
-   *  until the flattened-case emission carries the instantiation. */
+   *  handoff IS a root `PSet` in the patch vocabulary. */
   private val pendingC: sgo.Atomic[List[Patch]] = sgo.atomic(Nil)
 
   /** the windowed apply trampoline, minted ONCE at module init (the

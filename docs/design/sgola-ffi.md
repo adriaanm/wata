@@ -180,11 +180,25 @@ category), and two filed gaps:
   generated bindings' enum params), so each enum-typed method is
   wrapped in a plain-typed glue func. Recurs on every generated Apple
   surface; filed 2026-08-09.
-- `SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`: a sealed-trait case
-  carrying `List[Patch]` emits an unparameterized `List` field in the
-  flattened sum struct (loud at go build). Worked around by dissolving
-  the sum (`MacStage`'s pending cell is a flat `List[Patch]`); filed
-  2026-08-09.
+- `SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`: RESOLVED same-day at sgola
+  `fb9621c` (repinned 2026-08-09) — the sum shape compiles now. The
+  dissolved-sum design stays on its own merits: a whole-tree handoff is
+  a root `PSet`, so `MacStage`'s pending cell is a flat `List[Patch]`.
+
+Two authoring facts the port surfaced, worth knowing before writing the
+next facade over generated bindings:
+
+- **A zero-field bound-subset facade's `==` is vacuous.** Binding no
+  fields (the `struct{ objc.ID }` handles) makes every two instances
+  compare equal — Go struct equality over an empty bound set. Any real
+  identity check needs a glue function over the Go field
+  (`glue.SameView`); never compare handle facades with `==`.
+- **Facade files sit in `package go`, which cannot name empty-package
+  types.** Core `Bytes` resolves to `go.Bytes` there and
+  `_root_.Bytes` does not exist (empty-package members are invisible
+  from named packages) — so byte-carrying facade params are spelled
+  `go.Bytes`, and producers build one with `go.makeSlice[Byte]`, not
+  `Array[Byte].toBytes`.
 
 The chrome (`macshell/login,menu,prefs`, 581 lines of raw `objc.Send`
 sites) is in none of these categories: raw messaging is not a compiler
