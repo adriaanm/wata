@@ -1,6 +1,9 @@
 # 0045 — the non-happy paths, as an adult meets them
 
-Status: accepted
+Status: done (all five slices landed 2026-08-09/10; `just mac-ui-tests`
+is the suite. The startup-verdict/stdout inventory findings (items 8,
+19, 20) did not ride slice 3 beyond what the title now says — they
+remain follow-ups under ADULT-UX-NONHAPPY's iOS half.)
 
 ## Problem
 

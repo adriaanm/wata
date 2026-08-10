@@ -322,8 +322,13 @@ object Pump:
 
   /** continuous non-live time after which "reconnecting…" becomes a
    *  euphemism: the sync loop's own backoff ceiling — past it, retries are a
-   *  minute apart and the honest word is offline. */
+   *  minute apart and the honest word is offline. `WATA_MAC_OFFLINE_MS`
+   *  overrides, read per frame like the other committed harness arms — the
+   *  failure suite cannot sit out a real minute per scenario. */
   val TITLE_OFFLINE_MS: Long = 60000L
+
+  def titleOfflineMs(): Long =
+    MacStr.num(go.sys.getenv("WATA_MAC_OFFLINE_MS"), TITLE_OFFLINE_MS.toInt).toLong
 
   /** when the health went non-live (0 = live now, or still pre-everLive). */
   private val titleBadSinceC: sgo.Atomic[Long] = sgo.atomic(0L)
@@ -338,7 +343,7 @@ object Pump:
     var out = "Wata"
     if everLive && !isLiveHealth(net.health) then
       if titleBadSinceC.get() == 0L then titleBadSinceC.set(nowMs)
-      if nowMs - titleBadSinceC.get() >= TITLE_OFFLINE_MS then
+      if nowMs - titleBadSinceC.get() >= titleOfflineMs() then
         out = "Wata — offline"
       else out = "Wata — reconnecting…"
     else titleBadSinceC.set(0L)

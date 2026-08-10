@@ -251,6 +251,12 @@ mac *ARGS:
 mac-smoke:
     tools/mac-smoke.py
 
+# macOS client: the failure-scenario suite (plan 0045) — wrong password,
+# unreachable, hung server, mid-session loss, send failure, denied mic; judged
+# on tree dumps + the title seam. ~1min, standalone; macOS only, not in ci.
+mac-ui-tests *ARGS:
+    tools/mac-ui-tests.py {{ARGS}}
+
 # macOS client as a real .app (plan 0037): Info.plist, icon, ad-hoc signature.
 # A bundle is what makes notifications, the microphone and a stable Keychain
 # identity possible at all — and what a non-technical user double-clicks.

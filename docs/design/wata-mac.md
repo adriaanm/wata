@@ -820,6 +820,18 @@ next probe, and the only one that can.
   picked handset and the off window, the decision sentence names the device
   and the account and what Deny costs, an empty window commits nothing, and a
   redraw keeps the selection and the typed account).
+- `just mac-ui-tests` (plan 0045; ~1min, macOS-only, not in ci — the
+  same posture as mac-smoke): the failure-scenario suite, one headless
+  session per scenario judged on tree dumps, printed lines and the
+  `title` seam. Wrong-password (boot says "account rejected", title
+  stays calm), unreachable-at-login and hung-server ("can't reach
+  server"; the hung one terminating at all is slice 1's HTTP timeout at
+  work), mid-session-loss (title walks "Wata" → "reconnecting…" →
+  "offline" past a `WATA_MAC_OFFLINE_MS`-shortened ceiling while the
+  stage stays on the live UI), send-fail (a hook-armed upload 500
+  flashes SEND FAILED, and the flash clears), and recording-error
+  (`WATA_MAC_MIC_FAIL=1` flashes MIC FAILED, never SEND FAILED, and the
+  mic banner prints exactly once per run).
 - `just mac-creds-smoke` (macOS-only, not in ci; touches the login
   keychain and cleans up after itself): three headless runs against one
   server — with a password in the environment, with NOTHING in it (which
