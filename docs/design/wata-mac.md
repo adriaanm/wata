@@ -160,6 +160,20 @@ back — the failure-scenario harness's assertion seam. A session ending
 back at the login sheet resets the title, since no frames run while the
 sheet is up.
 
+### The mic-failure banner (plan 0045 slice 4)
+
+A recording failure flashes `MIC FAILED` on the shared grid (see
+wata-fb.md — the flag is `WataState.micError`). On a Mac the likely
+cause is a denied Microphone permission, so the first
+`AeRecordingError` per run also posts a chrome banner naming the fix
+(`Pump.noteMicError`: "Check System Settings > Privacy & Security >
+Microphone") and prints the assertable `mic: banner` line. Once per
+run only — the flash repeats with every attempt; a nagging banner
+would teach the user to ignore banners. The failure-scenario arm is
+`WATA_MAC_MIC_FAIL=1` under the fake audio backend (macaudio's
+`OpenCapture` refuses, which is exactly what TCC denial looks like to
+the audio thread).
+
 ### Arrival notifications and the Dock badge
 
 A message landing while the window is behind another one used to be

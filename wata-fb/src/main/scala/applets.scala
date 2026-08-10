@@ -53,6 +53,11 @@ case class WataState(
   // was the play failure "there is nothing to play it through" rather than
   // "it could not be fetched"? Two causes, two sentences on screen.
   noAudio: Boolean,
+  // the RECORDING failed — the microphone's fault, not the network's. Its
+  // own flag because it draws its own sentence: blaming a TCC-denied mic on
+  // the send path reads as "SEND FAILED" and points the user at the wrong
+  // fix (plan 0045 slice 4).
+  micError: Boolean,
   statusTimer: scala.Double,
   backHeld: Boolean,
   backHoldTime: scala.Double,
@@ -74,7 +79,7 @@ object WataLogic:
   val FOOTER_ROW = Font.ROWS - 1
 
   def initial(): WataState =
-    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, 0.0,
+    WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, false, 0.0,
       false, 0.0, false, 0.0, 0, "")
 
   /** visible list rows between header and footer (bitmap grid). */
@@ -84,11 +89,11 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** Opens at row 0, which is the NEWEST message now that the list comes back
    *  newest first — the one somebody just pressed the LED for. It used to be
@@ -96,42 +101,42 @@ object WataLogic:
    *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "")
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "")
 
   /** cursor move that keeps the current anchor — the per-frame reconcile's
    *  found-the-anchor path and every non-cursor wither go through here. */
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** cursor move that also RE-DECIDES the anchor — what an explicit up/down
    *  and the vanished-anchor fallback use. */
   def withMsgAnchor(s: WataState, sel: scala.Int, scr: scala.Int, anchor: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** the recording meter's level — the only field `AeCaptureLevel` moves. */
   def withCapLevel(s: WataState, level: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId)
 
   /** `room`/`id` name what is playing, and are cleared when it stops — a
    *  playback target that outlives the playback would receipt the wrong
    *  message the next time audio ends. */
   def withPlaying(s: WataState, playing: Boolean, room: String, id: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
-  /** the full status-flash tuple (hold + timer + the three flash flags); the
+  /** the full status-flash tuple (hold + timer + the four flash flags); the
    *  play-failure CAUSE rides along unchanged. */
   def withFlash(s: WataState, hold: scala.Double, timer: scala.Double,
-                sendErr: Boolean, sendOk: Boolean, playErr: Boolean): WataState =
+                sendErr: Boolean, sendOk: Boolean, playErr: Boolean, micErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, timer, s.backHeld, s.backHoldTime,
+      s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, micErr, timer, s.backHeld, s.backHoldTime,
       s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   /** a play that failed: the flash, its cause, and `playing` dropped — a
@@ -139,17 +144,17 @@ object WataLogic:
   def withPlayErr(s: WataState, playing: Boolean, playErr: Boolean, noAudio: Boolean,
                   timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, timer,
+      s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, s.micError, timer,
       s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
       s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.statusTimer,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
       held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
@@ -415,11 +420,11 @@ object WataLogic:
 
   def tickTimers(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
     val hold = if s.pttHeld then s.pttHoldTime + dt else s.pttHoldTime
-    var out = withFlash(s, hold, s.statusTimer, s.sendError, s.sendOk, s.playError)
+    var out = withFlash(s, hold, s.statusTimer, s.sendError, s.sendOk, s.playError, s.micError)
     if s.statusTimer > 0.0 then
       val t = s.statusTimer - dt
-      if t <= 0.0 then out = withFlash(s, hold, 0.0, false, false, false)
-      else out = withFlash(s, hold, t, s.sendError, s.sendOk, s.playError)
+      if t <= 0.0 then out = withFlash(s, hold, 0.0, false, false, false, false)
+      else out = withFlash(s, hold, t, s.sendError, s.sendOk, s.playError, s.micError)
     if out.backHeld then
       val bt = out.backHoldTime + dt
       if bt >= BACK_HOLD_DELETE then out = withBack(deleteSelected(out, ctx), false, 0.0)
@@ -437,7 +442,7 @@ object WataLogic:
     case d: AeRecordingDone =>
       uploadRecording(ctx, s, d.ogg, d.durationMs)
       s
-    case _: AeRecordingError => withFlash(s, s.pttHoldTime, 2.0, true, s.sendOk, s.playError)
+    case _: AeRecordingError => withFlash(s, s.pttHoldTime, 2.0, false, s.sendOk, s.playError, true)
     // the record loop's 25 Hz level tick — the recording meter's only feed.
     case l: AeCaptureLevel   => withCapLevel(s, l.level)
     // the clip played to the end, which is what "heard" means here: receipt
@@ -468,8 +473,8 @@ object WataLogic:
 
   // ---- send/play status feedback (from the runtime's UiEvents) ----------------
   def notifySend(s: WataState, isError: Boolean): WataState =
-    var out = withFlash(s, s.pttHoldTime, 1.5, false, true, s.playError)
-    if isError then out = withFlash(s, s.pttHoldTime, 2.0, true, false, s.playError)
+    var out = withFlash(s, s.pttHoldTime, 1.5, false, true, s.playError, s.micError)
+    if isError then out = withFlash(s, s.pttHoldTime, 2.0, true, false, s.playError, s.micError)
     out
 
   /** the runtime's play failure: flash the cause and stop showing the play
@@ -736,11 +741,13 @@ object WataLogic:
     VGroup(ListOps.reverse(kids))
 
   /** the send/play flash, while its timer runs. An empty group is what "no
-   *  flash" looks like as data — the three states are exclusive and the losing
-   *  ones draw nothing. */
+   *  flash" looks like as data — the four states are exclusive and the losing
+   *  ones draw nothing. MIC FAILED outranks the rest: it names the device
+   *  that broke, where SEND FAILED would blame the network for it. */
   def statusFlashView(s: WataState): View =
     var kids: List[Keyed] = Nil
-    if s.sendError then kids = Keyed("msg", VText(3, 9, "SEND FAILED", Color.red)) :: kids
+    if s.micError then kids = Keyed("msg", VText(3, 9, "MIC FAILED", Color.red)) :: kids
+    else if s.sendError then kids = Keyed("msg", VText(3, 9, "SEND FAILED", Color.red)) :: kids
     else if s.playError then kids = Keyed("msg", VText(3, 9, playErrMsg(s), Color.red)) :: kids
     else if s.sendOk then kids = Keyed("msg", VText(8, 9, "SENT", Color.green)) :: kids
     VGroup(kids)

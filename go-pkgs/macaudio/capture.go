@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"unsafe"
 
@@ -145,6 +146,13 @@ func OpenCapture() (*Capture, error) {
 		return nil, errors.New("macaudio: SetupMixer has not run (the audio thread calls it once at start)")
 	}
 	if fakeMode {
+		// The failure-scenario arm (plan 0045 slice 4), committed and
+		// env-gated so a harness run is reproducible: a capture that cannot
+		// OPEN is exactly what a TCC-denied microphone looks like to the
+		// audio thread.
+		if os.Getenv("WATA_MAC_MIC_FAIL") != "" {
+			return nil, errors.New("macaudio: WATA_MAC_MIC_FAIL armed — simulated denied microphone")
+		}
 		return openFakeCapture(), nil
 	}
 	e, err := audioEngine()

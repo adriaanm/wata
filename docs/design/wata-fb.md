@@ -443,7 +443,11 @@ Two row marks say what the client is doing with the user's own audio
   deadline into `EvPlaybackError`, which clears `playing` and flashes;
   the flash names the cause, `PLAY FAILED` for a fetch that failed and
   `NO AUDIO` when the bytes arrived but there is nothing to play them
-  through (no audio thread, or the audio thread reported failure).
+  through (no audio thread, or the audio thread reported failure). A
+  RECORDING that fails flashes `MIC FAILED` (`WataState.micError`) —
+  the microphone's fault named as such; it used to ride the send-error
+  flag and read `SEND FAILED`, blaming the network for a dead or denied
+  mic (plan 0045 slice 4).
 
 The mark state reaches the frame the way everything else does: the
 runtime pushes `EvOutbox(unsent, undelivered)` on every queue change,
@@ -1702,7 +1706,7 @@ information in the equivalent place, not the same number.
 | connectivity: pipe + health, under test | no | yes | the `conn-status` scenario |
 | pre-sync placeholder (`Connecting…`/`Syncing…`/…) | yes | yes | same |
 | PTT overlay: red bar + hold timer | yes | yes | same, with a `REC` prefix |
-| `SENT` / `SEND FAILED` / `PLAY FAILED` flash | yes | yes | same |
+| `SENT` / `SEND FAILED` / `PLAY FAILED` flash | yes | yes | same, plus `MIC FAILED` for a recording failure (the Zig client folded it into `SEND FAILED`) |
 | screensaver blank + wake-swallows-the-keypress | yes | yes | same, and covered by `settings-walk` |
 | **Snake applet** ||||
 | board: full-width grid of 6x8 cells, bottom row = score | 21x18 | 26x14 | same cells, sized to the landscape grid |

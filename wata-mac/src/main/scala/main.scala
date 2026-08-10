@@ -662,7 +662,28 @@ object Pump:
 
   def onAudioEvt(st: PumpSt, e: AudioEvt, ctx: FrameCtx): PumpSt =
     if isEchoEvt(e) then st
-    else withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
+    else
+      noteMicError(e)
+      withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
+
+  /** On a Mac the likely cause of a recording failure is a denied
+   *  Microphone permission (TCC), so the first failure per run also names
+   *  the fix in chrome — the grid's flash says MIC FAILED, this says where
+   *  the switch is. Once per run: the flash repeats with every attempt, a
+   *  nagging banner would teach the user to ignore banners. The printed
+   *  line is the assertable part, notifyLine-style. */
+  private val micToldC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  def noteMicError(e: AudioEvt): Unit = e match
+    case _: AeRecordingError =>
+      if !micToldC.get() then
+        micToldC.set(true)
+        val err = go.macshell.notify("Microphone unavailable",
+          "Wata could not record. Check System Settings > Privacy & Security > Microphone.")
+        var line = "mic: banner"
+        if err != "" then line = line + " (" + err + ")"
+        println(line)
+    case _ => ()
 
   /** the same predicate `Shell.isEchoEvt` names, restated here because the
    *  mac's `Shell` stub carries only the key predicates. */
