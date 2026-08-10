@@ -11,32 +11,34 @@ import "errors"
 
 var errDarwinOnly = errors.New("macshell: darwin only — wata-mac needs macOS")
 
-func StartHeadless()                   {}
-func Start(scale int, title string)    {}
-func RunApp()                          {}
-func Terminate()                       {}
-func NextKey() int                     { return -1 }
-func PushKeyCode(code int, phase int)  {}
-func TreeDump() (string, error)        { return "", errDarwinOnly }
+func StartHeadless()                       {}
+func Start(scale int, title string)        {}
+func RunApp()                              {}
+func Terminate()                           {}
+func NextKey() int                         { return -1 }
+func PushKeyCode(code int, phase int)      {}
+func TreeDump() (string, error)            { return "", errDarwinOnly }
 func Login(hs, user, reason string) string { return "" }
-func NextCommand() string              { return "" }
-func SetAccount(hs, user string)       {}
-func ShowPrefs()                       {}
-func RequestNotifyAuth()               {}
-func NotifyAvailable() bool            { return false }
-func Notify(title, body string) string { return "darwin only" }
-func SetBadge(n int)                   {}
-func Frontmost() bool                  { return true }
-func SetFrontmost(on bool)             {}
-func SetNotifyPlay(on bool)            {}
-func ShowDevices()                     {}
-func SetHandsets(tsv string)           {}
-func SetNetworks(tsv string)           {}
-func SetPending(tsv string)            {}
-func SetRoster(tsv string)             {}
-func SetDevStatus(s string)            {}
-func TakePSK() string                  { return "" }
-func DevSelect(kind string, i int)     {}
-func DevType(field, s string)          {}
-func DevClick(name string)             {}
-func DevDecision() string              { return "" }
+func NextCommand() string                  { return "" }
+func SetAccount(hs, user string)           {}
+func SetTitle(s string)                    {}
+func Title() string                        { return "" }
+func ShowPrefs()                           {}
+func RequestNotifyAuth()                   {}
+func NotifyAvailable() bool                { return false }
+func Notify(title, body string) string     { return "darwin only" }
+func SetBadge(n int)                       {}
+func Frontmost() bool                      { return true }
+func SetFrontmost(on bool)                 {}
+func SetNotifyPlay(on bool)                {}
+func ShowDevices()                         {}
+func SetHandsets(tsv string)               {}
+func SetNetworks(tsv string)               {}
+func SetPending(tsv string)                {}
+func SetRoster(tsv string)                 {}
+func SetDevStatus(s string)                {}
+func TakePSK() string                      { return "" }
+func DevSelect(kind string, i int)         {}
+func DevType(field, s string)              {}
+func DevClick(name string)                 {}
+func DevDecision() string                  { return "" }

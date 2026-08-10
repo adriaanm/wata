@@ -108,7 +108,7 @@ func TestLoginSheetAnswer(t *testing.T) {
 	f := buildLoginFields("", "", "", "")
 	setValue(f.hs, "  http://pi.local:8008 ") // trimmed: people paste with spaces
 	setValue(f.user, " alice ")
-	setValue(f.pass, " s3cret with spaces ")  // NOT trimmed: a space is a character
+	setValue(f.pass, " s3cret with spaces ") // NOT trimmed: a space is a character
 
 	got := f.answer()
 	want := "http://pi.local:8008\talice\t s3cret with spaces \t1"
