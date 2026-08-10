@@ -160,6 +160,37 @@ func AdoptRoot(v appkit.NSView) {
 	w.ContentView().AddSubviewPositionedRelativeTo(v, appkit.NSWindowBelow, kv)
 }
 
+// The window title doubles as the adult-facing connectivity line (plan 0045
+// slice 3): the Sgola pump derives the words from the same NetState the
+// header's dots draw and pushes them here once a frame. Deduped, so the
+// per-frame call costs one mutex hit; headless keeps the string as the
+// REPL's `title` query seam — there is no window, but a harness still
+// asserts the words.
+var titleNow = "" // guarded by mu; "" = never set (Start's title stands)
+
+func SetTitle(s string) {
+	mu.Lock()
+	if s == titleNow {
+		mu.Unlock()
+		return
+	}
+	titleNow = s
+	hl := headless
+	w := win
+	mu.Unlock()
+	if hl {
+		return
+	}
+	onMainAsync(func() { w.SetTitle(s) })
+}
+
+// Title answers the last SetTitle — the headless harness's query seam.
+func Title() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return titleNow
+}
+
 // RunApp is NSApplication.run: main thread only, never returns.
 func RunApp() {
 	appkit.GetNSApplicationClass().SharedApplication().Run()

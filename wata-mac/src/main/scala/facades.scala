@@ -61,6 +61,11 @@ object macshell:
    *  `homeserver 	 user 	 password 	 0|1` — the flag being the checkbox.
    *  Strings only, like the rest of this facade. */
   @go.name("Login") def login(hs: String, user: String, reason: String): String = ???
+  /** the window title as the adult-facing connectivity line (plan 0045
+   *  slice 3): pushed once a frame, deduped shell-side; headless it is
+   *  recorded and `title` reads it back — the harness's query seam. */
+  @go.name("SetTitle") def setTitle(s: String): Unit = ???
+  @go.name("Title") def title(): String = ???
   /** headless init: just the flag and the key queue — the stage lives on
    *  the calling goroutine (the locked main OS thread). */
   @go.name("StartHeadless") def startHeadless(): Unit = ???

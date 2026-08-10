@@ -40,7 +40,8 @@ import language.experimental.saferExceptions
  *     stage lives on macshell's own locked thread and the main goroutine
  *     runs a line command loop — `wait <ms>` pumps frames and prints each
  *     applied patch (`patch <script line>`, the differ's own script, in
- *     order), `tree` prints the live NATIVE hierarchy, `key <name>
+ *     order), `tree` prints the live NATIVE hierarchy, `title` the window
+ *     title's connectivity words, `key <name>
  *     <press|release|repeat>` injects a macOS key code through the real
  *     translation table, `quit` winds down. tools/mac-smoke.py drives this
  *     and asserts on the printed lines, tui-smoke style.
@@ -215,6 +216,9 @@ object Pump:
         if ending == "quit" then going = false
         else
           go.macshell.setAccount("", "")
+          // no frames run while the sheet is up, so a dead session's last
+          // title ("Wata — reconnecting…") would linger behind it
+          go.macshell.setTitle("Wata")
           if ending == "unreachable" then
             // nothing was REFUSED — the secrets stay stored; the sheet is
             // back to fix WHERE, and says so.
@@ -314,6 +318,36 @@ object Pump:
     else if isRejected(h.connection()) then "rejected"
     else "quit"
 
+  // ---- the window title (plan 0045 slice 3) ---------------------------------
+
+  /** continuous non-live time after which "reconnecting…" becomes a
+   *  euphemism: the sync loop's own backoff ceiling — past it, retries are a
+   *  minute apart and the honest word is offline. */
+  val TITLE_OFFLINE_MS: Long = 60000L
+
+  /** when the health went non-live (0 = live now, or still pre-everLive). */
+  private val titleBadSinceC: sgo.Atomic[Long] = sgo.atomic(0L)
+
+  /** the title as connectivity words — derived from the SAME `NetState` the
+   *  header's dots draw (the plan's one-source law), rendered louder where
+   *  an adult looks: the title bar and the Dock. Pre-everLive it stays plain
+   *  "Wata": the boot screen owns that presentation (plan 0035's
+   *  calm-outranks-failure), and a title crying offline over a window saying
+   *  "starting up…" would be a second opinion. */
+  def titleStep(net: NetState, everLive: Boolean, nowMs: Long): String =
+    var out = "Wata"
+    if everLive && !isLiveHealth(net.health) then
+      if titleBadSinceC.get() == 0L then titleBadSinceC.set(nowMs)
+      if nowMs - titleBadSinceC.get() >= TITLE_OFFLINE_MS then
+        out = "Wata — offline"
+      else out = "Wata — reconnecting…"
+    else titleBadSinceC.set(0L)
+    out
+
+  def isLiveHealth(h: NetHealth): Boolean = h match
+    case _: NetLive => true
+    case _          => false
+
   /** the chrome's commands, drained once a frame beside the key queue. A menu
    *  click lands on the main thread; the session ends here, on the pump's own
    *  thread, where the client and the stores are. */
@@ -391,6 +425,7 @@ object Pump:
         if cmd == "quit" then going = false
         else if cmd == "wait" then st = doWait(h, clock, evts, st, MacStr.num(MacStr.nth(ts, 1), 0))
         else if cmd == "tree" then printTree()
+        else if cmd == "title" then println("title " + go.macshell.title())
         else if cmd == "key" then doKey(MacStr.nth(ts, 1), MacStr.nth(ts, 2))
         else if cmd == "front" then doFront(MacStr.nth(ts, 1))
         else if cmd == "mode" then doMode(MacStr.nth(ts, 1))
@@ -531,6 +566,7 @@ object Pump:
     // one log line per change, and an immediate retry when the pipe arrives.
     NetStatus.logTransition(net, conn, NetStatus.clockOk())
     NetStatus.logSnapshot(snap, conn)
+    go.macshell.setTitle(titleStep(net, NetStatus.everLive(), nowMs))
     persistSession(h.client)
     if NetStatus.takePipeArrival() then Runtime.retryNow(h.client)
     val ctx = FrameCtx(snap, conn, net, h.client, h.client.audioCmds, evts,

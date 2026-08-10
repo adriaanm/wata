@@ -142,6 +142,24 @@ the pre-frames connect wait (`Pump.waitLiveOrRejected`) gives up
 immediately on `ConnAuthRejected`, so a wrong password is answered in
 one auth round-trip rather than after the full connect window.
 
+### The window title (plan 0045 slice 3)
+
+Mid-session network loss used to be announced only by the header's two
+blinking dots — pixels on the kid's grid, no words anywhere. The window
+title now carries the state in words an adult sees in the title bar and
+the Dock: "Wata" when healthy, "Wata — reconnecting…" on
+`ConnError`/backoff, "Wata — offline" once the trouble has lasted the
+sync backoff's own 60s ceiling (`Pump.titleStep`, `TITLE_OFFLINE_MS`).
+It derives from the SAME `NetState` the header dots draw — the title is
+a louder rendering, never a second opinion — and stays plain "Wata"
+pre-`everLive`, where the boot screen owns the presentation (plan
+0035's calm-outranks-failure). The pump pushes it once a frame through
+`macshell.SetTitle`, which dedupes; headless there is no window, so
+`SetTitle` records the words and the REPL's `title` command reads them
+back — the failure-scenario harness's assertion seam. A session ending
+back at the login sheet resets the title, since no frames run while the
+sheet is up.
+
 ### Arrival notifications and the Dock badge
 
 A message landing while the window is behind another one used to be
