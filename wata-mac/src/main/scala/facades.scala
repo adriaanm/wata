@@ -52,10 +52,15 @@ object macshell:
    *  `runApp` is on its way (a sheet asked for earlier simply waits for the
    *  queue to drain, which is right: there is no window to put it on yet).
    *
+   *  `reason` is why the sheet is back — the session loop's one sentence,
+   *  drawn as a red line above the fields; empty on a first ask (plan 0045
+   *  slice 2). An empty homeserver or name does not commit: the sheet
+   *  reshows itself naming the missing field.
+   *
    *  Answers "" for cancel, else a tab-separated
    *  `homeserver 	 user 	 password 	 0|1` — the flag being the checkbox.
    *  Strings only, like the rest of this facade. */
-  @go.name("Login") def login(hs: String, user: String): String = ???
+  @go.name("Login") def login(hs: String, user: String, reason: String): String = ???
   /** headless init: just the flag and the key queue — the stage lives on
    *  the calling goroutine (the locked main OS thread). */
   @go.name("StartHeadless") def startHeadless(): Unit = ???

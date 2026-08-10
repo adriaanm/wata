@@ -189,34 +189,53 @@ object Pump:
    *  stores, or by asking), run until the session ends, and ask again if what
    *  ended it was the server rejecting the account. That last arc is why the
    *  sheet exists at all — a token invalidated server-side used to leave the
-   *  window on its boot screen with nothing a user could do about it. */
+   *  window on its boot screen with nothing a user could do about it.
+   *
+   *  `reason` is what the NEXT sheet says about why it is back (plan 0045
+   *  slice 2): the loop knows how the last attempt ended, and a sheet that
+   *  reshows identically after a refused password blames nobody and helps
+   *  nobody. Sign-out carries no reason — nothing failed. */
   def windowedSession(cfg0: ClientConfig): Unit =
     var cfg = cfg0
+    var reason = ""
     var going = true
     while going do
-      cfg = ensureCredentials(cfg)
+      // whether THIS attempt's credentials came off the sheet: only then may
+      // an unreachable server bounce back to it (see windowedPump).
+      val asked = reason != "" || !Main.hasCredentials(cfg)
+      cfg = ensureCredentials(cfg, reason)
+      reason = ""
       if cfg.username == "" then going = false          // the sheet was cancelled
       else
         go.macshell.setAccount(cfg.homeserver, cfg.username)
         val h = startAudioClient(cfg)
-        val ending = windowedPump(h)
+        val ending = windowedPump(h, asked)
         h.stop()
         val joined = ClientHandle.join(h, 5000L)
-        // Rejected and signed-out end the same way — forget the secrets and
-        // ask again — and differ only in who decided. Quitting ends the loop.
         if ending == "quit" then going = false
         else
           go.macshell.setAccount("", "")
-          cfg = Main.withPassword(FbConfig.forgetAndReload(cfg), "")
+          if ending == "unreachable" then
+            // nothing was REFUSED — the secrets stay stored; the sheet is
+            // back to fix WHERE, and says so.
+            reason = "Could not reach " + cfg.homeserver + "."
+          else
+            // Rejected and signed-out end the same way — forget the secrets
+            // and ask again — and differ only in who decided, which is
+            // exactly what the reason line carries.
+            if ending == "rejected" then reason = "The server refused this password."
+            cfg = Main.withPassword(FbConfig.forgetAndReload(cfg), "")
     go.macshell.terminate()
 
-  /** what the sheet is for: nothing usable stored, so ask. Cancelling answers
-   *  an empty config, which ends the app — "Quit" is the sheet's other button
-   *  and has to mean it. */
-  def ensureCredentials(c: ClientConfig): ClientConfig =
-    if Main.hasCredentials(c) then c
+  /** what the sheet is for: nothing usable stored, so ask — and always ask
+   *  when there is a `reason`, because a reason means the stored answer just
+   *  failed and silently retrying it is the loop the sheet exists to end.
+   *  Cancelling answers an empty config, which ends the app — "Quit" is the
+   *  sheet's other button and has to mean it. */
+  def ensureCredentials(c: ClientConfig, reason: String): ClientConfig =
+    if reason == "" && Main.hasCredentials(c) then c
     else
-      val line = go.macshell.login(c.homeserver, c.username)
+      val line = go.macshell.login(c.homeserver, c.username, reason)
       if line == "" then ClientConfig("", "", "", c.syncTimeoutMs, FbConfig.empty())
       else
         val hs = MacStr.tabField(line, 0)
@@ -226,16 +245,45 @@ object Pump:
         FbConfig.savePassword(hs, user, pass)
         FbConfig.resolve(hs, user, pass)
 
+  /** `Runtime.waitForConnection(Syncing)`, except a `ConnAuthRejected` ends
+   *  the wait at once: a refused password should be answerable in one auth
+   *  round-trip, not after sitting out the whole connect window. Same
+   *  event-draining shape as the original; `h.connection()` is an atomic
+   *  read beside it. */
+  def waitLiveOrRejected(h: Handle, timeoutMs: Long): Boolean =
+    val deadline = h.client.clock.nowUnixMillis() + timeoutMs
+    var live = false
+    var run = true
+    while run do
+      if isRejected(h.connection()) then run = false
+      else if h.client.clock.nowUnixMillis() >= deadline then run = false
+      else
+        Runtime.pollEvent(h.client) match
+          case s: Some[UiEvent] =>
+            if Runtime.isConnEvent(s.value, Syncing()) then
+              live = true
+              run = false
+          case None => h.client.clock.sleepMs(20L)
+    live
+
   /** how the session ended: `"quit"` (the window's own quit gesture),
-   *  `"rejected"` (the server refused the account) or `"signout"` (the user
-   *  asked, from the menu or the Settings window). The last two both mean
-   *  "ask again"; the first ends the app. */
-  def windowedPump(h: Handle): String =
+   *  `"rejected"` (the server refused the account), `"signout"` (the user
+   *  asked, from the menu or the Settings window) or `"unreachable"` (the
+   *  credentials came off the sheet and the server never answered inside the
+   *  connect window). All but the first mean "ask again"; `fromSheet` gates
+   *  the last one — with STORED credentials an unreachable server keeps the
+   *  boot screen and the client's own backoff (plan 0022's never-terminate),
+   *  because nobody is standing at a sheet waiting to retype a hostname. */
+  def windowedPump(h: Handle, fromSheet: Boolean): String =
     val clock = MacCaps.clock()
     NetStatus.reset()
-    if Runtime.waitForConnection(h.client, Syncing(), connectMs()) then
-      println("ready " + Runtime.lastAuth.userId)
+    val live = waitLiveOrRejected(h, connectMs())
+    if live then println("ready " + Runtime.lastAuth.userId)
     else println("login failed") // keep pumping: the boot screen shows the state
+    if fromSheet && !live && !isRejected(h.connection()) then "unreachable"
+    else windowedFrames(h, clock)
+
+  def windowedFrames(h: Handle, clock: Clock): String =
     sgo.supervised {
       val evts = sgo.makeChan[AudioEvt](16)
       // hoist the command Chan out of the fork — the body needs only the

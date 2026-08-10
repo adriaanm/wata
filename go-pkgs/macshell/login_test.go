@@ -28,7 +28,7 @@ func setValue(id objc.ID, s string) {
 }
 
 func TestLoginSheetControls(t *testing.T) {
-	f := buildLoginFields("http://home:8008", "alice")
+	f := buildLoginFields("http://home:8008", "alice", "", "")
 
 	if got := className(f.pass); got != "NSSecureTextField" {
 		t.Fatalf("the password field is a %s — it would echo the password", got)
@@ -58,10 +58,54 @@ func TestLoginSheetControls(t *testing.T) {
 	if n := int(subs.Count()); n != 7 {
 		t.Fatalf("accessory view holds %d subviews, want 7 (3 labels + 3 fields + checkbox)", n)
 	}
+	// no reason on the first ask — a red line on a fresh sheet would be
+	// blaming the user for nothing.
+	if f.reason != 0 {
+		t.Fatal("a first ask has a reason row")
+	}
+}
+
+// The reason row (plan 0045 slice 2): when the session loop knows why the
+// sheet is back, the sheet says it — present exactly when the reason is
+// non-empty, holding the exact sentence.
+func TestLoginSheetReason(t *testing.T) {
+	f := buildLoginFields("http://home:8008", "alice", "", "The server refused this password.")
+	if f.reason == 0 {
+		t.Fatal("a non-empty reason built no reason row")
+	}
+	if got := stringValue(f.reason); got != "The server refused this password." {
+		t.Fatalf("reason row says %q", got)
+	}
+	if n := int(appkit.NSView{ID: f.box}.Subviews().Count()); n != 8 {
+		t.Fatalf("accessory view holds %d subviews, want 8 (the 7 + the reason row)", n)
+	}
+}
+
+// The validation rerun's password prefill: a "you left the server empty"
+// round trip must not also discard the password that was typed.
+func TestLoginSheetPassPrefill(t *testing.T) {
+	f := buildLoginFields("", "alice", "s3cret", "Enter the server address.")
+	if got := stringValue(f.pass); got != "s3cret" {
+		t.Fatalf("password prefill = %q", got)
+	}
+}
+
+// What commits and what bounces: empty homeserver/user do not commit, and
+// the bounce names the first missing field.
+func TestLoginMissingField(t *testing.T) {
+	if got := missingField("", ""); got != "Enter the server address." {
+		t.Fatalf("both empty: %q", got)
+	}
+	if got := missingField("http://home", ""); got != "Enter the name on the handset." {
+		t.Fatalf("user empty: %q", got)
+	}
+	if got := missingField("http://home", "alice"); got != "" {
+		t.Fatalf("complete fields bounce: %q", got)
+	}
 }
 
 func TestLoginSheetAnswer(t *testing.T) {
-	f := buildLoginFields("", "")
+	f := buildLoginFields("", "", "", "")
 	setValue(f.hs, "  http://pi.local:8008 ") // trimmed: people paste with spaces
 	setValue(f.user, " alice ")
 	setValue(f.pass, " s3cret with spaces ")  // NOT trimmed: a space is a character
@@ -85,7 +129,7 @@ func TestLoginSheetAnswer(t *testing.T) {
 // Where the cursor starts, which is the difference between a sheet that is
 // ready to type into and one that makes you click first.
 func TestLoginSheetFirstField(t *testing.T) {
-	f := buildLoginFields("", "")
+	f := buildLoginFields("", "", "", "")
 	if f.firstField("", "") != f.hs {
 		t.Fatal("a fresh install should start at the server field")
 	}

@@ -118,10 +118,29 @@ stores, which belongs to the Sgola side. They push a string onto a
 the pump polls once a frame. A menu action must not block the main thread
 waiting for the pump, and this way it does not.
 
-`Pump.windowedSession`'s outer loop therefore has three endings rather
-than two: `quit` ends the app, while `rejected` (the server refused the
-account) and `signout` (the user asked) both forget the secrets and
-return to the sheet. They share every line except who decided.
+`Pump.windowedSession`'s outer loop has four endings: `quit` ends the
+app; `rejected` (the server refused the account) and `signout` (the user
+asked) both forget the secrets and return to the sheet, sharing every
+line except who decided; and `unreachable` returns to the sheet with the
+secrets kept — nothing was refused, the server just never answered
+inside the connect window. `unreachable` fires only when the session's
+credentials came off the sheet (`fromSheet`): with stored credentials an
+unreachable server keeps the boot screen and the client's own backoff
+(plan 0022's never-terminate), because nobody is standing at a sheet.
+
+The sheet says WHY it is back (plan 0045 slice 2). `macshell.Login`
+takes a `reason` — drawn as a red line above the fields — and the
+session loop supplies it from the ending: `rejected` → "The server
+refused this password.", `unreachable` → "Could not reach <host>.",
+`signout` → none, nothing failed. A non-empty reason also forces
+`ensureCredentials` to ask even when the stores still hold usable
+secrets, since a reason means those secrets just failed and silently
+retrying them is the loop the sheet exists to end. Two more sheet
+rules live in `login.go`: an empty homeserver or name does not commit
+(the sheet reshows naming the missing field, password preserved), and
+the pre-frames connect wait (`Pump.waitLiveOrRejected`) gives up
+immediately on `ConnAuthRejected`, so a wrong password is answered in
+one auth round-trip rather than after the full connect window.
 
 ### Arrival notifications and the Dock badge
 

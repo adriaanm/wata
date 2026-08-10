@@ -41,7 +41,8 @@ const (
 	controlStateOn   = 1
 )
 
-// the accessory view's geometry, in points
+// the accessory view's geometry, in points. `fieldsH` is the field rows
+// alone; a reason line, when there is one, adds its own row above them.
 const (
 	sheetW  = 320.0
 	rowH    = 24.0
@@ -49,7 +50,7 @@ const (
 	labelW  = 96.0
 	fieldW  = sheetW - labelW
 	numRows = 4 // homeserver, user, password, remember
-	sheetH  = numRows*rowH + (numRows-1)*rowGap
+	fieldsH = numRows*rowH + (numRows-1)*rowGap
 )
 
 // onStageSync lives in shell.go now: headless the caller IS the stage's
@@ -97,30 +98,53 @@ func stringValue(id objc.ID) string {
 //	"<homeserver>\t<user>\t<pass>\t0|1"    committed; the flag is "remember me"
 //
 // `hs` and `user` prefill the fields — a re-authentication after a rejected
-// token should not make anyone retype what the app already knows.
-func Login(hs, user string) string {
+// token should not make anyone retype what the app already knows. `reason`
+// is why the sheet is back — the session loop's one sentence ("The server
+// refused this password.") drawn as a red line above the fields; empty on
+// the first ask. An identical sheet after a failure is what plan 0045's
+// finding 1 forbids.
+func Login(hs, user, reason string) string {
 	var out string
-	onStageSync(func() { out = runLoginSheet(hs, user) })
+	onStageSync(func() { out = runLoginSheet(hs, user, reason) })
 	return out
 }
 
 // loginFields is the accessory view and the controls a caller reads back.
 // Split out from the modal so it can be built and asserted WITHOUT spinning
 // one — a test cannot click a button, and a machine with no screen-recording
-// grant cannot even look at it.
+// grant cannot even look at it. `reason` is the zero ID when the sheet has
+// no reason line.
 type loginFields struct {
-	box, hs, user, pass, remember objc.ID
+	box, hs, user, pass, remember, reason objc.ID
 }
 
-func buildLoginFields(hs, user string) loginFields {
+// `pass` prefills the password field — only the field-validation rerun uses
+// it, so a "you left the server empty" round trip does not also make the
+// user retype the password they just typed. The session loop always passes
+// it empty: a stored secret has no business drawn into a sheet.
+func buildLoginFields(hs, user, pass, reason string) loginFields {
+	boxH := fieldsH
+	if reason != "" {
+		boxH += rowH + rowGap
+	}
 	box := objc.ID(objc.GetClass("NSView")).Send(objc.RegisterName("alloc")).
 		Send(objc.RegisterName("initWithFrame:"), appkit.CGRect{
-			Size: appkit.CGSize{Width: sheetW, Height: sheetH},
+			Size: appkit.CGSize{Width: sheetW, Height: boxH},
 		})
 	view := appkit.NSView{ID: box}
 
-	// rows are laid out from the TOP, and AppKit's origin is bottom-left
-	row := func(i int) float64 { return sheetH - float64(i+1)*rowH - float64(i)*rowGap }
+	// rows are laid out from the TOP, and AppKit's origin is bottom-left;
+	// the field rows keep the box's bottom `fieldsH`, the reason line rides
+	// above them.
+	row := func(i int) float64 { return fieldsH - float64(i+1)*rowH - float64(i)*rowGap }
+
+	var reasonLabel objc.ID
+	if reason != "" {
+		reasonLabel = newLabel(reason, 0, fieldsH+rowGap, sheetW, rowH)
+		reasonLabel.Send(objc.RegisterName("setTextColor:"),
+			objc.ID(objc.GetClass("NSColor")).Send(objc.RegisterName("systemRedColor")))
+		view.AddSubview(appkit.NSView{ID: reasonLabel})
+	}
 
 	hsField := newTextField(labelW, row(0), fieldW, rowH, false)
 	setPlaceholder(hsField, "http://…")
@@ -133,6 +157,9 @@ func buildLoginFields(hs, user string) loginFields {
 		appkit.NSControl{ID: userField}.SetStringValue(user)
 	}
 	passField := newTextField(labelW, row(2), fieldW, rowH, true)
+	if pass != "" {
+		appkit.NSControl{ID: passField}.SetStringValue(pass)
+	}
 
 	remember := objc.ID(objc.GetClass("NSButton")).Send(objc.RegisterName("alloc")).
 		Send(objc.RegisterName("initWithFrame:"), appkit.CGRect{
@@ -152,7 +179,7 @@ func buildLoginFields(hs, user string) loginFields {
 		view.AddSubview(appkit.NSView{ID: sub})
 	}
 	return loginFields{box: box, hs: hsField, user: userField,
-		pass: passField, remember: remember}
+		pass: passField, remember: remember, reason: reasonLabel}
 }
 
 // firstField is where the cursor lands: the first EMPTY one. A fresh install
@@ -182,22 +209,47 @@ func (f loginFields) answer() string {
 	}, "\t")
 }
 
-func runLoginSheet(hs, user string) string {
-	alert := objc.ID(objc.GetClass("NSAlert")).Send(objc.RegisterName("alloc")).
-		Send(objc.RegisterName("init"))
-	alert.Send(objc.RegisterName("setMessageText:"), objcrt.NSString("Sign in to Wata"))
-	alert.Send(objc.RegisterName("setInformativeText:"),
-		objcrt.NSString("Connect to your family's Wata server."))
-	alert.Send(objc.RegisterName("addButtonWithTitle:"), objcrt.NSString("Sign In"))
-	alert.Send(objc.RegisterName("addButtonWithTitle:"), objcrt.NSString("Quit"))
-
-	f := buildLoginFields(hs, user)
-	alert.Send(objc.RegisterName("setAccessoryView:"), f.box)
-	alert.Send(objc.RegisterName("window")).
-		Send(objc.RegisterName("setInitialFirstResponder:"), f.firstField(hs, user))
-
-	if int(alert.Send(objc.RegisterName("runModal"))) != alertFirstButton {
-		return ""
+// missingField is the reason a commit cannot proceed, or "" if it can. A
+// session against an empty homeserver or name could only fail after a full
+// connect window; the sheet says what is missing instead of committing.
+func missingField(hs, user string) string {
+	if hs == "" {
+		return "Enter the server address."
 	}
-	return f.answer()
+	if user == "" {
+		return "Enter the name on the handset."
+	}
+	return ""
+}
+
+func runLoginSheet(hs, user, reason string) string {
+	pass := ""
+	for {
+		alert := objc.ID(objc.GetClass("NSAlert")).Send(objc.RegisterName("alloc")).
+			Send(objc.RegisterName("init"))
+		alert.Send(objc.RegisterName("setMessageText:"), objcrt.NSString("Sign in to Wata"))
+		alert.Send(objc.RegisterName("setInformativeText:"),
+			objcrt.NSString("Connect to your family's Wata server."))
+		alert.Send(objc.RegisterName("addButtonWithTitle:"), objcrt.NSString("Sign In"))
+		alert.Send(objc.RegisterName("addButtonWithTitle:"), objcrt.NSString("Quit"))
+
+		f := buildLoginFields(hs, user, pass, reason)
+		alert.Send(objc.RegisterName("setAccessoryView:"), f.box)
+		alert.Send(objc.RegisterName("window")).
+			Send(objc.RegisterName("setInitialFirstResponder:"), f.firstField(hs, user))
+
+		if int(alert.Send(objc.RegisterName("runModal"))) != alertFirstButton {
+			return ""
+		}
+		// an empty homeserver or name does not commit: the sheet comes back
+		// with what it already holds and the missing field named — and the
+		// cursor lands there, firstField's first-empty rule.
+		hs = strings.TrimSpace(stringValue(f.hs))
+		user = strings.TrimSpace(stringValue(f.user))
+		pass = stringValue(f.pass)
+		reason = missingField(hs, user)
+		if reason == "" {
+			return f.answer()
+		}
+	}
 }
