@@ -63,6 +63,8 @@ object Main:
     // every string that screen can draw against the panel's 26 columns, since
     // drawText truncates at the edge in silence; run by fb-smoke.
     else if args.length > 0 && args(0) == "exitfit" then ExitMenu.fitCheck()
+    // the message-row age column's selfcheck (agecheck.scala); run by fb-smoke.
+    else if args.length > 0 && args(0) == "agecheck" then AgeCheck.run()
     // the pending-one-shot oracle (plan 0046): a full action queue keeps a
     // refused delete/favorite pending and the frame tick re-offers it; run by
     // client-tests against tools/wataclient-oneshot.expected.txt.

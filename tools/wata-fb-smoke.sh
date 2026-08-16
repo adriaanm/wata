@@ -43,6 +43,10 @@ FITOUT="$("$FB_EMIT/$FB_BIN" exitfit)" || { echo "wata-fb exitfit run failed"; e
 printf '%s\n' "$FITOUT" | sed 's/^/   /'
 printf '%s\n' "$FITOUT" | grep -qF "exitfit: PASS" || { echo "wata-fb: exitfit did not PASS"; exit 1; }
 
+echo "-- wata-fb (1b3): message-row age column (agecheck) --"
+AGEOUT="$("$FB_EMIT/$FB_BIN" agecheck)" || { echo "wata-fb agecheck run failed"; exit 1; }
+printf '%s\n' "$AGEOUT" | grep -qF "agecheck: PASS" || { printf '%s\n' "$AGEOUT"; echo "wata-fb: agecheck did not PASS"; exit 1; }
+
 # -- (1c) the Gio blit pipeline (plan 0023 M2): the RGB565->RGBA conversion and
 # the integer nearest-neighbour scaler that go-pkgs/gioshell blits the panel
 # with. Pure Go, no window and no GPU — this is the assertion that the window

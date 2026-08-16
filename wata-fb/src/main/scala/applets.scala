@@ -556,7 +556,8 @@ object WataLogic:
     val everLive = NetStatus.everLive()
     FbPaint.draw(px, body(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
       ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable(),
-      enrolSnap(ctx, everLive), Enrol.provisioning(), NetStatus.clockOk()))
+      enrolSnap(ctx, everLive), Enrol.provisioning(), NetStatus.clockOk(),
+      ctx.client.clock.nowUnixMillis()))
 
   /** the screen, then the two things that sit OVER it: the send/play status
    *  flash and the recording bar. They are children after the screen because
@@ -565,12 +566,12 @@ object WataLogic:
   def body(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
       everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean,
-      clockOk: Boolean): View =
+      clockOk: Boolean, nowMs: Long): View =
     val screen: View = s.view match
       case _: VContacts =>
         bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol,
           prov, clockOk)
-      case _: VConversation => bodyConversation(s, snap)
+      case _: VConversation => bodyConversation(s, snap, nowMs)
     var kids: List[Keyed] = Nil
     if s.pttHeld then kids = Keyed("rec", recordingView(s)) :: kids
     if s.statusTimer > 0.0 then kids = Keyed("flash", statusFlashView(s)) :: kids
@@ -721,12 +722,12 @@ object WataLogic:
 
   /** the conversation screen: a pure function of the applet state and the
    *  frame's snapshot. Nothing here reads an atomic, a clock or the network. */
-  def bodyConversation(s: WataState, snap: StateSnapshot): View =
+  def bodyConversation(s: WataState, snap: StateSnapshot, nowMs: Long): View =
     convAt(snap, s.convContactIdx) match
-      case c: Some[Conversation] => convBodyView(s, c.value, snap)
+      case c: Some[Conversation] => convBodyView(s, c.value, snap, nowMs)
       case None                  => VText(3, 6, "No conversation", Color.midGray)
 
-  def convBodyView(s: WataState, conv: Conversation, snap: StateSnapshot): View =
+  def convBodyView(s: WataState, conv: Conversation, snap: StateSnapshot, nowMs: Long): View =
     // the same name the list row shows: the contact, the family name, or the
     // group's stamp name — "Chat" only when nothing knows better.
     var header = convName(snap, conv)
@@ -737,7 +738,7 @@ object WataLogic:
       kids = Keyed("empty", VText(3, 6, "No messages", Color.midGray)) ::
         (Keyed("footer", VText(0, FOOTER_ROW, "ESC back", Color.midGray)) :: Nil)
     else
-      kids = Keyed("rows", msgRowsView(s, conv, n, selfIdOf(snap))) ::
+      kids = Keyed("rows", msgRowsView(s, conv, n, selfIdOf(snap), nowMs)) ::
         (Keyed("footer", VText(0, FOOTER_ROW, "OK play hold=fav red=del", Color.midGray)) :: Nil)
     VGroup(Keyed("header", VText(0, 0, clip(header, 20), Color.cyan)) :: kids)
 
@@ -745,7 +746,8 @@ object WataLogic:
    *  own identity, so a retained backend recognizes a row that scrolled rather
    *  than rewriting every row below it. A row index the list cannot answer for
    *  contributes nothing, highlight included. */
-  def msgRowsView(s: WataState, conv: Conversation, n: scala.Int, selfId: String): View =
+  def msgRowsView(s: WataState, conv: Conversation, n: scala.Int, selfId: String,
+      nowMs: Long): View =
     val vis = visibleRows()
     val end = if n < s.msgScroll + vis then n else s.msgScroll + vis
     var acc: List[Keyed] = Nil
@@ -759,7 +761,7 @@ object WataLogic:
             if selected then Color.black
             else (if m.value.isPlayed then Color.midGray else Color.green)
           val own = selfId != "" && m.value.sender.id == selfId
-          acc = Keyed(m.value.id, msgRowView(m.value, row, fg, selected, selected && s.playing, own)) :: acc
+          acc = Keyed(m.value.id, msgRowView(m.value, row, fg, selected, selected && s.playing, own, nowMs)) :: acc
         case None => ()
       i += 1
     VGroup(ListOps.reverse(acc))
@@ -767,10 +769,12 @@ object WataLogic:
   def selfIdOf(snap: StateSnapshot): String =
     if snap.hasSelfUser then snap.selfUser.id else ""
 
-  /** the row: the selection highlight FIRST — children paint in list order, so
-   *  the filled rectangle has to precede the text it sits behind — then the
-   *  mark area, duration, sender, and a favorited row's STAR in the last
-   *  column, right-aligned so marking a message never shifts the text.
+  /** the row, one fixed grid for every message so the columns align down the
+   *  list (plan 0049): selection highlight FIRST — children paint in list
+   *  order, so the filled rectangle has to precede the text it sits behind —
+   *  then marks (cols 0-1), age (col 2), sender (col 6), the duration
+   *  right-aligned ending at col 24, and a favorited row's STAR in the last
+   *  column, so marking a message never shifts the text.
    *
    *  The mark area is column 0 for a RECEIVED row (the PLAY triangle while
    *  this row is the one being fetched and played, else the played check) and
@@ -778,16 +782,18 @@ object WataLogic:
    *  timeline, so the server has it — and a second adjacent check when a peer
    *  has played it (`playedByPeer`). Two adjacent `ICON_CHECK` glyphs are the
    *  Zig reference's documented double-check convention (`font.zig`: "draw
-   *  two 0x80 glyphs adjacent"), so no new glyph. An own row's text always
-   *  starts at column 2 — the second-check column is reserved even before the
-   *  peer plays it, so the receipt arriving never reflows the row; received
-   *  rows keep the old one-column shift. The play mark appears the instant OK
-   *  is released, before the download has even started: pressing a key must
-   *  show something, and a slow fetch is exactly when it matters. All marks
-   *  are custom glyphs (> 0x7F), so they are `VGlyph`s rather than characters
-   *  inside a `VText`. */
+   *  two 0x80 glyphs adjacent"), so no new glyph. Both mark columns are
+   *  reserved on EVERY row, so own and received text share one grid and a
+   *  receipt arriving never reflows a row. The play mark appears the instant
+   *  OK is released, before the download has even started: pressing a key
+   *  must show something, and a slow fetch is exactly when it matters. All
+   *  marks are custom glyphs (> 0x7F), so they are `VGlyph`s rather than
+   *  characters inside a `VText`.
+   *
+   *  The sender is "me" on an own row — the reader knows their own name —
+   *  and is clipped to the room left of the duration. */
   def msgRowView(m: VoiceMessage, row: scala.Int, fg: scala.Int, selected: Boolean,
-      playing: Boolean, own: Boolean): View =
+      playing: Boolean, own: Boolean, nowMs: Long): View =
     val y = 1 + row * Font.GLYPH_H
     var kids: List[Keyed] = Nil
     if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
@@ -795,13 +801,32 @@ object WataLogic:
     else if own || m.isPlayed then kids = Keyed("mark", VGlyph(0, y, Font.ICON_CHECK, fg)) :: kids
     if own && m.playedByPeer then
       kids = Keyed("mark2", VGlyph(Font.GLYPH_W, y, Font.ICON_CHECK, fg)) :: kids
+    kids = Keyed("age", VText(2, row, ageStr(nowMs, m.timestamp), fg)) :: kids
     val dur = durStr(m.durationMs)
-    val col = if own then 2 else (if m.isPlayed || playing then 1 else 0)
-    kids = Keyed("dur", VText(col, row, dur, fg)) :: kids
-    kids = Keyed("sender", VText(col + dur.length + 1, row, clip(m.sender.displayName, 8), fg)) :: kids
+    val durCol = 25 - dur.length
+    kids = Keyed("dur", VText(durCol, row, dur, fg)) :: kids
+    val name = if own then "me" else m.sender.displayName
+    kids = Keyed("sender", VText(6, row, clip(name, durCol - 7), fg)) :: kids
     if m.isFavorite then
       kids = Keyed("star", VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, Font.ICON_STAR, fg)) :: kids
     VGroup(ListOps.reverse(kids))
+
+  /** when a message arrived, as the row's 3-wide age column: "now" under a
+   *  minute, then minutes/hours, then relative days capped at 99 (a calendar
+   *  date would need month math for a column that answers "when"). A FUTURE
+   *  timestamp is "now" — the handset boots at 1970 until the clock steps,
+   *  and the scripted harness runs a virtual frame clock against real server
+   *  timestamps; both belong in the newest bucket, and the clamp is what
+   *  keeps the golden frames deterministic. */
+  def ageStr(nowMs: Long, ts: Long): String =
+    val diff = nowMs - ts
+    if diff < 60000L then "now"
+    else if diff < 3600000L then "" + (diff / 60000L).toInt + "m"
+    else if diff < 86400000L then "" + (diff / 3600000L).toInt + "h"
+    else
+      var d = (diff / 86400000L).toInt
+      if d > 99 then d = 99
+      "" + d + "d"
 
   /** the send/play flash, while its timer runs. An empty group is what "no
    *  flash" looks like as data — the four states are exclusive and the losing

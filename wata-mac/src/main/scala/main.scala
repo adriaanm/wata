@@ -590,7 +590,8 @@ object Pump:
       st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
       st.unsent, st.undelivered,
-      NetStatus.everLive(), FbCaps.transportUnavailable(), None, false, NetStatus.clockOk())
+      NetStatus.everLive(), FbCaps.transportUnavailable(), None, false, NetStatus.clockOk(),
+      nowMs)
     // MAC-IDLE-LEAK bisect arms, env-gated and COMMITTED so a bisect run is
     // reproducible instead of a per-session working-tree edit (drive them with
     // `just mac-leak --arm <x>`):

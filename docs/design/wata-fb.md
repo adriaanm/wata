@@ -420,19 +420,24 @@ Two row marks say what the client is doing with the user's own audio
   find out — `WataLogic.enterConversation` sends `ActAckOutbox` for both
   spellings of the conversation's key (room id and contact id, since a
   send queued before the DM room existed is filed under the contact).
-- **The message row's check marks**, the left mark area
-  (`WataLogic.msgRowView`). A RECEIVED row keeps one mark column:
-  `ICON_CHECK` once self has played it, its text shifting one column when
-  the mark is there. An OWN row (sender == self) reserves TWO mark
-  columns and its text always starts at column 2: check one is drawn
-  always — the message is in the timeline, so the server has it — and a
-  second adjacent `ICON_CHECK` appears when `VoiceMessage.playedByPeer`
-  says a non-sender has receipted it. Two adjacent check glyphs rather
-  than a new doubled glyph is the Zig reference's documented convention
+- **The message row is one fixed grid** (plan 0049,
+  `WataLogic.msgRowView`): marks in columns 0-1, the age at column 2
+  (3 wide — `ageStr`: "now" under a minute, then "59m"/"23h"/"99d",
+  future timestamps clamped to "now" for the 1970-boot handset and the
+  scripted harness alike; the non-"now" arms are pinned by the
+  `agecheck` selfcheck in fb-smoke), the sender at column 6 — "me" on
+  an own row, else the display name clipped to the room left of the
+  duration — and the duration right-aligned ending at column 24, with
+  column 25 the favorite star. Both mark columns are reserved on every
+  row, so own and received text share the grid and nothing ever
+  reflows. A RECEIVED row's mark is `ICON_CHECK` once self has played
+  it; an OWN row (sender == self) draws check one always — the message
+  is in the timeline, so the server has it — and a second adjacent
+  `ICON_CHECK` when `VoiceMessage.playedByPeer` says a non-sender has
+  receipted it. Two adjacent check glyphs rather than a new doubled
+  glyph is the Zig reference's documented convention
   (`src/fbclient/src/font.zig` in git history at `27a2f75`: "draw two
-  0x80 glyphs adjacent"), and
-  reserving the second column even before the peer plays keeps the
-  receipt's arrival from reflowing the row. The `uitest` probe `peer`
+  0x80 glyphs adjacent"). The `uitest` probe `peer`
   counts peer-played messages in the open conversation; the
   `dm-roundtrip` scenario waits on it and the `dm-alice-reply` golden
   shows the double check.
