@@ -1,6 +1,6 @@
 # 0056 — the data row shows the switch in progress, not "off"
 
-Status: accepted (owner follow-up 2026-08-16: switching wifi→cell, the
+Status: done (owner follow-up 2026-08-16: switching wifi→cell, the
 row read "off" while the radios changed over)
 
 ## The problem

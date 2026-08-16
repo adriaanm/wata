@@ -78,6 +78,33 @@ advance 5
 expect kidtarget 2
 checkpoint kid-data-applied
 
+# with the fake-radio seam on (plan 0056), the same OK is answered
+# SILENTLY — the commands "ran", which is not the same as the switch being
+# done — so the row enters APPLYING: the target with an ascii spinner on
+# the black contrast patch, help saying what it is switching to. The
+# spinner steps on the applet's own frame counter, so this checkpoint is
+# deterministic.
+fakeradios on
+tap enter
+advance 10
+expect kidapply 2
+checkpoint kid-data-applying
+
+# off-device the diagnostics never agree (still "n/a"), so the wait runs
+# out its 75s frame budget — `idle` burns the frames with no real pause.
+# In CHUNKS under the screensaver's 60s threshold, with a key the kid
+# panel ignores (back) between them: one 2300-frame idle would blank the
+# panel, stale the checkpoint, and feed the next tap to the wake-swallow.
+idle 900
+tap back
+idle 900
+tap back
+idle 600
+waitmax kidapply 0 10
+advance 3
+checkpoint kid-data-timeout
+fakeradios off
+
 # the battery row (plan 0054): read-only — the percentage is an honest "n/a"
 # on the host — with the help rows saying what it is.
 tap down

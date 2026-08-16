@@ -333,6 +333,31 @@ something shows it on the help rows in red, KEEPS the target pending,
 and OK again is the deliberate retry (off-device: the guarded `not on
 device`, which is what lets the sim walk the report path too).
 
+**A silent apply enters APPLYING, not "done"** (plan 0056): the
+commands running is not the switch being made — pppd negotiation alone
+is tens of seconds, and mid-transition the truthful diag reading is
+"off", which must not be shown as the outcome. While applying, the row
+keeps the chosen target with an ascii spinner beside it (`| / - \`,
+one step per `SPIN_FRAMES` frames of the applet's own counter) and the
+help row says "switching to cell...". Three exits: the derived state
+matches the target (pending clears, the real state shows green); the
+apply reported an error immediately (the red report + keep-pending
+shape, unchanged); or `APPLY_TIMEOUT_FRAMES` (75s at 30fps) pass
+without agreement — the red "no link" report, target kept for
+OK-retry. Both the spinner phase and the timeout count FRAMES in the
+kid state, so the scripted clock pins them deterministically.
+**Contrast rule**: the pending/applying value draws yellow on a small
+BLACK patch behind the value columns (a `VRect` painted after the
+selection highlight, before the text) — yellow keeps its not-yet-real
+identity, the patch supplies the contrast on the green selection bar,
+and on an unselected row it blends into the background. Off-device the
+applying arms are reachable only through `Diag`'s `WATA_FAKE_RADIOS`
+seam (env-primed, or the `fakeradios` uitest directive): with it on,
+the guarded radio commands answer "" without running anything, and
+since the host diagnostics never agree the timeout arm is walkable too
+— the `kid-settings` scenario pins the spinner and the timeout with
+`idle`-burned frames (in chunks under the screensaver threshold).
+
 **Both panels edit the same persisted `FbPrefs`** (`FbConfig.savePrefs`),
 each holding brightness/timeout mirrors in its own state record;
 `Shell.syncPrefs` refreshes the INACTIVE panel's mirror from the

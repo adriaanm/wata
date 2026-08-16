@@ -311,9 +311,35 @@ object Diag:
    *  row to show: "" on success, a short reason otherwise. Off-device it runs
    *  nothing and says so — the rows still arm, so the whole gesture is
    *  walkable in the sim. */
+  /** WATA_FAKE_RADIOS — the radio commands' test seam (plan 0056). Off-device
+   *  every guarded command answers "not on device", so the kid data row's
+   *  APPLYING arm (entered only on a SILENT report) is unreachable in the
+   *  sim. With the knob on, the commands answer "" without running anything,
+   *  which is the scripted harness's way into the spinner and timeout arms —
+   *  the diagnostics still read "n/a", so the radios never agree and the
+   *  timeout is walkable too. Env-primed (`WATA_FAKE_RADIOS=1`) for hand
+   *  runs, and flipped mid-script by the `fakeradios` uitest directive so
+   *  ONE scenario can pin both the report arm and the applying arms — the
+   *  same shape as the other forced seams (`conn`, `netpipe`, `enrolstate`).
+   *  A module-level cell, like every sgo.Atomic here. */
+  private val fakeRadiosC: sgo.Atomic[scala.Int] = sgo.atomic(fakeRadiosEnv())
+
+  def fakeRadiosEnv(): scala.Int =
+    var out = 0
+    if go.sys.getenv("WATA_FAKE_RADIOS") == "1" then out = 1
+    out
+
+  def setFakeRadios(on: Boolean): Unit =
+    var v = 0
+    if on then v = 1
+    fakeRadiosC.set(v)
+
+  def fakeRadios(): Boolean = fakeRadiosC.get() == 1
+
   def runGuarded(line: String): String =
     var out = "not on device"
-    if onDevice() then out = shStatus(line)
+    if fakeRadios() then out = ""
+    else if onDevice() then out = shStatus(line)
     out
 
   def shStatus(line: String): String =

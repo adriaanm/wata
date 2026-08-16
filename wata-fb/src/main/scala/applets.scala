@@ -1849,6 +1849,14 @@ object SettingsLogic:
  *  must not linger. `diag`/`diagLeft` cache the same
  *  ambient reads the developer applet's rows use, on the same cadence, so
  *  the row shows what IS while the target shows what is asked for.
+ *  `applyFrames` is the APPLYING state (plan 0056): -1 outside it; an apply
+ *  whose commands ran silently sets it to 0 and it counts FRAMES until the
+ *  derived radio state matches the target (success — pending clears), or
+ *  `APPLY_TIMEOUT_FRAMES` pass without agreement (the "no link" report) —
+ *  frames, not wall time, so the spinner and the timeout are deterministic
+ *  under the scripted clock. While it runs the row shows the target with a
+ *  spinner; mid-transition the truthful diag reading is "off", which must
+ *  not be shown as the outcome.
  *  `actionMsg` is the last apply's report ("" = nothing to say) — an apply
  *  that answered something (a failed dial, the off-device "not on device")
  *  says so on the help rows until the next keypress. Nothing redials
@@ -1860,6 +1868,7 @@ case class KidSettingsState(
   timeoutIdx: scala.Int,
   notifyMode: String,
   dataTarget: scala.Int,
+  applyFrames: scala.Int,
   diag: DiagSnap,
   diagLeft: scala.Int,
   actionMsg: String
@@ -1894,39 +1903,50 @@ object KidSettingsLogic:
   val T_WIFI = 1
   val T_CELL = 2
 
+  /** frames per spinner step (~4 turns a second at 30fps), and how many
+   *  frames the applying state waits for the radios to agree before calling
+   *  it "no link" — 75s at 30fps, pppd's worst negotiation plus margin. */
+  val SPIN_FRAMES = 8
+  val APPLY_TIMEOUT_FRAMES = 2250
+
   def initial(): KidSettingsState =
     KidSettingsState(0, 40, 1, Notify.spellMode(FbConfig.notifyMode()),
-      T_NONE, SettingsLogic.noDiag(), 0, "")
+      T_NONE, -1, SettingsLogic.noDiag(), 0, "")
 
   /** the boot state: the same stored preferences the developer applet
    *  restores, read into this panel's mirrors. */
   def restored(p: FbPrefs): KidSettingsState =
     KidSettingsState(0, p.brightness, p.timeoutIdx, Notify.spellMode(FbConfig.notifyMode()),
-      T_NONE, SettingsLogic.noDiag(), 0, "")
+      T_NONE, -1, SettingsLogic.noDiag(), 0, "")
 
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: KidSettingsState, sel: scala.Int): KidSettingsState =
     KidSettingsState(sel, s.brightness, s.timeoutIdx, s.notifyMode,
-      s.dataTarget, s.diag, s.diagLeft, s.actionMsg)
+      s.dataTarget, s.applyFrames, s.diag, s.diagLeft, s.actionMsg)
   def withBrightness(s: KidSettingsState, b: scala.Int): KidSettingsState =
     KidSettingsState(s.selected, b, s.timeoutIdx, s.notifyMode,
-      s.dataTarget, s.diag, s.diagLeft, s.actionMsg)
+      s.dataTarget, s.applyFrames, s.diag, s.diagLeft, s.actionMsg)
   def withNotify(s: KidSettingsState, m: String): KidSettingsState =
     KidSettingsState(s.selected, s.brightness, s.timeoutIdx, m,
-      s.dataTarget, s.diag, s.diagLeft, s.actionMsg)
+      s.dataTarget, s.applyFrames, s.diag, s.diagLeft, s.actionMsg)
+  /** choosing (or clearing) a target always LEAVES the applying state — a
+   *  new pick supersedes a switch still in flight. */
   def withTarget(s: KidSettingsState, t: scala.Int): KidSettingsState =
     KidSettingsState(s.selected, s.brightness, s.timeoutIdx, s.notifyMode,
-      t, s.diag, s.diagLeft, s.actionMsg)
+      t, -1, s.diag, s.diagLeft, s.actionMsg)
+  def withApplyFrames(s: KidSettingsState, f: scala.Int): KidSettingsState =
+    KidSettingsState(s.selected, s.brightness, s.timeoutIdx, s.notifyMode,
+      s.dataTarget, f, s.diag, s.diagLeft, s.actionMsg)
   def withDiag(s: KidSettingsState, d: DiagSnap, left: scala.Int): KidSettingsState =
     KidSettingsState(s.selected, s.brightness, s.timeoutIdx, s.notifyMode,
-      s.dataTarget, d, left, s.actionMsg)
+      s.dataTarget, s.applyFrames, d, left, s.actionMsg)
   def withActionMsg(s: KidSettingsState, m: String): KidSettingsState =
     KidSettingsState(s.selected, s.brightness, s.timeoutIdx, s.notifyMode,
-      s.dataTarget, s.diag, s.diagLeft, m)
+      s.dataTarget, s.applyFrames, s.diag, s.diagLeft, m)
   /** the other panel's preference edits, mirrored in (`Shell.syncPrefs`). */
   def mirrored(s: KidSettingsState, b: scala.Int, tIdx: scala.Int): KidSettingsState =
     KidSettingsState(s.selected, b, tIdx, s.notifyMode,
-      s.dataTarget, s.diag, s.diagLeft, s.actionMsg)
+      s.dataTarget, s.applyFrames, s.diag, s.diagLeft, s.actionMsg)
 
   // ---- input (press-only) ---------------------------------------------------
   /** every key goes through `persisted` (the developer applet's rule: one
@@ -2046,10 +2066,12 @@ object KidSettingsLogic:
     withTarget(s, next)
 
   /** OK with a target pending: apply it. OK with nothing picked does
-   *  nothing — there is nothing chosen to confirm. */
+   *  nothing — there is nothing chosen to confirm — and OK mid-applying
+   *  does nothing either: the switch is already in flight, and a second
+   *  round of radio commands under it helps nobody. */
   def confirmData(s: KidSettingsState): KidSettingsState =
     var out = s
-    if s.dataTarget != T_NONE then out = applyData(s)
+    if s.dataTarget != T_NONE && s.applyFrames < 0 then out = applyData(s)
     out
 
   /** the tri-state the radios are IN, from the same readings the developer
@@ -2071,24 +2093,39 @@ object KidSettingsLogic:
     else Diag.UNAVAILABLE
 
   // ---- update ---------------------------------------------------------------
-  /** the same diagnostics cadence the developer applet keeps — the panel's
-   *  only per-frame work (the data apply rides the OK press, plan 0055). */
+  /** tick the applying wait (plan 0056), then the same diagnostics cadence
+   *  the developer applet keeps. */
   def update(s: KidSettingsState, dt: scala.Double, ctx: FrameCtx): KidSettingsState =
-    refreshDiag(s)
+    refreshDiag(tickApplying(s))
+
+  /** the APPLYING state's three exits: the derived radio state MATCHES the
+   *  target (done — pending clears and the row shows the real state); the
+   *  frame budget runs out with no agreement ("no link", the red report
+   *  shape with the target kept for OK-retry); otherwise count another
+   *  frame. Counting frames rather than wall time keeps the spinner phase
+   *  and the timeout deterministic under the scripted clock. */
+  def tickApplying(s: KidSettingsState): KidSettingsState =
+    if s.applyFrames < 0 then s
+    else if currentIdx(s) == s.dataTarget then withTarget(s, T_NONE)
+    else if s.applyFrames >= APPLY_TIMEOUT_FRAMES then
+      withActionMsg(withApplyFrames(s, -1), "no link")
+    else withApplyFrames(s, s.applyFrames + 1)
 
   /** the confirmed target, applied: at most one call per radio and NEVER an
    *  automatic retry — an immediate redial after a hangup can fail while the
-   *  modem settles (~5s), so the failure is SHOWN (red, on the help rows)
+   *  modem settles (~5s), so a failure is SHOWN (red, on the help rows)
    *  and OK again is the deliberate retry. A run that reported something
-   *  KEEPS the target pending — that is what a second OK retries; a silent
-   *  run clears it (done). Off-device every call answers the guarded "not on
-   *  device", so the sim walks the report path too. The diagnostics are
-   *  re-read on the next frame (`diagLeft` 0) so the row shows what the
-   *  radios now say rather than a stale reading. */
+   *  KEEPS the target pending — that is what a second OK retries; a SILENT
+   *  run means the commands are off running, which is not the same as the
+   *  switch being done (pppd negotiation alone is tens of seconds, and the
+   *  truthful mid-transition reading is "off") — so it enters APPLYING
+   *  (plan 0056) and waits for the diagnostics to agree. The diagnostics
+   *  are re-read on the next frame (`diagLeft` 0) so the wait judges fresh
+   *  readings. */
   def applyData(s: KidSettingsState): KidSettingsState =
     val msg = applyCalls(s, s.dataTarget)
     var out = withActionMsg(s, msg)
-    if msg == "" then out = withTarget(out, T_NONE)
+    if msg == "" then out = withApplyFrames(out, 0)
     withDiag(out, s.diag, 0)
 
   /** the calls that move the radios from what they read to the target; the
@@ -2144,6 +2181,15 @@ object KidSettingsLogic:
       kids = Keyed("hl", VRect(0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)) :: kids
     kids = Keyed("label", VText(0, row, rowLabel(i), fg)) :: kids
     val v = rowValue(s, i)
+    // the pending/applying data value draws on a BLACK patch behind the
+    // value columns (plan 0056): yellow keeps its not-yet-real identity and
+    // the patch supplies the contrast on the green selection bar; on an
+    // unselected row the patch blends into the background. Prepended after
+    // the label so it paints before the value text (children paint in list
+    // order, like the selection highlight itself).
+    if i == DATA && s.dataTarget != T_NONE then
+      kids = Keyed("patch", VRect(11 * Font.GLYPH_W, 1 + row * Font.GLYPH_H,
+        v.length * Font.GLYPH_W, Font.GLYPH_H, Color.black)) :: kids
     if v != "" then kids = Keyed("value", VText(11, row, v, rowValueColor(s, i, fg))) :: kids
     VGroup(ListOps.reverse(kids))
 
@@ -2175,11 +2221,20 @@ object KidSettingsLogic:
 
   /** what the radios read — or, while a target is pending, the target with a
    *  `>` prefix (and yellow, `rowValueColor`), so asked-for is never dressed
-   *  as done. */
+   *  as done — or, while APPLYING, the target with the spinner beside it, so
+   *  a mid-transition "off" reading is never shown as the outcome. */
   def dataValue(s: KidSettingsState): String =
     var out = targetLabel(currentIdx(s))
-    if s.dataTarget != T_NONE then out = ">" + targetLabel(s.dataTarget)
+    if s.applyFrames >= 0 then out = targetLabel(s.dataTarget) + " " + spinChar(s.applyFrames)
+    else if s.dataTarget != T_NONE then out = ">" + targetLabel(s.dataTarget)
     out
+
+  /** the ascii spinner, one step every `SPIN_FRAMES` frames of the applying
+   *  wait — a pure function of the frame count, so a scripted checkpoint
+   *  lands on a known phase. */
+  def spinChar(f: scala.Int): String =
+    val i = (f / SPIN_FRAMES) % 4
+    "|/-\\".substring(i, i + 1)
 
   def rowValueColor(s: KidSettingsState, i: scala.Int, fg: scala.Int): scala.Int =
     var out = fg
@@ -2197,12 +2252,19 @@ object KidSettingsLogic:
       SettingsLogic.twoLines(notifyHelp(s.notifyMode), "OK or </> change")
     else if s.selected == BRIGHT then
       SettingsLogic.twoLines("</> adjust backlight", "now: " + s.brightness + "/40")
-    else if s.selected == DATA then
-      SettingsLogic.twoLines("</> pick off/wifi/cell", "OK applies the choice")
+    else if s.selected == DATA then dataHelp(s)
     else if s.selected == BATTERY then
       SettingsLogic.twoLines("charge left", "now: " + batteryValue(s))
     else
       SettingsLogic.twoLines("OK opens dev settings", "red comes back")
+
+  /** the data row's help: the switch in progress while applying, the
+   *  gesture otherwise (the report shape is `helpView`'s first arm). */
+  def dataHelp(s: KidSettingsState): View =
+    if s.applyFrames >= 0 then
+      SettingsLogic.twoLines("switching to " + targetLabel(s.dataTarget) + "...", "")
+    else
+      SettingsLogic.twoLines("</> pick off/wifi/cell", "OK applies the choice")
 
   /** one short line per notify value: what the selected mode DOES. */
   def notifyHelp(m: String): String =

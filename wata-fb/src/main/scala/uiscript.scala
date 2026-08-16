@@ -39,7 +39,14 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *    idle <n>                  run n frames with NO real pause between them —
  *                              a timer expiring needs simulated time, not
  *                              network progress, so the screensaver's minutes
- *                              cost nothing
+ *                              cost nothing. CAVEAT: an idle that crosses the
+ *                              screen-timeout budget blanks the panel (a later
+ *                              checkpoint then pins a stale frame) and the
+ *                              next tap is EATEN as the wake key — burn long
+ *                              waits in chunks under the threshold with an
+ *                              applet-ignored key between, or manage the wake
+ *                              explicitly (alice-kid-settings.txt's timeout
+ *                              leg is the template)
  *    tap <key>                 press + release <key>, then one frame
  *    key <key> <press|release> one edge of <key>, then one frame (PTT needs
  *                              its press and release separated)
@@ -85,6 +92,10 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *    notifymode <play|quiet>   force the arrival-notification mode's cell
  *                              (plan 0041) with no config I/O — what a
  *                              notify leg sets instead of walking Settings
+ *    fakeradios <on|off>       flip Diag's WATA_FAKE_RADIOS seam (plan
+ *                              0056): guarded radio commands answer ""
+ *                              without running anything — the off-device
+ *                              way into the kid data row's applying state
  *    sendas <user>             send one voice message into the FAMILY room
  *                              as <user>, out of band (a direct login +
  *                              upload + send with the phase's password, like
@@ -116,9 +127,10 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  cursor index — how a script observes the event-id anchoring across an
  *  arrival), and the kid-settings probes (plan 0053): applet (the shell's
  *  active applet index — 3 while the developer panel is open), kidrow (the
- *  kid panel's selected row, 4 = the hidden development row), and kidtarget
+ *  kid panel's selected row, 4 = the hidden development row), kidtarget
  *  (the data row's pending tri-state target, shifted non-negative for the
- *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell). */
+ *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell), and kidapply
+ *  (the applying wait's frame count, same shift: 0 = not applying). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -273,6 +285,8 @@ object UiScript:
       err = enrolStateDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "notifymode" then
       err = notifyModeDirective(nth(ts, 1))
+    else if cmd == "fakeradios" then
+      err = fakeRadiosDirective(nth(ts, 1))
     else if cmd == "caplevel" then
       err = capLevelDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "sendas" then
@@ -458,6 +472,19 @@ object UiScript:
     else FbConfig.forceNotifyMode(Notify.parseMode(name))
     err
 
+  /** flip `Diag`'s WATA_FAKE_RADIOS seam (plan 0056): with it on, the
+   *  guarded radio commands answer "" without running anything, which is
+   *  the only off-device way into the kid data row's APPLYING state — the
+   *  sim's honest answer is "not on device", the report arm. Script-local
+   *  so ONE scenario pins the report arm first and the applying arms
+   *  after. */
+  def fakeRadiosDirective(name: String): String =
+    var err = ""
+    if name == "on" then Diag.setFakeRadios(true)
+    else if name == "off" then Diag.setFakeRadios(false)
+    else err = "fakeradios wants on|off"
+    err
+
   /** post one capture-level tick through the REAL audio-event mailbox — the
    *  same channel the frame loop drains — then advance one frame so the
    *  drained level is what the next checkpoint draws. SimAudio's recording is
@@ -633,6 +660,10 @@ object UiScript:
     else if name == "applet" then Ui.shellState.active
     else if name == "kidrow" then Shell.kidState(Ui.shellState).selected
     else if name == "kidtarget" then Shell.kidState(Ui.shellState).dataTarget + 1
+    // the applying wait's frame count, shifted non-negative like kidtarget
+    // (0 = not applying) — how a script proves the spinner state was entered
+    // (or left) without counting pixels.
+    else if name == "kidapply" then Shell.kidState(Ui.shellState).applyFrames + 1
     else -1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run
