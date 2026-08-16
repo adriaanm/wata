@@ -63,11 +63,11 @@ today's recovery.
   otherwise it dies at its next dial — recorded in the facade doc).
 - `wata-server`: `enroll.scala` (the revoke route + allowlist
   rewrite; a bind route for an already-enrolled node), `bindings.scala`
-  (`unbind` + journal + replay), `adminapi.scala` (`removeUser`
-  unbinds), `persist.scala`/`store.scala` (`node_id` on device rows;
+  (`unbind` + journal + replay — written only by revoke and explicit
+  rebind), `persist.scala`/`store.scala` (`node_id` on device rows;
   revoke by node id), the admin page's enrol section (remove action;
-  pick-or-create on unbound/dangling enrolled rows), `irohnet.scala`
-  facade.
+  pick-or-create on unbound rows; the dangling state named with a
+  create-account action), `irohnet.scala` facade.
 - `docs/design/wata-server.md` enrolment section.
 
 ## The lifecycle gaps (the owner's fumble, walked critically)
@@ -81,43 +81,44 @@ of its corners are reachable today with nothing marking them:
    creating one with the same localpart silently reattaches the same
    Matrix identity — history, room membership, and every enrolled
    handset bound to the name. That is exactly what the owner
-   observed ("provisioning nicely went through"), and as an
-   accidental-delete undo it is genuinely convenient — but it is
-   inheritance by name reuse, invisible and undecided. **Decision:
-   make it deliberate.** `removeUser` UNBINDS the account's node ids
-   (journaled, same `unbind` op as revoke), so a deleted account's
-   handsets drop to the visible "enrolled, no account" state below
-   and a same-name account never silently inherits hardware. The
-   identity reattachment (history/membership) remains — that part is
-   Matrix-shaped and fine — but re-granting a handset is an explicit
-   admin act again.
+   observed ("provisioning nicely went through"). **Owner ruling:
+   KEEP binding by name.** This server is for small family groups —
+   a name IS the identity, deleting an account is shallow (history,
+   membership, and handset bindings all survive under the name), and
+   recreating the name is the undo. `removeUser` stays as it is; the
+   gap was never the behavior but its invisibility, which item 3
+   fixes. `unbind` (journaled) still exists — but only revoke and an
+   explicit rebind ever write it.
 
 2. **"Enrolled, no account" is a real state with no exit in the UI.**
    An admitted node with no binding sits at device-login 404 forever;
    the enrolled table says "no account yet" and offers nothing (the
    picker exists only on pending rows, which an enrolled handset no
-   longer has). With decision 1 this state also becomes the landing
-   spot for deleted accounts' handsets. **The owner's ask, adopted:**
-   the enrolled table's unbound rows get the same pick-or-create
-   account control the pending rows have — binding (and creating) an
-   account for an already-enrolled handset in place.
+   longer has). **The owner's ask, adopted:** the enrolled table's
+   unbound rows get the same pick-or-create account control the
+   pending rows have — binding (and creating) an account for an
+   already-enrolled handset in place.
 
-3. **A dangling binding renders as if healthy.** Until decision 1
-   lands (and for journals replaying the old behavior), a binding
-   whose localpart has no account shows as "bound to alma" with no
-   hint that alma does not exist and the handset is getting 403.
-   The enrolled table marks it ("account deleted") and offers the
-   same pick-or-create control.
+3. **A dangling binding renders as if healthy.** A binding whose
+   localpart has no account shows as "bound to alma" with no hint
+   that alma does not exist and the handset is meanwhile refused
+   (403). With ruling 1 this is a legitimate parked state, so the
+   enrolled table says what it is and what fixes it: "bound to alma
+   (account deleted — recreate the name to restore)" with a
+   one-click create-account action. History for the name is KEPT
+   (owner ruling) — recreation reattaches everything, which is the
+   point.
 
-Also observed and to be pinned down: **the client seemed not to
-notice its own approval until a restart.** The code says it must —
-a rejected login retries at a 60s ceiling forever, and today's
-recovery was observed to connect unprompted within that window — so
-the fumble most plausibly hit the window where wata-fb was
-exit-looping with no config at all. The verification below makes
-approval-propagation-without-restart an explicit asserted property so
-a real defect (e.g. the iroh dial layer caching a refusal) cannot
-hide behind "restart fixed it".
+Also observed: **the handset kept showing the QR after the admin
+side was resolved.** Walked back through the states, that was most
+plausibly CORRECT behavior mid-fumble: with the bound account
+deleted, device-login answers 403 and the refused arc puts the QR
+up; recreating the name should have cleared it within the 60s retry
+ceiling — but the owner (reasonably) restarted the app first, so it
+was never observed. The verification below settles it permanently:
+both approval and account-recreation must propagate to a running
+client with no restart, so a real defect (e.g. the iroh dial layer
+caching a refusal) cannot hide behind "restart fixed it".
 
 ## Verification
 
@@ -125,16 +126,20 @@ An integ scenario walking the lifecycle: enrol + bind + exchange a
 message; revoke → (a) fresh dial refused at the transport, (b) the
 old token dead on a TCP request too, (c) re-announce → approve →
 device-login works again. Account-lifecycle legs: delete the bound
-account → handset drops to "enrolled, no account" (device-login 404,
-not 403) and a same-name re-create does NOT reattach the handset;
-bind-from-enrolled-table works. Approval propagation: after approve,
-the client connects within its backoff ceiling with no restart.
-`just ci`; admin-page actions exercised against a live server.
+account → the handset is refused (403) and the enrolled table shows
+the dangling state; recreate the same name → the RUNNING client
+recovers within its backoff ceiling with no restart (the owner's
+unobserved case, made an asserted property) and the handset is bound
+as before; bind-from-enrolled-table works for an unbound node.
+Approval propagation: after approve, the client connects within its
+backoff ceiling with no restart. `just ci`; admin-page actions
+exercised against a live server.
 
 ## Out of scope
 
 - Auto-expiring stale allowlist entries.
 - A last-seen column on the enrolled table (the server has the data;
   nice, separate).
-- Preventing same-name identity reattachment at the Matrix layer
-  (deliberately kept — it is the accidental-delete undo).
+- Severing name reattachment on account deletion (owner ruling:
+  binding by name is the model — deletion is shallow, recreation is
+  the undo, for handsets and history alike).
