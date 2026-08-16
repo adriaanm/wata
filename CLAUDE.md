@@ -35,10 +35,16 @@ No other absolute paths, machine names, IPs, or usernames; parameterize
 via env vars (`BQ268_HOST`, `SGOLA_HOME`) with defaults
 derived from those two facts. Public repos cross-reference by URL.
 
-Work that belongs in a sibling repo is not done from here: hand off a spec
-in the sibling's `docs/planning/<feature>.md` plus a one-line task in its
-tracker, and track our side here. Device work follows commit-before-flash:
-commit, flash/deploy, then record the outcome.
+Work that belongs in a sibling repo is done directly in that repo, by
+this session (owner ruling 2026-08-16: the project is stable enough that
+parallel agents across repos are retired — one session works across the
+repos as needed). Each change still lands where it belongs — a spec in
+the sibling's `docs/planning/<feature>.md` and a line in its tracker for
+non-trivial work, commits in the sibling's own history — and the wata
+side of a cross-repo change is tracked here. The sgola compiler is the
+exception: it has its own designer, so its work still travels by the
+ticket channel below, never by editing its tree. Device work follows
+commit-before-flash: commit, flash/deploy, then record the outcome.
 
 **Compiler bugs: work around AND file, never just work around.** When a
 sgola defect or gap forces a workaround here, the workaround keeps us
