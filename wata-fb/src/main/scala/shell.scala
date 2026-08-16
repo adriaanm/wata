@@ -242,31 +242,31 @@ object Shell:
     syncPrefs(ShellState(d.active, d.status,
       IArray.tabulate(d.applets.length)(i => tickOne(d, i, dt, ctx))))
 
-  /** the two settings applets edit the SAME persisted preferences (brightness,
-   *  screen timeout, notify mode) through the same `FbConfig` paths; their
+  /** the two settings applets edit the SAME persisted `FbPrefs` (brightness,
+   *  screen timeout) through the same `FbConfig.savePrefs` path; their
    *  state records each hold a mirror, so after every frame the INACTIVE
    *  panel's mirror is refreshed from the active one's — only the active
    *  applet receives input, so the active side is always the side that
    *  changed. This is what lets `Ui` read brightness/timeout from the DEV
-   *  state alone and both panels' rows agree whenever either is looked at. */
+   *  state alone and both panels' rows agree whenever either is looked at.
+   *  The notify mode needs no mirror since plan 0055: the kid row is its
+   *  only editor, and `FbConfig`'s cell is the shared authority. */
   def syncPrefs(s: ShellState): ShellState =
     if s.active == DEV then syncKidFromDev(s) else syncDevFromKid(s)
 
   def syncKidFromDev(s: ShellState): ShellState =
     val k = kidState(s)
     val d = devState(s)
-    if k.brightness != d.brightness || k.timeoutIdx != d.screenTimeoutIdx
-        || k.notifyChime != d.notifyChime then
+    if k.brightness != d.brightness || k.timeoutIdx != d.screenTimeoutIdx then
       withApplet(s, SETTINGS, KidSettingsApplet(
-        KidSettingsLogic.mirrored(k, d.brightness, d.screenTimeoutIdx, d.notifyChime)))
+        KidSettingsLogic.mirrored(k, d.brightness, d.screenTimeoutIdx)))
     else s
 
   def syncDevFromKid(s: ShellState): ShellState =
     val k = kidState(s)
     val d = devState(s)
-    if d.brightness != k.brightness || d.notifyChime != k.notifyChime then
-      withApplet(s, DEV, SettingsApplet(
-        SettingsLogic.withNotify(SettingsLogic.withBrightness(d, k.brightness), k.notifyChime)))
+    if d.brightness != k.brightness then
+      withApplet(s, DEV, SettingsApplet(SettingsLogic.withBrightness(d, k.brightness)))
     else s
   /** every applet ticks every frame — EXCEPT the snake, which ticks only
    *  while it is the active applet: the Zig shell ticks the active applet

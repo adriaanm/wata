@@ -1,6 +1,7 @@
-# kid settings (plan 0053): the three-row panel in the dot rotation, the
-# help/status rows, the data tri-state's target cycling, the hidden
-# development row, and the door to the developer panel.
+# kid settings (plans 0053/0054/0055): the four-row panel in the dot
+# rotation, the help/status rows, the notify tri-state (play/chime/quiet),
+# the data row's pick-then-confirm gesture, the hidden development row, and
+# the door to the developer panel.
 
 wait syncing 1 900
 wait convs 1 900
@@ -11,13 +12,20 @@ tap dot2
 advance 5
 checkpoint kid-rows
 
-# OK flips notify chime -> quiet (persisted through FbConfig.saveNotifyMode,
-# the same path the developer panel's Notify row writes) ...
+# the notify row cycles play -> chime -> quiet on OK and both arrows,
+# persisted through FbConfig.saveNotifyMode. The default is chime, so one
+# step lands on quiet...
 tap enter
 advance 5
 checkpoint kid-notify-quiet
 
-# ... and back, so the rest of the walk runs on the default.
+# ...and the next on PLAY — the walkie-talkie mode (plan 0055): arrivals
+# speak through the existing auto-play path.
+tap right
+advance 5
+checkpoint kid-notify-play
+
+# one more step returns to the chime default for the rest of the walk.
 tap enter
 advance 2
 
@@ -29,33 +37,45 @@ tap left
 advance 5
 checkpoint kid-bright
 
-# the data row: what the radios READ is an honest "n/a" on the host, and the
-# help rows carry the once-per-boot warning.
+# the data row: what the radios READ is an honest "n/a" on the host; the
+# help rows say the gesture (</> pick, OK applies).
 tap down
 advance 5
 checkpoint kid-data
 
-# OK cycles the TARGET only — the yellow ">off" value — while the radios
-# stay untouched until the selection settles. From an unknown reading the
-# first OK lands on `off`.
-tap enter
+# LEFT/RIGHT cycle the PENDING target only — the yellow ">off" value — and
+# nothing touches the radios until OK. From an unknown reading the first
+# right lands on `off`.
+tap right
 expect kidtarget 1
 advance 5
 checkpoint kid-data-target-off
 
-# two more OKs walk wifi -> cell; still nothing applied (the modem accepts
-# ONE data call per boot, so cycling through cell must not spend it).
-tap enter
-tap enter
+# two more rights walk wifi -> cell; left steps back to wifi.
+tap right
+tap right
 expect kidtarget 3
 advance 5
 checkpoint kid-data-target-cell
+tap left
+expect kidtarget 2
 
-# ~1s without a keypress applies the settled target: off-device that is the
-# guarded "not on device" no-op, which the help rows state in red rather
-# than looking like it worked.
-waitmax kidtarget 0 60
+# moving the selection away CLEARS an unconfirmed target — a choice walked
+# away from must not linger for a later OK.
+tap up
+waitmax kidtarget 0 5
+tap down
+
+# pick wifi again and CONFIRM with OK: the apply is one Diag call per radio,
+# never auto-retried — off-device the guarded "not on device", which the
+# help rows state in red. A reporting run KEEPS the target pending (that is
+# what OK-again retries), so the probe still reads wifi.
+tap right
+tap right
+expect kidtarget 2
+tap enter
 advance 5
+expect kidtarget 2
 checkpoint kid-data-applied
 
 # the battery row (plan 0054): read-only — the percentage is an honest "n/a"

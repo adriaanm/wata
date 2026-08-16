@@ -1,6 +1,6 @@
 # 0055 — play mode in the kid notify row; data by left/right + OK
 
-Status: accepted (owner follow-up 2026-08-16, with a hardware retest)
+Status: done (owner follow-up 2026-08-16, with a hardware retest)
 
 ## The problem
 

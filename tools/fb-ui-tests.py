@@ -189,11 +189,12 @@ SCENARIOS = [
         ],
     },
     {
-        # plan 0053: the kid settings panel — three rows + help text, the
-        # notify toggle, the data tri-state's TARGET cycling (the radios are
-        # only touched after the ~1s settle, and off-device the apply is the
-        # guarded "not on device" no-op), the hidden development row, and the
-        # door to the developer panel (red returns).
+        # plans 0053/0054/0055: the kid settings panel — four rows + help
+        # text, the notify tri-state (play/chime/quiet), the data row's
+        # pick-then-confirm gesture (left/right cycle the target, OK applies
+        # — off-device the guarded "not on device" no-op; up/down clears an
+        # unconfirmed pick), the battery row, the hidden development row, and
+        # the door to the developer panel (red returns).
         "name": "kid-settings",
         "phases": [
             ("alice", "alice-kid-settings.txt"),

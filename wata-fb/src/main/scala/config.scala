@@ -130,17 +130,27 @@ object FbConfig:
    *  write path (`writeStore` is called by `saveSession` and `savePrefs`,
    *  neither of which knows about the mode); `Ui.resetCells` primes it from
    *  the file before the first frame. Default `chime` (plan 0047): a message
-   *  announces itself with a short chime and the blinking LED; auto-play is
-   *  parked until the focus-modes work reintroduces it deliberately (the mac
+   *  announces itself with a short chime and the blinking LED; `play` —
+   *  auto-play on arrival, the walkie-talkie mode — is the kid settings
+   *  row's third value since plan 0055 (the mac
    *  defaults to `quiet` — a desktop is not a walkie-talkie). */
   private val modeC: sgo.Atomic[String] = sgo.atomic(Notify.MODE_CHIME)
+  /** the mode `writeStore` stamps into the file — SEPARATE from the live
+   *  cell so `forceNotifyMode`'s test-only force can never leak into the
+   *  store through an unrelated write (a session save mid-scripted-run used
+   *  to persist the forced mode, which the pre-0055 load-side remap happened
+   *  to hide). Only a load or an explicit save moves this one. */
+  private val storedModeC: sgo.Atomic[String] = sgo.atomic(Notify.MODE_CHIME)
 
   def loadNotifyMode(): NotifyMode =
-    var m = Notify.parseMode(WJson.strField(readJson(), "notify_mode", Notify.MODE_CHIME))
-    // a stored `play` (the pre-plan-0047 default; nobody chose it knowingly)
-    // loads as chime — bringing auto-play back is a new, deliberate act.
-    if Notify.playsNow(m) then m = NotifyChime()
+    // a stored `play` loads as itself: the kid settings row offers all three
+    // modes (plan 0055), so play is a choice someone made and it survives a
+    // reboot like the other two. (Plan 0047's load-as-chime remap guarded
+    // against the pre-0047 default nobody chose; that era's stores have long
+    // been rewritten by any settings change since.)
+    val m = Notify.parseMode(WJson.strField(readJson(), "notify_mode", Notify.MODE_CHIME))
     modeC.set(Notify.spellMode(m))
+    storedModeC.set(Notify.spellMode(m))
     m
 
   def notifyMode(): NotifyMode = Notify.parseMode(modeC.get())
@@ -148,10 +158,12 @@ object FbConfig:
   /** the user changed it in Settings: remember it for the next boot. */
   def saveNotifyMode(m: NotifyMode): Unit =
     modeC.set(Notify.spellMode(m))
+    storedModeC.set(Notify.spellMode(m))
     writeStore(load(), loadPrefs())
 
-  /** set the cell WITHOUT touching the file — the scripted driver's mode
-   *  force, so a test leg needs no config I/O. */
+  /** set the LIVE cell without touching the file or the stored half — the
+   *  scripted driver's mode force, so a test leg needs no config I/O and
+   *  cannot smuggle its mode into the next session's store. */
   def forceNotifyMode(m: NotifyMode): Unit = modeC.set(Notify.spellMode(m))
 
   /** the one writer: session fields first (the Zig client's file order), then
@@ -162,7 +174,7 @@ object FbConfig:
 
   def toJson(s: Session, p: FbPrefs): Json =
     var fs: List[(String, Json)] = Nil
-    fs = ("notify_mode", JStr(modeC.get())) :: fs
+    fs = ("notify_mode", JStr(storedModeC.get())) :: fs
     fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
     fs = ("brightness", JInt(p.brightness.toLong)) :: fs
     fs = ("device_id", JStr(s.deviceId)) :: fs

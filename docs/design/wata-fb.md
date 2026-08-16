@@ -303,8 +303,10 @@ the fake mic's constant-amplitude tone produces (level 15).
 ### The settings split: the kid panel and the developer door
 
 The settings slot in the dot rotation holds the KID panel (plan 0053,
-`KidSettingsLogic`): exactly four rows — **Notify** (chime/quiet, OK
-or `<`/`>` flips), **Bright** (the backlight steps, `<`/`>`, applied
+`KidSettingsLogic`): exactly four rows — **Notify** (play / chime /
+quiet — OK and both arrows cycle; `play` is the walkie-talkie mode,
+auto-playing arrivals through plan 0041's existing path — plan 0055
+exposed it), **Bright** (the backlight steps, `<`/`>`, applied
 live — `KidSettingsLogic.setBl` is the one settings row writing the
 backlight now), **Data** (the tri-state below), **Battery** (read-only
 — the percentage from the same cached `DiagSnap`, `n/a` off-device;
@@ -317,35 +319,38 @@ settings device rows", retitled `DEV SETTINGS`), and red returns.
 
 **The data row is a tri-state of the pipe, not two toggles**: `off`
 (wifi off, data off), `wifi` (wifi on, data off), `cell` (data on,
-wifi off). OK cycles the TARGET on screen immediately — shown yellow
-with a `>` prefix, so asked-for is never dressed as done — and the
-radios are touched only after the selection sits ~1s without a
-keypress (`SETTLE_S`, re-armed by every key), because the modem
-accepts ONE data call per boot and cycling through `cell` on the way
-to `off` must not spend it. What the row SHOWS is derived from the
-same cached `DiagSnap` reads the developer rows use (the wifi state
-and the ppp0 link), refreshed on the same `DIAG_REFRESH` cadence; the
-apply issues at most one call per radio, never retries, and reports
-what it answered on the help rows in red (off-device: the guarded
-`not on device`, which is what lets the sim walk the whole gesture).
-The help rows carry `cell works once per boot` while the row is
-selected.
+wifi off). Left/right cycle the PENDING target on screen — shown
+yellow with a `>` prefix, so asked-for is never dressed as done — OK
+applies it, and up/down moving the selection clears an unconfirmed
+pick (plan 0055: pick, then confirm; no timer). What the row SHOWS is
+derived from the same cached `DiagSnap` reads the developer rows use
+(the wifi state and the ppp0 link), refreshed on the same
+`DIAG_REFRESH` cadence. The apply issues at most one call per radio
+and NEVER retries on its own: repeated data calls per boot work
+(hardware-retested 2026-08-16), but an immediate redial after a hangup
+can fail while the modem settles (~5s) — so a run that reported
+something shows it on the help rows in red, KEEPS the target pending,
+and OK again is the deliberate retry (off-device: the guarded `not on
+device`, which is what lets the sim walk the report path too).
 
-**Both panels edit the same persisted preferences** (`FbConfig.savePrefs`
-/ `saveNotifyMode`), each holding a mirror in its own state record;
+**Both panels edit the same persisted `FbPrefs`** (`FbConfig.savePrefs`),
+each holding brightness/timeout mirrors in its own state record;
 `Shell.syncPrefs` refreshes the INACTIVE panel's mirror from the
 active one's every frame (only the active applet receives input), so
 the two never disagree and `Ui` reads brightness/timeout from the DEV
 state alone. The kid state carries `timeoutIdx` only as that mirror —
 the screen-timeout row itself is developer-only — and the dev state
-symmetrically keeps `brightness`/`notifyChime` mirrors with no rows of
+symmetrically keeps a `brightness` mirror with no row of
 its own (plan 0054): each panel's `persisted` saves the WHOLE `FbPrefs`
 record, so the mirror is what keeps a timeout save from clobbering the
-kid's brightness and vice versa. The kid panel is
+kid's brightness and vice versa. The notify mode needs no mirror since
+plan 0055 — the kid row is its only editor and `FbConfig`'s cell is the
+shared authority. The kid panel is
 pinned by the `kid-settings` scenario (`alice-kid-settings.txt`): the
-three rows and help text, the notify toggle, the target cycling (the
-`kidtarget` probe proves nothing applies mid-cycle), the settle-apply,
-the hidden row, and the door both ways (`applet`/`kidrow` probes).
+four rows and help text, the notify tri-state cycle, the target
+picking (the `kidtarget` probe proves nothing applies before OK, and
+that up/down clears a pick), the OK-apply with its red report, the
+hidden row, and the door both ways (`applet`/`kidrow` probes).
 
 ### The settings device rows
 
@@ -402,13 +407,15 @@ Three rules hold this together:
   instead of pretending. That is what makes the whole menu walkable in
   the sim and byte-reproducible in the goldens — including on a Linux
   CI host, which does have a `/proc/uptime` of its own.
-- **The radio calls are guarded against stray keypresses and never
-  retry** — this modem accepts a single data call per boot, and a
-  silent second attempt would spend it. The guard is the kid panel's
-  settle timer now (`isPowerRow` keeps the two-OK confirm for the
-  power actions alone); a failed apply is reported on the help rows
-  (`actionMsg`, red, until the next keypress) rather than attempted
-  again. `pppd` is backgrounded, so the outcome arrives through the
+- **The radio calls are deliberate and never auto-retried.** The
+  stray-keypress guard is the kid panel's pick-then-confirm gesture
+  (`isPowerRow` keeps the two-OK confirm for the power actions alone).
+  Repeated data calls per boot work (hardware-retested 2026-08-16 —
+  the once-per-boot pin died with the kernel bugs behind it), but an
+  immediate redial after a hangup can fail while the modem settles
+  (~5s): a failed apply is reported on the help rows (`actionMsg`,
+  red) with the target kept pending, and OK again is the deliberate
+  retry. `pppd` is backgrounded, so the outcome arrives through the
   ~5s ppp0 refresh, not through the exec's exit status.
 - **The net test runs OFF the frame loop.** OK starts the four probes on
   a goroutine (`Diag.startNetTest`) and returns; the row reads `run..`
@@ -1217,9 +1224,10 @@ once per session.
   and does one thing at a time, so the chime (the startup chirp asset,
   `Chirp.play()`, one audio path) never cuts into a recording or a
   playback — and then sets the same banner quiet mode sets. The
-  kid settings panel's Notify row toggles chime/quiet.
-- **Play-now (auto-play) is the future focus-modes seam** — in the code,
-  unreachable from the device UI. An arrival under it sends the same
+  kid settings panel's Notify row cycles play/chime/quiet.
+- **Play-now (auto-play) is the walkie-talkie mode**, the kid Notify
+  row's third value since plan 0055 (plan 0047 had parked it behind
+  future focus-modes work). An arrival under it sends the same
   `ActPlay` the applet's OK press sends and marks the applet playing
   through the `Shell.notifyWataPlaying` shim, so the existing
   `AePlaybackDone` arm sends the read receipt — an auto-played message
@@ -1269,9 +1277,10 @@ once per session.
   with its own cell and `loadNotifyMode`/`notifyMode`/`saveNotifyMode`
   (`config.scala`) — deliberately NOT an `FbPrefs` field, since the
   shared settings applets construct that record positionally. The kid
-  panel's first row toggles it on OK or left/right (the developer
-  menu's Notify row retired there — plan 0054; the dev state keeps a
-  `notifyChime` mirror via `Shell.syncPrefs`, but no row) and persists
+  panel's first row cycles play/chime/quiet on OK or left/right (the
+  developer menu's Notify row retired there — plan 0054 — and the
+  mode has no dev-state mirror at all since plan 0055: the kid row is
+  its only editor) and persists
   through `KidSettingsLogic.persisted`, the same
   seam as brightness/timeout. The applets are shared, so the mac's settings
   body grows the row too; its chrome commands `notify:play`/`notify:quiet`
