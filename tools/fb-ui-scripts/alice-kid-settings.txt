@@ -1,0 +1,79 @@
+# kid settings (plan 0053): the three-row panel in the dot rotation, the
+# help/status rows, the data tri-state's target cycling, the hidden
+# development row, and the door to the developer panel.
+
+wait syncing 1 900
+wait convs 1 900
+
+# dot2 -> the kid settings panel: Notify / Bright / Data, notify selected,
+# the help rows describing it on the bottom two grid rows.
+tap dot2
+advance 5
+checkpoint kid-rows
+
+# OK flips notify chime -> quiet (persisted through FbConfig.saveNotifyMode,
+# the same path the developer panel's Notify row writes) ...
+tap enter
+advance 5
+checkpoint kid-notify-quiet
+
+# ... and back, so the rest of the walk runs on the default.
+tap enter
+advance 2
+
+# brightness: </> steps the backlight live, same stored preference the
+# developer row edits.
+tap down
+tap left
+tap left
+advance 5
+checkpoint kid-bright
+
+# the data row: what the radios READ is an honest "n/a" on the host, and the
+# help rows carry the once-per-boot warning.
+tap down
+advance 5
+checkpoint kid-data
+
+# OK cycles the TARGET only — the yellow ">off" value — while the radios
+# stay untouched until the selection settles. From an unknown reading the
+# first OK lands on `off`.
+tap enter
+expect kidtarget 1
+advance 5
+checkpoint kid-data-target-off
+
+# two more OKs walk wifi -> cell; still nothing applied (the modem accepts
+# ONE data call per boot, so cycling through cell must not spend it).
+tap enter
+tap enter
+expect kidtarget 3
+advance 5
+checkpoint kid-data-target-cell
+
+# ~1s without a keypress applies the settled target: off-device that is the
+# guarded "not on device" no-op, which the help rows state in red rather
+# than looking like it worked.
+waitmax kidtarget 0 60
+advance 5
+checkpoint kid-data-applied
+
+# DOWN past the last row lands on the hidden development row — drawn only
+# while selected, so the panel stays three rows until now.
+tap down
+advance 5
+expect kidrow 3
+checkpoint kid-development
+
+# OK is the door: the ENTIRE developer panel (the old settings applet,
+# retitled DEV SETTINGS), outside the dot rotation.
+tap enter
+advance 5
+expect applet 3
+checkpoint kid-dev-open
+
+# red returns to the kid settings, still parked on the development row.
+tap back
+advance 5
+waitmax applet 1 10
+checkpoint kid-dev-back

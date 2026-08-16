@@ -1,6 +1,6 @@
 # 0053 — kid settings: three rows and a hidden developer door
 
-Status: accepted (field-test feedback 2026-08-16: "the settings applet
+Status: done (field-test feedback 2026-08-16: "the settings applet
 is too convoluted — this device is meant for use by kids now")
 
 ## The problem

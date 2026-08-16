@@ -112,9 +112,13 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  green LED's computed policy: 0 off, 1 steady, 2 blinking), notifyred (1
  *  while the arbiter holds the red LED on), notifybanner (1 while the quiet
  *  banner is up), caplevel (the wata applet's recording-meter level, what
- *  the `caplevel` directive set), and msgsel (the conversation view's message
+ *  the `caplevel` directive set), msgsel (the conversation view's message
  *  cursor index — how a script observes the event-id anchoring across an
- *  arrival). */
+ *  arrival), and the kid-settings probes (plan 0053): applet (the shell's
+ *  active applet index — 3 while the developer panel is open), kidrow (the
+ *  kid panel's selected row, 3 = the hidden development row), and kidtarget
+ *  (the data row's pending tri-state target, shifted non-negative for the
+ *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -620,6 +624,15 @@ object UiScript:
     // leaves an idle cursor on 0 (tracking newest). Exactness comes from
     // pairing `expect` (>=) with `waitmax` (<=) on the same value.
     else if name == "msgsel" then Shell.wataState(Ui.shellState).msgSelected
+    // the kid-settings probes (plan 0053): which applet is showing (the dev
+    // door and the red return are Shell transitions, so a script asserts the
+    // index), the kid panel's selected row, and the data row's pending target
+    // SHIFTED to non-negative (0 none, 1 off, 2 wifi, 3 cell — the script
+    // parser reads unsigned numbers only) — how a script pins "targets only,
+    // nothing applied yet" without reading pixels.
+    else if name == "applet" then Ui.shellState.active
+    else if name == "kidrow" then Shell.kidState(Ui.shellState).selected
+    else if name == "kidtarget" then Shell.kidState(Ui.shellState).dataTarget + 1
     else -1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run
@@ -627,7 +640,7 @@ object UiScript:
    *  are different frames — a scripted run waits for the second one rather than
    *  assuming a number of frames is enough. */
   def netTestProbe(): scala.Int =
-    boolProbe(SettingsLogic.hasNetTestResult(Shell.settingsState(Ui.shellState)))
+    boolProbe(SettingsLogic.hasNetTestResult(Shell.devState(Ui.shellState)))
 
   /** how many conversations carry one of the outbox markers. */
   def countKeys(xs: List[String]): scala.Int =

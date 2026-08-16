@@ -10,8 +10,16 @@
 wait syncing 1 900
 wait convs 1 900
 
-# dot2 switches to the settings applet; item 0 (the echo test) is selected.
+# dot2 switches to the settings applet — the KID panel now (plan 0053); the
+# developer rows this walk pins live behind its hidden development row:
+# scroll past the three kid rows, OK opens the DEV SETTINGS panel with item 0
+# (the echo test) selected.
 tap dot2
+advance 2
+tap down
+tap down
+tap down
+tap enter
 advance 5
 checkpoint settings-echo
 

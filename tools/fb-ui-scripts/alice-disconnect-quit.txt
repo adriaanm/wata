@@ -9,8 +9,14 @@
 wait syncing 1 900
 wait convs 1 900
 
-# dot2 -> settings; item 3 is Network.
+# dot2 -> the kid settings, then through the hidden development row into the
+# DEV panel (plan 0053); its item 3 is Network.
 tap dot2
+tap down
+tap down
+tap down
+tap enter
+advance 2
 tap down
 tap down
 tap down

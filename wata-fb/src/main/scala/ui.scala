@@ -247,10 +247,11 @@ object Ui:
     // device init: UNBLANK first — the kernel's console-blank timer may have
     // blanked the panel before this respawn, and a blanked panel shows white
     // and ignores fb writes (FB-FIRST-FRAME-WHITE) — then the STORED backlight
-    // level (resetCells has just restored the settings applet from the config
-    // store) + button LEDs on.
+    // level (resetCells has just restored the settings applets from the config
+    // store; the DEV state is the one Ui reads — Shell.syncPrefs keeps the kid
+    // panel's mirror equal to it) + button LEDs on.
     dev.unblank()
-    dev.backlight(SettingsLogic.getBrightness(Shell.settingsState(stateV)))
+    dev.backlight(SettingsLogic.getBrightness(Shell.devState(stateV)))
     dev.buttonBacklight(true)
     val px = Draw.newBuffer()
     sgo.supervised {
@@ -280,8 +281,9 @@ object Ui:
   /** reset the UI cells — a fresh session per run (the host drivers reuse the
    *  process across sequential sessions, so this is not merely cosmetic). */
   def resetCells(): Unit =
-    // the notify-mode cell first: `Shell.initial` -> `SettingsLogic.restored`
-    // reads it for the settings row, so it has to be primed before the shell.
+    // the notify-mode cell first: `Shell.initial` restores BOTH settings
+    // applets (`KidSettingsLogic.restored` / `SettingsLogic.restored`), and
+    // each reads it for its notify row, so it is primed before the shell.
     FbConfig.loadNotifyMode()
     stateC.set(Shell.initial(FbConfig.loadPrefs()))
     connC.set(Disconnected())
@@ -480,7 +482,7 @@ object Ui:
   def wake(dev: UiDevice): Unit =
     if displayOff then
       dev.unblank()
-      dev.backlight(SettingsLogic.getBrightness(Shell.settingsState(stateV)))
+      dev.backlight(SettingsLogic.getBrightness(Shell.devState(stateV)))
       dev.buttonBacklight(true)
       offC.set(false)
     idleC.set(0.0)
@@ -491,7 +493,7 @@ object Ui:
     else
       val t = idleTime + dt
       if !displayOff then
-        val timeout = SettingsLogic.getScreenTimeout(Shell.settingsState(stateV))
+        val timeout = SettingsLogic.getScreenTimeout(Shell.devState(stateV))
         if timeout > 0 && t >= timeout.toDouble then
           dev.backlight(0)
           dev.buttonBacklight(false)

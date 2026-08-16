@@ -13,10 +13,16 @@ enrolstate refused
 advance 2
 checkpoint enroll-boot
 
-# 2. the same screen on demand, from Settings -> Enroll. Hand the verdict back
+# 2. the same screen on demand, from the DEV settings' Enroll row (behind the
+#    kid panel's hidden development row, plan 0053). Hand the verdict back
 #    first: the row is offered whenever iroh is configured, refused or not.
 enrolstate auto
 tap dot2
+advance 2
+tap down
+tap down
+tap down
+tap enter
 advance 2
 tap down
 tap down

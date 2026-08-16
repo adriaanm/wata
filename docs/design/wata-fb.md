@@ -128,8 +128,8 @@ failure, not a compiler diagnostic. Any trait method here that wants a
 collection result needs the same boxing.
 
 Two device edges are NOT behind the seam and stay best-effort no-ops
-off-device: `SettingsLogic.setBl` writes the backlight sysfs node
-directly from the settings applet, and the `Led.*` sysfs writes never
+off-device: `SettingsLogic.setBl` / `KidSettingsLogic.setBl` write the
+backlight sysfs node directly from the settings applets, and the `Led.*` sysfs writes never
 throw. They are not blindly silent though: `Led.writeSysfs` keeps a
 per-node status cell (a `val`-held `Atomic[Int]`), and the FIRST write
 to a node is the hardware probe — a first-write failure marks the node
@@ -208,21 +208,25 @@ explicit state machine, not a generic widget framework:
 - `Shell` (`shell.scala:65`) holds an `IArray[Applet]` and an active
   index; `Applet` (`applets.scala:506`) is a three-method interface
   (`handleInput`, `update`, `render`) implemented by immutable,
-  wither-style state records rather than mutation. There are exactly
-  three applets today: `WataApplet`/`WataLogic` (contacts + conversation
+  wither-style state records rather than mutation. There are four
+  applets today: `WataApplet`/`WataLogic` (contacts + conversation
   view, PTT recording, playback — `applets.scala:38-479`),
-  `SnakeApplet`/`SnakeLogic` (the snake game, `snake.scala` — ported
-  from the Zig client's `applets/snake.zig`; see the parity table) and
-  `SettingsApplet`/`SettingsLogic` (menu: audio echo test,
-  brightness, screen timeout, disconnect, info, plus
+  `KidSettingsApplet`/`KidSettingsLogic` (the settings a kid sees —
+  three rows: notify, brightness, data; plan 0053, see "The settings
+  split" below), `SnakeApplet`/`SnakeLogic` (the snake game,
+  `snake.scala` — ported from the Zig client's `applets/snake.zig`;
+  see the parity table) and `SettingsApplet`/`SettingsLogic` (the
+  DEVELOPER settings, slot `Shell.DEV` — OUTSIDE the dot rotation,
+  reachable only through the kid panel's hidden development row:
+  audio echo test, brightness, screen timeout, disconnect, info, plus
   everything absorbed from system-menu — the IP and cellular info
   rows, the net test, the wifi and cellular-data toggles and the
   power off / reboot-to-BL / reboot-to-EDL actions; see "The settings
   device rows"). There is deliberately no display-name row: a person's
   name is their account's, set by whoever administers the server (the
   admin interface, plan 0021), not picked from presets on a handset —
-  so the menu holds thirteen items and every row is about this device.
-  The menu outgrew the grid, so it
+  so the developer menu holds thirteen items and every row is about
+  this device. That menu outgrew the grid, so it
   renders as a scrolling window of six with `^`/`v` cues in the
   last column; the window start is derived from the selection (no
   scroll state), which keeps the frames the goldens pin
@@ -234,13 +238,21 @@ explicit state machine, not a generic widget framework:
   without recording, so the second press is the one that talks, with
   the screen saying to whom (the release lands on wata as a no-op,
   `pttHeld` being false); the two "dot" buttons cycle the
-  active applet, and red pressed in the snake applet returns to the
-  wata applet — the red-goes-back convention; the game itself never
-  sees the key (`Shell.handleInput`). The contacts footer carries the
-  `PTT talk` hint.
+  active applet over the first `Shell.ROTATION` (3) slots — the DEV
+  applet sits past them, and a dot pressed inside it leaves through
+  the settings slot it is the hidden room of (`rotBase`); OK on the
+  kid panel's development row is intercepted by the shell as the door
+  to DEV (`isDevDoor`); and red pressed in the snake applet returns
+  to the wata applet, in the DEV applet back to the kid settings
+  (`isDevBack`, which also drops DEV's confirm latch — except while
+  the enrolment QR is open, whose only way out is Back, so the key
+  routes into the applet then) — the red-goes-back convention; neither
+  applet ever sees the key (`Shell.handleInput`). The contacts footer
+  carries the `PTT talk` hint.
 - The shell owns the `AudioEvt` mailbox's SINGLE per-frame drain
-  (`Shell.drainAudio` -> `routeAudio`): echo events go to the settings
-  applet, recording/playback events to the wata applet, whichever
+  (`Shell.drainAudio` -> `routeAudio`): echo events go to the developer
+  settings applet (the echo test's home), recording/playback events to
+  the wata applet, whichever
   applet is active. This is load-bearing, not tidiness — when each
   applet ran its own drain on the shared channel, each discarded the
   other's events, and an `AeRecordingDone` landing between the two
@@ -285,9 +297,51 @@ ticking. Both clients share the bar (the shared `applets.scala` /
 directive (the `rec-meter` scenario), and mac-smoke asserts the exact rect
 the fake mic's constant-amplitude tone produces (level 15).
 
+### The settings split: the kid panel and the developer door
+
+The settings slot in the dot rotation holds the KID panel (plan 0053,
+`KidSettingsLogic`): exactly three rows — **Notify** (chime/quiet, OK
+or `<`/`>` flips), **Bright** (the backlight steps, `<`/`>`, applied
+live through the same `Led.setBacklight` write the developer row
+makes), **Data** (the tri-state below) — with the bottom two grid rows
+(the `DETAIL_ROW` convention) always carrying a help/status line for
+the selected row. Scrolling DOWN past the last row lands on a hidden
+`development` row, drawn only while selected; OK on it opens the
+developer applet (`Shell.DEV` — the entire panel described in "The
+settings device rows", retitled `DEV SETTINGS`), and red returns.
+
+**The data row is a tri-state of the pipe, not two toggles**: `off`
+(wifi off, data off), `wifi` (wifi on, data off), `cell` (data on,
+wifi off). OK cycles the TARGET on screen immediately — shown yellow
+with a `>` prefix, so asked-for is never dressed as done — and the
+radios are touched only after the selection sits ~1s without a
+keypress (`SETTLE_S`, re-armed by every key), because the modem
+accepts ONE data call per boot and cycling through `cell` on the way
+to `off` must not spend it. What the row SHOWS is derived from the
+same cached `DiagSnap` reads the developer rows use (the wifi state
+and the ppp0 link), refreshed on the same `DIAG_REFRESH` cadence; the
+apply issues at most one call per radio, never retries, and reports
+what it answered on the help rows in red (off-device: the guarded
+`not on device`, which is what lets the sim walk the whole gesture).
+The help rows carry `cell works once per boot` while the row is
+selected.
+
+**Both panels edit the same persisted preferences** (`FbConfig.savePrefs`
+/ `saveNotifyMode`), each holding a mirror in its own state record;
+`Shell.syncPrefs` refreshes the INACTIVE panel's mirror from the
+active one's every frame (only the active applet receives input), so
+the two never disagree and `Ui` reads brightness/timeout from the DEV
+state alone. The kid state carries `timeoutIdx` only as that mirror —
+the screen-timeout row itself is developer-only. The kid panel is
+pinned by the `kid-settings` scenario (`alice-kid-settings.txt`): the
+three rows and help text, the notify toggle, the target cycling (the
+`kidtarget` probe proves nothing applies mid-cycle), the settle-apply,
+the hidden row, and the door both ways (`applet`/`kidrow` probes).
+
 ### The settings device rows
 
-The settings applet is the whole of what system-menu offered a parent
+The DEVELOPER settings applet — the panel behind the kid panel's
+development row — is the whole of what system-menu offered a parent
 or a kid (plan 0003's retirement checklist): wata is the only
 framebuffer occupant after the tty1 flip, so anything system-menu did
 that still matters had to move here. `diag.scala` is that half — every
@@ -731,10 +785,12 @@ network), is in `docs/design/wata-server.md` under Device enrolment.
   credentials, approved with an inline-created account, device-logged-in,
   syncing as that account — is the `refused-then-provisioned` integ scenario,
   driven by `just tunnel-smoke`.
-- **Settings -> Enroll**, offered whenever iroh is configured (`SettingsLogic`'s
+- **Dev settings -> Enroll** (behind the kid panel's development row, plan
+  0053), offered whenever iroh is configured (`SettingsLogic`'s
   `ENROLL` row, `enrolOpen` in `SettingsState`). Back closes it; nothing else
   does, because a QR a stray keypress dismisses is a QR a parent has to go find
-  again mid-scan.
+  again mid-scan — which is also why the shell's red-returns-to-kid-settings
+  arm stands down while the QR is open.
 
 **The announce is best-effort and rides the plain-TCP client.** Showing the
 screen posts `{nodeId, nonce}` to `<adminUrl>/_wata/v1/enroll` once per session
@@ -1199,11 +1255,13 @@ once per session.
 - **The mode is device config**, a `notify_mode` key in the config store
   with its own cell and `loadNotifyMode`/`notifyMode`/`saveNotifyMode`
   (`config.scala`) — deliberately NOT an `FbPrefs` field, since the
-  shared settings applet constructs that record positionally. The
-  settings applet's last row ("Notify: play now / quiet", stable id
-  `NOTIFY`, appended so no earlier row's golden moves) toggles it on
-  left/right and persists through `SettingsLogic.persisted`, the same
-  seam as brightness/timeout. The applet is shared, so the mac's settings
+  shared settings applets construct that record positionally. The kid
+  panel's first row toggles it on OK or left/right, and the developer
+  applet's last row ("Notify: chime / quiet", stable id
+  `NOTIFY`, appended so no earlier row's golden moves) on
+  left/right; both persist through their `persisted` seam, the same
+  one as brightness/timeout, and `Shell.syncPrefs` keeps the two rows
+  agreeing. The applets are shared, so the mac's settings
   body grows the row too; its chrome commands `notify:play`/`notify:quiet`
   use the same `Notify.MODE_*` constants, so the spellings cannot drift.
 - **The gate**: the `arrival-notify` scenario in `fb-ui-tests.py` — the

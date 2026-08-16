@@ -8,11 +8,15 @@ import language.experimental.saferExceptions
  *  used elsewhere in this codebase (e.g. the sync engine). The live cell is
  *  ONE module var (`stateV`) touched by ONE goroutine (the UI/main loop).
  *
- *  APPLET SET: `wata` (index 0) + `settings` (index 1) + `snake` (index 2).
- *  dot1/dot2 switch applets; PTT is the talk key everywhere — it records
- *  inside the wata applet and chimes-and-switches to it from any other
- *  (plan 0052, `pttGlobal`); red pressed in the snake applet returns to wata
- *  (the red-goes-back convention — the game itself never sees the key).
+ *  APPLET SET: `wata` (index 0) + `settings` (index 1, the kid panel) +
+ *  `snake` (index 2), plus `dev` (index 3) OUTSIDE the dot rotation — the
+ *  developer settings panel, reachable only through the kid panel's hidden
+ *  development row (plan 0053). dot1/dot2 rotate over the first three; PTT
+ *  is the talk key everywhere — it records inside the wata applet and
+ *  chimes-and-switches to it from any other (plan 0052, `pttGlobal`); red
+ *  pressed in the snake applet returns to wata, and in the dev applet back
+ *  to the kid settings (the red-goes-back convention — neither applet sees
+ *  the key).
  *
  *  dot2 CAVEAT: input handling opens ONLY /dev/input/event{0,1,2} — the SAME
  *  three devices Evdev.open() opens. It binds dot2 (KEY_F10) but discovers no
@@ -72,14 +76,20 @@ object Shell:
   val WATA = 0
   val SETTINGS = 1
   val SNAKE = 2
+  val DEV = 3
+  /** how many applets the dot rotation covers — DEV sits past it, reachable
+   *  only through the kid panel's development row (plan 0053). */
+  val ROTATION = 3
 
-  /** the boot state. The settings applet starts from the STORED preferences,
+  /** the boot state. BOTH settings applets start from the STORED preferences,
    *  so brightness and screen timeout survive a restart; everything else
    *  starts from its own defaults. */
   def initial(prefs: FbPrefs): ShellState =
     ShellState(WATA, StIdle(),
-      IArray[Applet](WataApplet(WataLogic.initial()), SettingsApplet(SettingsLogic.restored(prefs)),
-        SnakeApplet(SnakeLogic.initial())))
+      IArray[Applet](WataApplet(WataLogic.initial()),
+        KidSettingsApplet(KidSettingsLogic.restored(prefs)),
+        SnakeApplet(SnakeLogic.initial()),
+        SettingsApplet(SettingsLogic.restored(prefs))))
 
   // ---- record withers (no `.copy` on sgola — see WataLogic) -------------------
   def withActive(s: ShellState, a: scala.Int): ShellState =
@@ -100,8 +110,12 @@ object Shell:
   def wataState(s: ShellState): WataState = s.applets(WATA) match
     case w: WataApplet => w.state
     case _             => WataLogic.initial()
-  /** the settings applet's typed state (slot SETTINGS, same construction). */
-  def settingsState(s: ShellState): SettingsState = s.applets(SETTINGS) match
+  /** the kid settings applet's typed state (slot SETTINGS, same construction). */
+  def kidState(s: ShellState): KidSettingsState = s.applets(SETTINGS) match
+    case a: KidSettingsApplet => a.state
+    case _                    => KidSettingsLogic.initial()
+  /** the developer settings applet's typed state (slot DEV, same construction). */
+  def devState(s: ShellState): SettingsState = s.applets(DEV) match
     case a: SettingsApplet => a.state
     case _                 => SettingsLogic.initial()
   /** send/play status feedback lands on the wata applet regardless of the
@@ -127,6 +141,8 @@ object Shell:
     if isPressed(ks) && isDot(k) then switchApplet(s, k)
     else if isPtt(k) then pttGlobal(s, k, ks, ctx)   // PTT is global
     else if isPressed(ks) && isSnakeBack(s, k) then withActive(s, WATA)
+    else if isPressed(ks) && isDevBack(s, k) then devReturn(s)
+    else if isPressed(ks) && isDevDoor(s, k) then withActive(s, DEV)
     else routeActive(s, k, ks, ctx)
 
   def isPressed(ks: KeyState): Boolean = ks match
@@ -151,9 +167,38 @@ object Shell:
     case KBack() => true
     case _       => false
 
+  def isEnterKey(k: Key): Boolean = k match
+    case KEnter() => true
+    case _        => false
+
+  /** red pressed while the developer applet is active: back to the kid
+   *  settings — the snake-back convention, one applet further in. The one
+   *  exception is the enrolment QR, whose ONLY way out is Back (its screen
+   *  says so), so the key routes into the applet while it is open. */
+  def isDevBack(s: ShellState, k: Key): Boolean =
+    s.active == DEV && isBackKey(k) && !devState(s).enrolOpen
+
+  /** leaving the developer applet drops its confirm latch — an armed power
+   *  row must not stay armed behind a closed door. */
+  def devReturn(s: ShellState): ShellState =
+    withActive(withApplet(s, DEV, SettingsApplet(SettingsLogic.disarmed(devState(s)))), SETTINGS)
+
+  /** OK on the kid panel's hidden development row opens the developer
+   *  applet (the row itself does nothing inside the kid applet). */
+  def isDevDoor(s: ShellState, k: Key): Boolean =
+    s.active == SETTINGS && isEnterKey(k) && kidState(s).selected == KidSettingsLogic.DEV_ROW
+
+  /** the dot rotation covers the first `ROTATION` applets; from the DEV
+   *  applet (outside it) a dot leaves through the settings slot it is the
+   *  hidden room of. */
   def switchApplet(s: ShellState, k: Key): ShellState = k match
-    case KDot2() => withActive(s, (s.active + 1) % s.applets.length)
-    case _       => withActive(s, prevIdx(s.active, s.applets.length))
+    case KDot2() => withActive(s, (rotBase(s.active) + 1) % ROTATION)
+    case _       => withActive(s, prevIdx(rotBase(s.active), ROTATION))
+
+  def rotBase(a: scala.Int): scala.Int =
+    var out = a
+    if a == DEV then out = SETTINGS
+    out
 
   def prevIdx(active: scala.Int, n: scala.Int): scala.Int =
     var out = active - 1
@@ -194,7 +239,35 @@ object Shell:
    *  (docs/plans/0009-audio-event-routing.md). */
   def update(s: ShellState, dt: scala.Double, ctx: FrameCtx): ShellState =
     val d = drainAudio(s, ctx)
-    ShellState(d.active, d.status, IArray.tabulate(d.applets.length)(i => tickOne(d, i, dt, ctx)))
+    syncPrefs(ShellState(d.active, d.status,
+      IArray.tabulate(d.applets.length)(i => tickOne(d, i, dt, ctx))))
+
+  /** the two settings applets edit the SAME persisted preferences (brightness,
+   *  screen timeout, notify mode) through the same `FbConfig` paths; their
+   *  state records each hold a mirror, so after every frame the INACTIVE
+   *  panel's mirror is refreshed from the active one's — only the active
+   *  applet receives input, so the active side is always the side that
+   *  changed. This is what lets `Ui` read brightness/timeout from the DEV
+   *  state alone and both panels' rows agree whenever either is looked at. */
+  def syncPrefs(s: ShellState): ShellState =
+    if s.active == DEV then syncKidFromDev(s) else syncDevFromKid(s)
+
+  def syncKidFromDev(s: ShellState): ShellState =
+    val k = kidState(s)
+    val d = devState(s)
+    if k.brightness != d.brightness || k.timeoutIdx != d.screenTimeoutIdx
+        || k.notifyChime != d.notifyChime then
+      withApplet(s, SETTINGS, KidSettingsApplet(
+        KidSettingsLogic.mirrored(k, d.brightness, d.screenTimeoutIdx, d.notifyChime)))
+    else s
+
+  def syncDevFromKid(s: ShellState): ShellState =
+    val k = kidState(s)
+    val d = devState(s)
+    if d.brightness != k.brightness || d.notifyChime != k.notifyChime then
+      withApplet(s, DEV, SettingsApplet(
+        SettingsLogic.withNotify(SettingsLogic.withBrightness(d, k.brightness), k.notifyChime)))
+    else s
   /** every applet ticks every frame — EXCEPT the snake, which ticks only
    *  while it is the active applet: the Zig shell ticks the active applet
    *  alone, so switching away from its snake implicitly pauses the game, and
@@ -215,11 +288,12 @@ object Shell:
         case None => run = false
     s
 
-  /** echo events belong to the settings applet's test widget; recording and
-   *  playback events to the wata applet's send/play paths. */
+  /** echo events belong to the developer applet's test widget (the echo row
+   *  lives there); recording and playback events to the wata applet's
+   *  send/play paths. */
   def routeAudio(s: ShellState, e: AudioEvt, ctx: FrameCtx): ShellState =
     if isEchoEvt(e) then
-      withApplet(s, SETTINGS, SettingsApplet(SettingsLogic.onEcho(settingsState(s), e)))
+      withApplet(s, DEV, SettingsApplet(SettingsLogic.onEcho(devState(s), e)))
     else
       withApplet(s, WATA, WataApplet(WataLogic.onAudioEvent(wataState(s), e, ctx)))
 

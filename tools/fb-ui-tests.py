@@ -189,6 +189,17 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0053: the kid settings panel — three rows + help text, the
+        # notify toggle, the data tri-state's TARGET cycling (the radios are
+        # only touched after the ~1s settle, and off-device the apply is the
+        # guarded "not on device" no-op), the hidden development row, and the
+        # door to the developer panel (red returns).
+        "name": "kid-settings",
+        "phases": [
+            ("alice", "alice-kid-settings.txt"),
+        ],
+    },
+    {
         "name": "session-resume",
         "phases": [
             ("alice", "alice-login.txt"),

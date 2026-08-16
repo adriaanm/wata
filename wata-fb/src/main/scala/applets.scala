@@ -1210,7 +1210,8 @@ final class WataApplet(val state: WataState) extends Applet:
     WataLogic.render(state, px, ctx)
 
 // ============================================================================
-// settings applet — bitmap font, echo test, brightness, info
+// developer settings applet — echo test, diagnostics, radios, power (the
+// hidden panel behind the kid settings' development row, plan 0053)
 // ============================================================================
 
 sealed trait EchoState derives CanEqual
@@ -1688,7 +1689,7 @@ object SettingsLogic:
 
   def menuView(s: SettingsState): View =
     val start = windowStart(s)
-    VGroup(Keyed("title", VText(0, 0, "SETTINGS", Color.cyan)) ::
+    VGroup(Keyed("title", VText(0, 0, "DEV SETTINGS", Color.cyan)) ::
       (Keyed("rows", rowsView(s, start)) ::
         (Keyed("cues", cuesView(s, start)) ::
           (Keyed("detail", detailView(s)) :: Nil))))
@@ -1897,3 +1898,338 @@ object SettingsLogic:
   def isEchoErr(e: EchoState): Boolean = e match
     case _: EchoErr => true
     case _            => false
+
+// ============================================================================
+// kid settings applet — the three-row panel in the dot rotation (plan 0053)
+// ============================================================================
+
+/** the kid settings applet's state. Three visible rows (notify, bright, data)
+ *  plus a HIDDEN development row the selection can scroll onto; the bottom
+ *  two grid rows always carry a help/status line for the selected row.
+ *
+ *  `brightness`/`timeoutIdx`/`notifyChime` are MIRRORS of the same persisted
+ *  preferences the developer applet edits (`FbConfig.savePrefs` /
+ *  `saveNotifyMode`); `Shell.syncPrefs` keeps the inactive applet's mirror
+ *  equal to the active one's every frame, so the two panels never disagree.
+ *  The kid panel has no timeout row — `timeoutIdx` rides along only so a
+ *  brightness save can write the whole `FbPrefs` record back unchanged.
+ *
+ *  `dataTarget`/`settle` are the data row's tri-state gesture: OK cycles the
+ *  TARGET on screen immediately, and the radios are touched only once the
+ *  selection has sat still for `SETTLE_S` — this modem accepts a single data
+ *  call per boot (`SettingsLogic.toggleData`), so cycling through `cell` on
+ *  the way to `off` must not spend it. `diag`/`diagLeft` cache the same
+ *  ambient reads the developer applet's rows use, on the same cadence, so
+ *  the row shows what IS while the target shows what is asked for.
+ *  `actionMsg` is the last apply's report ("" = nothing to say) — an apply
+ *  that answered something (a failed toggle, the off-device "not on device")
+ *  says so on the help rows until the next keypress. */
+case class KidSettingsState(
+  selected: scala.Int,
+  brightness: scala.Int,
+  timeoutIdx: scala.Int,
+  notifyChime: Boolean,
+  dataTarget: scala.Int,
+  settle: scala.Double,
+  diag: DiagSnap,
+  diagLeft: scala.Int,
+  actionMsg: String
+)
+
+/** the kid settings applet: a thin dynamic-dispatch shell over
+ *  `KidSettingsLogic`, like every other applet wrapper here. */
+final class KidSettingsApplet(val state: KidSettingsState) extends Applet:
+  def handleInput(k: Key, ks: KeyState, ctx: FrameCtx): Applet =
+    KidSettingsApplet(KidSettingsLogic.handleInput(state, k, ks, ctx))
+  def update(dt: scala.Double, ctx: FrameCtx): Applet =
+    KidSettingsApplet(KidSettingsLogic.update(state, dt, ctx))
+  def render(px: go.Bytes, ctx: FrameCtx): Unit =
+    KidSettingsLogic.render(state, px, ctx)
+
+object KidSettingsLogic:
+  // rows: the three a kid sees, plus the development row — drawn only while
+  // selected, so the panel stays three rows until someone scrolls past the
+  // bottom. OK on it is intercepted by the Shell (the door to the DEV applet).
+  val NOTIFY = 0
+  val BRIGHT = 1
+  val DATA = 2
+  val DEV_ROW = 3
+
+  // the data row's tri-state targets, in OK's cycling order. `T_NONE` is
+  // "no pending target" (and "current state unknown" from `currentIdx`, so
+  // the first OK off a n/a reading lands on `off`).
+  val T_NONE = -1
+  val T_OFF = 0
+  val T_WIFI = 1
+  val T_CELL = 2
+
+  /** seconds the data selection must sit untouched before it is applied. */
+  val SETTLE_S = 1.0
+
+  def initial(): KidSettingsState =
+    KidSettingsState(0, 40, 1, Notify.chimes(FbConfig.notifyMode()),
+      T_NONE, 0.0, SettingsLogic.noDiag(), 0, "")
+
+  /** the boot state: the same stored preferences the developer applet
+   *  restores, read into this panel's mirrors. */
+  def restored(p: FbPrefs): KidSettingsState =
+    KidSettingsState(0, p.brightness, p.timeoutIdx, Notify.chimes(FbConfig.notifyMode()),
+      T_NONE, 0.0, SettingsLogic.noDiag(), 0, "")
+
+  // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
+  def withSelected(s: KidSettingsState, sel: scala.Int): KidSettingsState =
+    KidSettingsState(sel, s.brightness, s.timeoutIdx, s.notifyChime,
+      s.dataTarget, s.settle, s.diag, s.diagLeft, s.actionMsg)
+  def withBrightness(s: KidSettingsState, b: scala.Int): KidSettingsState =
+    KidSettingsState(s.selected, b, s.timeoutIdx, s.notifyChime,
+      s.dataTarget, s.settle, s.diag, s.diagLeft, s.actionMsg)
+  def withNotify(s: KidSettingsState, chime: Boolean): KidSettingsState =
+    KidSettingsState(s.selected, s.brightness, s.timeoutIdx, chime,
+      s.dataTarget, s.settle, s.diag, s.diagLeft, s.actionMsg)
+  def withTarget(s: KidSettingsState, t: scala.Int, settle: scala.Double): KidSettingsState =
+    KidSettingsState(s.selected, s.brightness, s.timeoutIdx, s.notifyChime,
+      t, settle, s.diag, s.diagLeft, s.actionMsg)
+  def withDiag(s: KidSettingsState, d: DiagSnap, left: scala.Int): KidSettingsState =
+    KidSettingsState(s.selected, s.brightness, s.timeoutIdx, s.notifyChime,
+      s.dataTarget, s.settle, d, left, s.actionMsg)
+  def withActionMsg(s: KidSettingsState, m: String): KidSettingsState =
+    KidSettingsState(s.selected, s.brightness, s.timeoutIdx, s.notifyChime,
+      s.dataTarget, s.settle, s.diag, s.diagLeft, m)
+  /** the other panel's preference edits, mirrored in (`Shell.syncPrefs`). */
+  def mirrored(s: KidSettingsState, b: scala.Int, tIdx: scala.Int, chime: Boolean): KidSettingsState =
+    KidSettingsState(s.selected, b, tIdx, chime,
+      s.dataTarget, s.settle, s.diag, s.diagLeft, s.actionMsg)
+
+  // ---- input (press-only) ---------------------------------------------------
+  /** every key goes through `persisted` (the developer applet's rule: one
+   *  place decides when the stored preferences are written), and every key
+   *  RE-ARMS the data settle timer — the apply waits for a hand to leave the
+   *  keypad, not merely for a second on the clock. */
+  def handleInput(s: KidSettingsState, k: Key, ks: KeyState, ctx: FrameCtx): KidSettingsState =
+    persisted(s, handleKey(s, k, ks))
+
+  def handleKey(s: KidSettingsState, k: Key, ks: KeyState): KidSettingsState =
+    if !Shell.isPressed(ks) then s
+    else resettled(pressedKey(cleared(s), k))
+
+  def pressedKey(s: KidSettingsState, k: Key): KidSettingsState = k match
+    case _: KUp    => moveUp(s)
+    case _: KDown  => moveDown(s)
+    case _: KEnter => onEnter(s)
+    case _: KLeft  => onLeft(s)
+    case _: KRight => onRight(s)
+    case _           => s
+
+  /** the last apply's report belongs to the gesture that produced it — any
+   *  keypress drops it. */
+  def cleared(s: KidSettingsState): KidSettingsState =
+    var out = s
+    if s.actionMsg != "" then out = withActionMsg(s, "")
+    out
+
+  /** a pending data target's settle clock restarts on EVERY keypress. */
+  def resettled(s: KidSettingsState): KidSettingsState =
+    var out = s
+    if s.dataTarget != T_NONE then out = withTarget(s, s.dataTarget, SETTLE_S)
+    out
+
+  def persisted(before: KidSettingsState, after: KidSettingsState): KidSettingsState =
+    if before.brightness != after.brightness then
+      FbConfig.savePrefs(FbPrefs(after.brightness, after.timeoutIdx))
+    if before.notifyChime != after.notifyChime then
+      FbConfig.saveNotifyMode(SettingsLogic.modeOf(after.notifyChime))
+    after
+
+  def moveUp(s: KidSettingsState): KidSettingsState =
+    var out = s
+    if s.selected > 0 then out = withSelected(s, s.selected - 1)
+    out
+
+  /** DOWN past the data row lands on the hidden development row. */
+  def moveDown(s: KidSettingsState): KidSettingsState =
+    var out = s
+    if s.selected < DEV_ROW then out = withSelected(s, s.selected + 1)
+    out
+
+  /** OK: flip notify, cycle the data target. OK on the development row never
+   *  reaches this applet — the Shell intercepts it as the door to the
+   *  developer panel. */
+  def onEnter(s: KidSettingsState): KidSettingsState =
+    if s.selected == NOTIFY then withNotify(s, !s.notifyChime)
+    else if s.selected == DATA then cycleData(s)
+    else s
+
+  def onLeft(s: KidSettingsState): KidSettingsState =
+    if s.selected == NOTIFY then withNotify(s, !s.notifyChime)
+    else if s.selected == BRIGHT then brightnessDown(s)
+    else s
+
+  def onRight(s: KidSettingsState): KidSettingsState =
+    if s.selected == NOTIFY then withNotify(s, !s.notifyChime)
+    else if s.selected == BRIGHT then brightnessUp(s)
+    else s
+
+  def brightnessDown(s: KidSettingsState): KidSettingsState =
+    var out = s
+    if s.brightness > 0 then out = setBl(s, s.brightness - 5)
+    out
+
+  def brightnessUp(s: KidSettingsState): KidSettingsState =
+    var out = s
+    if s.brightness < 40 then out = setBl(s, s.brightness + 5)
+    out
+
+  /** the backlight takes effect live, the same sysfs write the developer
+   *  row's `SettingsLogic.setBl` makes. */
+  def setBl(s: KidSettingsState, b: scala.Int): KidSettingsState =
+    Led.setBacklight(b)
+    withBrightness(s, b)
+
+  /** OK on the data row: cycle the TARGET (off -> wifi -> cell -> off),
+   *  starting from what the radios currently read when nothing is pending.
+   *  Only the screen changes here; `tickSettle` applies it later. */
+  def cycleData(s: KidSettingsState): KidSettingsState =
+    var base = s.dataTarget
+    if base == T_NONE then base = currentIdx(s)
+    withTarget(s, (base + 1) % 3, SETTLE_S)
+
+  /** the tri-state the radios are IN, from the same readings the developer
+   *  rows show: cell wins (data link up), then wifi, then a known off/off;
+   *  `T_NONE` when neither radio answers (off-device both read "n/a"). */
+  def currentIdx(s: KidSettingsState): scala.Int =
+    if dataIsOn(s) then T_CELL
+    else if wifiIsOn(s) then T_WIFI
+    else if s.diag.wifi == "OFF" || s.diag.cell.startsWith("off") then T_OFF
+    else T_NONE
+
+  def dataIsOn(s: KidSettingsState): Boolean = s.diag.cell.startsWith("up")
+  def wifiIsOn(s: KidSettingsState): Boolean = s.diag.wifi == "ON"
+
+  def targetLabel(t: scala.Int): String =
+    if t == T_OFF then "off"
+    else if t == T_WIFI then "wifi"
+    else if t == T_CELL then "cell"
+    else Diag.UNAVAILABLE
+
+  // ---- update ---------------------------------------------------------------
+  /** tick the settle timer (the one piece of per-frame logic this panel
+   *  owns), then the same diagnostics cadence the developer applet keeps. */
+  def update(s: KidSettingsState, dt: scala.Double, ctx: FrameCtx): KidSettingsState =
+    refreshDiag(tickSettle(s, dt))
+
+  def tickSettle(s: KidSettingsState, dt: scala.Double): KidSettingsState =
+    if s.dataTarget == T_NONE then s
+    else if s.settle > dt then withTarget(s, s.dataTarget, s.settle - dt)
+    else applyData(s)
+
+  /** the settled target, applied: at most one call per radio and NEVER a
+   *  retry (the modem's one-data-call-per-boot pin — see
+   *  `SettingsLogic.toggleData`). Off-device every call is the guarded
+   *  "not on device" no-op, so the sim walks the whole gesture. The
+   *  diagnostics are re-read on the next frame (`diagLeft` 0) so the row
+   *  shows what the radios now say rather than a stale reading. */
+  def applyData(s: KidSettingsState): KidSettingsState =
+    val msg = applyCalls(s, s.dataTarget)
+    withDiag(withActionMsg(withTarget(s, T_NONE, 0.0), msg), s.diag, 0)
+
+  /** the calls that move the radios from what they read to the target; the
+   *  first non-empty report is kept (one line is what the help rows hold). */
+  def applyCalls(s: KidSettingsState, t: scala.Int): String =
+    var msg = ""
+    if t == T_OFF then
+      if dataIsOn(s) then msg = keepMsg(msg, Diag.dataStop())
+      if wifiIsOn(s) then msg = keepMsg(msg, Diag.wifiStop())
+    else if t == T_WIFI then
+      if dataIsOn(s) then msg = keepMsg(msg, Diag.dataStop())
+      if !wifiIsOn(s) then msg = keepMsg(msg, Diag.wifiStart())
+    else
+      if wifiIsOn(s) then msg = keepMsg(msg, Diag.wifiStop())
+      if !dataIsOn(s) then msg = keepMsg(msg, Diag.dataStart())
+    msg
+
+  def keepMsg(have: String, next: String): String =
+    var out = have
+    if out == "" then out = next
+    out
+
+  def refreshDiag(s: KidSettingsState): KidSettingsState =
+    if s.diagLeft > 0 then withDiag(s, s.diag, s.diagLeft - 1)
+    else withDiag(s, SettingsLogic.readDiag(), SettingsLogic.DIAG_REFRESH)
+
+  // ---- render (a `wataui` body, like the developer panel's) -----------------
+  def render(s: KidSettingsState, px: go.Bytes, ctx: FrameCtx): Unit =
+    FbPaint.draw(px, body(s))
+
+  def body(s: KidSettingsState): View =
+    VGroup(Keyed("title", VText(0, 0, "SETTINGS", Color.cyan)) ::
+      (Keyed("rows", rowsView(s)) ::
+        (Keyed("help", helpView(s)) :: Nil)))
+
+  /** the three rows, at the two-row spacing the developer menu uses — plus
+   *  the development row, drawn ONLY while selected, so the panel a kid
+   *  scrolls through stays three rows deep. */
+  def rowsView(s: KidSettingsState): View =
+    var acc: List[Keyed] = Nil
+    if s.selected == DEV_ROW then
+      acc = Keyed("dev", rowView(s, DEV_ROW, 2 + DEV_ROW * 2, true)) :: acc
+    var i = DATA
+    while i >= 0 do
+      acc = Keyed("row" + i, rowView(s, i, 2 + i * 2, i == s.selected)) :: acc
+      i -= 1
+    VGroup(acc)
+
+  def rowView(s: KidSettingsState, i: scala.Int, row: scala.Int, sel: Boolean): View =
+    val fg = if sel then Color.black else Color.green
+    var kids: List[Keyed] = Nil
+    if sel then
+      kids = Keyed("hl", VRect(0, 1 + row * Font.GLYPH_H, Display.W, Font.GLYPH_H, Color.green)) :: kids
+    kids = Keyed("label", VText(0, row, rowLabel(i), fg)) :: kids
+    val v = rowValue(s, i)
+    if v != "" then kids = Keyed("value", VText(11, row, v, rowValueColor(s, i, fg))) :: kids
+    VGroup(ListOps.reverse(kids))
+
+  def rowLabel(i: scala.Int): String =
+    if i == NOTIFY then "Notify"
+    else if i == BRIGHT then "Bright"
+    else if i == DATA then "Data"
+    else "development"
+
+  def rowValue(s: KidSettingsState, i: scala.Int): String =
+    if i == NOTIFY then notifyLabel(s)
+    else if i == BRIGHT then "" + s.brightness + "/40"
+    else if i == DATA then dataValue(s)
+    else ""
+
+  def notifyLabel(s: KidSettingsState): String =
+    var out = "quiet"
+    if s.notifyChime then out = "chime"
+    out
+
+  /** what the radios read — or, while a target is pending, the target with a
+   *  `>` prefix (and yellow, `rowValueColor`), so asked-for is never dressed
+   *  as done. */
+  def dataValue(s: KidSettingsState): String =
+    var out = targetLabel(currentIdx(s))
+    if s.dataTarget != T_NONE then out = ">" + targetLabel(s.dataTarget)
+    out
+
+  def rowValueColor(s: KidSettingsState, i: scala.Int, fg: scala.Int): scala.Int =
+    var out = fg
+    if i == DATA && s.dataTarget != T_NONE then out = Color.yellow
+    out
+
+  /** the help/status block: the bottom two grid rows always describe the
+   *  selected row (the `DETAIL_ROW` convention the developer panel keeps).
+   *  A data apply that reported something shows that instead, in red. */
+  def helpView(s: KidSettingsState): View =
+    if s.actionMsg != "" then
+      SettingsLogic.lines(WataLogic.clip(s.actionMsg, 26), Color.red, "not retried", Color.midGray)
+    else if s.selected == NOTIFY then
+      SettingsLogic.twoLines("OK: chime or stay quiet", "now: " + notifyLabel(s))
+    else if s.selected == BRIGHT then
+      SettingsLogic.twoLines("</> adjust backlight", "now: " + s.brightness + "/40")
+    else if s.selected == DATA then
+      SettingsLogic.lines("OK picks off/wifi/cell", Color.midGray,
+        "cell works once per boot", Color.yellow)
+    else
+      SettingsLogic.twoLines("OK opens dev settings", "red comes back")
