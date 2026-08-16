@@ -9,15 +9,16 @@
 wait syncing 1 900
 wait convs 1 900
 
-# dot2 -> the kid settings, then through the hidden development row into the
-# DEV panel (plan 0053); its item 3 is Network.
+# dot2 -> the kid settings, then through the hidden development row (four
+# downs now — plan 0054's battery row) into the DEV panel; Network sits two
+# downs from the echo row.
 tap dot2
+tap down
 tap down
 tap down
 tap down
 tap enter
 advance 2
-tap down
 tap down
 tap down
 advance 5

@@ -22,9 +22,9 @@ advance 2
 tap down
 tap down
 tap down
+tap down
 tap enter
 advance 2
-tap down
 tap down
 tap down
 tap down

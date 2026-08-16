@@ -1293,12 +1293,14 @@ final class SettingsApplet(val state: SettingsState) extends Applet:
     SettingsLogic.render(state, px, ctx)
 
 object SettingsLogic:
-  // menu items: 0 echo, 1 brightness, 2 screen_off, 3 disconnect, 4 info,
-  // then the diagnostics absorbed from system-menu (plan 0003, phase 5):
-  // 5 ip and 6 cell data (info), 7 net test, 8 wifi and 9 cellular-data
-  // toggles, 10-12 the power actions, and last the arrival-notification
-  // mode (plan 0041) — appended so no earlier row's position (or golden)
-  // moves.
+  // menu order (plan 0054's de-dupe): echo, screen_off, disconnect,
+  // [enroll], info, then the diagnostics absorbed from system-menu (plan
+  // 0003, phase 5): ip, cell data, net test, and the three power actions.
+  // Brightness, notify and the two radio toggles left for the KID panel
+  // (its Data tri-state replaced the independent wifi/data toggles) — the
+  // item CONSTANTS keep their values as stable ids, so nothing keyed on an
+  // id (goldens key rows on "item" + id) renames when the menu shrinks;
+  // only the position -> id table below changed.
   //
   // There is deliberately NO display-name row: a person's name is the
   // account's, set by whoever administers the server (the admin interface,
@@ -1307,29 +1309,26 @@ object SettingsLogic:
   // ENROLL is a CONDITIONAL row (plan 0014): it exists only on a handset
   // configured to speak iroh, where a node id has to be admitted by a parent
   // before anything works. A plain-TCP deployment has nothing to enroll and
-  // shows the same 13 rows it always did — which is also why the item
-  // CONSTANTS below are stable ids rather than menu positions: `itemAt` maps
-  // a position to an id, so inserting the row after Network shifts no id and
-  // invalidates no golden of a non-iroh device.
-  val N_BASE = 14
+  // shows the same 10 rows — which is the other reason the constants are
+  // stable ids rather than menu positions: `itemAt` maps a position to an
+  // id, so inserting the row after Network shifts no id and invalidates no
+  // golden of a non-iroh device.
+  val N_BASE = 10
   val ECHO = 0
-  val BRIGHTNESS = 1
+  val BRIGHTNESS = 1   // retired from this menu (kid panel row) — id reserved
   val SCREEN_OFF = 2
   val DISCONNECT = 3
   val INFO = 4
   val IP_ADDR = 5
   val CELL_DATA = 6
   val NET_TEST = 7
-  val WIFI_TOGGLE = 8
-  val DATA_TOGGLE = 9
+  val WIFI_TOGGLE = 8  // retired from this menu (kid Data tri-state) — id reserved
+  val DATA_TOGGLE = 9  // retired from this menu (kid Data tri-state) — id reserved
   val POWER_OFF = 10
   val REBOOT_BL = 11
   val REBOOT_EDL = 12
   val ENROLL = 13
-  // the arrival-notification mode (plan 0041). A stable id like the others;
-  // its POSITION is the last base row, below the power actions — appending
-  // keeps every other row where its golden pinned it.
-  val NOTIFY = 14
+  val NOTIFY = 14      // retired from this menu (kid panel row) — id reserved
 
   /** how many rows the menu has this run — one more on a handset with an
    *  identity to enroll. */
@@ -1344,16 +1343,23 @@ object SettingsLogic:
    *  position while keeping its id. */
   def itemAt(s: SettingsState, i: scala.Int): scala.Int =
     if !s.diag.enrol then plainId(i)
-    else if i <= DISCONNECT then i
-    else if i == DISCONNECT + 1 then ENROLL
+    else if i <= 2 then plainId(i)
+    else if i == 3 then ENROLL
     else plainId(i - 1)
 
-  /** position -> id with no Enroll row in the way: identity, except the last
-   *  base position, which is the Notify row (its id sits past ENROLL's). */
+  /** position -> id with no Enroll row in the way — a table now that the ids
+   *  are sparse against the positions (the retired rows keep their ids). */
   def plainId(i: scala.Int): scala.Int =
-    var out = i
-    if i == N_BASE - 1 then out = NOTIFY
-    out
+    if i == 0 then ECHO
+    else if i == 1 then SCREEN_OFF
+    else if i == 2 then DISCONNECT
+    else if i == 3 then INFO
+    else if i == 4 then IP_ADDR
+    else if i == 5 then CELL_DATA
+    else if i == 6 then NET_TEST
+    else if i == 7 then POWER_OFF
+    else if i == 8 then REBOOT_BL
+    else REBOOT_EDL
 
   /** the item id the selection is on. */
   def cur(s: SettingsState): scala.Int = itemAt(s, s.selected)
@@ -1479,14 +1485,19 @@ object SettingsLogic:
     if out.actionMsg != "" then out = withActionMsg(out, "")
     out
 
+  /** the screen timeout is the one preference this menu still edits, but the
+   *  save writes the WHOLE `FbPrefs` record — which is why the state keeps a
+   *  live `brightness` mirror (`Shell.syncPrefs`) with no brightness row:
+   *  saving the timeout must not clobber the kid panel's brightness. The
+   *  `notifyChime` mirror rides along the same way, save-less (its persisted
+   *  cell is `FbConfig`'s, written only by the kid row now). */
   def persisted(before: SettingsState, after: SettingsState): SettingsState =
     if prefsChanged(before, after) then
       FbConfig.savePrefs(FbPrefs(after.brightness, after.screenTimeoutIdx))
-    if before.notifyChime != after.notifyChime then
-      FbConfig.saveNotifyMode(modeOf(after.notifyChime))
     after
 
-  /** the row's Boolean back as the shared model's mode. */
+  /** the notify row's Boolean back as the shared model's mode (the kid
+   *  panel's `persisted` is the caller now). */
   def modeOf(chime: Boolean): NotifyMode =
     var out: NotifyMode = NotifyQuiet()
     if chime then out = NotifyChime()
@@ -1511,18 +1522,14 @@ object SettingsLogic:
     else if i == DISCONNECT then doDisconnect(s, ctx)
     else if i == NET_TEST then runNetTest(s)
     else if i == ENROLL then withEnrolOpen(s, true)
-    else if isActionRow(i) then armOrRun(s)
+    else if isPowerRow(i) then armOrRun(s)
     else s
 
+  /** the rows OK must be pressed twice on: the three power actions (the
+   *  radio toggles that used to share this latch retired to the kid panel's
+   *  Data tri-state, whose settle timer is its own stray-keypress guard). */
   def isPowerRow(i: scala.Int): Boolean =
     i == POWER_OFF || i == REBOOT_BL || i == REBOOT_EDL
-
-  /** the rows OK must be pressed twice on: the three power actions and the
-   *  two radio toggles. Cutting a kid's wifi (or spending the boot's one
-   *  cellular data call) by a stray keypress is the same accident a reboot
-   *  is, so they share the confirm latch. */
-  def isActionRow(i: scala.Int): Boolean =
-    isPowerRow(i) || i == WIFI_TOGGLE || i == DATA_TOGGLE
 
   /** first OK arms (the detail rows turn into the confirm hint); the second
    *  runs the action and reports what it said. `Diag`'s `onDevice()` gate is
@@ -1533,38 +1540,16 @@ object SettingsLogic:
     if s.armed then out = withActionMsg(withArmed(s, false), runAction(s))
     out
 
-  /** "" when the action reported nothing to say (the power rows never come
-   *  back at all on the hardware). */
+  /** "" — the power rows never come back at all on the hardware, and
+   *  off-device `runPower` is the guarded no-op (the sim's walkable arm). */
   def runAction(s: SettingsState): String =
-    var out = ""
-    if isPowerRow(cur(s)) then runPower(cur(s))
-    else if cur(s) == WIFI_TOGGLE then out = toggleWifi(s)
-    else out = toggleData(s)
-    out
+    runPower(cur(s))
+    ""
 
   def runPower(i: scala.Int): Unit =
     if i == POWER_OFF then Diag.powerOff()
     else if i == REBOOT_BL then Diag.rebootBootloader()
     else Diag.rebootEdl()
-
-  def toggleWifi(s: SettingsState): String =
-    if isOn(s.diag.wifi) then Diag.wifiStop() else Diag.wifiStart()
-
-  /** the data toggle acts once per OK and NEVER retries: this modem accepts a
-   *  single data call per boot, so a hidden second attempt would spend it. */
-  def toggleData(s: SettingsState): String =
-    if dataOn(s) then Diag.dataStop() else Diag.dataStart()
-
-  def isOn(t: String): Boolean = t == "ON"
-  def dataOn(s: SettingsState): Boolean = s.diag.cell.startsWith("up")
-
-  /** the data row's ON/OFF, derived from the same cellular text the info row
-   *  shows ("n/a" off-device, so the toggle reads "n/a" too). */
-  def dataState(s: SettingsState): String =
-    var out = Diag.UNAVAILABLE
-    if s.diag.cell.startsWith("up") then out = "ON"
-    else if s.diag.cell.startsWith("off") then out = "OFF"
-    out
 
   /** OK on the net-test row STARTS the probes on a goroutine and returns: they
    *  take a few seconds — four network round trips — and a frame is 33ms. The
@@ -1602,15 +1587,11 @@ object SettingsLogic:
     out
 
   def onLeft(s: SettingsState): SettingsState =
-    if cur(s) == BRIGHTNESS then brightnessDown(s)
-    else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
-    else if cur(s) == NOTIFY then withNotify(s, !s.notifyChime)
+    if cur(s) == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
     else s
 
   def onRight(s: SettingsState): SettingsState =
-    if cur(s) == BRIGHTNESS then brightnessUp(s)
-    else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
-    else if cur(s) == NOTIFY then withNotify(s, !s.notifyChime)
+    if cur(s) == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
     else s
 
   /** wrap-decrement (the `if x==0 then n-1 else x-1` idiom as a plain fn). */
@@ -1618,20 +1599,6 @@ object SettingsLogic:
     var out = n - 1
     if x != 0 then out = x - 1
     out
-
-  def brightnessDown(s: SettingsState): SettingsState =
-    var out = s
-    if s.brightness > 0 then out = setBl(s, s.brightness - 5)
-    out
-
-  def brightnessUp(s: SettingsState): SettingsState =
-    var out = s
-    if s.brightness < 40 then out = setBl(s, s.brightness + 5)
-    out
-
-  def setBl(s: SettingsState, b: scala.Int): SettingsState =
-    Led.setBacklight(b)
-    withBrightness(s, b)
 
   // ---- update ---------------------------------------------------------------------
   /** the diagnostics refresh is the only per-frame work; echo events arrive
@@ -1722,7 +1689,6 @@ object SettingsLogic:
 
   def itemLabel(i: scala.Int): String =
     if i == ECHO then "Audio Echo"
-    else if i == BRIGHTNESS then "Brightness"
     else if i == SCREEN_OFF then "Screen off"
     else if i == DISCONNECT then "Network"
     else if i == ENROLL then "Enroll"
@@ -1730,11 +1696,8 @@ object SettingsLogic:
     else if i == IP_ADDR then "IP"
     else if i == CELL_DATA then "Cell data"
     else if i == NET_TEST then "Net test"
-    else if i == WIFI_TOGGLE then "Wifi"
-    else if i == DATA_TOGGLE then "Data link"
     else if i == POWER_OFF then "Power off"
     else if i == REBOOT_BL then "Reboot to BL"
-    else if i == NOTIFY then "Notify"
     else "Reboot to EDL"
 
   /** the row's right-hand value; "" for the rows that are a label alone (Device
@@ -1742,23 +1705,13 @@ object SettingsLogic:
    *  block). The two long readings are clipped to what is left of the row. */
   def itemValue(s: SettingsState, i: scala.Int): String =
     if i == ECHO then echoStatus(s.echo)
-    else if i == BRIGHTNESS then "" + s.brightness + "/40"
     else if i == SCREEN_OFF then timeoutLabel(s.screenTimeoutIdx)
     else if i == DISCONNECT then netLabel(s)
     else if i == ENROLL then "OK=QR"
     else if i == IP_ADDR then WataLogic.clip(s.diag.ip, 21)
     else if i == CELL_DATA then WataLogic.clip(s.diag.cell, 14)
     else if i == NET_TEST then netTestStatus(s)
-    else if i == WIFI_TOGGLE then s.diag.wifi
-    else if i == DATA_TOGGLE then dataState(s)
-    else if i == NOTIFY then notifyLabel(s)
     else ""
-
-  /** the Notify row's value: the persisted spellings, spoken as the row. */
-  def notifyLabel(s: SettingsState): String =
-    var out = "quiet"
-    if s.notifyChime then out = "chime"
-    out
 
   def netLabel(s: SettingsState): String =
     var out = "OFF"
@@ -1767,8 +1720,7 @@ object SettingsLogic:
 
   /** where each row's value starts — the column its label leaves free. */
   def valueCol(i: scala.Int): scala.Int =
-    if i == BRIGHTNESS then 14
-    else if i == ECHO || i == SCREEN_OFF then 12
+    if i == ECHO || i == SCREEN_OFF then 12
     else if i == IP_ADDR then 4
     else 11
 
@@ -1808,12 +1760,10 @@ object SettingsLogic:
       "Mem:" + s.diag.mem + " wata-fb", Color.midGray)
     else if i == ECHO then twoLines("Records 2s, plays", "back thru speaker")
     else if i == DISCONNECT then twoLines(connectDetail(s), "")
-    else if i == BRIGHTNESS then twoLines("</> adjust", "")
     else if i == SCREEN_OFF then twoLines("</> timeout", "Any key wakes")
     else if i == IP_ADDR then twoLines("wlan0 IPv4 address", "")
     else if i == CELL_DATA then twoLines("ppp0 link + signal", cellAddrLine(s))
     else if i == NET_TEST then netTestDetail(s)
-    else if i == NOTIFY then twoLines("</> arriving messages", "play thru speaker/quiet")
     else actionDetail(s)
 
   /** the detail block's two rows, in the color everything but a warning uses. */
@@ -1852,20 +1802,12 @@ object SettingsLogic:
       lines("OK again: " + actionVerb(s), Color.red, "other keys cancel", Color.midGray)
     else twoLines("OK arms " + actionVerb(s), "then OK again runs")
 
-  /** what the armed OK would do — for a toggle that is the OPPOSITE of the
-   *  state the row shows. */
+  /** what the armed OK would do (only the power rows arm now). */
   def actionVerb(s: SettingsState): String =
     val i = cur(s)
     if i == POWER_OFF then "power off"
     else if i == REBOOT_BL then "reboot to BL"
-    else if i == REBOOT_EDL then "reboot to EDL"
-    else if i == WIFI_TOGGLE then toggleVerb("wifi", isOn(s.diag.wifi))
-    else toggleVerb("data", dataOn(s))
-
-  def toggleVerb(what: String, on: Boolean): String =
-    var out = what + " on"
-    if on then out = what + " off"
-    out
+    else "reboot to EDL"
 
   /** Device Info's first line: battery + uptime. sysfs has no battery node
    *  off-device, and `readBatteryPercent` says so with -1 rather than by
@@ -1903,7 +1845,8 @@ object SettingsLogic:
 // kid settings applet — the three-row panel in the dot rotation (plan 0053)
 // ============================================================================
 
-/** the kid settings applet's state. Three visible rows (notify, bright, data)
+/** the kid settings applet's state. Four visible rows (notify, bright, data,
+ *  and the read-only battery percentage — plan 0054)
  *  plus a HIDDEN development row the selection can scroll onto; the bottom
  *  two grid rows always carry a help/status line for the selected row.
  *
@@ -1917,8 +1860,8 @@ object SettingsLogic:
  *  `dataTarget`/`settle` are the data row's tri-state gesture: OK cycles the
  *  TARGET on screen immediately, and the radios are touched only once the
  *  selection has sat still for `SETTLE_S` — this modem accepts a single data
- *  call per boot (`SettingsLogic.toggleData`), so cycling through `cell` on
- *  the way to `off` must not spend it. `diag`/`diagLeft` cache the same
+ *  call per boot (`applyCalls` is the one place that spends it), so cycling
+ *  through `cell` on the way to `off` must not spend it. `diag`/`diagLeft` cache the same
  *  ambient reads the developer applet's rows use, on the same cadence, so
  *  the row shows what IS while the target shows what is asked for.
  *  `actionMsg` is the last apply's report ("" = nothing to say) — an apply
@@ -1947,13 +1890,15 @@ final class KidSettingsApplet(val state: KidSettingsState) extends Applet:
     KidSettingsLogic.render(state, px, ctx)
 
 object KidSettingsLogic:
-  // rows: the three a kid sees, plus the development row — drawn only while
-  // selected, so the panel stays three rows until someone scrolls past the
-  // bottom. OK on it is intercepted by the Shell (the door to the DEV applet).
+  // rows: the four a kid sees (battery is read-only — plan 0054), plus the
+  // development row — drawn only while selected, so the panel stays four rows
+  // until someone scrolls past the bottom. OK on it is intercepted by the
+  // Shell (the door to the DEV applet).
   val NOTIFY = 0
   val BRIGHT = 1
   val DATA = 2
-  val DEV_ROW = 3
+  val BATTERY = 3
+  val DEV_ROW = 4
 
   // the data row's tri-state targets, in OK's cycling order. `T_NONE` is
   // "no pending target" (and "current state unknown" from `currentIdx`, so
@@ -2079,8 +2024,9 @@ object KidSettingsLogic:
     if s.brightness < 40 then out = setBl(s, s.brightness + 5)
     out
 
-  /** the backlight takes effect live, the same sysfs write the developer
-   *  row's `SettingsLogic.setBl` makes. */
+  /** the backlight takes effect live — the ONE place the UI writes the
+   *  backlight sysfs node from a settings row (the developer menu's
+   *  brightness row retired here, plan 0054). */
   def setBl(s: KidSettingsState, b: scala.Int): KidSettingsState =
     Led.setBacklight(b)
     withBrightness(s, b)
@@ -2123,8 +2069,8 @@ object KidSettingsLogic:
     else applyData(s)
 
   /** the settled target, applied: at most one call per radio and NEVER a
-   *  retry (the modem's one-data-call-per-boot pin — see
-   *  `SettingsLogic.toggleData`). Off-device every call is the guarded
+   *  retry — this modem accepts a single data call per boot, so a hidden
+   *  second attempt would spend it. Off-device every call is the guarded
    *  "not on device" no-op, so the sim walks the whole gesture. The
    *  diagnostics are re-read on the next frame (`diagLeft` 0) so the row
    *  shows what the radios now say rather than a stale reading. */
@@ -2165,14 +2111,14 @@ object KidSettingsLogic:
       (Keyed("rows", rowsView(s)) ::
         (Keyed("help", helpView(s)) :: Nil)))
 
-  /** the three rows, at the two-row spacing the developer menu uses — plus
+  /** the four rows, at the two-row spacing the developer menu uses — plus
    *  the development row, drawn ONLY while selected, so the panel a kid
-   *  scrolls through stays three rows deep. */
+   *  scrolls through stays four rows deep. */
   def rowsView(s: KidSettingsState): View =
     var acc: List[Keyed] = Nil
     if s.selected == DEV_ROW then
       acc = Keyed("dev", rowView(s, DEV_ROW, 2 + DEV_ROW * 2, true)) :: acc
-    var i = DATA
+    var i = BATTERY
     while i >= 0 do
       acc = Keyed("row" + i, rowView(s, i, 2 + i * 2, i == s.selected)) :: acc
       i -= 1
@@ -2192,13 +2138,24 @@ object KidSettingsLogic:
     if i == NOTIFY then "Notify"
     else if i == BRIGHT then "Bright"
     else if i == DATA then "Data"
+    else if i == BATTERY then "Battery"
     else "development"
 
   def rowValue(s: KidSettingsState, i: scala.Int): String =
     if i == NOTIFY then notifyLabel(s)
     else if i == BRIGHT then "" + s.brightness + "/40"
     else if i == DATA then dataValue(s)
+    else if i == BATTERY then batteryValue(s)
     else ""
+
+  /** the battery row is READ-ONLY (OK does nothing): the percentage from the
+   *  same cached `DiagSnap` the data row reads; -1 is the documented
+   *  no-battery-node answer (every dev host), shown as an honest "n/a" so the
+   *  goldens stay deterministic. */
+  def batteryValue(s: KidSettingsState): String =
+    var out = Diag.UNAVAILABLE
+    if s.diag.battery >= 0 then out = "" + s.diag.battery + "%"
+    out
 
   def notifyLabel(s: KidSettingsState): String =
     var out = "quiet"
@@ -2231,5 +2188,7 @@ object KidSettingsLogic:
     else if s.selected == DATA then
       SettingsLogic.lines("OK picks off/wifi/cell", Color.midGray,
         "cell works once per boot", Color.yellow)
+    else if s.selected == BATTERY then
+      SettingsLogic.twoLines("charge left", "now: " + batteryValue(s))
     else
       SettingsLogic.twoLines("OK opens dev settings", "red comes back")

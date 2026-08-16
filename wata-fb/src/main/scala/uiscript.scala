@@ -116,7 +116,7 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  cursor index — how a script observes the event-id anchoring across an
  *  arrival), and the kid-settings probes (plan 0053): applet (the shell's
  *  active applet index — 3 while the developer panel is open), kidrow (the
- *  kid panel's selected row, 3 = the hidden development row), and kidtarget
+ *  kid panel's selected row, 4 = the hidden development row), and kidtarget
  *  (the data row's pending tri-state target, shifted non-negative for the
  *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell). */
 

@@ -1,22 +1,24 @@
 # settings-walk, phase 2: a second run of the same user, started with no
-# credentials, showing that the preferences phase 1 changed came back from the
-# config store — brightness 30 rather than the default 40, and a 2m screen
-# timeout rather than the default 1m.
+# credentials, showing that the preferences phase 1 changed came back from
+# the config store — brightness 30 rather than the default 40, asserted on
+# the KID panel whose row owns it now (plan 0054), and a 2m screen timeout
+# rather than the default 1m, asserted on the DEV panel.
 
 wait syncing 1 900
 
-# through the kid panel's hidden development row into the DEV panel (plan
-# 0053), then down to its brightness row.
+# the kid panel's Bright row shows the restored 30/40.
 tap dot2
+tap down
+advance 5
+checkpoint settings-restored-brightness
+
+# through the hidden development row into the DEV panel; one down from the
+# echo row, the screen-off row shows the restored 2m.
 tap down
 tap down
 tap down
 tap enter
 advance 2
-tap down
-advance 5
-checkpoint settings-restored-brightness
-
 tap down
 advance 5
 checkpoint settings-restored-timeout

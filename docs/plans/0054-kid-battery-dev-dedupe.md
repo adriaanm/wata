@@ -1,6 +1,6 @@
 # 0054 — a battery row on the kid panel; the dev menu de-duped
 
-Status: accepted (owner follow-up to plan 0053, 2026-08-16)
+Status: done (owner follow-up to plan 0053, 2026-08-16)
 
 ## The problem
 

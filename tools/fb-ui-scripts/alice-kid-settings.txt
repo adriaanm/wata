@@ -5,8 +5,8 @@
 wait syncing 1 900
 wait convs 1 900
 
-# dot2 -> the kid settings panel: Notify / Bright / Data, notify selected,
-# the help rows describing it on the bottom two grid rows.
+# dot2 -> the kid settings panel: Notify / Bright / Data / Battery, notify
+# selected, the help rows describing it on the bottom two grid rows.
 tap dot2
 advance 5
 checkpoint kid-rows
@@ -58,11 +58,18 @@ waitmax kidtarget 0 60
 advance 5
 checkpoint kid-data-applied
 
-# DOWN past the last row lands on the hidden development row — drawn only
-# while selected, so the panel stays three rows until now.
+# the battery row (plan 0054): read-only — the percentage is an honest "n/a"
+# on the host — with the help rows saying what it is.
 tap down
 advance 5
 expect kidrow 3
+checkpoint kid-battery
+
+# DOWN past the last row lands on the hidden development row — drawn only
+# while selected, so the panel stays four rows until now.
+tap down
+advance 5
+expect kidrow 4
 checkpoint kid-development
 
 # OK is the door: the ENTIRE developer panel (the old settings applet,

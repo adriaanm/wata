@@ -1,7 +1,7 @@
-# settings-walk, phase 1: every settings item in turn, and the two that change
-# stored preferences actually changed. The detail block under the menu is what
-# these frames are really pinning — it renders on the last two grid rows, and
-# every item has its own.
+# settings-walk, phase 1: every DEV settings item in turn, and the two that
+# change stored preferences actually changed. The detail block under the menu
+# is what these frames are really pinning — it renders on the last two grid
+# rows, and every item has its own.
 
 # A room, so the roster the wata applet under this menu was built from is a
 # real one (the settings frames are what these checkpoints pin, but the walk
@@ -10,12 +10,17 @@
 wait syncing 1 900
 wait convs 1 900
 
-# dot2 switches to the settings applet — the KID panel now (plan 0053); the
-# developer rows this walk pins live behind its hidden development row:
-# scroll past the three kid rows, OK opens the DEV SETTINGS panel with item 0
-# (the echo test) selected.
+# dot2 switches to the settings applet — the KID panel (plan 0053). The
+# brightness preference now lives here (plan 0054): step it 40 -> 30 on the
+# kid row, which phase 2 asserts came back from the store.
 tap dot2
 advance 2
+tap down
+tap left
+tap left
+
+# then through the hidden development row (three more downs past data and
+# battery) into the DEV SETTINGS panel, item 0 (the echo test) selected.
 tap down
 tap down
 tap down
@@ -23,14 +28,8 @@ tap enter
 advance 5
 checkpoint settings-echo
 
-# brightness: starts at the maximum, so `<` is the direction that moves.
-tap down
-tap left
-tap left
-advance 5
-checkpoint settings-brightness
-
-# screen-off timeout: 30s / 1m / 2m / 5m / Never, wrapping.
+# screen-off timeout: 30s / 1m / 2m / 5m / Never, wrapping — the one stored
+# preference this menu still edits (brightness and notify are kid rows now).
 tap down
 tap right
 advance 5
@@ -39,7 +38,7 @@ checkpoint settings-timeout
 # There is no display-name row: a person's name is their account's, set
 # through the admin interface (plan 0021), not picked from presets here.
 #
-# network and device info: the last two items, both detail-only.
+# network and device info: both detail-only.
 tap down
 advance 5
 checkpoint settings-network
@@ -48,11 +47,10 @@ tap down
 advance 5
 checkpoint settings-info
 
-# The diagnostics rows absorbed from system-menu (plan 0003, phase 5). The
-# menu is a scrolling window of six from here on — walking past Device Info
-# scrolls, and the `v`/`^` cues mark the hidden rows. On the host the IP and
-# cellular values are an honest "n/a" (no wlan0, no modem); on the device
-# they read `ip -4 addr show` and the ppp0 node, which no golden can pin.
+# The diagnostics rows absorbed from system-menu (plan 0003, phase 5). On the
+# host the IP and cellular values are an honest "n/a" (no wlan0, no modem);
+# on the device they read `ip -4 addr show` and the ppp0 node, which no
+# golden can pin.
 tap down
 advance 5
 checkpoint settings-ip
@@ -76,36 +74,11 @@ wait nettest 1 300
 advance 5
 checkpoint settings-nettest-run
 
-# The two radio toggles (wifi, cellular data). Both read "n/a" on the host,
-# and both take the power rows' two-OK confirm: cutting a kid's wifi, or
-# spending the boot's one cellular data call, is as much an accident as a
-# reboot. OK arms...
-tap down
-advance 5
-checkpoint settings-wifi
-
-tap enter
-advance 5
-checkpoint settings-wifi-armed
-
-# ...and the second OK runs it: off-device the guarded no-op, whose "not on
-# device" the row states outright instead of looking like it worked.
-tap enter
-advance 5
-checkpoint settings-wifi-run
-
-# the data toggle, armed and run in one go — the run never retries (the modem
-# accepts one data call per boot).
-tap down
-tap enter
-advance 2
-tap enter
-advance 5
-checkpoint settings-data-run
-
-# The power actions render everywhere but only act on the hardware: OK arms
-# (the detail rows become the red confirm prompt), a second OK runs the
-# action — here a logged no-op, the device guard.
+# The radio toggles retired to the kid panel's Data tri-state (plan 0054);
+# past the net test the menu scrolls into the power actions. They render
+# everywhere but only act on the hardware: OK arms (the detail rows become
+# the red confirm prompt), a second OK runs the action — here a logged
+# no-op, the device guard.
 tap down
 advance 5
 checkpoint settings-poweroff

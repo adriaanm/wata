@@ -128,8 +128,8 @@ failure, not a compiler diagnostic. Any trait method here that wants a
 collection result needs the same boxing.
 
 Two device edges are NOT behind the seam and stay best-effort no-ops
-off-device: `SettingsLogic.setBl` / `KidSettingsLogic.setBl` write the
-backlight sysfs node directly from the settings applets, and the `Led.*` sysfs writes never
+off-device: `KidSettingsLogic.setBl` writes the backlight sysfs node
+directly from the kid settings applet, and the `Led.*` sysfs writes never
 throw. They are not blindly silent though: `Led.writeSysfs` keeps a
 per-node status cell (a `val`-held `Atomic[Int]`), and the FIRST write
 to a node is the hardware probe — a first-write failure marks the node
@@ -212,21 +212,24 @@ explicit state machine, not a generic widget framework:
   applets today: `WataApplet`/`WataLogic` (contacts + conversation
   view, PTT recording, playback — `applets.scala:38-479`),
   `KidSettingsApplet`/`KidSettingsLogic` (the settings a kid sees —
-  three rows: notify, brightness, data; plan 0053, see "The settings
-  split" below), `SnakeApplet`/`SnakeLogic` (the snake game,
-  `snake.scala` — ported from the Zig client's `applets/snake.zig`;
-  see the parity table) and `SettingsApplet`/`SettingsLogic` (the
+  four rows: notify, brightness, data, battery; plans 0053/0054, see
+  "The settings split" below), `SnakeApplet`/`SnakeLogic` (the snake
+  game, `snake.scala` — ported from the Zig client's
+  `applets/snake.zig`; see the parity table) and
+  `SettingsApplet`/`SettingsLogic` (the
   DEVELOPER settings, slot `Shell.DEV` — OUTSIDE the dot rotation,
   reachable only through the kid panel's hidden development row:
-  audio echo test, brightness, screen timeout, disconnect, info, plus
+  audio echo test, screen timeout, disconnect, info, plus
   everything absorbed from system-menu — the IP and cellular info
-  rows, the net test, the wifi and cellular-data toggles and the
+  rows, the net test and the
   power off / reboot-to-BL / reboot-to-EDL actions; see "The settings
-  device rows"). There is deliberately no display-name row: a person's
+  device rows". Brightness, notify and the radio toggles retired to
+  the kid panel — plan 0054's de-dupe, one door per preference).
+  There is deliberately no display-name row: a person's
   name is their account's, set by whoever administers the server (the
   admin interface, plan 0021), not picked from presets on a handset —
-  so the developer menu holds thirteen items and every row is about
-  this device. That menu outgrew the grid, so it
+  so the developer menu holds ten items (eleven with Enroll) and every
+  row is about this device. That menu outgrew the grid, so it
   renders as a scrolling window of six with `^`/`v` cues in the
   last column; the window start is derived from the selection (no
   scroll state), which keeps the frames the goldens pin
@@ -300,10 +303,12 @@ the fake mic's constant-amplitude tone produces (level 15).
 ### The settings split: the kid panel and the developer door
 
 The settings slot in the dot rotation holds the KID panel (plan 0053,
-`KidSettingsLogic`): exactly three rows — **Notify** (chime/quiet, OK
+`KidSettingsLogic`): exactly four rows — **Notify** (chime/quiet, OK
 or `<`/`>` flips), **Bright** (the backlight steps, `<`/`>`, applied
-live through the same `Led.setBacklight` write the developer row
-makes), **Data** (the tri-state below) — with the bottom two grid rows
+live — `KidSettingsLogic.setBl` is the one settings row writing the
+backlight now), **Data** (the tri-state below), **Battery** (read-only
+— the percentage from the same cached `DiagSnap`, `n/a` off-device;
+plan 0054) — with the bottom two grid rows
 (the `DETAIL_ROW` convention) always carrying a help/status line for
 the selected row. Scrolling DOWN past the last row lands on a hidden
 `development` row, drawn only while selected; OK on it opens the
@@ -332,7 +337,11 @@ selected.
 active one's every frame (only the active applet receives input), so
 the two never disagree and `Ui` reads brightness/timeout from the DEV
 state alone. The kid state carries `timeoutIdx` only as that mirror —
-the screen-timeout row itself is developer-only. The kid panel is
+the screen-timeout row itself is developer-only — and the dev state
+symmetrically keeps `brightness`/`notifyChime` mirrors with no rows of
+its own (plan 0054): each panel's `persisted` saves the WHOLE `FbPrefs`
+record, so the mirror is what keeps a timeout save from clobbering the
+kid's brightness and vice versa. The kid panel is
 pinned by the `kid-settings` scenario (`alice-kid-settings.txt`): the
 three rows and help text, the notify toggle, the target cycling (the
 `kidtarget` probe proves nothing applies mid-cycle), the settle-apply,
@@ -354,9 +363,13 @@ about what "Data: off" means:
 | IP | wlan0's IPv4 address | `net.InterfaceByName("wlan0")` (system-menu's `ip -4 addr show wlan0`) |
 | Cell data | ppp0 link state + signal strength, e.g. `up -85dBm` | the ppp0 sysfs node, plus `qmicli -p -d msmipc://0 --nas-get-signal-strength` parsed the way `modem_info` parses it (`-128` = no measurement, shown `--`). The ppp0 ADDRESS has no room next to the signal, so it moves to the row's detail line |
 | Net test | OK runs four probes, verdicts in the detail block | `ping -c2 -W3` against the auto-detected default gateway (`ip route show dev wlan0`, then ppp0), `1.1.1.1` and `8.8.8.8`, plus the `nslookup google.com` DNS probe judged by system-menu's own test (an `Address` line, no `NXDOMAIN`) |
-| Wifi | ON/OFF, OK toggles | `rc-service wifi start` / `stop`; the state is whether wlan0 exists |
-| Data link | ON/OFF, OK toggles | `pppd call cellular &` / `killall pppd`; the state is the same ppp0 read the info row does |
 | Power off / Reboot to BL / Reboot to EDL | OK arms, OK again runs | `poweroff`, `/usr/local/bin/reboot-bootloader`, `/usr/local/bin/reboot-edl` |
+
+The independent Wifi / Data link toggle rows retired to the kid panel's
+Data tri-state (plan 0054) — same commands (`rc-service wifi start` /
+`stop`, `pppd call cellular &` / `killall pppd`, via the same `Diag`
+calls), one control instead of two; the combination the tri-state
+cannot express (both radios up at once) was never an on-device need.
 | Enroll | OK opens the enrolment QR (Back closes) | nothing external — `enrol.scala`; see "Device identity and enrolment" |
 
 Enroll is the one CONDITIONAL row: it exists only when this handset is
@@ -389,14 +402,14 @@ Three rules hold this together:
   instead of pretending. That is what makes the whole menu walkable in
   the sim and byte-reproducible in the goldens — including on a Linux
   CI host, which does have a `/proc/uptime` of its own.
-- **Both toggles take the power rows' two-OK confirm** (`isActionRow`):
-  cutting a kid's wifi, or spending the boot's ONE cellular data call,
-  is as much an accident as a reboot. Nothing retries — a failed
-  `pppd call cellular` is reported on the row (`actionMsg`, red, until
-  the next keypress) rather than attempted again, because this modem
-  accepts a single data call per boot and a silent second attempt would
-  spend it. `pppd` is backgrounded, so the outcome arrives through the
-  row's own ~5s ppp0 refresh, not through the exec's exit status.
+- **The radio calls are guarded against stray keypresses and never
+  retry** — this modem accepts a single data call per boot, and a
+  silent second attempt would spend it. The guard is the kid panel's
+  settle timer now (`isPowerRow` keeps the two-OK confirm for the
+  power actions alone); a failed apply is reported on the help rows
+  (`actionMsg`, red, until the next keypress) rather than attempted
+  again. `pppd` is backgrounded, so the outcome arrives through the
+  ~5s ppp0 refresh, not through the exec's exit status.
 - **The net test runs OFF the frame loop.** OK starts the four probes on
   a goroutine (`Diag.startNetTest`) and returns; the row reads `run..`
   until `SettingsLogic.collectNetTest` picks the verdicts up from
@@ -1204,7 +1217,7 @@ once per session.
   and does one thing at a time, so the chime (the startup chirp asset,
   `Chirp.play()`, one audio path) never cuts into a recording or a
   playback — and then sets the same banner quiet mode sets. The
-  settings applet's Notify row toggles chime/quiet.
+  kid settings panel's Notify row toggles chime/quiet.
 - **Play-now (auto-play) is the future focus-modes seam** — in the code,
   unreachable from the device UI. An arrival under it sends the same
   `ActPlay` the applet's OK press sends and marks the applet playing
@@ -1256,12 +1269,11 @@ once per session.
   with its own cell and `loadNotifyMode`/`notifyMode`/`saveNotifyMode`
   (`config.scala`) — deliberately NOT an `FbPrefs` field, since the
   shared settings applets construct that record positionally. The kid
-  panel's first row toggles it on OK or left/right, and the developer
-  applet's last row ("Notify: chime / quiet", stable id
-  `NOTIFY`, appended so no earlier row's golden moves) on
-  left/right; both persist through their `persisted` seam, the same
-  one as brightness/timeout, and `Shell.syncPrefs` keeps the two rows
-  agreeing. The applets are shared, so the mac's settings
+  panel's first row toggles it on OK or left/right (the developer
+  menu's Notify row retired there — plan 0054; the dev state keeps a
+  `notifyChime` mirror via `Shell.syncPrefs`, but no row) and persists
+  through `KidSettingsLogic.persisted`, the same
+  seam as brightness/timeout. The applets are shared, so the mac's settings
   body grows the row too; its chrome commands `notify:play`/`notify:quiet`
   use the same `Notify.MODE_*` constants, so the spellings cannot drift.
 - **The gate**: the `arrival-notify` scenario in `fb-ui-tests.py` — the
