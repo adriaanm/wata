@@ -27,6 +27,14 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## client / device
 
+- **Unexplained wata-mac crash, once** (2026-08-16): the app (launched
+  via `just mac-app --open`, so stderr was discarded) died right after
+  playing two messages back-to-back during the plan-0050 verification.
+  No macOS crash report (consistent with a Go panic), no repro on an
+  immediate retry with output captured. If it recurs: launch the
+  bundle's inner binary directly with `>/tmp/wata-mac-run.log 2>&1` —
+  a Dock launch keeps eating the panic text.
+
 - **The recording level meter needs its device pass** (plan 0042,
   2026-08-08): gate-proven only (the `rec-meter` fb-ui-tests scenario and
   mac-smoke's exact fake-mic rect) and rides the next `fb-deploy`. On the
