@@ -430,11 +430,12 @@ Two row marks say what the client is doing with the user's own audio
   duration — and the duration right-aligned ending at column 24, with
   column 25 the favorite star. Both mark columns are reserved on every
   row, so own and received text share the grid and nothing ever
-  reflows. A RECEIVED row's mark is `ICON_CHECK` once self has played
-  it; an OWN row (sender == self) draws check one always — the message
-  is in the timeline, so the server has it — and a second adjacent
-  `ICON_CHECK` when `VoiceMessage.playedByPeer` says a non-sender has
-  receipted it. Two adjacent check glyphs rather than a new doubled
+  reflows. The marks read the SAME on every row (plan 0051): check one
+  always — the message is delivered (in the timeline; for an own row
+  that says the server has it) — and a second adjacent `ICON_CHECK`
+  when it has been HEARD by its audience (`WataLogic.heardMark`):
+  `VoiceMessage.playedByPeer` for an own row, `isPlayed` for a
+  received one. Two adjacent check glyphs rather than a new doubled
   glyph is the Zig reference's documented convention
   (`src/fbclient/src/font.zig` in git history at `27a2f75`: "draw two
   0x80 glyphs adjacent"). The `uitest` probe `peer`

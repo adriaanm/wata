@@ -776,17 +776,18 @@ object WataLogic:
    *  right-aligned ending at col 24, and a favorited row's STAR in the last
    *  column, so marking a message never shifts the text.
    *
-   *  The mark area is column 0 for a RECEIVED row (the PLAY triangle while
-   *  this row is the one being fetched and played, else the played check) and
-   *  columns 0-1 for an OWN row: check one always — the message is in the
-   *  timeline, so the server has it — and a second adjacent check when a peer
-   *  has played it (`playedByPeer`). Two adjacent `ICON_CHECK` glyphs are the
-   *  Zig reference's documented double-check convention (`font.zig`: "draw
-   *  two 0x80 glyphs adjacent"), so no new glyph. Both mark columns are
-   *  reserved on EVERY row, so own and received text share one grid and a
-   *  receipt arriving never reflows a row. The play mark appears the instant
-   *  OK is released, before the download has even started: pressing a key
-   *  must show something, and a slow fetch is exactly when it matters. All
+   *  The mark area (cols 0-1) reads the SAME on every row (plan 0051):
+   *  check one = the message is delivered (in the timeline — for an own row
+   *  that says the server has it), check two = it has been HEARD by its
+   *  audience — the peer for an own row (`playedByPeer`), yourself for a
+   *  received one (`isPlayed`). The PLAY triangle holds the first slot while
+   *  this row is the one being fetched and played, and it appears the
+   *  instant OK is released, before the download has even started: pressing
+   *  a key must show something, and a slow fetch is exactly when it matters.
+   *  Two adjacent `ICON_CHECK` glyphs are the Zig reference's documented
+   *  double-check convention (`font.zig`: "draw two 0x80 glyphs adjacent"),
+   *  so no new glyph. Both mark columns are reserved on EVERY row, so all
+   *  rows share one grid and a receipt arriving never reflows a row. All
    *  marks are custom glyphs (> 0x7F), so they are `VGlyph`s rather than
    *  characters inside a `VText`.
    *
@@ -798,8 +799,8 @@ object WataLogic:
     var kids: List[Keyed] = Nil
     if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
     if playing then kids = Keyed("mark", VGlyph(0, y, Font.ICON_PLAY, fg)) :: kids
-    else if own || m.isPlayed then kids = Keyed("mark", VGlyph(0, y, Font.ICON_CHECK, fg)) :: kids
-    if own && m.playedByPeer then
+    else kids = Keyed("mark", VGlyph(0, y, Font.ICON_CHECK, fg)) :: kids
+    if heardMark(m, own) then
       kids = Keyed("mark2", VGlyph(Font.GLYPH_W, y, Font.ICON_CHECK, fg)) :: kids
     kids = Keyed("age", VText(2, row, ageStr(nowMs, m.timestamp), fg)) :: kids
     val dur = durStr(m.durationMs)
@@ -810,6 +811,11 @@ object WataLogic:
     if m.isFavorite then
       kids = Keyed("star", VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, Font.ICON_STAR, fg)) :: kids
     VGroup(ListOps.reverse(kids))
+
+  /** the second check: the message reached its audience's ears — a peer's for
+   *  an own row, yours for a received one. */
+  def heardMark(m: VoiceMessage, own: Boolean): Boolean =
+    if own then m.playedByPeer else m.isPlayed
 
   /** when a message arrived, as the row's 3-wide age column: "now" under a
    *  minute, then minutes/hours, then relative days capped at 99 (a calendar

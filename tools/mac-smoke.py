@@ -299,30 +299,30 @@ def run(tmp):
         # ogg, the action loop hands `AcPlay` to the audio thread this client
         # forks, the thread decodes every Opus frame and plays the pcm against
         # the fake backend's clock, and `AePlaybackDone` returns through the
-        # ONE audio drain. Both edges are differ patches on the row's mark
-        # glyph: the play triangle (0x90 = 144) the instant OK is released,
-        # then the played check (0x80 = 128). Seeing the second one is also
-        # the end-to-end proof of the runtime's `UiEvent`/audio drains, since
-        # nothing else moves that glyph.
-        #
-        # The row starts with NO mark — a received message is unplayed until it
-        # has been HEARD, and opening the conversation receipts nothing — so
-        # each glyph is INSERTED into the row rather than overwriting the
-        # previous one. That also makes the ordering meaningful: the triangle
-        # goes away when the audio ends, and the check appears a moment later,
-        # when the receipt has been round-tripped through /sync. Nothing here
-        # is optimistic; the check means the server recorded it.
+        # ONE audio drain. The row carries the DELIVERED check from the start
+        # (plan 0051), so both play edges are `patch set` on that same glyph:
+        # the play triangle (0x90 = 144) the instant OK is released, then back
+        # to the check (0x80 = 128) when the audio ends. The HEARD check
+        # (`mark2`) is then INSERTED a moment later, when the receipt has been
+        # round-tripped through /sync — seeing it is the end-to-end proof of
+        # the runtime's `UiEvent`/audio drains, since nothing else creates
+        # that node. Nothing here is optimistic; mark2 means the server
+        # recorded the receipt.
         sess.cmd("key enter press", lambda l: l == "key ok")
         sess.cmd("key enter release", lambda l: l == "key ok")
         played = sess.cmd("wait 8000", lambda l: l == "waited 8000")
         pp = [l for l in played if l.startswith("patch ")]
-        c.ok(pp[:1] == ['patch insert [0.1.0] 1 mark:glyph(0,17,144,0)'],
+        c.ok(pp[:1] == ['patch set [0.1.0.1] glyph(0,17,144,0)'],
              f"play: want the play-triangle patch first, got {pp!r}")
-        c.line(pp, lambda l: l == 'patch insert [0.1.0] 1 mark:glyph(0,17,128,0)',
-               f"play: no played-check patch after it, got {pp!r}")
+        c.line(pp, lambda l: l == 'patch set [0.1.0.1] glyph(0,17,128,0)',
+               f"play: the mark never returned to the delivered check, got {pp!r}")
+        c.line(pp, lambda l: l == 'patch insert [0.1.0] 2 mark2:glyph(6,17,128,0)',
+               f"play: no heard-check insert after the receipt round-trip, got {pp!r}")
         t4 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
         c.line(t4, lambda l: l.strip() == 'NSTextField 0 103 6 8 "✓"',
-               "tree 4: no played check on the message row")
+               "tree 4: no delivered check on the message row")
+        c.line(t4, lambda l: l.strip() == 'NSTextField 6 103 6 8 "✓"',
+               "tree 4: no heard check on the message row")
 
         # ---- audio: RECORD ----------------------------------------------------
         # PTT (space) holds the microphone open: `AcRecordStart` reaches the
@@ -364,10 +364,12 @@ def run(tmp):
         # index 0 and highlighted: messages come back newest first, so a sent
         # message lands at the TOP, under a cursor that never moved. The black
         # ink (0) on the green highlight rect is what "selected" looks like.
+        # the plan-0049 grid: marks, then the age ("now"), the sender — "me"
+        # on an own row — and the right-aligned duration.
         c.line(sp, lambda l: re.fullmatch(
             r'patch insert \[0\.1\] 0 \$\S+:group\[hl:rect\(0,17,160,8,2016\) '
-            r'mark:glyph\(0,17,128,0\) dur:text\(2,2,"0:01",0\) '
-            r'sender:text\(7,2,"Alice",0\)\]', l),
+            r'mark:glyph\(0,17,128,0\) age:text\(2,2,"now",0\) '
+            r'dur:text\(21,2,"0:01",0\) sender:text\(6,2,"me",0\)\]', l),
             f"send: no own message row for the ~1.2s recording, got {sp!r}")
         c.line(sp, lambda l: l == 'patch insert [] 1 flash:group[msg:text(8,9,"SENT",2016)]',
                f"send: no SENT flash (EvSendComplete never reached the pump), got {sp!r}")
@@ -398,6 +400,7 @@ def run(tmp):
         lp = [l for l in live if l.startswith("patch ")]
         c.line(lp, lambda l: re.fullmatch(
             r'patch insert \[0\.1\] 0 \$\S+:group\[hl:rect\(\S+\) '
+            r'mark:glyph\(\S+\) age:text\(\d+,\d+,"now",\d+\) '
             r'dur:text\(\d+,\d+,"0:0\d",\d+\) sender:text\(\d+,\d+,"Bob",\d+\)\]', l),
             f"open-conversation arrival: no new message row, got {lp!r}")
         t6 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
