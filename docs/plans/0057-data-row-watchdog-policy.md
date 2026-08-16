@@ -50,11 +50,18 @@ one-data-call-per-boot pin plan 0055 retired everywhere else.
 
 ## Verification
 
-`just ci`, `just mac-build`, fb-ui green. On hardware: kid "cell" →
-wifi drops, ppp0 up, force file present, watchdog quiet; kid "wifi" →
-auto restored, wifi back, watchdog tears cellular down; kid "off" →
-both down and they STAY down past two watchdog cycles (the fight this
-plan ends).
+`just ci`, `just mac-build`, fb-ui green. On hardware (2026-08-16,
+row driven remotely by evdev key injection, observed over the USB
+serial console while wifi was down): kid "off" → both radios down and
+STAYING down through ~8 watchdog cycles, pin held (the fight this
+plan ends); kid "cell" → FORCED, ppp0 up with real traffic (2/2 pings
+via ppp0); kid "wifi" → pin removed, wlan0 back, and the WATCHDOG
+tore cellular down on its next healthy check — the designed backup
+cleanup, seen live. Bonus find while watching its log: net-watchdog
+had a `local`-outside-a-function crash loop on every healthy check
+(masked by supervision); fixed in bq268-alpine `5b902c0`, after which
+one process survived past the 120s modem-sleep line for the first
+time.
 
 ## Out of scope
 
