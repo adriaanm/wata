@@ -1,0 +1,6 @@
+queue filled with 64 receipts
+pending after delete+favorite+delete: 2
+pending after full-queue frame: 2
+pending after one freed slot: 1
+pending after two freed slots: 0
+one-shots in queue: RF

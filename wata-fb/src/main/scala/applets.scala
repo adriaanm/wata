@@ -71,7 +71,13 @@ case class WataState(
   // index the renderer draws; this is what re-locates it when the list shifts
   // under the cursor — the list is newest-first, so every arrival would
   // otherwise slide the selection one row older (`clampMessages`).
-  msgAnchorId: String
+  msgAnchorId: String,
+  // user-initiated one-shots (delete/favorite) the action queue REFUSED, kept
+  // in offer order and re-offered by `update` each frame until the queue takes
+  // them (plan 0046): a full queue must not silently eat a delete. Session
+  // intents only — a new session starts from `initial()`, so nothing here
+  // outlives the session that meant it.
+  pendingOneshots: List[Action]
 )
 
 object WataLogic:
@@ -80,7 +86,7 @@ object WataLogic:
 
   def initial(): WataState =
     WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, false, 0.0,
-      false, 0.0, false, 0.0, 0, "")
+      false, 0.0, false, 0.0, 0, "", Nil)
 
   /** visible list rows between header and footer (bitmap grid). */
   def visibleRows(): scala.Int = FOOTER_ROW - FONT_ROWS_HEADER
@@ -89,11 +95,11 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   /** Opens at row 0, which is the NEWEST message now that the list comes back
    *  newest first — the one somebody just pressed the LED for. It used to be
@@ -101,35 +107,35 @@ object WataLogic:
    *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "")
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "", s.pendingOneshots)
 
   /** cursor move that keeps the current anchor — the per-frame reconcile's
    *  found-the-anchor path and every non-cursor wither go through here. */
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   /** cursor move that also RE-DECIDES the anchor — what an explicit up/down
    *  and the vanished-anchor fallback use. */
   def withMsgAnchor(s: WataState, sel: scala.Int, scr: scala.Int, anchor: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor, s.pendingOneshots)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   /** the recording meter's level — the only field `AeCaptureLevel` moves. */
   def withCapLevel(s: WataState, level: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId, s.pendingOneshots)
 
   /** `room`/`id` name what is playing, and are cleared when it stops — a
    *  playback target that outlives the playback would receipt the wrong
    *  message the next time audio ends. */
   def withPlaying(s: WataState, playing: Boolean, room: String, id: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   /** the full status-flash tuple (hold + timer + the four flash flags); the
    *  play-failure CAUSE rides along unchanged. */
@@ -137,7 +143,7 @@ object WataLogic:
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean, micErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, micErr, timer, s.backHeld, s.backHoldTime,
-      s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   /** a play that failed: the flash, its cause, and `playing` dropped — a
    *  playback indicator that outlives the playback is a lie. */
@@ -145,17 +151,22 @@ object WataLogic:
                   timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, s.micError, timer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId)
+      s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId)
+      held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+
+  def withPendingOneshots(s: WataState, pending: List[Action]): WataState =
+    WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, pending)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
   /** full input with per-frame context (snapshot + queues). Returns new state. */
@@ -329,8 +340,7 @@ object WataLogic:
   def deleteSelected(s: WataState, ctx: FrameCtx): WataState =
     selectedMsg(ctx.snap, s.convContactIdx, s.msgSelected) match
       case m: Some[VoiceMessage] =>
-        Runtime.sendAction(ctx.client, ActRedact(roomIdAt(ctx.snap, s.convContactIdx), m.value.id))
-        s
+        offerOneshot(s, ctx, ActRedact(roomIdAt(ctx.snap, s.convContactIdx), m.value.id))
       case None => s
 
   /** hold-OK: toggle the server's favorite marker on the selected message. The
@@ -339,9 +349,62 @@ object WataLogic:
   def favoriteSelected(s: WataState, ctx: FrameCtx): WataState =
     selectedMsg(ctx.snap, s.convContactIdx, s.msgSelected) match
       case m: Some[VoiceMessage] =>
-        Runtime.sendAction(ctx.client, ActFavorite(roomIdAt(ctx.snap, s.convContactIdx), m.value.id))
-        s
+        offerOneshot(s, ctx, ActFavorite(roomIdAt(ctx.snap, s.convContactIdx), m.value.id))
       case None => s
+
+  // ---- pending one-shots (plan 0046) ---------------------------------------------
+  // A delete or favorite is a user INTENT, and no later action supersedes it —
+  // so unlike receipts and name pushes, a queue-refused one may not drop. The
+  // intent is kept locally and delivery retries until the queue takes it (the
+  // outbox's shape, session-scoped): local-first, the field being the design
+  // case — cellular drops and wifi<->cellular switches stall the action loop
+  // exactly when someone tidies a conversation.
+
+  /** at most this many refused one-shots are held; past it a new one drops
+   *  silently, which is the pre-plan-0046 behavior with a far narrower window
+   *  (the queue itself is 64 deep and stuck for minutes before this fills). */
+  val MAX_PENDING_ONESHOTS = 8
+
+  /** offer a one-shot to the action queue; a refused one joins
+   *  `pendingOneshots` (in offer order) unless the same intent is already
+   *  waiting — a second delete of the same message adds nothing, and a second
+   *  favorite keeps the single toggle the user's star will reflect. */
+  def offerOneshot(s: WataState, ctx: FrameCtx, a: Action): WataState =
+    if ClientHandle.sendAction(ctx.client, a) then s
+    else if hasOneshot(s.pendingOneshots, a) then s
+    else if lenActions(s.pendingOneshots) >= MAX_PENDING_ONESHOTS then s
+    else withPendingOneshots(s, appendAction(s.pendingOneshots, a))
+
+  /** re-offer the HEAD each frame until the queue accepts — one per frame is
+   *  plenty (the queue drains request-by-request) and keeps the frame cheap. */
+  def retryOneshots(s: WataState, ctx: FrameCtx): WataState = s.pendingOneshots match
+    case h :: t =>
+      if ClientHandle.sendAction(ctx.client, h) then withPendingOneshots(s, t) else s
+    case Nil => s
+
+  /** the same intent: one-shot kinds compare by their target, not by record
+   *  equality — the kinds are closed here (only redact/favorite are offered). */
+  def sameOneshot(a: Action, b: Action): Boolean = a match
+    case x: ActRedact => b match
+      case y: ActRedact => x.roomId == y.roomId && x.eventId == y.eventId
+      case _ => false
+    case x: ActFavorite => b match
+      case y: ActFavorite => x.roomId == y.roomId && x.eventId == y.eventId
+      case _ => false
+    case _ => false
+
+  def hasOneshot(l: List[Action], a: Action): Boolean = l match
+    case h :: t => if sameOneshot(h, a) then true else hasOneshot(t, a)
+    case Nil => false
+
+  def lenActions(l: List[Action]): scala.Int = l match
+    case h :: t => 1 + lenActions(t)
+    case Nil => 0
+
+  /** tail-append, keeping offer order (bounded by MAX_PENDING_ONESHOTS). */
+  def appendAction(l: List[Action], a: Action): List[Action] = l match
+    case h :: t => h :: appendAction(t, a)
+    case Nil => a :: Nil
 
   // ---- receipts ------------------------------------------------------------------
   /** The ONE place a receipt is sent, called from `AePlaybackDone`. There is
@@ -355,7 +418,7 @@ object WataLogic:
    *  arrive via `Shell.routeAudio` -> `onAudioEvent`, NOT a drain here — the
    *  shell owns the mailbox's single drain (plan 0009). */
   def update(s: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
-    clampSelection(tickTimers(s, dt, ctx), ctx)
+    clampSelection(tickTimers(retryOneshots(s, ctx), dt, ctx), ctx)
 
   /** Reconcile the cursors with the live snapshot. The lists change under the
    *  cursor without any input — an arrival puts a new row on top (the list is

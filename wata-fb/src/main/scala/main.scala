@@ -63,6 +63,10 @@ object Main:
     // every string that screen can draw against the panel's 26 columns, since
     // drawText truncates at the edge in silence; run by fb-smoke.
     else if args.length > 0 && args(0) == "exitfit" then ExitMenu.fitCheck()
+    // the pending-one-shot oracle (plan 0046): a full action queue keeps a
+    // refused delete/favorite pending and the frame tick re-offers it; run by
+    // client-tests against tools/wataclient-oneshot.expected.txt.
+    else if args.length > 0 && args(0) == "oneshottest" then OneshotTest.run()
     else if args.length > 1 && args(0) == "syncfix" then
       SyncFixDriver.run(args)
     else if args.length > 2 && args(0) == "integ" then

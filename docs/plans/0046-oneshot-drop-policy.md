@@ -1,6 +1,18 @@
 # 0046 — a full action queue must not silently eat a delete
 
-Status: proposed
+Status: done
+
+## Ruling (owner, 2026-08-16)
+
+Approved as scoped, with the frame generalized: wata is a natural
+**local-first** app, and that is the lens this mechanism belongs under. In
+the field — cellular drops, wifi↔cellular handovers, a server briefly
+unreachable — the experience stands or falls on a robust local outbox of
+user intents that syncs when it can: the voice outbox already works this
+way, and the pending one-shots below are the same shape session-scoped.
+Keep each slice simple; the direction (durable intent, retried delivery,
+never ask the user to notice) is the standing design pressure, tracked as
+`LOCAL-FIRST-ACTION-OUTBOX` in the queue.
 
 ## Problem
 
@@ -22,7 +34,7 @@ against a non-answering server, which after plan 0045 slice 1 is a
 bounded-but-minutes-long state, and an outage is precisely when someone
 tidies a conversation.
 
-## Decision (proposed)
+## Decision
 
 **Retry from the frame loop; no new words, no new state machine.**
 `ClientHandle.sendAction` already answers whether the queue took the
@@ -57,6 +69,18 @@ their semantics really are superseded-by-later.
 
 The new client-tests case; `just ci` (golden, fb-ui-tests unchanged —
 no rendering is touched); `just mac-ui-tests` stays green.
+
+## Done note (2026-08-16)
+
+As planned, with two details settled in code: coalescing covers a repeat
+FAVORITE of the same message too (one pending toggle, matching the star
+the user will see), and the pending list is capped at 8 — past it a new
+one-shot drops silently, the pre-plan behavior with a far narrower
+window. The oracle is `wata-fb oneshottest` (oneshottest.scala), check
+7/7 of client-tests, byte-diffed against
+tools/wataclient-oneshot.expected.txt: 64 receipts park the queue,
+delete+favorite+delete pend as 2, one freed slot per frame delivers head
+first, and the drain reads exactly `RF`.
 
 ## Out of scope
 
