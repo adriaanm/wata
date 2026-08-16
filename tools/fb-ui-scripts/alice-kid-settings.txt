@@ -57,8 +57,13 @@ tap right
 expect kidtarget 3
 advance 5
 checkpoint kid-data-target-cell
+
+# left steps back to wifi — the everyday value, whose help names the
+# watchdog's automatic cellular backup (plan 0057).
 tap left
 expect kidtarget 2
+advance 5
+checkpoint kid-data-target-wifi
 
 # moving the selection away CLEARS an unconfirmed target — a choice walked
 # away from must not linger for a later OK.

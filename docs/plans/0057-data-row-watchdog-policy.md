@@ -1,6 +1,6 @@
 # 0057 — the data row sets watchdog policy, not raw radios
 
-Status: accepted (queue item KID-DATA-WATCHDOG-PROTOCOL, unblocked
+Status: done (queue item KID-DATA-WATCHDOG-PROTOCOL, unblocked
 2026-08-16 when net-watchdog supervision went live on the handset)
 
 ## The problem

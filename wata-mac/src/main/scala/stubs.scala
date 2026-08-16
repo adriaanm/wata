@@ -63,8 +63,9 @@ object Diag:
   def takeNetTest(): Option[NetTestResult] = None
   def wifiStart(): String = "not on device"
   def wifiStop(): String = "not on device"
-  def dataStart(): String = "not on device"
-  def dataStop(): String = "not on device"
+  def dataAuto(): String = "not on device"
+  def dataForce(): String = "not on device"
+  def dataOff(): String = "not on device"
   def powerOff(): Unit = ()
   def rebootBootloader(): Unit = ()
   def rebootEdl(): Unit = ()

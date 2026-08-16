@@ -2128,19 +2128,27 @@ object KidSettingsLogic:
     if msg == "" then out = withApplyFrames(out, 0)
     withDiag(out, s.diag, 0)
 
-  /** the calls that move the radios from what they read to the target; the
-   *  first non-empty report is kept (one line is what the help rows hold). */
+  /** the target as net-watchdog POLICY (plan 0057): every apply SETS the
+   *  cellular policy through `cell-data` — unconditionally, since the
+   *  watchdog's pin file is not visible in the diag readings — plus the one
+   *  wifi service call. `wifi` = wifi up with `auto` failover (the watchdog
+   *  brings cellular up as backup and tears it down again when wifi is
+   *  healthy — the success predicate stays "wlan0 up", the backup's comings
+   *  and goings are not waited for); `cell` = pin cellular up, wifi down;
+   *  `off` = pin cellular down, wifi down, and the watchdog leaves both
+   *  alone. The first non-empty report is kept (one line is what the help
+   *  rows hold), and nothing here retries. */
   def applyCalls(s: KidSettingsState, t: scala.Int): String =
     var msg = ""
     if t == T_OFF then
-      if dataIsOn(s) then msg = keepMsg(msg, Diag.dataStop())
-      if wifiIsOn(s) then msg = keepMsg(msg, Diag.wifiStop())
+      msg = keepMsg(msg, Diag.dataOff())
+      msg = keepMsg(msg, Diag.wifiStop())
     else if t == T_WIFI then
-      if dataIsOn(s) then msg = keepMsg(msg, Diag.dataStop())
-      if !wifiIsOn(s) then msg = keepMsg(msg, Diag.wifiStart())
+      msg = keepMsg(msg, Diag.wifiStart())
+      msg = keepMsg(msg, Diag.dataAuto())
     else
-      if wifiIsOn(s) then msg = keepMsg(msg, Diag.wifiStop())
-      if !dataIsOn(s) then msg = keepMsg(msg, Diag.dataStart())
+      msg = keepMsg(msg, Diag.dataForce())
+      msg = keepMsg(msg, Diag.wifiStop())
     msg
 
   def keepMsg(have: String, next: String): String =
@@ -2258,13 +2266,24 @@ object KidSettingsLogic:
     else
       SettingsLogic.twoLines("OK opens dev settings", "red comes back")
 
-  /** the data row's help: the switch in progress while applying, the
-   *  gesture otherwise (the report shape is `helpView`'s first arm). */
+  /** the data row's help: the switch in progress while applying; what the
+   *  picked value MEANS while one is pending (the values are watchdog
+   *  policy, and "wifi" quietly includes the cellular backup — the help is
+   *  where that is said); the gesture otherwise (the report shape is
+   *  `helpView`'s first arm). */
   def dataHelp(s: KidSettingsState): View =
     if s.applyFrames >= 0 then
       SettingsLogic.twoLines("switching to " + targetLabel(s.dataTarget) + "...", "")
+    else if s.dataTarget != T_NONE then
+      SettingsLogic.twoLines(dataDesc(s.dataTarget), "OK applies the choice")
     else
       SettingsLogic.twoLines("</> pick off/wifi/cell", "OK applies the choice")
+
+  /** one short line per data value: what the policy DOES. */
+  def dataDesc(t: scala.Int): String =
+    if t == T_WIFI then "wifi, cell as backup"
+    else if t == T_CELL then "cellular only"
+    else "no network"
 
   /** one short line per notify value: what the selected mode DOES. */
   def notifyHelp(m: String): String =

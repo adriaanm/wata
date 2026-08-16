@@ -299,13 +299,20 @@ object Diag:
   def wifiStart(): String = runGuarded("rc-service wifi start")
   def wifiStop(): String = runGuarded("rc-service wifi stop")
 
-  /** the cellular data call, system-menu's `show_cellular` commands. Start is
-   *  BACKGROUNDED (pppd takes ~15s to bring ppp0 up) so the UI is not frozen
-   *  waiting on it; the row's own ppp0 refresh is what reports the outcome.
-   *  Nothing retries: this modem accepts ONE data call per boot, so a silent
-   *  second attempt would burn the only one there is. */
-  def dataStart(): String = runGuarded("pppd call cellular &")
-  def dataStop(): String = runGuarded("killall pppd 2>/dev/null")
+  /** the net-watchdog's POLICY verbs (plan 0057) — the data row sets policy
+   *  through the rootfs's `cell-data` wrapper rather than driving pppd raw,
+   *  because the supervised watchdog owns the cellular link and raw commands
+   *  fight it (an "off" it does not know about is undone by its next health
+   *  check). `auto` restores failover and returns quickly, so it runs in the
+   *  foreground; `force` (pin cellular up, failover disabled) blocks up to
+   *  the modem's 45s attach budget and `off` (tear down + pin down) can take
+   *  ~10s, so both are BACKGROUNDED like the old raw dial — the applying
+   *  spinner is the wait UI, and the row's own ppp0/wlan0 refresh reports
+   *  the outcome. The pin lives in /run (tmpfs): a reboot returns to
+   *  auto-with-wifi, the safe default. */
+  def dataAuto(): String = runGuarded("cell-data auto")
+  def dataForce(): String = runGuarded("cell-data force >/dev/null 2>&1 &")
+  def dataOff(): String = runGuarded("cell-data off >/dev/null 2>&1 &")
 
   /** run a command for its exit status, reporting the failure as text for the
    *  row to show: "" on success, a short reason otherwise. Off-device it runs

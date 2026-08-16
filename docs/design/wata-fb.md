@@ -317,16 +317,32 @@ the selected row. Scrolling DOWN past the last row lands on a hidden
 developer applet (`Shell.DEV` — the entire panel described in "The
 settings device rows", retitled `DEV SETTINGS`), and red returns.
 
-**The data row is a tri-state of the pipe, not two toggles**: `off`
-(wifi off, data off), `wifi` (wifi on, data off), `cell` (data on,
-wifi off). Left/right cycle the PENDING target on screen — shown
+**The data row is net-watchdog POLICY, not raw radios** (plan 0057;
+the tri-state shape is plan 0055's): the rootfs's supervised
+net-watchdog owns the cellular link through its `cell-data` wrapper,
+and raw pppd/wifi commands fight it — an "off" it does not know about
+is undone by its next health check. So the three values are: **wifi**
+= `rc-service wifi start` + `cell-data auto` — the everyday mode, wifi
+preferred with the watchdog running cellular as automatic BACKUP
+(up within ~60-90s of losing real internet, torn down again when wifi
+recovers), which the pending-value help states ("wifi, cell as
+backup"); **cell** = `cell-data force` (cellular pinned up, failover
+disabled) + wifi stop ("cellular only"); **off** = `cell-data off`
+(torn down AND pinned down, so it STAYS down) + wifi stop ("no
+network"). The pin file lives in `/run` (tmpfs): a reboot returns to
+auto-with-wifi, the safe walkie-talkie default. Left/right cycle the
+PENDING target on screen — shown
 yellow with a `>` prefix, so asked-for is never dressed as done — OK
 applies it, and up/down moving the selection clears an unconfirmed
-pick (plan 0055: pick, then confirm; no timer). What the row SHOWS is
+pick (pick, then confirm; no timer). What the row SHOWS is
 derived from the same cached `DiagSnap` reads the developer rows use
 (the wifi state and the ppp0 link), refreshed on the same
-`DIAG_REFRESH` cadence. The apply issues at most one call per radio
-and NEVER retries on its own: repeated data calls per boot work
+`DIAG_REFRESH` cadence — the policy verb is therefore issued
+UNCONDITIONALLY on apply (the pin file is not visible in those
+readings), and the wifi target's success predicate stays "wlan0 up":
+the backup's comings and goings under `auto` are the watchdog's
+business and are not waited for. The apply NEVER retries on its own:
+repeated data calls per boot work
 (hardware-retested 2026-08-16), but an immediate redial after a hangup
 can fail while the modem settles (~5s) — so a run that reported
 something shows it on the help rows in red, KEEPS the target pending,
@@ -396,10 +412,11 @@ about what "Data: off" means:
 | Power off / Reboot to BL / Reboot to EDL | OK arms, OK again runs | `poweroff`, `/usr/local/bin/reboot-bootloader`, `/usr/local/bin/reboot-edl` |
 
 The independent Wifi / Data link toggle rows retired to the kid panel's
-Data tri-state (plan 0054) — same commands (`rc-service wifi start` /
-`stop`, `pppd call cellular &` / `killall pppd`, via the same `Diag`
-calls), one control instead of two; the combination the tri-state
-cannot express (both radios up at once) was never an on-device need.
+Data tri-state (plan 0054), which since plan 0057 sets watchdog POLICY
+(`rc-service wifi start`/`stop` plus the `cell-data auto`/`force`/`off`
+verbs, via the same `Diag` calls) — one control instead of two; the
+combination the tri-state cannot express (both radios up at once) is
+exactly what `auto` failover provides when it is needed.
 | Enroll | OK opens the enrolment QR (Back closes) | nothing external — `enrol.scala`; see "Device identity and enrolment" |
 
 Enroll is the one CONDITIONAL row: it exists only when this handset is
@@ -440,8 +457,9 @@ Three rules hold this together:
   immediate redial after a hangup can fail while the modem settles
   (~5s): a failed apply is reported on the help rows (`actionMsg`,
   red) with the target kept pending, and OK again is the deliberate
-  retry. `pppd` is backgrounded, so the outcome arrives through the
-  ~5s ppp0 refresh, not through the exec's exit status.
+  retry. The blocking `cell-data` verbs (`force`/`off`) are
+  backgrounded, so the outcome arrives through the ~5s ppp0 refresh,
+  not through the exec's exit status.
 - **The net test runs OFF the frame loop.** OK starts the four probes on
   a goroutine (`Diag.startNetTest`) and returns; the row reads `run..`
   until `SettingsLogic.collectNetTest` picks the verdicts up from
@@ -1819,7 +1837,7 @@ information in the equivalent place, not the same number.
 | battery / uptime / free memory in the Info detail | battery only | yes | uptime and `MemAvailable` read straight out of `/proc` (system-menu shells out to awk for the same number); `n/a` off-device |
 | wlan0 IP + cellular-data info rows (link + signal dBm) | no (system-menu) | yes | absorbed from system-menu (plan 0003 phase 5): `Diag.wlanIp`/`cellData` mirror its sources — `ip -4 addr show <iface>`, the ppp0 sysfs node, and `qmicli --nas-get-signal-strength` — re-read every ~5s; off-device both rows answer `n/a` |
 | net test: ping gateway / 1.1.1.1 / 8.8.8.8 + DNS probe | no (system-menu) | yes | same four probes, same command lines, verdicts in the row's detail block; synchronous (a frozen frame loop for a few seconds, as in system-menu); off-device it runs nothing and says `n/a` |
-| wifi ON/OFF, cellular data start/stop | no (system-menu) | yes | `rc-service wifi start`/`stop` and `pppd call cellular &`/`killall pppd`; both take the power rows' two-OK confirm and NEVER retry — the modem accepts one data call per boot, so a failure is reported on the row instead |
+| wifi ON/OFF, cellular data | no (system-menu) | yes | the kid data row's watchdog policy (plans 0054/0057): `rc-service wifi start`/`stop` plus `cell-data auto`/`force`/`off`; pick-then-confirm, never auto-retried — a failure is reported on the row and OK is the deliberate retry |
 | power off / reboot to BL / reboot to EDL | no (system-menu) | yes | same commands system-menu runs (`poweroff`, `/usr/local/bin/reboot-bootloader`, `/usr/local/bin/reboot-edl`) via `go.exec`; OK arms (the detail rows become a red confirm prompt), a second OK runs, any other key cancels. `Diag.runOnDevice` gates on the lcd-bl sysfs node so off the hardware the run is a logged no-op; on-device verification is the boot-into-wata phase's checkpoint |
 | detail area under the menu | rows 16..19 of 19 | rows 13..14 of 15 | same idea, sized to the landscape grid |
 | every settings item under test | n/a | yes | the `settings-walk` scenario |
