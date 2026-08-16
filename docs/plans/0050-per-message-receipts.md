@@ -1,8 +1,9 @@
 # 0050 — a receipt is per MESSAGE, not per user: accumulate, don't replace
 
-Status: accepted (bug report 2026-08-16: "played" checkmarks not showing
+Status: done (bug report 2026-08-16: "played" checkmarks not showing
 on the device for messages played on the mac — only the server-received
-check appears)
+check appears. Hardware-confirmed same day: after the fixed server went
+live, a mac play put the double check on the device's own-message row.)
 
 ## The problem
 
