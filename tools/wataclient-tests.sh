@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The wataclient library gate — seven checks over the portable client core.
+# The wataclient library gate — eight checks over the portable client core.
 #
 #   1. PORTABILITY TRIPWIRE: wataclient sources must have ZERO `go.*`
 #      references. The core is portable by construction: it reaches hardware,
@@ -35,6 +35,12 @@
 #      re-offers until the queue takes each exactly once, in order. Byte-diffed
 #      against tools/wataclient-oneshot.expected.txt.
 #
+#   8. TXN-SEED ORACLE: `wata-fb txntest` runs TxnTest.run() (plan 0048) —
+#      client construction seeds the txn counter from the clock and only moves
+#      it forward, so a restart can never replay a txn id the server would
+#      dedup into an old event. Byte-diffed against
+#      tools/wataclient-txn.expected.txt.
+#
 #   tools/wataclient-tests.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -43,7 +49,7 @@ WATA="$(pwd)"
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 SRC="$WATA/wataclient/src/main/scala"
 
-echo "== wataclient-tests: 1/7 portability tripwire (zero go.* in $SRC) =="
+echo "== wataclient-tests: 1/8 portability tripwire (zero go.* in $SRC) =="
 # match a `go.` qualifier that is NOT part of `sgo.` (word-boundary before `go`).
 HITS=$(grep -rnE '(^|[^A-Za-z0-9_])go\.' "$SRC" || true)
 if [ -n "$HITS" ]; then
@@ -53,7 +59,7 @@ if [ -n "$HITS" ]; then
 fi
 echo "   ok — no go.* references"
 
-echo "== wataclient-tests: 2/7 sync-engine unit oracle (wata-fb synctest) =="
+echo "== wataclient-tests: 2/8 sync-engine unit oracle (wata-fb synctest) =="
 # The driver is wata-fb itself (it links core+json+wataclient). Hash-gated
 # build, so usually a no-op.
 ( cd "$WATA/wata-fb" && "$SGO" build ) >/dev/null || { echo "wataclient-tests FAIL: wata-fb build"; exit 1; }
@@ -64,7 +70,7 @@ if ! diff <("$FB" synctest) tools/wataclient-sync.expected.txt; then
 fi
 echo "   ok — 19 sync-engine scenarios byte-match the pinned expectations"
 
-echo "== wataclient-tests: 3/7 sync-engine fixture oracle (wata-fb syncfix) =="
+echo "== wataclient-tests: 3/8 sync-engine fixture oracle (wata-fb syncfix) =="
 # FIX stays repo-RELATIVE: the fixture paths echo into the oracle transcript
 # (the pinned expectation), so the spelling is part of the byte contract.
 FIX="wataclient/test-fixtures"
@@ -81,21 +87,21 @@ if ! diff <("$FB" syncfix \
 fi
 echo "   ok — live-server fixtures replay to the pinned events/state/snapshot"
 
-echo "== wataclient-tests: 4/7 Ogg/CRC byte oracle (wata-fb oggtest) =="
+echo "== wataclient-tests: 4/8 Ogg/CRC byte oracle (wata-fb oggtest) =="
 if ! diff <("$FB" oggtest) tools/wataclient-ogg.expected.txt; then
   echo "wataclient-tests FAIL: Ogg oracle diverged from the pinned expected"
   exit 1
 fi
 echo "   ok — OggOracle.report() byte-matches the pinned expected"
 
-echo "== wataclient-tests: 5/7 arrival-notification oracle (wata-fb notifytest) =="
+echo "== wataclient-tests: 5/8 arrival-notification oracle (wata-fb notifytest) =="
 if ! diff <("$FB" notifytest) tools/wataclient-notify.expected.txt; then
   echo "wataclient-tests FAIL: notify oracle diverged from the pinned expected"
   exit 1
 fi
 echo "   ok — NotifyOracle.report() byte-matches the pinned expected"
 
-echo "== wataclient-tests: 6/7 foreign-container fixture (wata-fb oggforeign) =="
+echo "== wataclient-tests: 6/8 foreign-container fixture (wata-fb oggforeign) =="
 FOREIGN="$WATA/go-pkgs/audio/testdata/tui-foreign.ogg"
 [ -f "$FOREIGN" ] || { echo "wataclient-tests FAIL: missing pinned fixture $FOREIGN"; exit 1; }
 if ! diff <("$FB" oggforeign "$FOREIGN") tools/wataclient-foreign.expected.txt; then
@@ -104,11 +110,18 @@ if ! diff <("$FB" oggforeign "$FOREIGN") tools/wataclient-foreign.expected.txt; 
 fi
 echo "   ok — foreign fixture parses to the pinned packets/granule/EOS shape"
 
-echo "== wataclient-tests: 7/7 pending-one-shot oracle (wata-fb oneshottest) =="
+echo "== wataclient-tests: 7/8 pending-one-shot oracle (wata-fb oneshottest) =="
 if ! diff <("$FB" oneshottest) tools/wataclient-oneshot.expected.txt; then
   echo "wataclient-tests FAIL: one-shot oracle diverged from the pinned expected"
   exit 1
 fi
 echo "   ok — refused delete/favorite retried to exactly-once, in-order delivery"
 
-echo "wataclient-tests: PASS (tripwire + sync unit/fixture + ogg + notify + foreign-container + one-shot oracles)"
+echo "== wataclient-tests: 8/8 txn-seed oracle (wata-fb txntest) =="
+if ! diff <("$FB" txntest) tools/wataclient-txn.expected.txt; then
+  echo "wataclient-tests FAIL: txn-seed oracle diverged from the pinned expected"
+  exit 1
+fi
+echo "   ok — clock-seeded, monotonic txn ids across reconstruction"
+
+echo "wataclient-tests: PASS (tripwire + sync unit/fixture + ogg + notify + foreign-container + one-shot + txn-seed oracles)"

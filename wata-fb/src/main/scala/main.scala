@@ -67,6 +67,9 @@ object Main:
     // refused delete/favorite pending and the frame tick re-offers it; run by
     // client-tests against tools/wataclient-oneshot.expected.txt.
     else if args.length > 0 && args(0) == "oneshottest" then OneshotTest.run()
+    // the txn-seed oracle (plan 0048): restart may not replay txn ids; run by
+    // client-tests against tools/wataclient-txn.expected.txt.
+    else if args.length > 0 && args(0) == "txntest" then TxnTest.run()
     else if args.length > 1 && args(0) == "syncfix" then
       SyncFixDriver.run(args)
     else if args.length > 2 && args(0) == "integ" then

@@ -13,9 +13,10 @@
  *  in -> events out) — they are DEFINED here (the seam) and CONSUMED in the
  *  runtime layer. There is deliberately NO randomness capability: the one
  *  candidate consumer, transaction ids, rides an `Atomic[Int]` counter
- *  (`Runtime.txnCounterC`) — deterministic and sufficient for a
- *  single-client process — and nothing else in the core consumes
- *  randomness.
+ *  (`Runtime.txnCounterC`) seeded from the clock at client construction —
+ *  the server dedups txn ids per DEVICE across restarts, so the counter
+ *  must start above every earlier run's ids (TXN-RESTART-DEDUP, plan
+ *  0048) — and nothing else in the core consumes randomness.
  */
 
 // ---- HTTP transport (request record => response record) ----------------------

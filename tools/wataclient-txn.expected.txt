@@ -1,0 +1,3 @@
+txn after construction at t=5000000s: 5000001
+txn after same-second reconstruction: 5000002
+txn after clock advance to t=9000000s: 9000001

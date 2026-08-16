@@ -185,6 +185,21 @@ object Runtime:
     val audioCmds = sgo.makeChan[AudioCmd](16)
     val topics = sgo.makeChan[Event](TOPIC_QUEUE)  // the handle's dirty flags
     resetSession()
+    // TXN-RESTART-DEDUP (plan 0048): the server dedups transaction ids per
+    // DEVICE, and the device id survives restarts (login-or-resume) — a
+    // counter restarting at 0 replays a previous run's ids, and the server
+    // answers a fresh send with the OLD event: 200, a truthful SENT flash,
+    // and no new message anywhere. Seeding from the wall clock puts every
+    // restart above any earlier run's ids (epoch seconds, then +1 per
+    // action); the seed only ever moves the counter FORWARD, so several
+    // clients in one process (the mac's session loop) can never step it back
+    // onto ids the previous session used. Remaining window: a restart within
+    // fewer seconds than the previous run's action count — accepted, the ids
+    // then differ within one wall-clock second of use. A device that boots at
+    // 1970 narrows but does not reopen the window: a send needs the network,
+    // and the clock steps when it arrives.
+    val txnSeed = (clock.nowUnixMillis() / 1000L).toInt
+    if txnCounterC.get() < txnSeed then txnCounterC.set(txnSeed)
     // the queue is loaded HERE, before either loop exists: an entry that
     // outlived the last process is already pending when the first sync round
     // proves the server reachable. A MEMORY store is emptied first — it has no
