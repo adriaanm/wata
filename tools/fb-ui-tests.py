@@ -261,17 +261,21 @@ SCENARIOS = [
     {
         # plan 0041: arrival notifications. Phase 1 pins quiet mode (banner +
         # LED-arbiter decisions + persistent highlight); phase 2 pins play-now
-        # (the arrival auto-plays and the receipt raises `played`). The
-        # decision lines are asserted from the phase log — they are the
-        # assertable half of the presentation.
+        # (the arrival auto-plays and the receipt raises `played`); phase 3
+        # (plan 0047) pins CHIME — the device default, so it deliberately sets
+        # no mode — with the sim audio thread's line proving the chime command
+        # crossed the mailbox. The decision lines are asserted from the phase
+        # log — they are the assertable half of the presentation.
         "name": "arrival-notify",
         "phases": [
             ("alice", "alice-notify-quiet.txt"),
             ("alice", "alice-notify-play.txt"),
+            ("alice", "alice-notify-chime.txt"),
         ],
         "logs": {
             "alice-notify-quiet.txt": ['notify: quiet "Bob"'],
             "alice-notify-play.txt": ['notify: play "Bob"'],
+            "alice-notify-chime.txt": ['notify: chime "Bob"', "sim-audio: chime"],
         },
     },
 ]

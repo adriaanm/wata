@@ -592,18 +592,24 @@ object Ui:
 
   /** What one arrival does, and the ONE decision line it prints:
    *
-   *      notify: play|quiet|suppressed "<title>" "<body>" unplayed=<n>
+   *      notify: play|chime|quiet|suppressed "<title>" "<body>" unplayed=<n>
    *
-   *  `play` is the walkie-talkie default — the same `ActPlay` the applet's OK
+   *  `play` (auto-play) is the future focus-modes seam — unreachable from the
+   *  device UI since plan 0047, kept as the same `ActPlay` the applet's OK
    *  press sends plus `withPlaying`, so the existing `AePlaybackDone` arm
    *  sends the read receipt and an auto-played message really becomes played.
    *  An arrival that loses the `canAutoPlay` gate falls through to the quiet
    *  channels rather than queueing (the audio thread does one thing at a
-   *  time, and the count is still up). `suppressed` = the person is already
-   *  looking at that conversation on a lit screen — told already. */
+   *  time, and the count is still up). `chime` is the device default: the
+   *  startup chirp through the audio thread's mailbox (serialized, so it
+   *  never cuts into a recording or playback; the analog volume knob is the
+   *  mute switch), plus the same banner the quiet arm sets — the LED blink
+   *  rides the unplayed count either way. `suppressed` = the person is
+   *  already looking at that conversation on a lit screen — told already. */
   def announce(c: MatrixClient, a: Arrival, snap: StateSnapshot,
                unplayed: scala.Int, nowMs: Long): Unit =
-    if Notify.playsNow(FbConfig.notifyMode()) && canAutoPlay(Shell.wataState(stateV)) then
+    val mode = FbConfig.notifyMode()
+    if Notify.playsNow(mode) && canAutoPlay(Shell.wataState(stateV)) then
       Runtime.sendAction(c, ActPlay(a.mxcUrl))
       stateC.set(Shell.notifyWataPlaying(stateV, a.roomId, a.eventId))
       println(notifyLine("play", a, unplayed))
@@ -611,7 +617,10 @@ object Ui:
     else
       bannerC.set(Some(NotifyBanner(Notify.title(a), Notify.body(a), a.roomId,
         nowMs + BANNER_MS)))
-      println(notifyLine("quiet", a, unplayed))
+      if Notify.chimes(mode) then
+        val sent = c.audioCmds.trySend(AcChime())
+        println(notifyLine("chime", a, unplayed))
+      else println(notifyLine("quiet", a, unplayed))
 
   /** the mac's gate, restated: an auto-play waits rather than cutting into a
    *  playback or a recording in progress. */

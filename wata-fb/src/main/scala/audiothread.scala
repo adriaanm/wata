@@ -70,6 +70,7 @@ object AudioThread:
     case p: AcPlay         => doPlay(cmds, evts, p.ogg)
     case _: AcStopPlayback => true // handled inside doPlay
     case _: AcEchoTest     => doEcho(evts)
+    case _: AcChime        => Chirp.play(); true
     case _: AcQuit         => false
 
   // ---- command polls during record/play ----------------------------------------

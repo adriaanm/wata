@@ -58,6 +58,7 @@ object SimAudio:
     case _: AcPlay         => done(evts)
     case _: AcStopPlayback => true
     case _: AcEchoTest     => echo(evts)
+    case _: AcChime        => chime()
     case _: AcQuit         => false
 
   def finish(evts: sgo.Chan[AudioEvt]): Boolean =
@@ -66,6 +67,12 @@ object SimAudio:
 
   def done(evts: sgo.Chan[AudioEvt]): Boolean =
     evts.trySend(AePlaybackDone())
+    true
+
+  /** no speaker here: the LINE is the proof the chime command crossed the
+   *  mailbox (fb-ui-tests asserts it from the phase log, plan 0047). */
+  def chime(): Boolean =
+    println("sim-audio: chime")
     true
 
   def echo(evts: sgo.Chan[AudioEvt]): Boolean =

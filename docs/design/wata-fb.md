@@ -1129,21 +1129,29 @@ snapshot the frame already read (`Ui.notifyFrame`, marks carried in
 unplayed count RISING with a NEW newest unplayed message, priming is
 once per session.
 
-- **Play-now is the walkie-talkie default** (`notify_mode` absent =
-  `play`; the mac defaults to `quiet` — a desktop is not a
-  walkie-talkie). An arrival sends the same `ActPlay` the applet's OK
-  press sends and marks the applet playing through the
-  `Shell.notifyWataPlaying` shim, so the existing `AePlaybackDone` arm
-  sends the read receipt — an auto-played message really becomes played.
-  The `canAutoPlay` gate is the mac's (`!playing && !pttHeld`); an
-  arrival that loses it falls through to the quiet channels rather than
-  queueing — the audio thread does one thing at a time.
+- **Chime is the device default** (plan 0047: `notify_mode` absent =
+  `chime`, and a stored `play` — the pre-0047 default nobody chose
+  knowingly — loads as chime; the mac defaults to `quiet` — a desktop
+  is not a walkie-talkie). An arrival under chime mode sends `AcChime`
+  through the audio thread's mailbox — the thread owns the pcm device
+  and does one thing at a time, so the chime (the startup chirp asset,
+  `Chirp.play()`, one audio path) never cuts into a recording or a
+  playback — and then sets the same banner quiet mode sets. The
+  settings applet's Notify row toggles chime/quiet.
+- **Play-now (auto-play) is the future focus-modes seam** — in the code,
+  unreachable from the device UI. An arrival under it sends the same
+  `ActPlay` the applet's OK press sends and marks the applet playing
+  through the `Shell.notifyWataPlaying` shim, so the existing
+  `AePlaybackDone` arm sends the read receipt — an auto-played message
+  really becomes played. The `canAutoPlay` gate is the mac's
+  (`!playing && !pttHeld`); an arrival that loses it falls through to
+  the quiet channels rather than queueing.
 - **The volume knob needs no software.** `PlayVol` is fixed; the pot is
-  analog and pre-PA, so its off position silences an auto-play exactly as
-  it silences the chirp — and the message is still receipted as played.
-  That is the walkie-talkie contract (a radio does not know its volume
-  either); a parent who wants unheard messages to stay unplayed sets
-  quiet mode.
+  analog and pre-PA, so its off position silences the chime exactly as
+  it silences the chirp and a playback — the knob is the mute switch,
+  which is what "chime only when the volume is up" means on this
+  hardware. A chimed message stays unplayed either way; only actually
+  playing it receipts it.
 - **Quiet mode announces on three channels, all derived from the one
   number** (`Notify.totalUnplayed` + the per-conversation counts the
   contact list already badges — no second state threads through the sync
@@ -1174,7 +1182,7 @@ once per session.
   checkpoints keep doing so: they pin the real invariant that badge
   state does not depend on notify mode, and cost nothing.
 - **Every arrival prints one decision line** to the app log:
-  `notify: play|quiet|suppressed "<title>" "<body>" unplayed=<n>` —
+  `notify: play|chime|quiet|suppressed "<title>" "<body>" unplayed=<n>` —
   the assertable half of the presentation (`suppressed` = the person was
   already looking at that conversation).
 - **The mode is device config**, a `notify_mode` key in the config store

@@ -129,12 +129,17 @@ object FbConfig:
    *  appear on the other in the same move. The cell is the reader for every
    *  write path (`writeStore` is called by `saveSession` and `savePrefs`,
    *  neither of which knows about the mode); `Ui.resetCells` primes it from
-   *  the file before the first frame. Default `play`: it is a walkie-talkie
-   *  (the mac defaults to `quiet` — a desktop is not one). */
-  private val modeC: sgo.Atomic[String] = sgo.atomic(Notify.MODE_PLAY)
+   *  the file before the first frame. Default `chime` (plan 0047): a message
+   *  announces itself with a short chime and the blinking LED; auto-play is
+   *  parked until the focus-modes work reintroduces it deliberately (the mac
+   *  defaults to `quiet` — a desktop is not a walkie-talkie). */
+  private val modeC: sgo.Atomic[String] = sgo.atomic(Notify.MODE_CHIME)
 
   def loadNotifyMode(): NotifyMode =
-    val m = Notify.parseMode(WJson.strField(readJson(), "notify_mode", Notify.MODE_PLAY))
+    var m = Notify.parseMode(WJson.strField(readJson(), "notify_mode", Notify.MODE_CHIME))
+    // a stored `play` (the pre-plan-0047 default; nobody chose it knowingly)
+    // loads as chime — bringing auto-play back is a new, deliberate act.
+    if Notify.playsNow(m) then m = NotifyChime()
     modeC.set(Notify.spellMode(m))
     m
 

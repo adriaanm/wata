@@ -1240,11 +1240,13 @@ case class SettingsState(
   actionMsg: String,
   diagLeft: scala.Int,
   enrolOpen: Boolean,
-  // the arrival-notification mode's row value (plan 0041): true = play now.
+  // the arrival-notification mode's row value (plan 0041, remapped by plan
+  // 0047): true = chime on arrival, false = quiet. Auto-play is not offered
+  // here — it returns with the future focus-modes work.
   // A mirror of FbConfig's notify-mode cell, held here so the menu body stays
   // a pure function of the applet state; `persisted` writes it back through
   // `FbConfig.saveNotifyMode` the moment it changes.
-  notifyPlay: Boolean
+  notifyChime: Boolean
 )
 
 /** the settings applet: a thin dynamic-dispatch shell over `SettingsLogic`
@@ -1349,7 +1351,7 @@ object SettingsLogic:
 
   def initial(): SettingsState =
     SettingsState(0, 40, EchoIdle(), 1, true, false, noDiag(), "", "", false, "", 0, false,
-      Notify.playsNow(FbConfig.notifyMode()))
+      Notify.chimes(FbConfig.notifyMode()))
 
   /** the boot state: preferences come back from the config store, so a device
    *  keeps the backlight and timeout its owner set. The notify mode reads the
@@ -1358,7 +1360,7 @@ object SettingsLogic:
    *  so a field for one would have to appear on the other in the same move. */
   def restored(p: FbPrefs): SettingsState =
     SettingsState(0, p.brightness, EchoIdle(), p.timeoutIdx, true, false,
-      noDiag(), "", "", false, "", 0, false, Notify.playsNow(FbConfig.notifyMode()))
+      noDiag(), "", "", false, "", 0, false, Notify.chimes(FbConfig.notifyMode()))
 
   /** nothing read yet — the first `refreshDiag` fills it in on the first frame
    *  (`diagLeft` starts at 0). `enrol` is the exception: it decides how many
@@ -1379,34 +1381,34 @@ object SettingsLogic:
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
     SettingsState(sel, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
     SettingsState(s.selected, b, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
     SettingsState(s.selected, s.brightness, e, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, i, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, c,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withArmed(s: SettingsState, a: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      a, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      a, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withDiag(s: SettingsState, d: DiagSnap, left: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, d, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, left, s.enrolOpen, s.notifyPlay)
+      s.armed, d, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, left, s.enrolOpen, s.notifyChime)
   def withNetTest(s: SettingsState, l1: String, l2: String, running: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, l1, l2, running, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      s.armed, s.diag, l1, l2, running, s.actionMsg, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withEnrolOpen(s: SettingsState, o: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, o, s.notifyPlay)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, o, s.notifyChime)
   def withActionMsg(s: SettingsState, m: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, m, s.diagLeft, s.enrolOpen, s.notifyPlay)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, m, s.diagLeft, s.enrolOpen, s.notifyChime)
   def withNotify(s: SettingsState, play: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
       s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, play)
@@ -1448,14 +1450,14 @@ object SettingsLogic:
   def persisted(before: SettingsState, after: SettingsState): SettingsState =
     if prefsChanged(before, after) then
       FbConfig.savePrefs(FbPrefs(after.brightness, after.screenTimeoutIdx))
-    if before.notifyPlay != after.notifyPlay then
-      FbConfig.saveNotifyMode(modeOf(after.notifyPlay))
+    if before.notifyChime != after.notifyChime then
+      FbConfig.saveNotifyMode(modeOf(after.notifyChime))
     after
 
   /** the row's Boolean back as the shared model's mode. */
-  def modeOf(play: Boolean): NotifyMode =
+  def modeOf(chime: Boolean): NotifyMode =
     var out: NotifyMode = NotifyQuiet()
-    if play then out = NotifyPlayNow()
+    if chime then out = NotifyChime()
     out
 
   def prefsChanged(a: SettingsState, b: SettingsState): Boolean =
@@ -1570,13 +1572,13 @@ object SettingsLogic:
   def onLeft(s: SettingsState): SettingsState =
     if cur(s) == BRIGHTNESS then brightnessDown(s)
     else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
-    else if cur(s) == NOTIFY then withNotify(s, !s.notifyPlay)
+    else if cur(s) == NOTIFY then withNotify(s, !s.notifyChime)
     else s
 
   def onRight(s: SettingsState): SettingsState =
     if cur(s) == BRIGHTNESS then brightnessUp(s)
     else if cur(s) == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
-    else if cur(s) == NOTIFY then withNotify(s, !s.notifyPlay)
+    else if cur(s) == NOTIFY then withNotify(s, !s.notifyChime)
     else s
 
   /** wrap-decrement (the `if x==0 then n-1 else x-1` idiom as a plain fn). */
@@ -1723,7 +1725,7 @@ object SettingsLogic:
   /** the Notify row's value: the persisted spellings, spoken as the row. */
   def notifyLabel(s: SettingsState): String =
     var out = "quiet"
-    if s.notifyPlay then out = "play now"
+    if s.notifyChime then out = "chime"
     out
 
   def netLabel(s: SettingsState): String =

@@ -22,6 +22,10 @@ case class AcPlay(ogg: Bytes) extends AudioCmd
 case class AcStopPlayback() extends AudioCmd
 /** record 2s + play back through the speaker (settings echo test). */
 case class AcEchoTest() extends AudioCmd
+/** play the notification chime — an arrival under chime mode (plan 0047).
+ *  Serialized like every command, so it never cuts into a recording or a
+ *  playback; a device layer with no chime asset no-ops with one line. */
+case class AcChime() extends AudioCmd
 /** exit the thread main loop; doubles as the poison pill — closing the
  *  channel would hand a nil interface to `match` (same pattern as
  *  `ActQuit` in the action loop). */

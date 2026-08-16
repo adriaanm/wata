@@ -1,0 +1,23 @@
+# arrival-notify, phase 3 (plan 0047): CHIME mode is the DEVICE DEFAULT — no
+# notifymode directive on purpose, so this phase asserts what a fresh device
+# does with an arrival: chime (the sim audio thread logs the command
+# crossing the mailbox), banner, blinking LED — and NO auto-play, which is
+# the plan's point: the message stays unplayed, so the blink survives until
+# somebody actually plays it.
+
+wait syncing 1 900
+wait convs 2 900
+advance 30
+# phase 1's message is still unplayed (phase 2 primed past it): blinking
+expect unplayed 1
+expect notifyled 2
+
+sendas bob
+wait unplayed 2 2000
+# announced on the chime channels: banner up, still blinking
+expect notifybanner 1
+expect notifyled 2
+advance 3
+# nothing auto-played it — the count holds, unlike phase 2's play mode
+expect unplayed 2
+checkpoint notify-chime-banner

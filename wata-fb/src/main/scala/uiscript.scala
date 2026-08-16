@@ -449,8 +449,8 @@ object UiScript:
    *  write a file another phase would then resume into. */
   def notifyModeDirective(name: String): String =
     var err = ""
-    if name != Notify.MODE_PLAY && name != Notify.MODE_QUIET then
-      err = "notifymode wants play|quiet"
+    if name != Notify.MODE_PLAY && name != Notify.MODE_CHIME && name != Notify.MODE_QUIET then
+      err = "notifymode wants play|chime|quiet"
     else FbConfig.forceNotifyMode(Notify.parseMode(name))
     err
 

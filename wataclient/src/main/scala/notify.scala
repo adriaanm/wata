@@ -35,8 +35,11 @@
 
 /** how an arriving message is presented. */
 sealed trait NotifyMode
-/** walkie-talkie: play it as it lands. */
+/** walkie-talkie: play it as it lands. Not reachable from the device UI —
+ *  the future focus-modes work reintroduces it deliberately (plan 0047). */
 case class NotifyPlayNow() extends NotifyMode
+/** the device default: a short chime, then the quiet channels (plan 0047). */
+case class NotifyChime() extends NotifyMode
 /** announce it and leave the audio to the user. */
 case class NotifyQuiet() extends NotifyMode
 
@@ -77,18 +80,26 @@ object Notify:
   /** the persisted spellings. Strings, because this is what a config file
    *  holds and what a client's chrome passes around. */
   val MODE_PLAY = "play"
+  val MODE_CHIME = "chime"
   val MODE_QUIET = "quiet"
 
   def parseMode(s: String): NotifyMode =
-    if s == MODE_PLAY then NotifyPlayNow() else NotifyQuiet()
+    if s == MODE_PLAY then NotifyPlayNow()
+    else if s == MODE_CHIME then NotifyChime()
+    else NotifyQuiet()
 
   def spellMode(m: NotifyMode): String = m match
     case _: NotifyPlayNow => MODE_PLAY
+    case _: NotifyChime   => MODE_CHIME
     case _                => MODE_QUIET
 
   def playsNow(m: NotifyMode): Boolean = m match
     case _: NotifyPlayNow => true
     case _                => false
+
+  def chimes(m: NotifyMode): Boolean = m match
+    case _: NotifyChime => true
+    case _              => false
 
   def initial(): NotifyState = NotifyState(false, Nil)
 
