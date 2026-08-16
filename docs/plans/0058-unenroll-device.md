@@ -1,8 +1,9 @@
-# 0058 — un-enrolling a device
+# 0058 — un-enrolling a device, and the enrolment lifecycle gaps around it
 
 Status: proposed (owner observation 2026-08-16, after the /data
 adoption incident orphaned an enrolled node id: "we should have a way
-to un-enroll a device")
+to un-enroll a device"; extended same day after the owner's re-enrol
+fumble surfaced the lifecycle gaps below)
 
 ## The problem
 
@@ -61,22 +62,79 @@ today's recovery.
   open connection from the node is dropped if the library offers it,
   otherwise it dies at its next dial — recorded in the facade doc).
 - `wata-server`: `enroll.scala` (the revoke route + allowlist
-  rewrite), `bindings.scala` (`unbind` + journal + replay),
-  `persist.scala`/`store.scala` (`node_id` on device rows; revoke by
-  node id), the admin page's enrol section, `irohnet.scala` facade.
+  rewrite; a bind route for an already-enrolled node), `bindings.scala`
+  (`unbind` + journal + replay), `adminapi.scala` (`removeUser`
+  unbinds), `persist.scala`/`store.scala` (`node_id` on device rows;
+  revoke by node id), the admin page's enrol section (remove action;
+  pick-or-create on unbound/dangling enrolled rows), `irohnet.scala`
+  facade.
 - `docs/design/wata-server.md` enrolment section.
+
+## The lifecycle gaps (the owner's fumble, walked critically)
+
+The state space is allowlist × binding × account × client, and three
+of its corners are reachable today with nothing marking them:
+
+1. **A binding is a NAME, and it outlives the account.** `removeUser`
+   revokes sessions but never unbinds, and the user id is derived
+   (`@<localpart>:<server>`), so deleting an account and later
+   creating one with the same localpart silently reattaches the same
+   Matrix identity — history, room membership, and every enrolled
+   handset bound to the name. That is exactly what the owner
+   observed ("provisioning nicely went through"), and as an
+   accidental-delete undo it is genuinely convenient — but it is
+   inheritance by name reuse, invisible and undecided. **Decision:
+   make it deliberate.** `removeUser` UNBINDS the account's node ids
+   (journaled, same `unbind` op as revoke), so a deleted account's
+   handsets drop to the visible "enrolled, no account" state below
+   and a same-name account never silently inherits hardware. The
+   identity reattachment (history/membership) remains — that part is
+   Matrix-shaped and fine — but re-granting a handset is an explicit
+   admin act again.
+
+2. **"Enrolled, no account" is a real state with no exit in the UI.**
+   An admitted node with no binding sits at device-login 404 forever;
+   the enrolled table says "no account yet" and offers nothing (the
+   picker exists only on pending rows, which an enrolled handset no
+   longer has). With decision 1 this state also becomes the landing
+   spot for deleted accounts' handsets. **The owner's ask, adopted:**
+   the enrolled table's unbound rows get the same pick-or-create
+   account control the pending rows have — binding (and creating) an
+   account for an already-enrolled handset in place.
+
+3. **A dangling binding renders as if healthy.** Until decision 1
+   lands (and for journals replaying the old behavior), a binding
+   whose localpart has no account shows as "bound to alma" with no
+   hint that alma does not exist and the handset is getting 403.
+   The enrolled table marks it ("account deleted") and offers the
+   same pick-or-create control.
+
+Also observed and to be pinned down: **the client seemed not to
+notice its own approval until a restart.** The code says it must —
+a rejected login retries at a 60s ceiling forever, and today's
+recovery was observed to connect unprompted within that window — so
+the fumble most plausibly hit the window where wata-fb was
+exit-looping with no config at all. The verification below makes
+approval-propagation-without-restart an explicit asserted property so
+a real defect (e.g. the iroh dial layer caching a refusal) cannot
+hide behind "restart fixed it".
 
 ## Verification
 
-An integ scenario: enrol + bind + exchange a message, revoke, then
-assert (a) a fresh dial is refused at the transport, (b) the old
-token is dead on a TCP request too, (c) re-announce → approve →
-device-login works again. `just ci`; admin-page action exercised
-against a live server.
+An integ scenario walking the lifecycle: enrol + bind + exchange a
+message; revoke → (a) fresh dial refused at the transport, (b) the
+old token dead on a TCP request too, (c) re-announce → approve →
+device-login works again. Account-lifecycle legs: delete the bound
+account → handset drops to "enrolled, no account" (device-login 404,
+not 403) and a same-name re-create does NOT reattach the handset;
+bind-from-enrolled-table works. Approval propagation: after approve,
+the client connects within its backoff ceiling with no restart.
+`just ci`; admin-page actions exercised against a live server.
 
 ## Out of scope
 
-- Bulk/cascade semantics (removing a user already revokes sessions;
-  it still won't touch the allowlist — an account and a handset are
-  separate trust grants, revoked separately).
 - Auto-expiring stale allowlist entries.
+- A last-seen column on the enrolled table (the server has the data;
+  nice, separate).
+- Preventing same-name identity reattachment at the Matrix layer
+  (deliberately kept — it is the accidental-delete undo).
