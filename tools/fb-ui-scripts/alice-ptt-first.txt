@@ -1,0 +1,34 @@
+# ptt-first (plan 0052): PTT is the talk key everywhere. From the contact
+# list PTT sends to the selected row (pinned by dm-roundtrip's phase 2);
+# this scenario pins the OTHER side: PTT from another applet chimes and
+# lands on the wata screen with NO recording started — the SECOND press is
+# the one that talks, with the screen now saying to whom.
+
+wait syncing 1 900
+wait convs 1 900
+advance 30
+
+# over to the settings applet
+tap dot2
+advance 5
+checkpoint ptt-on-settings
+
+# PTT there: chime + switch back to wata — and no recording overlay on the
+# frame, which is the point of the swallow
+key ptt press
+advance 5
+checkpoint ptt-switched-back
+key ptt release
+advance 5
+
+# the second press talks: the REC overlay over the contact list
+key ptt press
+advance 20
+checkpoint ptt-second-press
+key ptt release
+wait msgs 1 1500
+
+# exactly ONE message: had the swallowed first press recorded, its release
+# would have sent a second one
+advance 60
+waitmax msgs 1 5

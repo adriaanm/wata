@@ -9,9 +9,10 @@ import language.experimental.saferExceptions
  *  ONE module var (`stateV`) touched by ONE goroutine (the UI/main loop).
  *
  *  APPLET SET: `wata` (index 0) + `settings` (index 1) + `snake` (index 2).
- *  dot1/dot2 switch applets; PTT always routes to wata regardless of the
- *  active applet; red pressed in the snake applet returns to wata (the
- *  red-goes-back convention — the game itself never sees the key).
+ *  dot1/dot2 switch applets; PTT is the talk key everywhere — it records
+ *  inside the wata applet and chimes-and-switches to it from any other
+ *  (plan 0052, `pttGlobal`); red pressed in the snake applet returns to wata
+ *  (the red-goes-back convention — the game itself never sees the key).
  *
  *  dot2 CAVEAT: input handling opens ONLY /dev/input/event{0,1,2} — the SAME
  *  three devices Evdev.open() opens. It binds dot2 (KEY_F10) but discovers no
@@ -124,7 +125,7 @@ object Shell:
    *  at update/render). The per-frame ctx carries the snapshot + queues. */
   def handleInput(s: ShellState, k: Key, ks: KeyState, ctx: FrameCtx): ShellState =
     if isPressed(ks) && isDot(k) then switchApplet(s, k)
-    else if isPtt(k) then routeWata(s, k, ks, ctx)   // PTT is global
+    else if isPtt(k) then pttGlobal(s, k, ks, ctx)   // PTT is global
     else if isPressed(ks) && isSnakeBack(s, k) then withActive(s, WATA)
     else routeActive(s, k, ks, ctx)
 
@@ -159,8 +160,21 @@ object Shell:
     if active == 0 then out = n - 1
     out
 
-  /** PTT routes to the wata applet regardless of the active one — a
-   *  special-cased direct call, outside the uniform dispatch. */
+  /** PTT is the TALK key everywhere (plan 0052): inside the wata applet it
+   *  records; from any OTHER applet the press chimes and brings the wata
+   *  screen up instead — a kid mid-snake must not broadcast invisibly. The
+   *  press is swallowed (no recording starts), and the matching release then
+   *  lands on the wata applet as a no-op (`pttHeld` is false), so the SECOND
+   *  press is the one that talks — with the screen now saying to whom. */
+  def pttGlobal(s: ShellState, k: Key, ks: KeyState, ctx: FrameCtx): ShellState =
+    if s.active == WATA then routeWata(s, k, ks, ctx)
+    else if isPressed(ks) then
+      ctx.audioCmds.trySend(AcChime())
+      withActive(s, WATA)
+    else s
+
+  /** the wata-applet direct call — a special-cased dispatch outside the
+   *  uniform one (PTT and the notify shims target wata by construction). */
   def routeWata(s: ShellState, k: Key, ks: KeyState, ctx: FrameCtx): ShellState =
     withApplet(s, WATA, s.applets(WATA).handleInput(k, ks, ctx))
 

@@ -202,6 +202,15 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0052: PTT from another applet chimes and switches to the wata
+        # screen without recording; the second press talks. The send-from-
+        # contact-list half of the plan rides dm-roundtrip's phase 2.
+        "name": "ptt-first",
+        "phases": [
+            ("alice", "alice-ptt-first.txt"),
+        ],
+    },
+    {
         "name": "boot-retry",
         "late_server": 4.0,
         "phases": [

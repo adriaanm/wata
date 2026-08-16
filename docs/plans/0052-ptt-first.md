@@ -1,6 +1,6 @@
 # 0052 — PTT is the talk key everywhere
 
-Status: accepted (field-test feedback 2026-08-16 — the first real
+Status: done (field-test feedback 2026-08-16 — the first real
 garden-range session: kids pressed OK to open a conversation before
 every send, and PTT from another applet recorded invisibly)
 

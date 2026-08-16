@@ -228,11 +228,16 @@ explicit state machine, not a generic widget framework:
   scroll state), which keeps the frames the goldens pin
   deterministic.
 - Input routing has three special cases outside the generic per-applet
-  dispatch: the PTT button always targets the wata applet regardless
-  of which applet is active, the two "dot" buttons cycle the
+  dispatch: the PTT button is the talk key everywhere (plan 0052,
+  `Shell.pttGlobal`) — inside the wata applet it records; from any
+  other applet the press CHIMES and switches to the wata screen
+  without recording, so the second press is the one that talks, with
+  the screen saying to whom (the release lands on wata as a no-op,
+  `pttHeld` being false); the two "dot" buttons cycle the
   active applet, and red pressed in the snake applet returns to the
   wata applet — the red-goes-back convention; the game itself never
-  sees the key (`Shell.handleInput`).
+  sees the key (`Shell.handleInput`). The contacts footer carries the
+  `PTT talk` hint.
 - The shell owns the `AudioEvt` mailbox's SINGLE per-frame drain
   (`Shell.drainAudio` -> `routeAudio`): echo events go to the settings
   applet, recording/playback events to the wata applet, whichever

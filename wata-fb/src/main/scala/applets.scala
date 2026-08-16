@@ -626,7 +626,7 @@ object WataLogic:
       VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) :: (Keyed("net", netView(net)) :: kids))
 
   def contactsFooter(quitArmed: Boolean): String =
-    if quitArmed then "BACK again to exit" else "UP/DN sel OK open"
+    if quitArmed then "BACK again to exit" else "UP/DN sel OK open PTT talk"
 
   /** the visible window of contact rows, keyed on the conversation's identity —
    *  the same room-or-contact key the outbox marks are matched by. */
