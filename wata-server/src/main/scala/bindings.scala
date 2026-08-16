@@ -57,6 +57,20 @@ object Bindings:
   /** the replay path: same reseat, no re-journaling. */
   def replayBind(nodeId: String, user: String): Unit = put(nodeId, user)
 
+  /** drop `nodeId`'s binding, if any. Journaled (`unbind` op). Written ONLY by
+   *  an enrolment revocation (enroll.scala) — never by account removal: a
+   *  binding is a NAME and deliberately outlives its account (plan 0058's
+   *  owner ruling — deletion is shallow, recreating the name is the undo), and
+   *  an explicit rebind overwrites through `bind` rather than through here. */
+  def unbind(nodeId: String): Unit =
+    drop(nodeId)
+    Journal.rec(Journal.unbindOp(nodeId))
+
+  def replayUnbind(nodeId: String): Unit = drop(nodeId)
+
+  def drop(nodeId: String): Unit =
+    cell.withLock(st => st.items = withoutNode(st.items, nodeId, Nil))
+
   def put(nodeId: String, user: String): Unit =
     cell.withLock(st => st.items = Binding(nodeId, user) :: withoutNode(st.items, nodeId, Nil))
 
@@ -97,12 +111,14 @@ object DeviceLogin:
     else byNode(nid)
 
   def byNode(nodeId: String): Either[MErr, Json] = Bindings.userFor(nodeId) match
-    case s: Some[String] => byUser(s.value)
+    case s: Some[String] => byUser(s.value, nodeId)
     case None => Left(MErr(404, M_NOT_FOUND(), "No account is bound to this device"))
 
   /** a binding to an account that was since removed answers 403, not a
    *  session for a ghost. The binding itself is left in place: re-creating
-   *  the account restores the handset without another enrolment. */
-  def byUser(lp: String): Either[MErr, Json] = Store.userByLocalpart(lp) match
-    case _: Some[UserCfg] => Router.loginOk(lp)
+   *  the account restores the handset without another enrolment. A success
+   *  records the proven node id on the minted row (plan 0058), so an
+   *  enrolment revocation can kill exactly the sessions this node minted. */
+  def byUser(lp: String, nodeId: String): Either[MErr, Json] = Store.userByLocalpart(lp) match
+    case _: Some[UserCfg] => Router.loginOkNode(lp, nodeId)
     case None => Left(MErr(403, M_FORBIDDEN(), "The bound account no longer exists"))

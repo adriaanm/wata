@@ -25,7 +25,12 @@ Steps:
      first entry in the previously-empty allowlist — and it is then accepted:
      by the same SERVER process and, in the second half, by the same CLIENT
      process, which is left running across the approval and has to redial its
-     way in on its own retry cadence.
+     way in on its own retry cadence;
+  8. un-enrolment (plan 0058): the node that just synced is revoked — the
+     live listener stops admitting it, its node-minted session rows die
+     (revoked_sessions >= 1), a fresh dial is refused loudly — and then
+     recovered through the ordinary announce/approve loop, same server
+     process throughout.
 
 Prints TUNNEL-SMOKE PASS / FAIL. Needs cargo (the Rust toolchain) on top of
 the repo's usual prerequisites — this recipe and fb-deploy's successors are
@@ -273,6 +278,79 @@ def enrol_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id, spare_id, sdir
         if proc.poll() is None:
             proc.kill()
         log.close()
+    if good:
+        good = revoke_leg(env, client_bin, cli_cfg_dir, srv_cfg, intruder_id,
+                          base, token)
+    return good
+
+
+def revoke_leg(env, client_bin, cli_cfg_dir, srv_cfg, node, base, token):
+    """Un-enrolment over the REAL transport (plan 0058) — the half the TCP
+    admin smoke cannot reach. The node that just synced is revoked: the live
+    listener must stop admitting it (irohnet.Disallow, `live: true`), the
+    node-minted session rows must die (`revoked_sessions` counts REAL
+    device-login rows here — the TCP smoke can only ever see 0), and a FRESH
+    DIAL from the same key must be refused with the ordinary loud refusal.
+    Then the recovery arc the plan promises: re-announce, approve again with
+    the still-existing account, and the same key is back in — no restart of
+    the server anywhere in the story.
+
+    The token-dead-on-TCP half of a revocation rides the same
+    `Store.dropDevice` that account removal uses, which the admin smoke
+    already pins mid-session; what is asserted here is that the node-minted
+    rows are FOUND (the count), which is the plan-0058 half.
+
+    Returns True when every check held."""
+    good = True
+
+    def check(cond, what):
+        nonlocal good
+        print(f"tunnel-smoke: un-enrol: {'PASS' if cond else 'FAIL'} — {what}")
+        if not cond:
+            good = False
+        return cond
+
+    status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{node}/revoke", None, token)
+    check(status == 200, f"revoke answers 200 (saw {status} {body})")
+    check(body.get("live") is True,
+          f"revoke applied to the LIVE listener (note: {body.get('note')!r})")
+    check(body.get("revoked_sessions", 0) >= 1,
+          f"the node-minted session row was found and revoked (saw {body.get('revoked_sessions')})")
+    check(node not in json.loads(srv_cfg.read_text())["allowlist"],
+          "the id left the server's iroh config allowlist")
+    _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
+    check(node not in (listing.get("allowlisted") or []),
+          "the listing no longer reports it as enrolled")
+    check(node not in {b["node_id"] for b in listing.get("bindings", [])},
+          "the binding is dropped")
+
+    r = subprocess.run(
+        [str(client_bin), "integ", "login-syncing", "http://wata.iroh"],
+        env={**env, "WATA_IROH_CONFIG": str(cli_cfg_dir)},
+        cwd=WATA, capture_output=True, text=True, timeout=60,
+    )
+    combined = r.stdout + r.stderr
+    check("INTEG PASS" not in r.stdout and "not allowlisted" in combined,
+          "a FRESH dial from the revoked key is refused at the transport, loudly")
+
+    # the recovery: exactly today's arc, from zero — announce, approve (the
+    # account still exists, so the approve binds it as-is), fresh dial in.
+    status, body = api(base, "POST", "/_wata/v1/enroll", {"nodeId": node, "nonce": "RV01"})
+    check(status == 200 and body.get("pending") is True and body.get("allowlisted") is False,
+          f"the revoked node's re-announce is pending again, not 'already enrolled' (saw {body})")
+    status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{node}/approve",
+                       {"user": "kid1"}, token)
+    check(status == 200 and body.get("live") is True,
+          f"re-approval works and applies live (saw {status} {body})")
+    r = subprocess.run(
+        [str(client_bin), "integ", "login-syncing", "http://wata.iroh"],
+        env={**env, "WATA_IROH_CONFIG": str(cli_cfg_dir)},
+        cwd=WATA, capture_output=True, text=True, timeout=60,
+    )
+    if not check("INTEG PASS" in r.stdout,
+                 "after re-approval the same key is admitted again — no server restart"):
+        print("---- re-admitted client output ----")
+        print(r.stdout + r.stderr)
     return good
 
 

@@ -15,6 +15,8 @@ import sgo.{Mutex, mutex}
  *  GET  /_wata/v1/admin/enroll                                   (admin)
  *  POST /_wata/v1/admin/enroll/{nodeId}/approve   [{user}]       (admin)
  *  POST /_wata/v1/admin/enroll/{nodeId}/deny                     (admin)
+ *  POST /_wata/v1/admin/enroll/{nodeId}/revoke                   (admin)
+ *  POST /_wata/v1/admin/enroll/{nodeId}/bind      {user}         (admin)
  *  }}}
  *
  *  **The announce is deliberately unauthenticated and deliberately inert.** A
@@ -449,3 +451,105 @@ object Enroll:
   def fileHasId(p: String, nodeId: String): Boolean = Json.tryParse(Config.readAll(p)) match
     case Left(_)  => false
     case Right(j) => hasStr(allowIds(j), nodeId)
+
+  // ---- revocation (plan 0058) ---------------------------------------------------
+
+  /** `POST /_wata/v1/admin/enroll/{nodeId}/revoke` — the inverse of approve,
+   *  same durable-first shape:
+   *
+   *   1. rewrite the allowlist file WITHOUT the id (the same atomic
+   *      temp+rename, confirmed by re-read); 404 when the file holds no
+   *      literal entry for it (a `"*"` wildcard is not something revoke
+   *      edits — it is a deployment choice, not an enrolment);
+   *   2. `irohnet.Disallow` on the RUNNING listener, which also closes the
+   *      node's live connections — reported as `live`/`note` like approve's
+   *      live apply, never fatal, since the file is what the next boot reads;
+   *   3. drop the binding (journaled `unbind` — the ONE writer besides an
+   *      explicit rebind);
+   *   4. revoke every session the node minted: `revoked_sessions` counts the
+   *      device rows whose `node_id` matched, so the tokens are dead on the
+   *      TCP path too. Rows minted before device rows carried a node id
+   *      cannot be traced to this node and are NOT revoked — the count is how
+   *      the response states what actually died instead of silently skipping.
+   *
+   *  The bound ACCOUNT is untouched (deletion is a separate, shallow act —
+   *  the plan's owner ruling); a revoked handset that announces again starts
+   *  the ordinary approve loop from zero. */
+  def revoke(nodeId: String): Either[MErr, Json] =
+    val p = allowlistPath()
+    if p == "" then Left(MErr(500, M_UNKNOWN(), "No allowlist file configured (WATA_IROH_CONFIG)"))
+    else if !fileHasId(p, nodeId) then Left(MErr(404, M_NOT_FOUND(), "That node id is not in the allowlist"))
+    else revoke2(p, nodeId)
+
+  def revoke2(p: String, nodeId: String): Either[MErr, Json] =
+    val note = writeDisallow(p, nodeId)
+    if note != "" then Left(MErr(500, M_UNKNOWN(), note))
+    else revoked(nodeId)
+
+  def revoked(nodeId: String): Either[MErr, Json] =
+    val live = liveDisallow(nodeId)
+    Bindings.unbind(nodeId)
+    val n = Store.dropNodeDevices(nodeId)
+    var fs: List[(String, Json)] = startObj
+    fs = ("node_id", JStr(nodeId)) :: fs
+    fs = ("allowlist_file", JStr(allowlistPath())) :: fs
+    fs = ("live", JBool(live == "")) :: fs
+    fs = ("note", JStr(live)) :: fs
+    fs = ("revoked_sessions", JInt(n)) :: fs
+    Right(endObj(fs))
+
+  /** rewrite the config's `allowlist` without the id, atomically, confirming
+   *  by re-read exactly as `writeAllow3` does. Returns "" on success. */
+  def writeDisallow(p: String, nodeId: String): String = Json.tryParse(Config.readAll(p)) match
+    case Left(_)  => "Allowlist file " + p + " is missing or not JSON"
+    case Right(j) => writeDisallow2(p, j, nodeId)
+
+  def writeDisallow2(p: String, j: Json, nodeId: String): String =
+    val updated = jsonSet(j, "allowlist", JArr(withoutId(allowIds(j), nodeId)))
+    writeAtomic(p, Json.write(updated) + "\n")
+    if fileHasId(p, nodeId) then "Could not rewrite the allowlist file " + p else ""
+
+  def withoutId(xs: List[Json], nodeId: String): List[Json] = xs match
+    case h :: t => withoutIdStep(h, t, nodeId)
+    case Nil  => Nil
+
+  def withoutIdStep(h: Json, t: List[Json], nodeId: String): List[Json] =
+    var out: List[Json] = withoutId(t, nodeId)
+    if strOr(h, "") == nodeId then () else out = h :: out
+    out
+
+  /** the live half of a revocation; "" on success, else why not — a process
+   *  with no iroh listener stays a successful revocation, the file is what
+   *  the next boot reads (and the node's sessions are dead either way). */
+  def liveDisallow(nodeId: String): String =
+    var msg = ""
+    try
+      go.irohnet.disallow(nodeId)
+      ()
+    catch case e: sgo.GoError => msg = e.message
+    msg
+
+  // ---- binding an already-enrolled node (plan 0058) -----------------------------
+
+  /** `POST /_wata/v1/admin/enroll/{nodeId}/bind {user}` — bind (or re-bind)
+   *  an ALREADY-allowlisted node to an account: the enrolled table's exit
+   *  from "enrolled, no account" (an approve without a user selection), and
+   *  the one-click recovery for a dangling binding — the name goes through
+   *  the same `ensureUser` as approve's inline create, so a deleted
+   *  account's name is recreated passwordless and the handset's next
+   *  device-login succeeds. 404 for a node the allowlist does not hold:
+   *  binding an unadmitted node would promise a session the transport will
+   *  never carry — that path is approve's. */
+  def bindRoute(nodeId: String, body: String): Either[MErr, Json] =
+    if !allowlisted(nodeId) then Left(MErr(404, M_NOT_FOUND(), "That node id is not enrolled"))
+    else bindingUser(body) match
+      case l: Left[MErr, String]   => Left(l.left)
+      case rr: Right[MErr, String] => bind2(nodeId, rr.right)
+
+  def bind2(nodeId: String, lp: String): Either[MErr, Json] =
+    if lp == "" then Left(MErr(400, M_BAD_JSON(), "An account name is required"))
+    else bound(nodeId, lp)
+
+  def bound(nodeId: String, lp: String): Either[MErr, Json] =
+    Bindings.bind(nodeId, lp)
+    Right(obj3("node_id", JStr(nodeId), "user", JStr(lp), "user_id", JStr(Store.userIdOf(lp))))

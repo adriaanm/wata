@@ -109,11 +109,14 @@ object Store:
 
   // ---- devices / auth --------------------------------------------------------
 
-  def createDevice(userId: String): Device =
+  /** mint a session. `nodeId` is "" for a password login; device-login passes
+   *  the proven transport identity so revoke-by-node (plan 0058) can find the
+   *  rows that node minted. */
+  def createDevice(userId: String, nodeId: String): Device =
     val localpart = localpartOf(userId)
     val token = "syt_" + localpart + "_" + randId(18)
     val deviceId = randId(6)
-    val d = Device(deviceId, userId, token)
+    val d = Device(deviceId, userId, token, nodeId)
     cell.withLock { st =>
       st.devices = HashMap.put(st.devices, deviceId, d)
       st.tokens = HashMap.put(st.tokens, token, d)
@@ -170,9 +173,7 @@ object Store:
   def dropUserDevices(userId: String): Unit =
     cell.withLock { st =>
       dropEach(st, userDeviceIds(st.devices, userId))
-      val old = st.waiters
-      st.waiters = dropUser(old, userId, Nil)
-      closeUser(old, userId)
+      wakeUserLocked(st, userId)
     }
 
   // the fold returned directly from result position: the standing proof of
@@ -191,6 +192,46 @@ object Store:
   def dropEachStep(st: StoreState, h: String, t: List[String]): Unit =
     dropDevice(st, HashMap.get(st.devices, h), h)
     dropEach(st, t)
+
+  /** Revoke every session minted through `nodeId` — the store half of an
+   *  enrolment revocation (plan 0058). Rows with an empty node id (password
+   *  logins, and rows journaled before the field existed) never match, so
+   *  they are untouched — the route's response states the count for exactly
+   *  that reason. Each drop journals its `rmDevice` like any logout, and the
+   *  affected user's long-poll waiters are woken as `dropUserDevices` does,
+   *  so a client parked in /sync learns now. Returns the revoked-row count. */
+  def dropNodeDevices(nodeId: String): scala.Long =
+    if nodeId == "" then 0L
+    else cell.withLock(st => dropNodeLocked(st, nodeDevices(st.devices, nodeId)))
+
+  def nodeDevices(devices: HashMap[String, Device], nodeId: String): List[Device] =
+    HashMap.foldLeft[String, Device, List[Device]](devices, Nil,
+      (acc: List[Device], k: String, d: Device) => consIfNode(acc, d, nodeId))
+
+  def consIfNode(acc: List[Device], d: Device, nodeId: String): List[Device] =
+    if d.nodeId == nodeId then d :: acc else acc
+
+  def dropNodeLocked(st: StoreState, ds: List[Device]): scala.Long =
+    dropNodeEach(st, ds)
+    countDevices(ds, 0L)
+
+  def dropNodeEach(st: StoreState, ds: List[Device]): Unit = ds match
+    case h :: t => dropNodeStep(st, h, t)
+    case Nil  => ()
+
+  def dropNodeStep(st: StoreState, h: Device, t: List[Device]): Unit =
+    dropDevice(st, HashMap.get(st.devices, h.deviceId), h.deviceId)
+    wakeUserLocked(st, h.userId)
+    dropNodeEach(st, t)
+
+  def wakeUserLocked(st: StoreState, userId: String): Unit =
+    val old = st.waiters
+    st.waiters = dropUser(old, userId, Nil)
+    closeUser(old, userId)
+
+  def countDevices(ds: List[Device], n: scala.Long): scala.Long = ds match
+    case _ :: t => countDevices(t, n + 1L)
+    case Nil  => n
 
   /** how many live devices (sessions) this user has — the admin status panel. */
   def deviceCount(userId: String): scala.Long =

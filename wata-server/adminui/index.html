@@ -77,7 +77,7 @@
 
   <h2 id="enrolled-head" class="hidden">Enrolled handsets</h2>
   <table id="enrolled" class="hidden">
-    <thead><tr><th>node id</th><th>account</th></tr></thead>
+    <thead><tr><th>node id</th><th>account</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -412,21 +412,64 @@ function renderEnroll(pending, allowed, users, bindings) {
   }
 }
 
-// The enrolled table: every allowlisted handset and the account it is bound
-// to. "no account yet" marks a node approved without a binding — admitted to
-// the transport but refused a session until an account is picked.
+// The enrolled table: every allowlisted handset, the account it is bound to,
+// and the lifecycle actions (plan 0058). Three account states, each with its
+// exit in place:
+//   * bound, account exists — healthy; "remove" un-enrols the handset;
+//   * bound, account DELETED — a dangling binding is a legitimate parked
+//     state (binding is by NAME, the owner's ruling): say so, and offer the
+//     one-click undo — recreating the name through the bind route, which
+//     restores the handset with no re-enrolment;
+//   * no binding — admitted to the transport but refused a session; the same
+//     pick-or-create control the pending rows have, wired to the bind route.
+// "remove" is the revoke route: allowlist file, live listener, binding, and
+// the node's sessions all go; the handset falls back to its QR screen.
 function renderEnrolled() {
   const ids = lastAllowed.filter((id) => id !== "*");
   $("enrolled-head").classList.toggle("hidden", ids.length === 0);
   $("enrolled").classList.toggle("hidden", ids.length === 0);
   const tb = $("enrolled").querySelector("tbody");
   tb.textContent = "";
+  const roster = new Set(lastUsers.map((u) => u.user));
   for (const id of ids) {
     const tr = document.createElement("tr");
     cell(tr, short(id)).className = "mono";
     const who = lastBindings[id];
-    const td = cell(tr, who || "no account yet");
-    if (!who) td.className = "muted";
+    const acct = document.createElement("td");
+    const actions = document.createElement("td");
+    if (who && roster.has(who)) {
+      acct.textContent = who;
+    } else if (who) {
+      acct.textContent = "bound to " + who + " (account deleted — recreate the name to restore)";
+      acct.className = "muted";
+      actions.append(button("recreate " + who, async () => {
+        const r = await api("POST", "/_wata/v1/admin/enroll/" + id + "/bind", { user: who });
+        say("recreated " + r.user + "; the handset will sign back in itself.");
+        await refresh();
+      }));
+    } else {
+      const pick = accountPicker();
+      acct.append(pick.sel, pick.input);
+      actions.append(button("bind", async () => {
+        const user = pick.chosen();
+        if (!user) { say("Pick an account, or type a name for this handset.", true); return; }
+        const r = await api("POST", "/_wata/v1/admin/enroll/" + id + "/bind", { user });
+        say("bound " + short(id) + " to " + r.user + "; the handset will sign in itself.");
+        await refresh();
+      }));
+    }
+    actions.append(button("remove", async () => {
+      const held = who ? " It is bound to " + who + "." : "";
+      if (!confirm("Remove handset " + short(id) + "?" + held +
+        " It will be signed out and refused until it is enrolled again.")) return;
+      const r = await api("POST", "/_wata/v1/admin/enroll/" + id + "/revoke");
+      const done = "removed " + short(id) + " (" + (r.revoked_sessions || 0) + " session(s) revoked)";
+      say(r.live ? done : done +
+        ". Removed from the allowlist file, but not applied live: " + (r.note || "no listener"),
+        !r.live);
+      await refresh();
+    }));
+    tr.append(acct, actions);
     tb.append(tr);
   }
 }

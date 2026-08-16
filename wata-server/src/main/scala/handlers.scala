@@ -249,9 +249,14 @@ object Router:
     if Pwhash.verify(u.hash, strField(j, "password", "")) then loginOk(lp)
     else Left(MErr(403, M_FORBIDDEN(), "Invalid username or password"))
 
-  def loginOk(lp: String): Either[MErr, Json] =
+  def loginOk(lp: String): Either[MErr, Json] = loginOkNode(lp, "")
+
+  /** the shared success shape; `nodeId` is "" for a password login and the
+   *  proven transport identity for device-login (plan 0058: the row records
+   *  the node it came through, so a revocation can find it). */
+  def loginOkNode(lp: String, nodeId: String): Either[MErr, Json] =
     val userId = Store.userIdOf(lp)
-    val dev = Store.createDevice(userId)
+    val dev = Store.createDevice(userId, nodeId)
     Right(obj4(
       "user_id", JStr(userId),
       "access_token", JStr(dev.accessToken),

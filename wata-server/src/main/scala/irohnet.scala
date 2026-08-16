@@ -31,6 +31,15 @@ object irohnet:
    *  build, a malformed id) is reported rather than fatal. */
   @go.name("Allow") def allow(nodeId: String): Unit throws sgo.GoError = ???
 
+  /** `irohnet.Disallow(nodeId)` — the inverse, the enrolment revoke path
+   *  (plan 0058): stop admitting the node on THIS process's live listener AND
+   *  close the connections it already holds, so a revoked handset is out now,
+   *  not at the next restart. The durable half is the config file's allowlist,
+   *  which enroll.scala rewrites without the id; this is only the live apply,
+   *  so its failure (no iroh listener in this process, a stub build, a
+   *  malformed id) is reported rather than fatal. */
+  @go.name("Disallow") def disallow(nodeId: String): Unit throws sgo.GoError = ???
+
   /** `irohnet.StripNodeID(handler)` — wrap a handler so any client-supplied
    *  `X-Wata-Node-Id` is deleted before dispatch: the TCP edge's half of the
    *  trusted-header contract (plan 0027). Untagged in the Go package, so it

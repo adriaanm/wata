@@ -19,7 +19,12 @@ import sgo.{Mutex, mutex}
  *  lock) BEFORE serving; then the append handle opens and `on` flips.
  *
  *  What is logged (enough to make a reboot useful AND faithful):
- *   - `device` / `rmDevice`  — a client's access token survives a restart
+ *   - `device` / `rmDevice`  — a client's access token survives a restart;
+ *                              `device` carries the node id the session was
+ *                              minted through ("" for a password login; a
+ *                              journal from before the field simply lacks it
+ *                              and replays as ""), so revoke-by-node (plan
+ *                              0058) survives a reboot too
  *   - `profile`              — displayname / avatar
  *   - `acct`                 — account data (carries its seq)
  *   - `room` / `event` / `redact` — rooms, their state + timeline, redactions
@@ -38,10 +43,11 @@ import sgo.{Mutex, mutex}
  *   - `txn`                  — per-device send idempotency
  *   - `dmpair`               — a canonical DM's pair -> room claim, so DM
  *                              identity survives a restart with no re-derivation
- *   - `bind`                 — a device-account binding nodeId -> user (plan
+ *   - `bind` / `unbind`      — a device-account binding nodeId -> user (plan
  *                              0027); a re-bind of the same node overwrites,
  *                              so replay in commit order converges on the
- *                              latest binding
+ *                              latest binding. `unbind` (plan 0058) is
+ *                              written only by an enrolment revocation
  *
  *  NOT logged (transient by nature): long-poll waiters (in-flight goroutines).
  */
@@ -96,6 +102,7 @@ object Journal:
     fs = ("device_id", JStr(d.deviceId)) :: fs
     fs = ("user_id", JStr(d.userId)) :: fs
     fs = ("token", JStr(d.accessToken)) :: fs
+    fs = ("node_id", JStr(d.nodeId)) :: fs
     endObj(fs)
 
   def rmDeviceOp(deviceId: String, token: String): Json =
@@ -200,6 +207,13 @@ object Journal:
     fs = ("user", JStr(user)) :: fs
     endObj(fs)
 
+  /** an enrolment revocation dropped the binding (plan 0058). */
+  def unbindOp(nodeId: String): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("unbind")) :: fs
+    fs = ("node_id", JStr(nodeId)) :: fs
+    endObj(fs)
+
   def txnOp(key: String, eventId: String): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("op", JStr("txn")) :: fs
@@ -255,7 +269,7 @@ object Journal:
     case Right(j) => dispatch(j, strField(j, "op", ""))
 
   def dispatch(j: Json, op: String): Unit =
-    if op == "device" then Store.replayDevice(Device(strField(j, "device_id", ""), strField(j, "user_id", ""), strField(j, "token", "")))
+    if op == "device" then Store.replayDevice(Device(strField(j, "device_id", ""), strField(j, "user_id", ""), strField(j, "token", ""), strField(j, "node_id", "")))
     else if op == "rmDevice" then Store.replayRmDevice(strField(j, "device_id", ""), strField(j, "token", ""))
     else if op == "profile" then Store.replayProfile(strField(j, "user_id", ""), Profile(strField(j, "displayname", ""), strField(j, "avatar_url", "")))
     else if op == "acct" then Store.replayAcct(acctOf(j))
@@ -268,6 +282,7 @@ object Journal:
     else if op == "txn" then Store.replayTxn(strField(j, "key", ""), strField(j, "event_id", ""))
     else if op == "dmpair" then Store.replayDmPair(DmPair(strField(j, "a", ""), strField(j, "b", ""), strField(j, "room_id", "")))
     else if op == "bind" then Bindings.replayBind(strField(j, "node_id", ""), strField(j, "user", ""))
+    else if op == "unbind" then Bindings.replayUnbind(strField(j, "node_id", ""))
     else ()
 
   def acctOf(j: Json): AcctData =

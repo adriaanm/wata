@@ -54,8 +54,13 @@ case class Auth(userId: String, deviceId: String)
  *  `/_wata/v1/admin/…` surface. */
 case class UserCfg(localpart: String, hash: String, displayName: String, admin: Boolean)
 
-/** A device/session created on login. */
-case class Device(deviceId: String, userId: String, accessToken: String)
+/** A device/session created on login. `nodeId` is the proven iroh node id the
+ *  session was minted through — set by device-login, "" for a password login
+ *  (and for rows journaled before the field existed). It is what lets an
+ *  enrolment revocation kill the sessions that node minted (plan 0058);
+ *  rows with `nodeId == ""` cannot be traced to a node and are untouched by
+ *  revoke. */
+case class Device(deviceId: String, userId: String, accessToken: String, nodeId: String)
 
 /** A user profile: `avatarUrl == ""` means unset. */
 case class Profile(displayname: String, avatarUrl: String)

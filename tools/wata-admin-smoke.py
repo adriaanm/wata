@@ -31,7 +31,12 @@ of a pure function:
     sequence the admin page performs when a QR fragment names a node nobody
     announced, and the negative that makes the typed code safe: a node-id
     PREFIX is refused everywhere on the enrol surface, so a code a parent types
-    can only ever select a row a device created.
+    can only ever select a row a device created;
+  * the enrolment lifecycle (plan 0058) — revoke rewrites the allowlist file
+    without the id and drops the binding (both surviving a reboot through the
+    journal's unbind op), leaves untraceable password sessions alone and says
+    so through revoked_sessions; the bind route closes the "enrolled, no
+    account" and dangling-binding states in place.
 
 The PBKDF2 derivation itself is oracled elsewhere: `wata-server selfcheck`
 prints the published test vectors and `tools/wata-smoke.sh` byte-compares them
@@ -67,6 +72,8 @@ ADMIN_ROUTES = [
     ("GET", "/_wata/v1/admin/enroll", None),
     ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/approve", None),
     ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/deny", None),
+    ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/revoke", None),
+    ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/bind", {"user": "bob"}),
 ]
 
 failures = []
@@ -224,6 +231,7 @@ def run(server, env, tmp):
         revoke(atok, users)
         enrolment(atok, btok, iroh)
         provisioning(atok, users)
+        unenrol(atok, users, iroh)
     finally:
         stop_server(proc, log)
 
@@ -676,6 +684,85 @@ def provisioning(atok, users):
           "the created account is on the users surface like any other")
 
 
+def unenrol(atok, users, iroh):
+    """The enrolment lifecycle (plan 0058), TCP-level. What can be asserted
+    here: the revoke route's durable half (the allowlist rewrite, atomic,
+    404 when absent), the binding drop and its journal round-trip (the
+    reboot below re-checks), the bind route for an already-enrolled node —
+    including the inline create and the dangling-name recovery — and the
+    untouchability rule: no session here was minted through a node (TCP
+    device-login is 403 by construction), so revoked_sessions is 0 and
+    password sessions survive a revoke. What ONLY tunnel-smoke can assert:
+    the live-listener half (`irohnet.Disallow` closing real connections),
+    revoked_sessions counting real node-minted rows, and the fresh dial
+    being refused at the transport."""
+    print("un-enrol: revoke is durable-first, 404 when absent")
+    # provisioning() left node_p bound to bob and node_q bound to handset1;
+    # fragment_announce approved node 0x9A with NO user (unbound).
+    node_p, node_q, node_u = node_id(0x70), node_id(0x71), node_id(0x9A)
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_id(0xDEAD)}/revoke", None, atok)[0] == 404,
+          "revoking a node the allowlist does not hold is 404")
+    btok = login("bob", "bobpw123")
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{node_p}/revoke", None, atok)
+    check(status == 200, f"revoke answers 200 (saw {status} {body})")
+    check(body.get("live") is False and "stub build" in body.get("note", ""),
+          f"revoke reports the live apply is unavailable here (saw {body.get('note')!r})")
+    check(body.get("revoked_sessions") == 0,
+          "no session here was minted through the node — the count says so instead of lying")
+    check(node_p not in allowlist(iroh)["allowlist"], "the id left the allowlist file")
+    check(node_q in allowlist(iroh)["allowlist"], "other enrolled ids are untouched")
+    check(not os.path.exists(iroh + ".tmp"), "the atomic rewrite leaves no temp file behind")
+    check(req("GET", "/_matrix/client/v3/account/whoami", None, btok)[0] == 200,
+          "bob's PASSWORD session survives the revoke — only node-minted rows are traceable")
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    check(node_p not in (listing.get("allowlisted") or []), "the listing no longer reports it")
+    check(node_p not in {b["node_id"] for b in listing.get("bindings", [])},
+          "the binding is dropped")
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_p}/revoke", None, atok)[0] == 404,
+          "revoking it again is 404 — it is no longer enrolled")
+
+    print("un-enrol: a revoked device starts the approve loop from zero")
+    status, body, _ = req("POST", "/_wata/v1/enroll", {"nodeId": node_p, "nonce": "RV01"})
+    check(status == 200 and body.get("pending") is True and body.get("allowlisted") is False,
+          f"its re-announce is pending again, not 'already enrolled' (saw {body})")
+    req("POST", f"/_wata/v1/admin/enroll/{node_p}/deny", None, atok)
+
+    print("bind: an already-enrolled, unbound node gets its account in place")
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_id(0xDEAD)}/bind",
+              {"user": "bob"}, atok)[0] == 404,
+          "binding a node the allowlist does not hold is 404 — that path is approve's")
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_u}/bind", {"user": "Bad/Name"}, atok)[0] == 400,
+          "an invalid name is refused")
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_u}/bind", {}, atok)[0] == 400,
+          "a bind without a user is refused — binding nothing means nothing")
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{node_u}/bind", {"user": "bob"}, atok)
+    check(status == 200 and body.get("user_id") == "@bob:localhost",
+          f"binding an existing account answers like approve's binding (saw {status} {body})")
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    check({b["node_id"]: b["user"] for b in listing.get("bindings", [])}.get(node_u) == "bob",
+          "the listing reports the new binding")
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{node_u}/bind", {"user": "handset2"}, atok)
+    check(status == 200 and body.get("user_id") == "@handset2:localhost",
+          f"a NEW name creates the account and re-binds, one step (saw {status} {body})")
+    es = entries(users)
+    check("handset2" in es and es["handset2"].get("hash", "x") == "",
+          "the bind-created account is passwordless like approve's inline create")
+
+    print("dangling: a deleted bound account, and the name-recreation undo")
+    check(req("DELETE", "/_wata/v1/admin/users/handset1", None, atok)[0] == 200,
+          "the bound account is removed")
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    check({b["node_id"]: b["user"] for b in listing.get("bindings", [])}.get(node_q) == "handset1",
+          "the binding SURVIVES the account (binding is by name — the page renders it dangling)")
+    check("handset1" not in {u["user"] for u in listing.get("users", [])},
+          "while the roster no longer holds the name — the page's dangling test")
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{node_q}/bind", {"user": "handset1"}, atok)
+    check(status == 200 and body.get("user_id") == "@handset1:localhost",
+          f"the one-click recreate goes through the bind route (saw {status} {body})")
+    check("handset1" in entries(users), "the name is back in users.json")
+    check(entries(users)["handset1"].get("hash", "x") == "", "recreated passwordless")
+
+
 def bounded():
     print("enrolment: the pending set is bounded (max 3, expiry 1.5s)")
     atok = login("alice", "alicepw1")
@@ -697,9 +784,10 @@ def after_reboot(users):
     check(login("kid", "kidpw456") is None, "a removed account stays removed")
     atok = login("alice", "alicepw1")
     _, s, _ = req("GET", "/_wata/v1/admin/status", None, atok)
-    check(s is not None and {u["user"] for u in s["users"]} == {"alice", "bob", "handset1"},
-          "the account set round-trips the reboot (incl. the bound device account)")
-    check(all(hashed(e) for e in entries(users).values() if e["user"] != "handset1"),
+    check(s is not None and {u["user"] for u in s["users"]} == {"alice", "bob", "handset1", "handset2"},
+          "the account set round-trips the reboot (incl. the bound device accounts)")
+    check(all(hashed(e) for e in entries(users).values()
+              if e["user"] not in ("handset1", "handset2")),
           "the file is still fully hashed after the reboot")
     check(entries(users)["handset1"].get("hash", "x") == "",
           "the device account is still passwordless after the reboot")
@@ -707,8 +795,10 @@ def after_reboot(users):
     print("reboot: bindings replay from the journal")
     _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
     binds = {b["node_id"]: b["user"] for b in listing.get("bindings", [])}
-    check(binds.get(node_id(0x70)) == "bob" and binds.get(node_id(0x71)) == "handset1",
-          f"both bindings round-trip the reboot (saw {binds})")
+    check(binds.get(node_id(0x71)) == "handset1" and binds.get(node_id(0x9A)) == "handset2",
+          f"the surviving bindings round-trip the reboot (saw {binds})")
+    check(node_id(0x70) not in binds,
+          "the revoked node's UNBIND replays too — a reboot does not resurrect it")
 
 
 def builtin_defaults():
