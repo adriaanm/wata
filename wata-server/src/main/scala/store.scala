@@ -57,6 +57,16 @@ class StoreState:
    *  this process's uptime, not the account. */
   var lastSync: HashMap[String, scala.Long] =
     HashMap.empty[String, scala.Long](k => sgo.hash(k), (a, b) => a == b)
+  /** when each SESSION (device id) last authenticated, epoch ms — the admin
+   *  surface's per-session "last seen" (plan 0059). Transient by decision,
+   *  never journaled: it is touched on every token-authenticated request, and
+   *  journaling it would turn the append-only journal into a per-request
+   *  write stream. After a restart every session honestly reads "not since
+   *  restart" until its next request — for the revoke question ("is this
+   *  handset alive?") a session silent since the last restart IS the cold
+   *  one. */
+  var lastSeenDev: HashMap[String, scala.Long] =
+    HashMap.empty[String, scala.Long](k => sgo.hash(k), (a, b) => a == b)
 
 /** A pure snapshot crossing out of `updateMemberProfile`'s `withLock` (the
  *  guarded room-id list + the user's profile, both immutable) — a named case
@@ -116,7 +126,7 @@ object Store:
     val localpart = localpartOf(userId)
     val token = "syt_" + localpart + "_" + randId(18)
     val deviceId = randId(6)
-    val d = Device(deviceId, userId, token, nodeId)
+    val d = Device(deviceId, userId, token, nodeId, nowMs())
     cell.withLock { st =>
       st.devices = HashMap.put(st.devices, deviceId, d)
       st.tokens = HashMap.put(st.tokens, token, d)
@@ -139,7 +149,17 @@ object Store:
    *  guess and linear in the device count — family-sized here, so a handful
    *  of compares. */
   def deviceByToken(token: String): Option[Device] =
-    cell.withLock(st => resolveToken(st.tokens, foldTokens(st.tokens, token)))
+    cell.withLock(st => touchResolved(st, resolveToken(st.tokens, foldTokens(st.tokens, token))))
+
+  /** stamp the session's last-seen as it authenticates (plan 0059) — one map
+   *  write under the lock this lookup already holds. */
+  def touchResolved(st: StoreState, d: Option[Device]): Option[Device] = d match
+    case s: Some[Device] => touchHit(st, s.value)
+    case None => None
+
+  def touchHit(st: StoreState, d: Device): Option[Device] =
+    st.lastSeenDev = HashMap.put(st.lastSeenDev, d.deviceId, nowMs())
+    Some(d)
 
   /** "" when no stored token constant-time-matches the guess. */
   def foldTokens(tokens: HashMap[String, Device], token: String): String =
@@ -162,6 +182,7 @@ object Store:
   def dropDeviceGo(st: StoreState, d: Device, deviceId: String): Unit =
     st.tokens = HashMap.remove(st.tokens, d.accessToken)
     st.devices = HashMap.remove(st.devices, deviceId)
+    st.lastSeenDev = HashMap.remove(st.lastSeenDev, deviceId)
     if Journal.enabled then Journal.rec(Journal.rmDeviceOp(deviceId, d.accessToken)) else ()
 
   /** Revoke EVERY live session of one user — the store half of an admin
@@ -240,6 +261,40 @@ object Store:
 
   def addIfUser(acc: scala.Long, d: Device, userId: String): scala.Long =
     if d.userId == userId then acc + 1L else acc
+
+  // ---- session visibility (plan 0059) ----------------------------------------
+
+  /** this user's live sessions, each with its in-memory last-seen stamp —
+   *  what the admin users area renders. */
+  def sessionsOf(userId: String): List[SessionSnap] =
+    cell.withLock(st => HashMap.foldLeft[String, Device, List[SessionSnap]](st.devices, Nil,
+      (acc: List[SessionSnap], k: String, d: Device) => consSession(acc, st, d, userId)))
+
+  def consSession(acc: List[SessionSnap], st: StoreState, d: Device, userId: String): List[SessionSnap] =
+    if d.userId == userId then SessionSnap(d.deviceId, d.nodeId, d.createdMs, lastSeenOf(st, d.deviceId)) :: acc
+    else acc
+
+  def lastSeenOf(st: StoreState, deviceId: String): scala.Long =
+    longOrZero(HashMap.get(st.lastSeenDev, deviceId))
+
+  /** the freshest last-seen (epoch ms) over the sessions `nodeId` minted —
+   *  the enrolled table's number. -1 when the node has NO session rows at all
+   *  (renders "—"); 0 when it has rows but none has authenticated since this
+   *  process started ("not since restart"). */
+  def nodeLastSeen(nodeId: String): scala.Long =
+    if nodeId == "" then -1L
+    else cell.withLock(st => HashMap.foldLeft[String, Device, scala.Long](st.devices, -1L,
+      (acc: scala.Long, k: String, d: Device) => maxIfNode(acc, st, d, nodeId)))
+
+  def maxIfNode(acc: scala.Long, st: StoreState, d: Device, nodeId: String): scala.Long =
+    if d.nodeId != nodeId then acc else maxSeen(acc, lastSeenOf(st, d.deviceId))
+
+  /** any matching row lifts a no-rows -1 to at least 0. */
+  def maxSeen(acc: scala.Long, v: scala.Long): scala.Long =
+    var out: scala.Long = acc
+    if v > acc then out = v else ()
+    if out < 0L then out = 0L else ()
+    out
 
   // ---- last-seen (the admin status panel) ------------------------------------
 

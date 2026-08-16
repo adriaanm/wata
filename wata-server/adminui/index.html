@@ -77,7 +77,7 @@
 
   <h2 id="enrolled-head" class="hidden">Enrolled handsets</h2>
   <table id="enrolled" class="hidden">
-    <thead><tr><th>node id</th><th>account</th><th></th></tr></thead>
+    <thead><tr><th>node id</th><th>account</th><th>last seen</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -224,6 +224,24 @@ function renderUsers(users) {
     }
     tr.append(actions);
     tb.append(tr);
+    // The account's sessions (plan 0059): which device, still in use? One
+    // muted line per live session — the light an admin needs before reaching
+    // for revoke. Last-seen is in-memory on the server, so after a restart it
+    // honestly reads "not since restart" until the session speaks again.
+    if (u.sessions && u.sessions.length) {
+      const str = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.className = "muted";
+      td.textContent = u.sessions.map((s) =>
+        "session " + s.device_id +
+        " — " + (s.node_id ? "handset " + short(s.node_id) : "password login") +
+        ", created " + (s.created_age_ms < 0 ? "unknown" : ms(s.created_age_ms) + " ago") +
+        ", last seen " + (s.last_seen_age_ms < 0 ? "not since restart" : ms(s.last_seen_age_ms) + " ago")
+      ).join("  ·  ");
+      str.append(td);
+      tb.append(str);
+    }
   }
 }
 
@@ -302,6 +320,7 @@ let lastPending = [];
 let lastAllowed = [];
 let lastUsers = [];
 let lastBindings = {};
+let lastSeenNodes = {};
 
 // Is this id already in the server's allowlist? A `"*"` entry admits every
 // peer, so it answers for any id — the same rule the server applies.
@@ -334,12 +353,14 @@ function accountPicker() {
   return { sel, input, chosen };
 }
 
-function renderEnroll(pending, allowed, users, bindings) {
+function renderEnroll(pending, allowed, users, bindings, seen) {
   lastPending = pending;
   lastAllowed = (allowed || []).map((s) => String(s).toLowerCase());
   lastUsers = users || [];
   lastBindings = {};
   for (const b of bindings || []) lastBindings[String(b.node_id).toLowerCase()] = b.user;
+  lastSeenNodes = {};
+  for (const r of seen || []) lastSeenNodes[String(r.node_id).toLowerCase()] = r.age_ms;
   const table = $("enroll");
   const tb = table.querySelector("tbody");
   const target = enrollTarget();
@@ -469,7 +490,17 @@ function renderEnrolled() {
         !r.live);
       await refresh();
     }));
-    tr.append(acct, actions);
+    // last seen (plan 0059): the freshest last-seen over the sessions this
+    // node minted — the number that separates a stale enrolment from the
+    // live one at revoke time. No row from the server means no sessions at
+    // all ("—"); -1 means sessions exist but none has spoken since the
+    // server restarted.
+    const seenAge = lastSeenNodes[id];
+    const seenTd = document.createElement("td");
+    if (seenAge === undefined) { seenTd.textContent = "—"; seenTd.className = "muted"; }
+    else if (seenAge < 0) { seenTd.textContent = "not since restart"; seenTd.className = "muted"; }
+    else seenTd.textContent = ms(seenAge) + " ago";
+    tr.append(acct, seenTd, actions);
     tb.append(tr);
   }
 }
@@ -479,7 +510,7 @@ async function refresh() {
   renderStatus(s);
   renderUsers(s.users);
   const e = await api("GET", "/_wata/v1/admin/enroll");
-  renderEnroll(e.pending || [], e.allowlisted || [], e.users || [], e.bindings || []);
+  renderEnroll(e.pending || [], e.allowlisted || [], e.users || [], e.bindings || [], e.last_seen || []);
 }
 
 // Exactly one of the three screens is up: first-run setup, the login form, or

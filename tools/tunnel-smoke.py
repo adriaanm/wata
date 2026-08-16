@@ -310,6 +310,14 @@ def revoke_leg(env, client_bin, cli_cfg_dir, srv_cfg, node, base, token):
             good = False
         return cond
 
+    # session visibility (plan 0059), the half only a real device-login can
+    # show: the node that just synced has a session, so the enroll listing
+    # carries its last-seen (the TCP admin smoke asserts the absence half).
+    _, listing = api(base, "GET", "/_wata/v1/admin/enroll", None, token)
+    seen = {r["node_id"]: r["age_ms"] for r in listing.get("last_seen", [])}
+    check(node in seen and seen[node] >= 0,
+          f"the enroll listing reports the node's last-seen — its session spoke (saw {seen.get(node)})")
+
     status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{node}/revoke", None, token)
     check(status == 200, f"revoke answers 200 (saw {status} {body})")
     check(body.get("live") is True,
@@ -323,6 +331,8 @@ def revoke_leg(env, client_bin, cli_cfg_dir, srv_cfg, node, base, token):
           "the listing no longer reports it as enrolled")
     check(node not in {b["node_id"] for b in listing.get("bindings", [])},
           "the binding is dropped")
+    check(node not in {r["node_id"] for r in listing.get("last_seen", [])},
+          "its last_seen row is gone with its sessions")
 
     r = subprocess.run(
         [str(client_bin), "integ", "login-syncing", "http://wata.iroh"],

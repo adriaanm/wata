@@ -501,6 +501,26 @@ recreate the name to restore)" with a one-click recreate through the
 bind route), and an unbound row (the pending rows' pick-or-create
 control, wired to the bind route).
 
+**Session visibility (plan 0059)** is the light beside 0058's knife —
+which of two enrolled handsets is the live one is answerable before
+revoking. `Device` also carries `createdMs` (journaled; rows from before
+the field replay as 0 and render "unknown"). Per-session **last-seen is
+in-memory only, deliberately not journaled**: `StoreState.lastSeenDev`
+(deviceId → epoch ms) is stamped in `Store.deviceByToken` — the
+token-auth path every authenticated request already takes, one map write
+under the lock that lookup already holds — and journaling it would turn
+the append-only journal into a per-request write stream. After a restart
+every session honestly reads "not since restart" until it speaks again;
+for the revoke question, a session silent since the restart is exactly
+the cold one. Surfaces: each row in the users payload (the users listing
+and `status`) carries `sessions` — `device_id`, `node_id` ("" = password
+login), `created_ms`/`created_age_ms`, `last_seen_age_ms` (-1 = not
+since restart) — rendered as a muted line under the account row; the
+enroll listing carries `last_seen` (`{node_id, age_ms}`, one row per
+allowlisted id that HAS sessions — absence renders "—", age -1 "not
+since restart"), the enrolled table's "last seen" column, the freshest
+over the node's sessions.
+
 ### Gates
 
 `tools/wata-admin-smoke.py` covers the announce, its validation, the

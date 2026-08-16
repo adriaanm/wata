@@ -24,7 +24,13 @@ import sgo.{Mutex, mutex}
  *                              minted through ("" for a password login; a
  *                              journal from before the field simply lacks it
  *                              and replays as ""), so revoke-by-node (plan
- *                              0058) survives a reboot too
+ *                              0058) survives a reboot too; and the mint
+ *                              time `created_ms` (plan 0059 — absent replays
+ *                              as 0, rendered "unknown"). The per-session
+ *                              LAST-SEEN stamp is deliberately NOT here:
+ *                              journaling it would make every authenticated
+ *                              request a journal write (store.scala's
+ *                              `lastSeenDev` doc has the tradeoff)
  *   - `profile`              — displayname / avatar
  *   - `acct`                 — account data (carries its seq)
  *   - `room` / `event` / `redact` — rooms, their state + timeline, redactions
@@ -103,6 +109,7 @@ object Journal:
     fs = ("user_id", JStr(d.userId)) :: fs
     fs = ("token", JStr(d.accessToken)) :: fs
     fs = ("node_id", JStr(d.nodeId)) :: fs
+    fs = ("created_ms", JInt(d.createdMs)) :: fs
     endObj(fs)
 
   def rmDeviceOp(deviceId: String, token: String): Json =
@@ -269,7 +276,7 @@ object Journal:
     case Right(j) => dispatch(j, strField(j, "op", ""))
 
   def dispatch(j: Json, op: String): Unit =
-    if op == "device" then Store.replayDevice(Device(strField(j, "device_id", ""), strField(j, "user_id", ""), strField(j, "token", ""), strField(j, "node_id", "")))
+    if op == "device" then Store.replayDevice(Device(strField(j, "device_id", ""), strField(j, "user_id", ""), strField(j, "token", ""), strField(j, "node_id", ""), longField(j, "created_ms")))
     else if op == "rmDevice" then Store.replayRmDevice(strField(j, "device_id", ""), strField(j, "token", ""))
     else if op == "profile" then Store.replayProfile(strField(j, "user_id", ""), Profile(strField(j, "displayname", ""), strField(j, "avatar_url", "")))
     else if op == "acct" then Store.replayAcct(acctOf(j))

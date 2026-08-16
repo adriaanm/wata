@@ -59,8 +59,16 @@ case class UserCfg(localpart: String, hash: String, displayName: String, admin: 
  *  (and for rows journaled before the field existed). It is what lets an
  *  enrolment revocation kill the sessions that node minted (plan 0058);
  *  rows with `nodeId == ""` cannot be traced to a node and are untouched by
- *  revoke. */
-case class Device(deviceId: String, userId: String, accessToken: String, nodeId: String)
+ *  revoke. `createdMs` is the mint time, epoch ms — journaled with the row;
+ *  rows journaled before the field replay as 0 and render as "unknown"
+ *  (plan 0059). */
+case class Device(deviceId: String, userId: String, accessToken: String, nodeId: String, createdMs: scala.Long)
+
+/** One session as the admin surface reports it (plan 0059): the device row's
+ *  durable facts plus the in-memory last-seen stamp (`lastSeenMs` — epoch ms
+ *  of the session's latest authenticated request, 0 for "not since this
+ *  process started"). */
+case class SessionSnap(deviceId: String, nodeId: String, createdMs: scala.Long, lastSeenMs: scala.Long)
 
 /** A user profile: `avatarUrl == ""` means unset. */
 case class Profile(displayname: String, avatarUrl: String)

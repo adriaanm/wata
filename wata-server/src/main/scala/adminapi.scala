@@ -184,11 +184,29 @@ object Admin:
     fs = ("admin", JBool(u.admin)) :: fs
     fs = ("devices", JInt(Store.deviceCount(userId))) :: fs
     fs = ("last_sync_age_ms", JInt(ageOf(Store.lastSyncMs(userId)))) :: fs
+    fs = ("sessions", JArr(sessionRows(Store.sessionsOf(userId), Nil))) :: fs
     endObj(fs)
 
   /** how long ago, in ms; `-1` for "not since this server booted". */
   def ageOf(atMs: scala.Long): scala.Long =
     if atMs == 0L then -1L else Store.nowMs() - atMs
+
+  /** the account's live sessions (plan 0059): the durable facts off the
+   *  device row plus the in-memory last-seen, both as ages the page's
+   *  relative-time helper renders — `-1` for "not since restart" (last
+   *  seen) and for "unknown" (a row journaled before mint times existed). */
+  def sessionRows(ss: List[SessionSnap], acc: List[Json]): List[Json] = ss match
+    case h :: t => sessionRows(t, sessionRow(h) :: acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def sessionRow(s: SessionSnap): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("device_id", JStr(s.deviceId)) :: fs
+    fs = ("node_id", JStr(s.nodeId)) :: fs
+    fs = ("created_ms", JInt(s.createdMs)) :: fs
+    fs = ("created_age_ms", JInt(ageOf(s.createdMs))) :: fs
+    fs = ("last_seen_age_ms", JInt(ageOf(s.lastSeenMs))) :: fs
+    endObj(fs)
 
   def createUser(body: String): Either[MErr, Json] = Json.tryParse(body) match
     case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))

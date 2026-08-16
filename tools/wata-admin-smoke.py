@@ -36,7 +36,11 @@ of a pure function:
     without the id and drops the binding (both surviving a reboot through the
     journal's unbind op), leaves untraceable password sessions alone and says
     so through revoked_sessions; the bind route closes the "enrolled, no
-    account" and dangling-binding states in place.
+    account" and dangling-binding states in place;
+  * session visibility (plan 0059) — each account's sessions with mint time
+    (durable, replays verbatim; a pre-plan journal row reads "unknown") and
+    an in-memory last-seen that use advances and a reboot honestly resets;
+    the enroll listing's last_seen rows exist only for nodes with sessions.
 
 The PBKDF2 derivation itself is oracled elsewhere: `wata-server selfcheck`
 prints the published test vectors and `tools/wata-smoke.sh` byte-compares them
@@ -77,6 +81,8 @@ ADMIN_ROUTES = [
 ]
 
 failures = []
+# facts recorded pre-reboot so the reboot leg can compare (plan 0059).
+SEEN = {}
 
 
 def check(ok, what):
@@ -231,6 +237,7 @@ def run(server, env, tmp):
         revoke(atok, users)
         enrolment(atok, btok, iroh)
         provisioning(atok, users)
+        session_visibility(atok)
         unenrol(atok, users, iroh)
     finally:
         stop_server(proc, log)
@@ -244,6 +251,12 @@ def run(server, env, tmp):
         stop_server(proc, log)
 
     # ---- the reboot: the file IS the source of truth -------------------------
+    # An OLD-GENERATION device op, hand-appended the way a pre-plan-0059
+    # journal holds them: no created_ms (and no node_id). Replay must
+    # tolerate it — created_ms 0 renders "unknown" on the page.
+    with open(os.path.join(tmp, "journal.jsonl"), "a") as f:
+        f.write(json.dumps({"op": "device", "device_id": "OLDGEN",
+                            "user_id": "@bob:localhost", "token": "syt_bob_oldgen"}) + "\n")
     proc, log = start_server(server, os.path.join(tmp, "server2.log"), senv)
     try:
         after_reboot(users)
@@ -684,6 +697,46 @@ def provisioning(atok, users):
           "the created account is on the users surface like any other")
 
 
+def session_visibility(atok):
+    """Session visibility (plan 0059): the users payload carries each
+    account's live sessions with mint time and an in-memory last-seen; the
+    enroll listing carries last_seen per allowlisted id ONLY where the node
+    has sessions. On the TCP path no session is ever node-minted, so the
+    positive last_seen row (and its post-revoke disappearance) is
+    tunnel-smoke's to assert."""
+    print("sessions: who is still using what")
+    _, who, _ = req("GET", "/_matrix/client/v3/account/whoami", None, atok)
+    dev = who["device_id"]
+
+    def alice_sessions():
+        _, s, _ = req("GET", "/_wata/v1/admin/status", None, atok)
+        rows = {u["user"]: u for u in s["users"]}
+        return {x["device_id"]: x for x in rows["alice"].get("sessions", [])}
+
+    row = alice_sessions().get(dev)
+    check(row is not None, "the admin's own session appears under its account")
+    check(row and row.get("node_id") == "",
+          "a password session carries no node id (the page renders 'password login')")
+    check(row and 0 <= row.get("last_seen_age_ms", -1) < 5000,
+          f"a fresh login's last-seen is recent (saw {row and row.get('last_seen_age_ms')})")
+    check(row and row.get("created_ms", 0) > 0 and row.get("created_age_ms", -1) >= 0,
+          "the mint time is stamped")
+    SEEN["alice_dev"] = dev
+    SEEN["alice_created"] = row["created_ms"] if row else 0
+    time.sleep(1.2)
+    row = alice_sessions().get(dev)
+    check(row is not None and row.get("last_seen_age_ms", 9999) < 1000,
+          "an authenticated request advances last-seen (the status read itself is one)")
+    check(row is not None and SEEN["alice_created"] == row.get("created_ms"),
+          "the mint time does not move with use")
+
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    check(len(listing.get("allowlisted") or []) > 0,
+          "there are enrolled ids at this point (the negative below is not vacuous)")
+    check(listing.get("last_seen") == [],
+          "no enrolled node has sessions on the TCP path, so NO last_seen rows — absence, not zero")
+
+
 def unenrol(atok, users, iroh):
     """The enrolment lifecycle (plan 0058), TCP-level. What can be asserted
     here: the revoke route's durable half (the allowlist rewrite, atomic,
@@ -799,6 +852,23 @@ def after_reboot(users):
           f"the surviving bindings round-trip the reboot (saw {binds})")
     check(node_id(0x70) not in binds,
           "the revoked node's UNBIND replays too — a reboot does not resurrect it")
+
+    print("reboot: session facts (plan 0059)")
+    _, s, _ = req("GET", "/_wata/v1/admin/status", None, atok)
+    rows = {u["user"]: u for u in s["users"]}
+    ses = {x["device_id"]: x for x in rows["alice"].get("sessions", [])}
+    old = ses.get(SEEN["alice_dev"])
+    check(old is not None, "the pre-reboot session replays from the journal")
+    check(old is not None and old.get("created_ms") == SEEN["alice_created"],
+          "created_ms survives replay verbatim — creation time is durable")
+    check(old is not None and old.get("last_seen_age_ms") == -1,
+          "last-seen honestly resets — 'not since restart' until the session speaks again")
+    bses = {x["device_id"]: x for x in rows["bob"].get("sessions", [])}
+    oldgen = bses.get("OLDGEN")
+    check(oldgen is not None, "a pre-plan-0059 journal row (no created_ms) still replays")
+    check(oldgen is not None and oldgen.get("created_ms") == 0
+          and oldgen.get("created_age_ms") == -1,
+          "its mint time reads 'unknown' (created_ms 0, age -1) instead of lying")
 
 
 def builtin_defaults():

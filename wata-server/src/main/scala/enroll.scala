@@ -238,12 +238,34 @@ object Enroll:
   def list(): Json =
     val now = Store.nowMs()
     val xs = cell.withLock(st => pruneLocked(st, now))
+    val ids = allowlistIds()
     var fs: List[(String, Json)] = startObj
     fs = ("pending", JArr(rows(xs, now, Nil))) :: fs
-    fs = ("allowlisted", JArr(allowlistIds())) :: fs
+    fs = ("allowlisted", JArr(ids)) :: fs
     fs = ("users", JArr(rosterRows(Config.allUsers(), Nil))) :: fs
     fs = ("bindings", JArr(bindingRows(Bindings.all(), Nil))) :: fs
+    fs = ("last_seen", JArr(seenRows(ids, now, Nil))) :: fs
     endObj(fs)
+
+  /** one `{node_id, age_ms}` per allowlisted id that has SESSION rows (plan
+   *  0059) — the freshest last-seen over the sessions the node minted, as an
+   *  age; `-1` for "rows exist but none has authenticated since restart". An
+   *  id with no sessions gets NO row here, which the page renders as "—". */
+  def seenRows(ids: List[Json], now: scala.Long, acc: List[Json]): List[Json] = ids match
+    case h :: t => seenRows(t, now, consSeen(h, now, acc))
+    case Nil  => ListOps.reverse(acc)
+
+  def consSeen(h: Json, now: scala.Long, acc: List[Json]): List[Json] =
+    val id = strOr(h, "")
+    val seen = Store.nodeLastSeen(id)
+    var out: List[Json] = acc
+    if seen >= 0L then out = seenRow(id, now, seen) :: acc else ()
+    out
+
+  def seenRow(id: String, now: scala.Long, seen: scala.Long): Json =
+    var age: scala.Long = -1L
+    if seen > 0L then age = now - seen else ()
+    obj2("node_id", JStr(id), "age_ms", JInt(age))
 
   /** the roster as the picker renders it: localpart + display name only —
    *  the full account rows (device counts, admin flags) stay on the users
