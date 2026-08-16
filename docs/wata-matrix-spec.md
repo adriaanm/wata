@@ -520,6 +520,13 @@ Strip all information out of an event (redaction).
 
 ## Receipts
 
+> **wata divergence (plan 0050):** Matrix keeps ONE `m.read` marker per
+> user per room ("read up to here"); wata's server keeps one receipt per
+> *(user, event)* — they accumulate. Wata's clients receipt each message
+> when its playback completes and render played state per message;
+> voice messages play out of order, so a moving marker cannot represent
+> "heard".
+
 ### POST /rooms/{roomId}/receipt/{receiptType}/{eventId}
 
 Send a receipt for the given event ID.

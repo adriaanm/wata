@@ -633,7 +633,13 @@ All server state lives in one process-wide guarded cell:
 (`store.scala:34`) is a plain mutable-field class — 14 `var`s — covering
 devices/tokens (two HashMaps, one for lookup by id and one by token),
 profiles, a flat `List[AcctData]` for all account data (global and per-room),
-rooms (`HashMap[String, Room]`), aliases, media, a flat `List[Receipt]`, a
+rooms (`HashMap[String, Room]`), aliases, media, a flat `List[Receipt]`
+(**per message**, not Matrix's one-marker-per-user: `Store.sameReceiptKey`
+includes the event id, so a user's receipts on different events coexist —
+wata's clients receipt each message when its playback completes and read
+`played`/`playedByPeer` per event, and the read-up-to replacement semantics
+would erase a sender's played check whenever the peer played anything else;
+plan 0050), a
 `HashMap` for per-device transaction idempotency, the ordered list of room
 ids (newest-first), a flat `List[DmPair]` of canonical DM claims, a global
 monotonic `seq` counter, and a flat

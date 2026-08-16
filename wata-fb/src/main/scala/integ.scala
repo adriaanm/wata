@@ -59,6 +59,7 @@ object Integ:
       else if name == "group-room" then ok = s21()
       else if name == "family-no-leave" then ok = s22()
       else if name == "wifi-cmd" then ok = s23()
+      else if name == "receipt-both-played" then ok = s24()
       else println("integ: unknown scenario " + name)
       if ok then println("INTEG PASS " + name)
       else println("INTEG FAIL " + name)
@@ -113,6 +114,7 @@ object Integ:
   private val outRoomC: sgo.Atomic[String] = sgo.atomic("")   // a room id
   private val outEventC: sgo.Atomic[String] = sgo.atomic("")  // an event id
   private val outMxcC: sgo.Atomic[String] = sgo.atomic("")    // an mxc url
+  private val outEvent2C: sgo.Atomic[String] = sgo.atomic("") // a SECOND event id (s24)
   private def outId: String = outIdC.get()
   private def outRoom: String = outRoomC.get()
   private def outEvent: String = outEventC.get()
@@ -1422,6 +1424,74 @@ object Integ:
 
   def argvStep(h: Json, t: List[Json]): Boolean =
     if WJson.strOr(h, "").indexOf("hunter2") >= 0 then false else argvClean(t)
+
+  /** bob receipts TWO of alice's messages (older first), then a FRESH alice
+   *  session must see BOTH marked played-by-peer. This pins the server's
+   *  per-message receipt semantics (plan 0050): under Matrix's
+   *  one-marker-per-user replacement, bob's second receipt erases his first,
+   *  so alice's initial sync would show the double check on at most one
+   *  message. */
+  def s24(): Boolean =
+    if !phase("bob")(c => grabSelf(c)) then false
+    else
+      val bobId = outId
+      if !phase("alice")(c => aliceSendsTwo(c, bobId)) then false
+      else
+        val aliceId = outId
+        if !phase("bob")(c => bobReceiptsBoth(c, aliceId)) then false
+        else
+          val e1 = outEvent
+          val e2 = outEvent2C.get()
+          phase("alice")(c => grabSelf(c) &&
+            Runtime.waitForSnapshot(c,
+              s => msgPeerPlayed(s, bobId, e1) && msgPeerPlayed(s, bobId, e2), 20000L))
+
+  def aliceSendsTwo(c: MatrixClient, bobId: String): Boolean =
+    if !grabSelf(c) then false
+    else if !sendVoice(c, "", bobId, 100L) then false
+    else if !sendVoice(c, "", bobId, 200L) then false
+    else Runtime.waitForSnapshot(c, s => lastDursMatch(s, bobId, durs2()), 30000L)
+
+  def durs2(): List[Long] =
+    var ds: List[Long] = Nil
+    ds = 200L :: ds
+    ds = 100L :: ds
+    ds
+
+  /** receipt the OLDER message first, then the newer — exactly the order that
+   *  loses the first receipt under replacement — and wait until bob's own
+   *  snapshot shows both played, so both POSTs have round-tripped before the
+   *  phase ends. Leaves the older event id in `outEventC`, the newer in
+   *  `outEvent2C`. */
+  def bobReceiptsBoth(c: MatrixClient, aliceId: String): Boolean =
+    if !grabSelf(c) then false
+    else if !Runtime.waitForSnapshot(c, s => lastDursMatch(s, aliceId, durs2()), 30000L) then false
+    else if !stashMsgWithDur(Runtime.lastSnap, aliceId, 100L) then false
+    else
+      val room = outRoom
+      val e1 = outEvent
+      if !stashMsgWithDur(Runtime.lastSnap, aliceId, 200L) then false
+      else
+        val e2 = outEvent
+        Runtime.sendAction(c, ActReceipt(room, e1))
+        Runtime.sendAction(c, ActReceipt(room, e2))
+        outEventC.set(e1)
+        outEvent2C.set(e2)
+        Runtime.waitForSnapshot(c,
+          s => msgPlayed(s, aliceId, e1) && msgPlayed(s, aliceId, e2), 20000L)
+
+  /** the message with `eventId` is marked played by a PEER of its sender. */
+  def msgPeerPlayed(s: StateSnapshot, contactId: String, eventId: String): Boolean =
+    findConv(s.conversations, contactId) match
+      case cv: Some[Conversation] => peerPlayedIn(cv.value.messages, eventId)
+      case None  => false
+
+  def peerPlayedIn(ms: List[VoiceMessage], eventId: String): Boolean = ms match
+    case m :: t => peerPlayedStep(m, t, eventId)
+    case Nil  => false
+
+  def peerPlayedStep(m: VoiceMessage, t: List[VoiceMessage], eventId: String): Boolean =
+    if m.id == eventId && m.playedByPeer then true else peerPlayedIn(t, eventId)
 
   /** poll the transport's own verdict (`Enrol.refused()`, the boot screen's). */
   def waitRefused(c: MatrixClient, timeoutMs: Long): Boolean =

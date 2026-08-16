@@ -102,7 +102,11 @@ case class Room(roomId: String, version: String, state: List[(String, Event)], t
 case class MediaItem(mediaId: String, data: String, contentType: String)
 
 /** A read receipt, with `roomId` embedded so the whole set is ONE flat list
- *  (like the acct slice) rather than a per-room map. */
+ *  (like the acct slice) rather than a per-room map. PER MESSAGE, not per
+ *  user (plan 0050): a receipt says "this event has been heard", and a
+ *  user's receipts on different events coexist — the Matrix read-up-to
+ *  marker semantics would erase the sender's played check when the peer
+ *  plays anything else. */
 case class Receipt(roomId: String, userId: String, eventId: String, ts: scala.Long, receiptType: String, seq: scala.Long)
 
 /** One canonical DM: the unordered user pair `{a, b}` (stored SORTED, so the

@@ -923,6 +923,11 @@ object Store:
 
   // ---- receipts --------------------------------------------------------------
 
+  /** Record a receipt. Wata semantics, not Matrix's (plan 0050): an `m.read`
+   *  here means "this exact message has been heard", so receipts ACCUMULATE
+   *  per event — only re-receipting the same event replaces. Matrix's
+   *  one-marker-per-user "read up to here" would let a peer's later play
+   *  erase the receipt a sender's double check depends on. */
   def setReceipt(roomId: String, receiptType: String, userId: String, eventId: String): Unit =
     cell.withLock { st =>
       st.seq = st.seq + 1L
@@ -955,8 +960,11 @@ object Store:
     if sameReceiptKey(h, rc) then receiptMap(t, rc, rc :: acc)
     else receiptMap(t, rc, h :: acc)
 
+  /** identity includes the EVENT: one receipt per (room, user, type, event),
+   *  so a user's receipts on different messages coexist (plan 0050). */
   def sameReceiptKey(a: Receipt, b: Receipt): Boolean =
-    a.roomId == b.roomId && a.userId == b.userId && a.receiptType == b.receiptType
+    a.roomId == b.roomId && a.userId == b.userId && a.receiptType == b.receiptType &&
+      a.eventId == b.eventId
 
   // ---- per-device txnId idempotency ------------------------------------------
 
