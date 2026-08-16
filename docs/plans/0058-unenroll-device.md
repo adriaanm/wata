@@ -1,6 +1,6 @@
 # 0058 — un-enrolling a device, and the enrolment lifecycle gaps around it
 
-Status: accepted (owner observation 2026-08-16, after the /data
+Status: done (owner observation 2026-08-16, after the /data
 adoption incident orphaned an enrolled node id: "we should have a way
 to un-enroll a device"; extended same day after the owner's re-enrol
 fumble surfaced the lifecycle gaps below; go 2026-08-16)
