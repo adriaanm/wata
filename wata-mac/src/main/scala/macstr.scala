@@ -55,11 +55,6 @@ object MacStr:
     else if ch == "9" then 9
     else -1
 
-  /** field `i` of a TAB-separated line, or "" past the end. The login sheet's
-   *  answer is tab-separated rather than whitespace-separated because a
-   *  password may hold spaces and a homeserver may not be typed tidily —
-   *  `splitWs` would tear both apart. Hand-scanned: the subset has no split.
-   */
   /** the non-empty lines of a newline-separated block — the shape every
    *  macshell list setter speaks. */
   def lines(block: String): List[String] =
@@ -78,6 +73,11 @@ object MacStr:
 
   def boolStr(b: Boolean): String = if b then "true" else "false"
 
+  /** field `i` of a TAB-separated line, or "" past the end. The login sheet's
+   *  answer is tab-separated rather than whitespace-separated because a
+   *  password may hold spaces and a homeserver may not be typed tidily —
+   *  `splitWs` would tear both apart. Hand-scanned: the subset has no split.
+   */
   def tabField(line: String, i: scala.Int): String =
     var start = 0
     var field = 0

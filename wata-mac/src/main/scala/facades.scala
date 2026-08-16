@@ -86,8 +86,10 @@ object macshell:
   /** one pending CHROME command, or "" — never blocks, polled once a frame
    *  like `nextKey`. A menu item cannot do the work itself: signing out means
    *  ending the session and clearing the stores, which is the Sgola side's.
-   *  Today the only command that reaches here is `"signout"` (Settings opens
-   *  its own window without asking anyone). */
+   *  What reaches here: `"signout"`, the Settings checkbox's
+   *  `"notify:play"`/`"notify:quiet"`, and the tab-separated `"dev:…"` family
+   *  from the Devices window — the pump hands those to the Devices worker
+   *  (`pollChrome`) and applies the rest itself. */
   @go.name("NextCommand") def nextCommand(): String = ???
   /** what the Settings window says the session is signed in as. */
   @go.name("SetAccount") def setAccount(hs: String, user: String): Unit = ???

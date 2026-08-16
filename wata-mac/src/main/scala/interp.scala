@@ -37,7 +37,9 @@ import language.experimental.saferExceptions
  *  calls `submitTree`/`submitScript` which run DIRECTLY (pool-bracketed);
  *  windowed the pump PUBLISHES the frame and `go.nativeui.onMain` dispatches
  *  the module-registered `go.callback` trampoline onto the main queue, which
- *  drains and applies — one frame per queue turn. The retained node tree and
+ *  drains EVERYTHING pending and applies it in publish order — a queue turn
+ *  may apply several frames' scripts, which is what the flat-patch-list shape
+ *  below is for. The retained node tree and
  *  its mirror live in one atomic cell, only ever touched from the stage's
  *  thread; the cell exists so the windowed callback (a different goroutine
  *  than the one that created the stage) can reach them. */

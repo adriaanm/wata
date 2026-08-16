@@ -9,7 +9,7 @@
  *  left/right, enter (select), back (esc). The prev/next-applet side keys
  *  have no macOS binding yet. */
 object MacKeys:
-  // the numbering `decode` packs against: 0 = not a wata key.
+  // the numbering `translate` answers in: 0 = not a wata key.
   val NONE = 0
   val UP = 1
   val DOWN = 2

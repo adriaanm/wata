@@ -123,7 +123,8 @@ object FbConfig:
       val err = go.mackeychain.store(SERVICE, passAccount(hs, user), pass)
       if err != "" then println("wata-mac: could not store the password: " + err)
 
-  /** forget both secrets for one identity — what a `--forget` run does. */
+  /** forget both secrets for one identity — the rejected/sign-out arc's
+   *  half of `forgetAndReload`. */
   def forget(hs: String, user: String): Unit =
     drop(go.mackeychain.forget(SERVICE, tokenAccount(hs, user)))
     drop(go.mackeychain.forget(SERVICE, passAccount(hs, user)))

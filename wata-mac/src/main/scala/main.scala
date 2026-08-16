@@ -8,14 +8,15 @@ import language.experimental.saferExceptions
  *
  *  Login is from the environment — `WATA_MAC_HS` (default
  *  `http://127.0.0.1:8008`), `WATA_MAC_USER`, `WATA_MAC_PASS` — with
- *  positional arguments overriding, the same rule as wata-tui (with a user
- *  but no password, it is prompted from stdin). Startup prints exactly one
- *  line: `ready <userId>`, or `login failed`.
+ *  positional arguments overriding, the same rule as wata-tui. With a user
+ *  but no password, headless prompts from stdin; windowed asks through the
+ *  login sheet. Each session attempt prints one line: `ready <userId>`, or
+ *  `login failed`.
  *
  *  THE PUMP (one shape, two drivers). Each frame: drain the runtime's
- *  `UiEvent` queue, drain the shell's key queue into `WataLogic.handleInput`,
- *  drain the audio thread's `AudioEvt` queue, tick `WataLogic.update`, read
- *  the handle's snapshot/connection, run `WataLogic.body` — the SAME body the
+ *  `UiEvent` queue, read the handle's snapshot/connection, drain the shell's
+ *  key queue into `WataLogic.handleInput`, drain the audio thread's
+ *  `AudioEvt` queue, tick `WataLogic.update`, run `WataLogic.body` — the SAME body the
  *  device runs — then diff against the last tree (`Diff.diff`) and hand the
  *  script to the retained interpreter (`MacStage`, interp.scala) by DIRECT
  *  call. Bodies and the diff stay on the pump goroutine; only the stage
@@ -43,8 +44,10 @@ import language.experimental.saferExceptions
  *     order), `tree` prints the live NATIVE hierarchy, `title` the window
  *     title's connectivity words, `key <name>
  *     <press|release|repeat>` injects a macOS key code through the real
- *     translation table, `quit` winds down. tools/mac-smoke.py drives this
- *     and asserts on the printed lines, tui-smoke style.
+ *     translation table, `front <window>` and `mode <play|quiet>` drive the
+ *     notify seam, `dev …` the Devices window, `quit` winds down.
+ *     tools/mac-smoke.py and the other mac-*-smoke harnesses drive this and
+ *     assert on the printed lines, tui-smoke style.
  *
  *  The two-step quit (Back on the contact list, again within 2s) terminates
  *  the windowed app; headless it only arms/renders, since the smoke owns the
@@ -65,8 +68,9 @@ object Main:
     val sc = go.bufio.newScanner(go.osx.Stdin)
     // The stores decide what this run logs in as (plan 0036): an explicit
     // argument or environment variable wins, then the identity and the
-    // secrets the last run left behind. So the FIRST run still needs
-    // WATA_MAC_USER/PASS, and no run after it needs anything at all.
+    // secrets the last run left behind. So a HEADLESS first run still needs
+    // WATA_MAC_USER/PASS (windowed asks through the login sheet), and no run
+    // after it needs anything at all.
     var cfg = FbConfig.resolve(hs, user, passIn)
     // The walkie-talkie toggle, read once and pushed to the chrome so the
     // Settings checkbox draws the stored answer. Primed here because every
@@ -162,11 +166,13 @@ object Pump:
         savedC.set(true)
         FbConfig.saveLogin(c.cfg.homeserver, c.cfg.username, creds)
 
-  /** how long startup waits for the first live sync before saying so. The
-   *  answer is only a PRINT — both drivers keep pumping either way — so
-   *  `WATA_MAC_CONNECT_MS` shortening it costs nothing but lets a harness
-   *  reach the boot screen of a transport that will never come up without
-   *  sitting out the full default. */
+  /** how long startup waits for the first live sync before saying so. With
+   *  STORED credentials the answer is only a print — the pump keeps going on
+   *  the boot screen either way; with sheet-typed credentials an expired
+   *  window ends the attempt as `"unreachable"` and reshows the sheet
+   *  (windowedPump, plan 0045 slice 2). `WATA_MAC_CONNECT_MS` shortening it
+   *  lets a harness reach either outcome without sitting out the full
+   *  default. */
   def connectMs(): Long = MacStr.num(go.sys.getenv("WATA_MAC_CONNECT_MS"), 30000).toLong
 
   def runWindowed(cfg: ClientConfig, scale: scala.Int): Unit =
@@ -283,7 +289,7 @@ object Pump:
     NetStatus.reset()
     val live = waitLiveOrRejected(h, connectMs())
     if live then println("ready " + Runtime.lastAuth.userId)
-    else println("login failed") // keep pumping: the boot screen shows the state
+    else println("login failed") // stored creds keep pumping on the boot screen; sheet creds may bounce back below
     if fromSheet && !live && !isRejected(h.connection()) then "unreachable"
     else windowedFrames(h, clock)
 
@@ -589,8 +595,9 @@ object Pump:
     // reproducible instead of a per-session working-tree edit (drive them with
     // `just mac-leak --arm <x>`):
     //   build     tree built, nothing diffed, nothing sent — the flat control
-    //   diffonly  Diff.diff runs, nothing encoded, nothing sent — the leaking
-    //             bisect state, kept reproducible for heap profiling
+    //   diffonly  Diff.diff runs, nothing encoded, nothing sent — the arm
+    //             that exhibited MAC-IDLE-LEAK (closed upstream: the slab
+    //             List retired; reads flat now), kept for regression re-checks
     //   diffself  Diff.diff(v, v) — the all-equal walk over real content,
     //             pointer-identical arguments, no previous frame involved
     //   consttree the FULL pipeline, but diffing a constant spike-shaped tree

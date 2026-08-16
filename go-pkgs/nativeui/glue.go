@@ -72,8 +72,8 @@ func PoolPop(p uintptr) { poolPop(p) }
 // OnMain enqueues a registered callback trampoline (a `go.callback` address
 // the Sgola side minted once at startup) on the MAIN QUEUE, wrapped in an
 // autorelease pool — the windowed frame hop: the pump publishes its frame,
-// then the callback applies it on the AppKit thread, one frame per queue
-// turn.
+// then the callback applies everything pending on the AppKit thread (a queue
+// turn may drain several published frames).
 func OnMain(fn uintptr) {
 	poolInit()
 	MainQueue().Async(func() {
