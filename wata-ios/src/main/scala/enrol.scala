@@ -48,6 +48,7 @@ object Enrol:
   private val announcedC: sgo.Atomic[Boolean] = sgo.atomic(false)
   private val openedC: sgo.Atomic[Boolean] = sgo.atomic(false)
   private val setupOpenedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  private val announceDoneC: sgo.Atomic[Boolean] = sgo.atomic(false)
   /** latched by the first real refusal this session — see `provisioning`. */
   private val everRefusedC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
@@ -165,18 +166,33 @@ object Enrol:
       val resp = MatrixHttp.request(hs, "POST", "/_wata/v1/enroll", "application/json",
         "{\"nodeId\":\"" + id + "\",\"nonce\":\"" + nonce() + "\"}")
       println("enrol: announce " + base + " -> " + resp.status)
+    announceDoneC.set(true)
 
   /** bounce to the admin page with this device's fragment — the QR contract's
    *  URL, opened by the enrollee itself. Once per session; the shell hops to
    *  the main thread itself and a failure to open costs only the bounce (the
-   *  screen still shows the typed code). */
+   *  screen still shows the typed code).
+   *
+   *  It WAITS (off the frame path) for the announce to finish first: opening
+   *  Safari backgrounds this app and iOS suspends it moments later, freezing
+   *  the announce goroutine mid-POST — the pending row would never park, and
+   *  the approve page would have nothing to approve. */
   def openOnce(): Unit =
     if !openedC.get() then
       openedC.set(true)
       val id = nodeId()
       if id != "" then
-        println("enrol: opening " + adminUrl() + "/admin#enroll/…")
-        go.iosshell.openURL(adminUrl() + "/admin#enroll/" + id + "/" + nonce())
+        sgo.spawn(() => openAfterAnnounce(id))
+
+  def openAfterAnnounce(id: String): Unit =
+    // generously past the POST's own timeout: the announce goroutine can be
+    // held up behind the session's iroh client init before it even sends
+    var waitMs = 10000L
+    while !announceDoneC.get() && waitMs > 0L do
+      IosCaps.sleepMs(50L)
+      waitMs = waitMs - 50L
+    println("enrol: opening " + adminUrl() + "/admin#enroll/…")
+    go.iosshell.openURL(adminUrl() + "/admin#enroll/" + id + "/" + nonce())
 
   /** the SETUP arc's bounce: the bare admin page, where "Add this phone"
    *  lives. Once per session, from main.scala's setup wait. */

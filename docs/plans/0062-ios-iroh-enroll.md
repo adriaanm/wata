@@ -63,10 +63,19 @@ app connects itself.
 ## Verification
 
 Stage 1: irohnet builds for both iOS sysroots plus its existing tests
-on darwin. Stage 2–3: the simulator gates — ios-smoke grows an enroll
-leg (fresh sandbox, assert the enroll screen and the composed URL;
-`simctl openurl` is not needed since the link opens outward). Stage 4
-is owner-in-the-loop on the phone.
+on darwin. Stage 2–3: the simulator gates — a dedicated
+`just ios-enroll-smoke` (the plan's "grow ios-smoke" call was revised:
+the enroll arc needs an iroh server, a fresh sandbox, and TWO harness
+actors, its own gate keeps ios-smoke's stage-4 contract stable). It
+drives the WHOLE flow — `simctl openurl` turned out to be both needed
+and nontrivial: the configure link must come back IN (the revised
+option-1 design), and delivering a custom scheme in the simulator
+needs a pre-seeded scheme approval plus an explicit re-foreground
+after every delivery (gotchas recorded in wata-ios.md and
+apple-dev-tooling.md). Green 2026-08-17: fresh install → setup screen
+→ configure → announce 200 → approve → restart → `ready
+@phone:localhost` → contacts painted, 7.5s launch-to-verdict, no
+password anywhere. Stage 4 is owner-in-the-loop on the phone.
 
 ## Out of scope
 

@@ -448,3 +448,10 @@ ios-interptest *FLAGS:
 ios-smoke:
     tools/ios-smoke.py
 
+# the plan-0062 gate: the whole phone-enrol flow in the simulator — fresh
+# install, wata://configure from the admin page's card, plain-TCP announce,
+# approve, passwordless device-login over iroh, contacts painted. Needs
+# Xcode + a simulator runtime + the ios-sim irohnet archive; not in ci.
+ios-enroll-smoke:
+    tools/ios-enroll-smoke.py
+

@@ -120,6 +120,29 @@ def ensure_device(sc, name=DEVICE_NAME, device_type=DEVICE_TYPE):
     return udid
 
 
+def approve_scheme(udid, scheme, bundle_id, ds=None):
+    """Pre-approve a custom URL scheme so `simctl openurl` delivers instead
+    of parking on the system's "Open in <app>?" consent alert (which no
+    harness is there to tap). The approval store is a per-device plist lsd
+    reads at boot — so returns True if the entry was ADDED, in which case a
+    booted device must be rebooted before the approval takes."""
+    key = f"com.apple.CoreSimulator.CoreSimulatorBridge-->{scheme}"
+    p = pathlib.Path(ds or devset()) / udid / "data" / "Library" / \
+        "Preferences" / "com.apple.launchservices.schemeapproval.plist"
+    approvals = {}
+    if p.exists():
+        with open(p, "rb") as f:
+            approvals = plistlib.load(f)
+    if approvals.get(key) == bundle_id:
+        return False
+    approvals[key] = bundle_id
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "wb") as f:
+        plistlib.dump(approvals, f)
+    print(f"simrun: approved scheme {scheme} -> {bundle_id} (device reboot needed)")
+    return True
+
+
 def launch_and_expect(sc, udid, app_path, bundle_id, expect,
                       done_res=(r"all checks passed", r"FAIL"),
                       timeout=90, screenshot=None, args=()):

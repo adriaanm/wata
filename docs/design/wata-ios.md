@@ -80,8 +80,25 @@ pump with the mac-only seams swapped.
   arrival decision still prints (`notify: play|noted …` — `noted`
   because there is no banner surface yet); a rejected session ends the
   pump with a printed `rejected` (the ask-again arc is
-  `ADULT-UX-NONHAPPY`'s iOS half). No iroh seam yet:
-  `FbCaps.transportUnavailable()` is constant false.
+  `ADULT-UX-NONHAPPY`'s iOS half).
+- **The iroh transport + enrolment are real** (plan 0062): `Enrol`
+  (enrol.scala) is wata-fb's enrolment with the QR replaced by the app
+  itself bouncing to Safari. The fresh-install arc: `setupWait` paints
+  the setup screen and opens `<adminUrl>/admin`; the page's "Add this
+  phone" link comes back as `wata://configure?peer&relay&admin&addrs`
+  (iosshell's URL delegate queues it, `takeURL` drains — the scheme is
+  registered by both simrun's bundler and ios-device.py); the config
+  is merge-written to the sandbox `iroh.json` (a minted secretKey
+  survives) and the session starts on the iroh transport
+  (`IosCaps.httpDo` swaps clients when `Enrol.configured()`). A
+  not-allowlisted refusal paints the shared enrol screen, whose first
+  frame announces over plain TCP and THEN bounces to
+  `/admin#enroll/<id>/<nonce>` — strictly after the announce lands
+  (`openAfterAnnounce`), because opening Safari suspends this app and
+  freezes the announce mid-POST. Approval allowlists the node and binds
+  a passwordless account; login is the iroh connection proving its
+  identity (wataclient's device-login). A configure link arriving
+  mid-session (`pollUrl`) restarts the session onto the new server.
 - **The assertable surface is printed lines + the render probe**:
   `ready <userId>`, `screen boot|contacts|conversation` per change, and
   `paint <screen> lit=<n>/<m>` — a main-queue trampoline renders the
@@ -118,6 +135,26 @@ pump with the mac-only seams swapped.
   `expect` regexes are searched against the JOINED output without
   MULTILINE, and console-pty lines can carry a stray `\r` — never
   anchor them with `^`/`$`.
+
+- `just ios-enroll-smoke` (tools/ios-enroll-smoke.py) — plan 0062's
+  gate: one iroh-mode wata-server on the host, the app from a FRESH
+  sandbox with no credentials, the harness playing the admin page
+  (`simctl openurl` with the configure link built from
+  `GET /_wata/v1/enroll/server`) and the approving owner (poll pending,
+  approve as `phone`). Asserts, off the printed lines: the setup
+  screen, the configure claim, the announce landing 200, the restart,
+  `ready @phone:` (device-login — no password exists by construction),
+  the painted contacts. Three simulator facts it depends on, learned
+  the hard way: (1) a custom scheme opened from outside shows a
+  consent alert no harness can tap — pre-seed the per-device
+  `com.apple.launchservices.schemeapproval.plist`
+  (simrun.approve_scheme; lsd reads it at boot, so a fresh entry needs
+  a device reboot); (2) `simctl openurl` delivers WITHOUT activating
+  the target — the backgrounded app is suspended (Go runtime frozen)
+  seconds later, so every delivery is followed by a bare
+  `simctl launch`, which foregrounds an already-running app without
+  restarting it; (3) `login failed` is a mid-arc line here (the
+  pre-approve session's honest verdict), not a terminal marker.
 
 None of the gates are in ci (Xcode-gated), the same posture as
 nativeui-tests/mac-smoke.

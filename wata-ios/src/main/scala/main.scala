@@ -278,6 +278,9 @@ object Pump:
       val audioCmds = h.client.audioCmds
       sgo.fork(AudioThread.mainLoop(audioCmds, evts, false))
       var st = initial(clock)
+      // the session can go live AFTER the connect window — an enrol approve
+      // landing mid-pump does exactly that — so the ready line also arms here.
+      var readyLate = live
       // A rejected session ends the pump; there is no sheet to bounce to
       // yet, so the printed line is the surface (ADULT-UX-NONHAPPY's iOS
       // half owns the ask-again arc). The two-step quit edge only ever
@@ -286,6 +289,9 @@ object Pump:
         pollUrl()
         val took = h.waitEvent(FRAME_MS)
         st = frame(h, clock, evts, st)
+        if !readyLate && NetStatus.everLive() then
+          readyLate = true
+          println("ready " + Runtime.lastAuth.userId)
       audioCmds.send(AcQuit())
     }
     if isRejected(h.connection()) then println("rejected")
@@ -319,8 +325,9 @@ object Pump:
       st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
       st.unsent, st.undelivered,
-      NetStatus.everLive(), FbCaps.transportUnavailable(), None, false, NetStatus.clockOk(),
-      nowMs)
+      NetStatus.everLive(), FbCaps.transportUnavailable(),
+      WataLogic.enrolSnap(ctx, NetStatus.everLive()), Enrol.provisioning(),
+      NetStatus.clockOk(), nowMs)
     st.last match
       case old: Some[View] => patchTo(old.value, v)
       case None            => IosStage.submitTree(v)
