@@ -6,6 +6,13 @@ directives expect it (clib/<archdir>/libirohnet_ffi.a).
     ./mklib.py arm        # device (armv7 musl, the BQ268)     -> clib/linux_arm/
     ./mklib.py ios        # iPhone   (aarch64-apple-ios)       -> clib/ios/
     ./mklib.py ios-sim    # simulator(aarch64-apple-ios-sim)   -> clib/ios_sim/
+    ./mklib.py activate ios|ios-sim   # stage clib/<which> -> clib/ios_active/
+
+`activate` exists because cgo cannot tell the two iOS builds apart: GOOS=ios
+covers device and simulator alike, so the `#cgo ios` stanza points at ONE
+directory (clib/ios_active) and the build harness stages the matching archive
+into it first (re-asserting the Mach-O platform on the way — the wrong one
+links fine and fails at runtime).
 
 The two Apple cross-builds need no zig and no linker work — a staticlib is
 not linked here, and Xcode's clang is the C toolchain cargo picks up. NOTHING
@@ -175,8 +182,24 @@ def assert_apple(name: str, lib: Path) -> None:
     print(f"[mklib] {name}: arch {want_arch}, Mach-O platform {want_plat} — OK")
 
 
+def activate(name: str) -> int:
+    if name not in APPLE:
+        sys.exit(f"[mklib] activate: want ios | ios-sim, got {name!r}")
+    src = HERE / "clib" / APPLE[name][1] / "libirohnet_ffi.a"
+    if not src.exists():
+        sys.exit(f"[mklib] activate: no archive at {src} — run ./mklib.py {name} first")
+    assert_apple(name, src)
+    out = HERE / "clib" / "ios_active"
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, out / src.name)
+    print(f"[mklib] activated {name} -> {out / src.name}")
+    return 0
+
+
 def main() -> int:
     arch = sys.argv[1] if len(sys.argv) > 1 else "host"
+    if arch == "activate":
+        return activate(sys.argv[2] if len(sys.argv) > 2 else "")
     if arch == "host":
         lib, archdir = build_host(), "darwin"
     elif arch == "arm":

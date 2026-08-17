@@ -55,6 +55,29 @@ def main():
     covered = "uikit, iosui, iosshell, the ios hello"
     if WATA_IOS_EMIT[0].is_dir():
         covered += " and the emitted wata-ios"
+
+    # irohnet (plan 0062 stage 1): its real implementation is `-tags iroh`
+    # cgo over the staged Rust archive, and a package alone never links —
+    # the keygen main is the link proof. Needs the simulator archive
+    # (mklib.py ios-sim), skipped with a pointer when absent.
+    irohnet = REPO / "go-pkgs" / "irohnet"
+    if (irohnet / "clib" / "ios_sim" / "libirohnet_ffi.a").exists():
+        for cmd in (
+            [sys.executable, str(irohnet / "mklib.py"), "activate", "ios-sim"],
+            ["go", "vet", "-tags", "iroh", "."],
+            ["go", "build", "-tags", "iroh", "-o", "/dev/null",
+             "./cmd/irohnet-keygen"],
+        ):
+            print(f"+ (cd {irohnet.relative_to(REPO)}) " + " ".join(cmd),
+                  flush=True)
+            r = subprocess.run(cmd, cwd=irohnet, env=env)
+            if r.returncode != 0:
+                sys.exit(r.returncode)
+        covered += " and irohnet (iroh tag, simulator archive)"
+    else:
+        print("ios-build-check: skipping irohnet (no simulator archive — "
+              "run go-pkgs/irohnet/mklib.py ios-sim first)")
+
     print(f"ios-build-check: {covered} are vet-clean and build for "
           "ios/arm64 against the iphonesimulator SDK")
 

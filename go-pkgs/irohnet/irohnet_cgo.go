@@ -15,8 +15,14 @@
 package irohnet
 
 /*
-#cgo darwin LDFLAGS: -L${SRCDIR}/clib/darwin -lirohnet_ffi -framework Security -framework SystemConfiguration -framework CoreFoundation -framework CoreWLAN
+#cgo darwin,!ios LDFLAGS: -L${SRCDIR}/clib/darwin -lirohnet_ffi -framework Security -framework SystemConfiguration -framework CoreFoundation -framework CoreWLAN
+#cgo ios LDFLAGS: -L${SRCDIR}/clib/ios_active -lirohnet_ffi -framework Security -framework SystemConfiguration -framework CoreFoundation -framework Network
 #cgo linux,arm LDFLAGS: -L${SRCDIR}/clib/linux_arm -lirohnet_ffi -lunwind
+
+// ios: GOOS=ios also carries the darwin tag, so the mac line is fenced
+// !ios (CoreWLAN does not exist on iOS). clib/ios_active holds whichever
+// of the device/simulator archives the harness staged via
+// `./mklib.py activate ios|ios-sim` — cgo tags cannot tell those apart.
 
 // -lunwind: Rust std's panic machinery references _Unwind_* — on the armv7
 // musl cross-link `zig cc` (the device C toolchain) satisfies it with its
