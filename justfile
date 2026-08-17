@@ -435,3 +435,10 @@ ios-hello *FLAGS:
 ios-interptest *FLAGS:
     tools/ios-interptest.py {{FLAGS}}
 
+# the plan-0044 stage-4 gate: wata-ios in the simulator against a live
+# wata-server — the boot screen paints before the session connects, alice
+# logs in, the contact list paints (verdict = the app's printed lines, judged
+# by tools/ios-smoke.py). Needs Xcode + an iOS simulator runtime; not in ci.
+ios-smoke:
+    tools/ios-smoke.py
+
