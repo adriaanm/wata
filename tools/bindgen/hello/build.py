@@ -9,9 +9,10 @@ Three stages, each runnable on its own:
 
 `archive` and `app` are unattended and need only Xcode — that is the leg CI-ish
 verification can reach. `sign` needs a provisioning profile carrying the
-restricted `com.apple.developer.push-to-talk` entitlement, which Apple grants
-per team on request; without one the app cannot be installed, no matter how it
-is built. README.md has the owner's steps.
+`com.apple.developer.push-to-talk` and `aps-environment` entitlements (both
+come from a paid-team App ID with the Push to Talk and Push Notifications
+capabilities — portal checkboxes, no request form); without one the app cannot
+be installed, no matter how it is built. README.md has the owner's steps.
 
     tools/bindgen/hello/build.py                 # archive + app
     tools/bindgen/hello/build.py --sign          # …and sign it

@@ -6,6 +6,18 @@ Swift anywhere. The system PTT UI comes up, the app joins a channel, the
 hold-to-talk button transmits, and the system hands the app an activated audio
 session — all logged on screen.
 
+**Verified on hardware 2026-08-17** (iPhone 16, iOS 27.0 beta, dev-signed,
+team YAURQZ84XZ, bundle `net.wa-ta.hello`): channel manager up, join
+(`reason request`), a 32-byte ephemeral push token delivered, transmit →
+`audio session activated: <AVAudioSession …>`, release → deactivated. Every
+line is a PushToTalk delegate callback arriving in Go. One requirement was
+learned on device: `PTChannelManager` instantiation fails with
+`com.apple.pushtotalk.instantiation error 3` (missingPushServerEnvironment)
+unless the app is signed with `aps-environment` — the entitlements file
+carries it now, and the App ID needs the Push Notifications capability to
+put it in the profile. Also observed, correct by design: transmit before
+join fails with `com.apple.pushtotalk.channel error 1` (channelNotFound).
+
 ```
 ios/main.m      the shell: a window, four controls, a log view. No framework
                 calls — it only forwards taps into the archive.
@@ -30,11 +42,13 @@ Running it is the owner's leg, below.
 
 ## What the owner has to do
 
-1. **Make an App ID and a profile.** Push to Talk is a standard Xcode
-   capability — no request form; enabling it on the App ID is enough. In the
-   developer portal, create the App ID
-   `net.wa-ta.hello` (override with `WATA_BUNDLE_ID`) with the
-   Push to Talk capability, then a development provisioning profile for it and
+1. **Make an App ID and a profile.** Push to Talk is a standard capability —
+   no request form; a portal checkbox. In the developer portal, create the
+   App ID `net.wa-ta.hello` (override with `WATA_BUNDLE_ID`) with the
+   **Push to Talk AND Push Notifications** capabilities (the second puts
+   `aps-environment` in the profile, without which the channel manager
+   refuses to instantiate — see the hardware note above), then an
+   **iOS App Development** provisioning profile for it and
    the target device. Download it to
    `tools/bindgen/hello/WataHello.mobileprovision` (or point `WATA_PROFILE` at
    it). Set `WATA_TEAM_ID` to the team the profile belongs to (the sign
