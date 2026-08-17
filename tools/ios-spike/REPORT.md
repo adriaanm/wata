@@ -4,6 +4,13 @@ Queue item IOS-CLIENT-ASSEMBLY, run 2026-08-06 on macOS arm64, Xcode 26.2,
 Go 1.26.5, iOS simulator runtime 26.3 (iPhone 17), purego v0.11.0-alpha.8.
 Rerun: `just ios-spike` (unattended, ~90s); `just ios-spike --only run`.
 
+**The physical-device leg (IOS-HELLO-ON-PHONE) is retired as subsumed**
+(2026-08-17, plan 0061): the PushToTalk hello passed its hardware gate on
+a real iPhone under a dev-signed build — dlopen'd frameworks, synthesized
+ObjC delegate classes, and Go callbacks all working signed — which was
+this spike's sole remaining device question. The real client's device leg
+(plan 0061 stage 1) carries the answer forward on the code that ships.
+
 ## The answer
 
 **(A) works. A single pure-Go binary — no Swift, no Objective-C source, no
