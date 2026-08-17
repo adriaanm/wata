@@ -33,7 +33,7 @@ Running it is the owner's leg, below.
 1. **Make an App ID and a profile.** Push to Talk is a standard Xcode
    capability — no request form; enabling it on the App ID is enough. In the
    developer portal, create the App ID
-   `com.adriaanm.watahello` (override with `WATA_BUNDLE_ID`) with the
+   `net.wa-ta.hello` (override with `WATA_BUNDLE_ID`) with the
    Push to Talk capability, then a development provisioning profile for it and
    the target device. Download it to
    `tools/bindgen/hello/WataHello.mobileprovision` (or point `WATA_PROFILE` at

@@ -33,7 +33,7 @@ OUT = HERE / "out"
 APP = OUT / "WataHello.app"
 
 TEAM_ID = os.environ.get("WATA_TEAM_ID", "")
-BUNDLE_ID = os.environ.get("WATA_BUNDLE_ID", "com.adriaanm.watahello")
+BUNDLE_ID = os.environ.get("WATA_BUNDLE_ID", "net.wa-ta.hello")
 MIN_IOS = "16.0"
 
 

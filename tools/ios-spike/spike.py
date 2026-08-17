@@ -37,7 +37,7 @@ import simrun  # noqa: E402  (tools/simrun.py — the shared simulator driver)
 
 OUT = HERE / "out"
 APP = OUT / "WataIosSpike.app"
-BUNDLE_ID = "dev.wata.iosspike"
+BUNDLE_ID = "net.wa-ta.iosspike"
 BIN = "WataIosSpike"
 MIN_IOS = "17.0"
 

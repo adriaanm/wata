@@ -32,7 +32,7 @@ import sys
 
 WATA = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_NAME = "Wata"
-BUNDLE_ID = "com.adriaanm.wata"
+BUNDLE_ID = "net.wa-ta.mac"
 ICONSET = os.path.join(WATA, "tools", "wata.iconset")
 
 

@@ -26,7 +26,7 @@ import simrun  # noqa: E402
 
 OUT = HERE / "out"
 APP = OUT / "WataIosHello.app"
-BUNDLE_ID = "dev.wata.ioshello"
+BUNDLE_ID = "net.wa-ta.ioshello"
 BIN = "WataIosHello"
 
 # Each line is a proof; see tools/ios-hello/app/main.go's header.

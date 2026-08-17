@@ -41,7 +41,7 @@ import simrun  # noqa: E402
 
 REPO = HERE.parent
 APP = REPO / "wata-ios" / ".sgo" / "wata-ios" / "WataIos.app"
-BUNDLE_ID = "dev.wata.ios"
+BUNDLE_ID = "net.wa-ta.ios"
 PASSWORD = "testpass123"
 PORT = int(os.environ.get("IOS_SMOKE_PORT") or random.randint(20000, 39999))
 BASE = f"http://127.0.0.1:{PORT}"

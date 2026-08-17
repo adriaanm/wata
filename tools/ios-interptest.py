@@ -34,7 +34,7 @@ MODULE = REPO / "wata-ios"
 EMIT = MODULE / ".sgo" / "wata-ios"  # <module>/.sgo/<emitname>, sgo.build's
 BIN = "wata-ios-sim"
 APP = EMIT / "WataIos.app"
-BUNDLE_ID = "dev.wata.ios"
+BUNDLE_ID = "net.wa-ta.ios"
 
 PASS_RE = r"^interptest: PASS$"
 DONE_RES = (r"interptest: (PASS|FAIL)",)
