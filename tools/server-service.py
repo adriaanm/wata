@@ -129,6 +129,12 @@ def stage_release(iroh: bool) -> tuple[str, Path]:
 
 
 def cmd_package(args):
+    # Refuse to build as root: it would root-own the .sgo emit tree, the Go
+    # build cache, and the toolchain clone. `just server-install` runs this
+    # unprivileged and applies sudo to the install step alone.
+    if os.geteuid() == 0:
+        sys.exit("server-service: refusing to build as root — run `just server-install` "
+                 "(or `just server-package`) without sudo; only the install step needs it")
     version, stage = stage_release(args.iroh)
     print(f"server-service: staged {stage / 'wata-server'} (version {version})")
 

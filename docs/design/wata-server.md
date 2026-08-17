@@ -1318,13 +1318,19 @@ is never rotated — it's the database, not a log.
 it checks for real root and refuses politely if absent):
 
 ```
-just server-package             # build, stages under .service-stage/ (no sudo)
-sudo just server-install        # newest staged release -> layout + launchctl bootstrap
+just server-install              # package the tree (--iroh default), then sudo-install it
+just server-package              # the build half alone, stages under .service-stage/ (no sudo)
 just server-status               # layout, current release, journal size, launchd state
 sudo just server-restart         # launchctl kickstart -k, after an etc/wata.env edit
 sudo just server-uninstall                    # bootout, remove plist + newsyslog conf
 sudo just server-uninstall --purge --yes      # also delete /usr/local/wata (data included)
 ```
+
+`server-install` is run WITHOUT sudo: it depends on `server-package` (so the
+installed release is always the current tree, never a stale stage) and
+applies `sudo` to the install step alone — packaging under root would
+root-own the build caches, and the tool refuses it outright. Its FLAGS go to
+the package half and default to `--iroh`, the family server's flavor.
 
 Editing `etc/wata.env` and running `server-restart` is the whole
 config-change workflow — no plist regen, no reinstall. **An install writes no
@@ -1359,9 +1365,9 @@ second process against the same root to prove the account survives a restart
 prints a `SRV-PACKAGE SELFTEST PASS`/`FAIL` line and a non-zero exit on
 failure.
 
-The real `sudo just server-install` on the mac that hosts the family server
-is a human step outside this gate; `just server-status` afterward is the
-acceptance check for that run.
+The real `just server-install` on the mac that hosts the family server
+is a human step outside this gate (the sudo prompt is its confirmation);
+`just server-status` afterward is the acceptance check for that run.
 
 ## File-by-file map
 

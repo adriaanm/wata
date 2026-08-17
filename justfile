@@ -343,9 +343,11 @@ fb-shot *ARGS:
 server-package *FLAGS:
     python3 tools/server-service.py package {{FLAGS}}
 
-# install the newest staged release at /usr/local/wata (needs sudo; `just server-package` first)
-server-install *FLAGS:
-    python3 tools/server-service.py install {{FLAGS}}
+# package the current tree (iroh flavor unless FLAGS says otherwise), then install it at
+# /usr/local/wata. Run WITHOUT sudo: packaging must stay unprivileged (a root build would
+# root-own the emit tree and caches); only the install step prompts for sudo.
+server-install *FLAGS="--iroh": (server-package FLAGS)
+    sudo python3 tools/server-service.py install
 
 # bootout + remove the daemon files (needs sudo; add --purge to also drop data)
 server-uninstall *FLAGS:
