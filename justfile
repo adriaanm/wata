@@ -174,6 +174,12 @@ bindgen *FLAGS:
 ios-build-check:
     tools/ios-build-check.py
 
+# wata-ios on a physical iPhone (plan 0061): build for the iphoneos sysroot,
+# bundle, sign (needs WATA_TEAM_ID + a profile), devicectl install.
+# Stage-by-stage via `--only build|bundle|sign|install`. Needs Xcode; not in ci.
+ios-device *FLAGS:
+    tools/ios-device.py {{FLAGS}}
+
 # Apple bindings: the runtime leg — the generated Foundation wrappers driven
 # against this Mac's ObjC runtime (dispatch, blocks, NSError**, and a
 # synthesized delegate class Foundation itself calls). Needs macOS; not in ci.
