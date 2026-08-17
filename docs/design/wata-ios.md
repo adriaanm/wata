@@ -63,12 +63,18 @@ pump with the mac-only seams swapped.
   touch-up/cancel edges, which is what makes hold-to-talk work. Real
   interaction design is `ADULT-UX-NONHAPPY`'s; these buttons make the
   shared applet logic drivable at all.
-- **Audio is stubbed off** (`audiostub.scala`): the same
-  `AudioThread.mainLoop` seam as wata-fb's audio thread, answering
-  `AcRecordStart` with `AeRecordingError` and `AcPlay` with
-  `AePlaybackError` — honestly broken (MIC FAILED flashes), never
-  wedged (the command channel is always drained). The real iOS audio
-  stack is the PTT leg's, hardware-gated.
+- **Audio is real** (plan 0063): wata-fb's own `audiothread.scala`
+  symlinked in — the same seam wata-mac uses — over an `audio.scala`
+  facade bound to `go-pkgs/macaudio` (facade-check holds all three
+  declarations identical). macaudio was iOS-clean by construction; the
+  one iOS-only piece is its `session_ios.go`: AVAudioSession set to
+  PlayAndRecord (DefaultToSpeaker — walkie-talkie audio belongs on the
+  speaker — plus AllowBluetooth) and activated before the engine is
+  built, with the record-permission ask fired there so the system
+  prompt lands at audio-thread start, not mid-PTT-press. A denied mic
+  still surfaces as MIC FAILED per command, never a wedge. Foreground
+  only: the PushToTalk framework (background transmit) is a follow-up
+  plan.
 - **The stores are sandbox files** (`config.scala`): wata-mac's three
   stores with the keychain swapped for `secrets.json` (0600) in the
   app's own data container — the honest simulator-grade store; the iOS
@@ -144,7 +150,11 @@ pump with the mac-only seams swapped.
   approve as `phone`). Asserts, off the printed lines: the setup
   screen, the configure claim, the announce landing 200, the restart,
   `ready @phone:` (device-login — no password exists by construction),
-  the painted contacts. Three simulator facts it depends on, learned
+  the painted contacts. Both this gate and ios-smoke run the app with
+  `WATA_MAC_AUDIO=fake` (macaudio's tone/clock hardware ends — the env
+  name is the package's, kept for facade parity): the REAL audio
+  thread links, starts and pumps, and no mic-permission prompt can
+  block a harness. Three simulator facts it depends on, learned
   the hard way: (1) a custom scheme opened from outside shows a
   consent alert no harness can tap — pre-seed the per-device
   `com.apple.launchservices.schemeapproval.plist`

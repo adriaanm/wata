@@ -134,6 +134,10 @@ def main():
     os.environ["SIMCTL_CHILD_WATA_IOS_HS"] = BASE
     os.environ["SIMCTL_CHILD_WATA_IOS_USER"] = "alice"
     os.environ["SIMCTL_CHILD_WATA_IOS_PASS"] = PASSWORD
+    # the REAL audio thread with macaudio's fake hardware ends (plan 0063):
+    # no mic-permission prompt can block a harness, and the gate proves the
+    # thread links, starts, and pumps on iOS
+    os.environ["SIMCTL_CHILD_WATA_MAC_AUDIO"] = "fake"
 
     sc = simrun.simctl()
     udid = simrun.ensure_device(sc)

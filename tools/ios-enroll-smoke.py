@@ -183,6 +183,10 @@ def main():
         # the connect wait blocks painting, and the enrol announce rides on a
         # painted frame — shorten it so the arc reaches the pump quickly
         os.environ["SIMCTL_CHILD_WATA_IOS_CONNECT_MS"] = "3000"
+        # the REAL audio thread with macaudio's fake hardware ends (plan 0063):
+        # no mic-permission prompt can block a harness, and the gate proves the
+        # thread links, starts, and pumps on iOS
+        os.environ["SIMCTL_CHILD_WATA_MAC_AUDIO"] = "fake"
         for k in ("WATA_IOS_HS", "WATA_IOS_USER", "WATA_IOS_PASS"):
             os.environ.pop("SIMCTL_CHILD_" + k, None)
 

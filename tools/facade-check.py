@@ -38,6 +38,12 @@ PAIRS = [
         "wata-fb/src/main/scala/audio.scala",
         "wata-mac/src/main/scala/audio.scala",
     ),
+    # wata-ios binds macaudio too (plan 0063): audiothread.scala is the same
+    # symlinked file, so the same identity must hold there.
+    (
+        "wata-fb/src/main/scala/audio.scala",
+        "wata-ios/src/main/scala/audio.scala",
+    ),
     # The iroh transport facade (plan 0034). Nothing symlinked binds this one:
     # wata-tui and wata-mac each declare their own `go.irohnet` over the SAME
     # Go package, and the pair is held identical so the client-side surface

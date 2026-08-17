@@ -157,12 +157,16 @@ object Enrol:
     if !idTriedC.get() then mintId()
     idC.get()
 
+  /** the id lands BEFORE the tried flag: a concurrent nodeId() that observes
+   *  tried=true must find the id already there, or it reads "" and (say) an
+   *  announce silently skips — a race the iOS client actually hit between
+   *  its frame thread and the spawned announce. */
   def mintId(): Unit =
-    idTriedC.set(true)
     val p = go.sys.getenv(ENV_IROH)
     if p != "" then
       try idC.set(go.irohnet.ensureKey(p))
       catch case e: sgo.GoError => noteIdError(e.message)
+    idTriedC.set(true)
 
   def noteIdError(msg: String): Unit =
     println("enrol: cannot mint this device's node key: " + msg)
@@ -262,11 +266,13 @@ object Enrol:
   def announceOnce(): Unit =
     if !announcedC.get() then
       announcedC.set(true)
-      sgo.spawn(() => announce())
+      // the id resolves HERE, on the calling thread, so the spawned POST can
+      // never race the first mint (see mintId)
+      val id = nodeId()
+      sgo.spawn(() => announce(id))
 
-  def announce(): Unit =
+  def announce(id: String): Unit =
     val base = adminUrl()
-    val id = nodeId()
     if base != "" && id != "" then
       val hs = Hs(FbCaps.plainHttp(ANNOUNCE_TIMEOUT_MS), FbCaps.clock(), base, "")
       val resp = MatrixHttp.request(hs, "POST", "/_wata/v1/enroll", "application/json",

@@ -1,6 +1,8 @@
 # 0063 — real audio on iOS: the mac's backend under the shared audio thread
 
-Status: proposed
+Status: accepted; simulator legs green 2026-08-17 (ios-smoke +
+ios-enroll-smoke with the real thread over the fake backend, full ci) —
+awaiting the owner's on-phone mic roundtrip
 
 ## The problem
 

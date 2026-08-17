@@ -124,6 +124,12 @@ func startEngine() error {
 	if err := loadAudioToolbox(); err != nil {
 		return err
 	}
+	// iOS only (no-op elsewhere): the AVAudioSession category decides what
+	// the IO unit is configured with, so it is set and activated before the
+	// engine exists. See session_ios.go.
+	if err := sessionActivate(); err != nil {
+		return err
+	}
 	var err error
 	inPool(func() {
 		e := av.GetAVAudioEngineClass().Alloc().Init() // -init: adopt the result

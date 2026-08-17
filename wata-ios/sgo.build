@@ -1,8 +1,9 @@
 # sgo.build (schema: see the sgola tree's core/sgo.build). wata-ios is an APP
 # over core + json + wataclient + wataui: the iOS client (plan 0044),
 # wata-mac's architecture with UIKit under it — wata-fb's screen bodies
-# (copied in, honest duplication) on the retained UIKit stage, the audio
-# thread stubbed off, key input as the shell's touch keypad.
+# (copied in, honest duplication) on the retained UIKit stage, real audio
+# via the shared macaudio backend (plan 0063), key input as the shell's
+# touch keypad.
 mode app
 emitname wata-ios
 binname wata-ios
@@ -19,6 +20,11 @@ optreport
 godep github.com/adriaanm/wata/go-pkgs/iosshell go-pkgs/iosshell
 godep github.com/adriaanm/wata/go-pkgs/iosui go-pkgs/iosui
 godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt
+# The audio backend (plan 0063): the same macaudio wata-mac binds —
+# AudioToolbox + AVFAudio over purego, iOS-clean by construction, plus the
+# AVAudioSession activation its ios build tag adds. It rides appleptt
+# (already replaced above), so no further godep of its own.
+godep github.com/adriaanm/wata/go-pkgs/macaudio go-pkgs/macaudio
 # the timeout-carrying http.Client constructor (plan 0045 slice 1) — the
 # net/http facade binds the Client type, not its fields, so the per-request
 # Timeout comes from this tiny Go package, same as wata-fb and wata-mac
