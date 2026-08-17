@@ -29,10 +29,22 @@ TARGETS = [
     (REPO / "tools" / "ios-hello" / "app", "-o /dev/null ."),
 ]
 
+# wata-ios's EMITTED module (plan 0044 stage 3) — a build product, present
+# only after an `sgo build`, so it is covered when it exists and named as
+# skipped when it does not (a fresh checkout has no .sgo tree; the full
+# emit-and-run gate is `just ios-interptest`).
+WATA_IOS_EMIT = (REPO / "wata-ios" / ".sgo" / "wata-ios", "-o /dev/null .")
+
 
 def main():
     env = iosenv.go_env("iphonesimulator")
-    for mod, pat in TARGETS:
+    targets = list(TARGETS)
+    if WATA_IOS_EMIT[0].is_dir():
+        targets.append(WATA_IOS_EMIT)
+    else:
+        print("ios-build-check: skipping wata-ios (no emitted module — "
+              "run `just ios-interptest` or `sgo build` in wata-ios first)")
+    for mod, pat in targets:
         for verb in ("vet", "build"):
             args = pat.split() if verb == "build" else [pat.split()[-1]]
             cmd = ["go", verb] + args
@@ -40,8 +52,11 @@ def main():
             r = subprocess.run(cmd, cwd=mod, env=env)
             if r.returncode != 0:
                 sys.exit(r.returncode)
-    print("ios-build-check: uikit, iosui, iosshell and the ios hello are "
-          "vet-clean and build for ios/arm64 against the iphonesimulator SDK")
+    covered = "uikit, iosui, iosshell, the ios hello"
+    if WATA_IOS_EMIT[0].is_dir():
+        covered += " and the emitted wata-ios"
+    print(f"ios-build-check: {covered} are vet-clean and build for "
+          "ios/arm64 against the iphonesimulator SDK")
 
 
 if __name__ == "__main__":

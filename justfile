@@ -426,3 +426,12 @@ ios-spike *FLAGS:
 ios-hello *FLAGS:
     tools/ios-hello/hello.py {{FLAGS}}
 
+# the plan-0044 stage-3 gate: `wata-ios interptest` in the simulator — sgo
+# emits the app, the emitted module cross-builds for the simulator, and the
+# retained UIKit interpreter's suite runs on the shared device (verdict = the
+# printed `interptest: PASS`, the wata-mac discipline). Needs Xcode + an iOS
+# simulator runtime; not in ci.
+#   just ios-interptest --only run    # one stage
+ios-interptest *FLAGS:
+    tools/ios-interptest.py {{FLAGS}}
+

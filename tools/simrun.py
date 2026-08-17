@@ -117,16 +117,18 @@ def ensure_device(sc, name=DEVICE_NAME, device_type=DEVICE_TYPE):
 
 def launch_and_expect(sc, udid, app_path, bundle_id, expect,
                       done_res=(r"all checks passed", r"FAIL"),
-                      timeout=90, screenshot=None):
+                      timeout=90, screenshot=None, args=()):
     """Boot (if needed), install, launch with a console pty, pump the app's
     stdout until a done marker (or the watchdog timeout), screenshot if
     asked, terminate. Returns (lines, elapsed_seconds, missing_patterns) —
     the caller judges. `expect` is a list of regexes that must each match
-    somewhere in the output."""
+    somewhere in the output. `args` become the app's argv (simctl passes
+    everything after the bundle id through to the process)."""
     run(sc + ["bootstatus", udid, "-b"])
     run(sc + ["install", udid, str(app_path)])
     t0 = time.time()
-    proc = subprocess.Popen(sc + ["launch", "--console-pty", udid, bundle_id],
+    proc = subprocess.Popen(sc + ["launch", "--console-pty", udid, bundle_id]
+                            + list(args),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
     lines, done = [], threading.Event()
