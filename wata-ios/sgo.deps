@@ -1,0 +1,4 @@
+# In-link libraries above the implicit prelude (core). Stage 3 links only
+# wataui — the view algebra and differ the retained interpreter consumes.
+# json and wataclient join when the bodies cross (plan 0044 stage 4).
+wataui

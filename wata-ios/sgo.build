@@ -1,0 +1,21 @@
+# sgo.build (schema: see the sgola tree's core/sgo.build). wata-ios is an APP
+# over core + wataui: the iOS client (plan 0044), wata-mac's architecture with
+# UIKit under it. Today it holds the retained interpreter (iosstage.scala) and
+# its interptest argv mode; the bodies cross in stage 4, which is when json +
+# wataclient join the dep chain.
+mode app
+emitname wata-ios
+binname wata-ios
+gomod wataios
+optreport
+# The UIKit shell and glue: iosshell owns UIApplicationMain, the delegate,
+# the window and the ready hop; iosui owns the main-queue seam, the pool
+# brackets, the cast facets, the raw-RGBA crossing and the render probe. They
+# ride appleptt (the generated uikit bindings), which needs its OWN godep
+# line — a `replace` in a dependency's go.mod is ignored by Go once the
+# emitted app is the main module, so each local sibling must be replaced from
+# the app's go.mod, and a godep line is exactly that (require + local
+# replace).
+godep github.com/adriaanm/wata/go-pkgs/iosshell go-pkgs/iosshell
+godep github.com/adriaanm/wata/go-pkgs/iosui go-pkgs/iosui
+godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt
