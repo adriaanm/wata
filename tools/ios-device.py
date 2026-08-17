@@ -53,8 +53,13 @@ def run(cmd, **kw):
 def build():
     run([REPO / "tools" / "sgo", "build"], cwd=REPO / "wata-ios")
     OUT.mkdir(parents=True, exist_ok=True)
+    # the DEVICE irohnet archive (plan 0062: the phone's transport is iroh);
+    # -a because Go's build cache is blind to the .a swap activate just did
+    irohnet = REPO / "go-pkgs" / "irohnet"
+    run([sys.executable, irohnet / "mklib.py", "activate", "ios"], cwd=irohnet)
     env = iosenv.go_env("iphoneos")
-    run(["go", "build", "-o", OUT / BIN, "."], cwd=EMIT, env=env)
+    run(["go", "build", "-a", "-tags", "iroh", "-o", OUT / BIN, "."],
+        cwd=EMIT, env=env)
 
 
 def bundle():
