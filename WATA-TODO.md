@@ -141,11 +141,11 @@ blocks + git log; each entry cites where it was recorded.*
 - **`PRUNE-DANGLING-MODULE-INIT`** (filed 2026-08-17) — a module-init
   `val x = go.callback(() => Obj.f())` whose val is not read from any
   reachable code still emits the callback literal, but `f` is pruned, so
-  the emitted Go fails with `undefined: Obj_f`. Hit by wata-ios (stage 3:
-  the pump that reads `IosStage.applyCb` does not exist yet). Workaround:
-  `Main.runInterptest` makes a no-op `IosStage.submit(Nil)` call to keep
-  the chain referenced (comment key in main.scala); remove it when stage
-  4's pump lands or the fix does, whichever first.
+  the emitted Go fails with `undefined: Obj_f`. Hit by wata-ios at stage
+  3, when no pump read `IosStage.applyCb` yet; the stage-4 pump became
+  `submit`'s real caller and the no-op workaround came out (gates
+  re-taken green). The upstream defect stands — any consumer minting a
+  module-init callback nothing reachable reads reproduces it.
 
 - **`SUM-CASE-GENERIC-FIELD-EMITS-BARE-LIST`** — RESOLVED at sgola
   `fb9621c` (repinned 2026-08-09, same day it was filed): field types of

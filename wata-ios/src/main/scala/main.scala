@@ -65,13 +65,10 @@ object Main:
     go.iosshell.runApp(readyCb) // never returns
 
   def runInterptest(): Unit =
-    // PRUNE-DANGLING-MODULE-INIT: keep the frame-handoff seam linked. The
-    // pruner drops `drainPending` when nothing reachable references `submit`
-    // (the client pump is its real caller, absent from an interptest-focused
-    // slice), but the module init still emits the `applyCb` callback literal
-    // that CALLS it — the emitted Go then does not compile. This inline
-    // no-op submit keeps submit -> applyCb -> drainPending in the program.
-    IosStage.submit(Nil)
+    // (The stage-3 PRUNE-DANGLING-MODULE-INIT workaround — a no-op
+    // IosStage.submit(Nil) here — came out when the pump became `submit`'s
+    // real caller; the upstream ticket about pruning a def a module-init
+    // callback literal still calls remains open in sgola's queue.)
     val failures = InterpTest.run()
     // The verdict travels by the printed line: launchd owns the process's
     // exit, so the harness greps `interptest: PASS`/`FAIL` and terminates
