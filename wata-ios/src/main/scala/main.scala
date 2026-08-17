@@ -180,18 +180,74 @@ object Pump:
         savedC.set(true)
         FbConfig.saveLogin(c.cfg.homeserver, c.cfg.username, creds)
 
-  def session(): Unit = cfgC.get() match
+  /** set when a `wata://configure` link lands (setup wait or mid-session):
+   *  the current pump ends and the session restarts onto the new transport. */
+  private val restartC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  def session(): Unit =
+    var looping = true
+    while looping do
+      restartC.set(false)
+      looping = sessionOnce()
+
+  /** one session arc; true = run another (a configure link landed). Three
+   *  ways in: password/stored credentials (the harness path), an iroh
+   *  config (device-login — the enrolled phone, plan 0062), or neither —
+   *  the fresh install, which waits in `setupWait` for the admin page's
+   *  configure link. */
+  def sessionOnce(): Boolean = cfgC.get() match
     case c: Some[ClientConfig] =>
       val cfg = c.value
-      if !Main.hasCredentials(cfg) then
-        println("wata-ios: set WATA_IOS_USER (and WATA_IOS_PASS), or store a session first")
+      if !Main.hasCredentials(cfg) && !Enrol.configured() then setupWait()
       else
         val h = startAudioClient(cfg)
         pump(h)
         h.stop()
         val joined = ClientHandle.join(h, 5000L)
-        println("session ended")
-    case None => println("wata-ios: no config")
+        if restartC.get() then
+          println("session restarting (configured)")
+          true
+        else
+          println("session ended")
+          false
+    case None =>
+      println("wata-ios: no config")
+      false
+
+  /** the fresh-install arc (plan 0062): paint the setup screen, bounce to
+   *  the family admin page once (its "Add this phone" link is the way
+   *  back), and wait for `wata://configure`. Always answers true — the only
+   *  way out is being configured. */
+  def setupWait(): Boolean =
+    noteScreen("setup")
+    Enrol.openSetupOnce()
+    var old = bootTree()
+    var going = true
+    while going do
+      val u = go.iosshell.takeURL()
+      if u != "" && Enrol.handleConfigure(u) then going = false
+      else
+        val v = setupTree()
+        patchTo(old, v)
+        old = v
+        IosCaps.clock().sleepMs(200L)
+    true
+
+  def setupTree(): View =
+    val l1 = "set up wata"
+    val l2 = "tap Add this phone on the"
+    val l3 = "family admin page (Safari)"
+    VGroup(
+      Keyed("title", VText(0, 0, "WATA", Color.cyan)) ::
+        Keyed("head", VText(FbPaint.centerCol(l1), 4, l1, Color.white)) ::
+        Keyed("sub1", VText(FbPaint.centerCol(l2), 6, l2, Color.midGray)) ::
+        Keyed("sub2", VText(FbPaint.centerCol(l3), 7, l3, Color.midGray)) :: Nil)
+
+  /** one non-blocking look at the URL queue, from the pump loop: a configure
+   *  link mid-session (re-pairing to a new server) restarts the session. */
+  def pollUrl(): Unit =
+    val u = go.iosshell.takeURL()
+    if u != "" && Enrol.handleConfigure(u) then restartC.set(true)
 
   /** `Runtime.waitForConnection(Syncing)`, except a `ConnAuthRejected` ends
    *  the wait at once (wata-mac's shape). */
@@ -226,7 +282,8 @@ object Pump:
       // yet, so the printed line is the surface (ADULT-UX-NONHAPPY's iOS
       // half owns the ask-again arc). The two-step quit edge only ever
       // re-arms: an iOS app does not terminate itself.
-      while !st.quit && !isRejected(h.connection()) do
+      while !st.quit && !isRejected(h.connection()) && !restartC.get() do
+        pollUrl()
         val took = h.waitEvent(FRAME_MS)
         st = frame(h, clock, evts, st)
       audioCmds.send(AcQuit())

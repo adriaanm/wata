@@ -27,21 +27,9 @@ object Shell:
     case KBack() => true
     case _       => false
 
-/** the enrolment screen's data — never shown here. A phone enrols the way a
- *  laptop does (out of band), not the way a handset does; `required()`
- *  answering false is what routes `WataLogic.bodyContacts` past the QR
- *  screen (wata-fb/enrol.scala is the real thing). */
-case class EnrolSnap(hint: String)
-
-object Enrol:
-  def configured(): Boolean = false
-  def required(): Boolean = false
-  def provisioning(): Boolean = false
-  def announceOnce(): Unit = ()
-  def snap(hint: String): EnrolSnap = EnrolSnap(hint)
-  /** unreachable while `required()` is false; loud rather than blank if it
-   *  ever shows. */
-  def body(e: EnrolSnap): View = VText(1, 6, "enrol: fb only", Color.red)
+// Enrol is REAL here (enrol.scala, plan 0062) — the phone enrols the way a
+// handset does, with the QR replaced by the app opening the admin page
+// itself. Only the device-hardware objects below stay stubs.
 
 /** wata-fb's sysfs/modem diagnostics (diag.scala). Off-device every reading
  *  answers `UNAVAILABLE` and every action is a no-op that says so — the same
@@ -97,11 +85,11 @@ final class FbOutbox(val dir: String, val writable: Boolean) extends OutboxStore
   def clear(slot: scala.Int): Unit = FbConfig.clearSlot(dir, slot)
   def persistent(): Boolean = writable
 
-/** wata-fb's app-edge capability extras (caps.scala). The iOS client has no
- *  iroh transport yet (the mac's `WATA_IROH_CONFIG` seam is not carried),
- *  so the transport is never "configured but unbringable". */
+/** wata-fb's app-edge capability extras (caps.scala) — the iroh transport
+ *  is real on iOS now (plan 0062), so the "configured but unbringable"
+ *  latch is IosCaps's and this shared-source name delegates to it. */
 object FbCaps:
-  def transportUnavailable(): Boolean = false
+  def transportUnavailable(): Boolean = IosCaps.transportUnavailable()
 
 /** wata-fb's startup bleep (chirp.scala, plan 0039): a handset answers "has
  *  it finished booting?" out loud because its screen shows nothing for ~40s;

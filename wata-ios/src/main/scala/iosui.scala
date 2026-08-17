@@ -73,3 +73,11 @@ object iosshell:
   @go.name("NextKey") def nextKey(): scala.Int = ???
   /** inject a key edge into the same queue the buttons feed. */
   @go.name("PushKey") def pushKey(code: scala.Int, phase: scala.Int): Unit = ???
+
+  // ---- the wata:// scheme (plan 0062) ---------------------------------------
+  /** the oldest URL handed to the app (Info.plist registers `wata:`), or ""
+   *  — never blocks; the pump polls once per frame, the setup wait faster. */
+  @go.name("TakeURL") def takeURL(): String = ???
+  /** open a URL in its owning app (Safari for http) — any thread, the shell
+   *  hops to the main queue itself; fire-and-forget. */
+  @go.name("OpenURL") def openURL(u: String): Unit = ???

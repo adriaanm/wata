@@ -230,16 +230,19 @@ func TakeURL() string {
 }
 
 // OpenURL hands a URL to the system to open in its owning app (Safari for
-// http). MAIN THREAD ONLY — call through iosui.OnMain, or from the pump's
-// frame callback. Fire-and-forget: the completion handler is nil.
+// http). Any-thread: the UIKit call hops to the main queue itself.
+// Fire-and-forget — the completion handler is nil and a malformed URL is
+// silently dropped (NSURL answers nil).
 func OpenURL(s string) {
-	pool := iosui.PoolPush()
-	defer iosui.PoolPop(pool)
-	url := objc.ID(objc.GetClass("NSURL")).Send(selURLWithString, objcrt.NSString(s))
-	if url == 0 {
-		return
-	}
-	app := objc.ID(objc.GetClass("UIApplication")).Send(selSharedApplication)
-	opts := objc.ID(objc.GetClass("NSDictionary")).Send(selDictionary)
-	app.Send(selOpenURLOutbound, url, opts, 0)
+	iosui.MainQueue().Async(func() {
+		pool := iosui.PoolPush()
+		defer iosui.PoolPop(pool)
+		url := objc.ID(objc.GetClass("NSURL")).Send(selURLWithString, objcrt.NSString(s))
+		if url == 0 {
+			return
+		}
+		app := objc.ID(objc.GetClass("UIApplication")).Send(selSharedApplication)
+		opts := objc.ID(objc.GetClass("NSDictionary")).Send(selDictionary)
+		app.Send(selOpenURLOutbound, url, opts, 0)
+	})
 }
