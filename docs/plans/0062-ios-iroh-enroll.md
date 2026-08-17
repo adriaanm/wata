@@ -1,6 +1,7 @@
 # 0062 — iroh + enrollment on iOS: the phone logs in like a handset
 
-Status: accepted (owner ruling 2026-08-17)
+Status: done (2026-08-17 — all four stages; stage 4 owner-verified on
+the phone, including the cellular/relay leg)
 
 ## The problem
 
@@ -75,7 +76,15 @@ after every delivery (gotchas recorded in wata-ios.md and
 apple-dev-tooling.md). Green 2026-08-17: fresh install → setup screen
 → configure → announce 200 → approve → restart → `ready
 @phone:localhost` → contacts painted, 7.5s launch-to-verdict, no
-password anywhere. Stage 4 is owner-in-the-loop on the phone.
+password anywhere. Stage 4, owner-verified on the phone 2026-08-17:
+the iroh-linked device build (`just ios-device` grew the archive
+activation + `-tags iroh`) installed on the owner's iPhone, the home
+server redeployed with the card (release 20260817-6f87d63), then the
+real walkthrough — setup screen, Safari, "Add this phone", approve,
+contacts — and the prize: with wifi OFF, the same session confirmed
+live over cellular through the n0 relay. The phone logs in like a
+handset, everywhere. (Voice itself is still the audio stub — MIC
+FAILED by design; that is PTT-MIC-ROUNDTRIP, plan 0061 stage 4.)
 
 ## Out of scope
 
