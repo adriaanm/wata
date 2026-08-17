@@ -40,6 +40,16 @@ object irohnet:
    *  malformed id) is reported rather than fatal. */
   @go.name("Disallow") def disallow(nodeId: String): Unit throws sgo.GoError = ???
 
+  /** `irohnet.ActiveID()` — the live listener's node id: the public identity
+   *  a new device needs to dial this server (the add-this-phone payload,
+   *  plan 0062). Throws when no iroh listener is up in this process. */
+  @go.name("ActiveID") def activeId(): String throws sgo.GoError = ???
+
+  /** `irohnet.ActiveAddrsCSV()` — the live listener's direct addresses,
+   *  comma-joined `ip:port` entries; rides with `activeId` in the
+   *  add-this-phone payload as the LAN fast path. */
+  @go.name("ActiveAddrsCSV") def activeAddrsCsv(): String throws sgo.GoError = ???
+
   /** `irohnet.StripNodeID(handler)` — wrap a handler so any client-supplied
    *  `X-Wata-Node-Id` is deleted before dispatch: the TCP edge's half of the
    *  trusted-header contract (plan 0027). Untagged in the Go package, so it

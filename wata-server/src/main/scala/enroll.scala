@@ -96,6 +96,49 @@ object Enroll:
     val over = go.sys.getenv("WATA_ENROLL_ALLOWLIST")
     if over != "" then over else go.sys.getenv("WATA_IROH_CONFIG")
 
+  // ---- the server's own card (plan 0062) ---------------------------------------
+
+  /** `GET /_wata/v1/enroll/server` — unauthenticated, like the announce and
+   *  for the same reason: it serves a device that has nothing yet, and every
+   *  field is public (the node id is what every enrolment QR already shows,
+   *  the relay is a well-known name, the direct addrs are what any LAN peer
+   *  observes). The admin page's "add this phone" link is composed from this
+   *  payload plus the page's own origin as the admin URL — the address the
+   *  phone provably reached the page on. A server with no live iroh listener
+   *  answers 503: over plain TCP there is no identity to hand out. */
+  def serverInfo(): Either[MErr, Json] =
+    var id = ""
+    var addrs = ""
+    var msg = ""
+    try
+      id = go.irohnet.activeId()
+      addrs = go.irohnet.activeAddrsCsv()
+    catch case e: sgo.GoError => msg = e.message
+    if msg != "" then Left(MErr(503, M_UNKNOWN(), "No live iroh listener: " + msg))
+    else Right(obj3("peer", JStr(id), "relay", JStr(configRelay()),
+                    "peerAddrs", JArr(csvStrs(addrs))))
+
+  /** the `relay` field of this server's own iroh config, `"n0"` when unset —
+   *  the same default `irohnet.LoadConfig` applies, restated because this
+   *  read goes through the JSON directly. */
+  def configRelay(): String =
+    val p = go.sys.getenv("WATA_IROH_CONFIG")
+    if p == "" then "n0"
+    else Json.tryParse(Config.readAll(p)) match
+      case Right(j) =>
+        val r = strField(j, "relay", "")
+        if r == "" then "n0" else r
+      case Left(_) => "n0"
+
+  /** comma-separated → JStr list, empty string → empty list. Plain
+   *  recursion: an addrs list is a handful of entries. */
+  def csvStrs(s: String): List[Json] =
+    if s == "" then Nil
+    else
+      val i = s.indexOf(",")
+      if i < 0 then JStr(s) :: Nil
+      else JStr(s.substring(0, i)) :: csvStrs(s.substring(i + 1))
+
   // ---- the announce ------------------------------------------------------------
 
   /** `POST /_wata/v1/enroll` — unauthenticated. */

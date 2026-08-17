@@ -232,6 +232,10 @@ object Server:
     // grants nothing; the approve/deny pair behind the admin gate is what
     // moves a node id into the allowlist.
     mux.handle("POST /_wata/v1/enroll", h)
+    // the server's own public card (plan 0062): node id, relay, direct
+    // addrs — what the admin page's "add this phone" link hands a new
+    // phone. Unauthenticated like the announce; grants nothing.
+    mux.handle("GET /_wata/v1/enroll/server", h)
     // device-login (plan 0027): no credentials — the iroh transport's proven
     // node id, delivered as the trusted header, is exchanged for a session;
     // any request without that header (every TCP-path request) is 403.

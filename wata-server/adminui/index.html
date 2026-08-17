@@ -78,6 +78,14 @@
     <button type="submit">Find</button>
   </form>
 
+  <h2>Add this phone</h2>
+  <p class="muted">On an iPhone with the Wata app installed, open this page in Safari and tap
+    the link — it hands the app this server's address. The phone then announces itself and
+    appears above for approval, like any handset.</p>
+  <p><a id="add-phone" class="hidden" href="">Set up this phone in Wata</a></p>
+  <p class="muted hidden" id="add-phone-unavail">Not available: this server has no live iroh
+    listener (it is running plain TCP), so there is no address to hand out.</p>
+
   <h2 id="enrolled-head" class="hidden">Enrolled handsets</h2>
   <table id="enrolled" class="hidden">
     <thead><tr><th>handset</th><th>node id</th><th>account</th><th>last seen</th><th></th></tr></thead>
@@ -588,6 +596,29 @@ async function refresh() {
   // the account rows' session tables join against.
   renderEnroll(e);
   renderUsers(s.users);
+  renderAddPhone();
+}
+
+// The "add this phone" link (plan 0062): the server's public card composed
+// into a wata://configure URL the Wata app on THIS phone claims. The admin
+// URL is the page's own origin — the address the phone provably reached this
+// page on. Fetched once per page life; a 503 means the server runs plain TCP
+// and there is nothing to hand out.
+let addPhoneDone = false;
+async function renderAddPhone() {
+  if (addPhoneDone) return;
+  addPhoneDone = true;
+  try {
+    const c = await api("GET", "/_wata/v1/enroll/server");
+    const q = new URLSearchParams({
+      peer: c.peer, relay: c.relay, admin: location.origin,
+      addrs: (c.peerAddrs || []).join(","),
+    });
+    $("add-phone").href = "wata://configure?" + q.toString();
+    $("add-phone").classList.remove("hidden");
+  } catch (e) {
+    $("add-phone-unavail").classList.remove("hidden");
+  }
 }
 
 // Exactly one of the three screens is up: first-run setup, the login form, or

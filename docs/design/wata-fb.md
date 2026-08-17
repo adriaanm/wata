@@ -739,6 +739,21 @@ session.
 iroh (`WATA_IROH_CONFIG` names a file), the transport's allowlist decides
 whether this device exists at all, and a brand-new device is not on it.
 
+> `[FB-ZERO-CONFIG-DEPLOY]` **Open: a standard rootfs with no baked server.**
+> Today the `peer`/`relay` fields are baked at deploy time, so every family's
+> rootfs image is unique — a future user cannot flash a published stock image
+> and end up at their own server. The ask (owner, 2026-08-17): the handset
+> should learn its server the way plan 0062 taught the iPhone (there, the
+> phone opens the admin page in Safari and a `wata://configure` link hands
+> back `peer`/`relay`/`adminUrl`). The handset has no browser and no camera,
+> so the delivery channel is the open design question — candidates: the
+> parent's phone playing an audio-modem chirp into the handset's mic (the
+> audio-modem idea plan 0014 dropped, now pointed the right direction: this
+> IS the case where data must flow into a device with no other input), wifi
+> provisioning via a temporary AP, or the USB gadget serial console scripted
+> from the admin page. Prereq for the hosted tier's onboarding story as much
+> as for self-hosters.
+
 **The identity is minted on the device.** A handset is deployed with an iroh
 config that names the family's server and carries **no secret**:
 

@@ -610,6 +610,29 @@ func NewHTTPClient(path string) (*http.Client, error) {
 	return &http.Client{Transport: tr}, nil
 }
 
+// ActiveID reports the live listener's node id — the public identity a new
+// device needs to dial this server (the admin page's add-this-phone payload,
+// plan 0062). Errors when no listener is up in this process.
+func ActiveID() (string, error) {
+	l, e := activeListener()
+	if e != nil {
+		return "", e
+	}
+	return l.id, nil
+}
+
+// ActiveAddrsCSV reports the live listener's DIALABLE direct addresses
+// comma-joined (each "ip:port" — no commas inside; wildcard binds expanded
+// the same way the announce file's are). CSV because the consumer is a
+// facade crossing that speaks strings; same payload as ActiveID's.
+func ActiveAddrsCSV() (string, error) {
+	l, e := activeListener()
+	if e != nil {
+		return "", e
+	}
+	return strings.Join(dialableAddrs(l.addrs), ","), nil
+}
+
 // Serve runs handler over an iroh listener built from the config at path —
 // the whole server side: no TCP port exists. Blocks like ListenAndServe.
 // Requests reach the handler with NodeIDHeader set to the connection's

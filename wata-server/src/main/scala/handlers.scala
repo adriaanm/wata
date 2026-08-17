@@ -36,6 +36,7 @@ object Router:
     else if isGroupPath(path) then Group.route(r, body)
     else if isFavoritePath(path, n) then Favorite.route(r)
     else if isAdminPath(path, n) then Admin.route(r, m, body)
+    else if isEnrollServerPath(path) then Enroll.serverInfo()
     else if isEnrollPath(path) then Enroll.announce(body)
     else if isDeviceLoginPath(path) then DeviceLogin.route(r)
     // the command mailbox (devicecmd.scala): the two literals BEFORE the
@@ -115,10 +116,14 @@ object Router:
   def isAdminPath(path: String, n: scala.Int): Boolean =
     n >= 4 && seg(path, 0) == "_wata" && seg(path, 1) == "v1" && seg(path, 2) == "admin"
 
-  /** `/_wata/v1/enroll` — the device announce (enroll.scala). The ONE
-   *  unauthenticated wata route: a device with no allowlist entry has no way
-   *  to obtain a token, and the announce grants nothing by itself. */
+  /** `/_wata/v1/enroll` — the device announce (enroll.scala), and
+   *  `/_wata/v1/enroll/server` — the server's own public card (plan 0062).
+   *  The TWO unauthenticated wata routes, for the same reason: they serve a
+   *  device with nothing yet, and neither grants anything — the announce
+   *  parks a public id, the card repeats identity the enrolment QRs already
+   *  display. */
   def isEnrollPath(path: String): Boolean = path == "/_wata/v1/enroll"
+  def isEnrollServerPath(path: String): Boolean = path == "/_wata/v1/enroll/server"
 
   /** `/_wata/v1/device-login` — token-less BY DESIGN (bindings.scala): the
    *  credential is the iroh connection's proven node id, read off the trusted

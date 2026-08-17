@@ -67,6 +67,11 @@ def bundle(app_path, binary, bundle_id, min_ios=MIN_IOS):
         "CFBundleShortVersionString": "1.0",
         "CFBundleVersion": "1",
         "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
+        # the wata:// scheme (plan 0062): registered in the simulator too so
+        # `simctl openurl` can drive the configure edge in the smokes.
+        "CFBundleURLTypes": [
+            {"CFBundleURLName": bundle_id, "CFBundleURLSchemes": ["wata"]},
+        ],
         "DTPlatformName": "iphonesimulator",
         "LSRequiresIPhoneOS": True,
         "MinimumOSVersion": min_ios,

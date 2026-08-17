@@ -68,6 +68,18 @@ var (
 	selInitSel        = objc.RegisterName("init")
 	selView           = objc.RegisterName("view")
 	selSafeAreaInsets = objc.RegisterName("safeAreaInsets")
+
+	selOpenURLOpts       = objc.RegisterName("application:openURL:options:")
+	selAbsoluteString    = objc.RegisterName("absoluteString")
+	selURLWithString     = objc.RegisterName("URLWithString:")
+	selSharedApplication = objc.RegisterName("sharedApplication")
+	selOpenURLOutbound   = objc.RegisterName("openURL:options:completionHandler:")
+	selDictionary        = objc.RegisterName("dictionary")
+
+	// URLs delivered to application:openURL:options: (the wata:// scheme,
+	// Info.plist's CFBundleURLTypes), oldest first. The app polls TakeURL
+	// once per frame — same shape as the keypad queue.
+	urlQueue []string
 )
 
 // uiEdgeInsets mirrors UIEdgeInsets — the safeAreaInsets property's return.
@@ -99,6 +111,16 @@ func Start() {
 		[]objc.MethodDef{
 			{Cmd: selDidLaunch, Fn: func(self objc.ID, _ objc.SEL, app objc.ID, opts objc.ID) bool {
 				didFinishLaunching()
+				return true
+			}},
+			// The wata:// scheme's inbound edge. iOS calls this for a launch
+			// URL too (after didFinishLaunching returns true), so one queue
+			// covers cold and warm opens.
+			{Cmd: selOpenURLOpts, Fn: func(self objc.ID, _ objc.SEL, app, url, opts objc.ID) bool {
+				s := objcrt.GoString(url.Send(selAbsoluteString))
+				mu.Lock()
+				urlQueue = append(urlQueue, s)
+				mu.Unlock()
 				return true
 			}},
 		}); err != nil {
@@ -192,4 +214,32 @@ func Root() (uikit.UIView, bool) {
 	mu.Lock()
 	defer mu.Unlock()
 	return root, hasRoot
+}
+
+// TakeURL pops the oldest URL handed to the app (the wata:// scheme), or ""
+// when none is pending. Any-thread safe; the pump polls it once per frame.
+func TakeURL() string {
+	mu.Lock()
+	defer mu.Unlock()
+	if len(urlQueue) == 0 {
+		return ""
+	}
+	s := urlQueue[0]
+	urlQueue = urlQueue[1:]
+	return s
+}
+
+// OpenURL hands a URL to the system to open in its owning app (Safari for
+// http). MAIN THREAD ONLY — call through iosui.OnMain, or from the pump's
+// frame callback. Fire-and-forget: the completion handler is nil.
+func OpenURL(s string) {
+	pool := iosui.PoolPush()
+	defer iosui.PoolPop(pool)
+	url := objc.ID(objc.GetClass("NSURL")).Send(selURLWithString, objcrt.NSString(s))
+	if url == 0 {
+		return
+	}
+	app := objc.ID(objc.GetClass("UIApplication")).Send(selSharedApplication)
+	opts := objc.ID(objc.GetClass("NSDictionary")).Send(selDictionary)
+	app.Send(selOpenURLOutbound, url, opts, 0)
 }

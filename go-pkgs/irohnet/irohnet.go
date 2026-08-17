@@ -224,6 +224,24 @@ func (a Addr) String() string  { return a.ID }
 // dialable form; the on-device smoke filters for these). Written via rename
 // so a polling reader never sees a partial file.
 func announce(path, id string, addrs []string) error {
+	dialable := dialableAddrs(addrs)
+	blob, e := json.Marshal(map[string]any{"id": id, "addrs": dialable})
+	if e != nil {
+		return e
+	}
+	tmp := path + ".tmp"
+	if e := os.WriteFile(tmp, blob, 0o644); e != nil {
+		return e
+	}
+	return os.Rename(tmp, path)
+}
+
+// dialableAddrs expands the listener's local socket addrs into every form a
+// peer could actually dial: an unspecified-host bind becomes loopback (the
+// same-machine tunnel smoke) plus each non-loopback unicast interface
+// address (a LAN peer's form); a concrete addr passes through. Shared by
+// the announce file and the server's public card (ActiveAddrsCSV).
+func dialableAddrs(addrs []string) []string {
 	dialable := make([]string, 0, len(addrs))
 	for _, a := range addrs {
 		host, port, e := net.SplitHostPort(a)
@@ -245,15 +263,7 @@ func announce(path, id string, addrs []string) error {
 			dialable = append(dialable, net.JoinHostPort(ifip, port))
 		}
 	}
-	blob, e := json.Marshal(map[string]any{"id": id, "addrs": dialable})
-	if e != nil {
-		return e
-	}
-	tmp := path + ".tmp"
-	if e := os.WriteFile(tmp, blob, 0o644); e != nil {
-		return e
-	}
-	return os.Rename(tmp, path)
+	return dialable
 }
 
 // interfaceIPs lists the host's non-loopback unicast addresses of one family

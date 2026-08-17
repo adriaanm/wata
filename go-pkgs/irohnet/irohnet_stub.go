@@ -44,3 +44,9 @@ func NewHTTPClient(path string) (*http.Client, error) { return nil, errIrohStub 
 
 // Serve — stub; see the darwin+iroh build.
 func Serve(path string, handler http.Handler) error { return errIrohStub }
+
+// ActiveID — stub; see the darwin+iroh build.
+func ActiveID() (string, error) { return "", errIrohStub }
+
+// ActiveAddrsCSV — stub; see the darwin+iroh build.
+func ActiveAddrsCSV() (string, error) { return "", errIrohStub }

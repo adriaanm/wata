@@ -80,6 +80,11 @@ def bundle():
         # For plan 0061 stage 4 (real audio); harmless while the stub runs.
         "NSMicrophoneUsageDescription":
             "Wata records your voice while you hold the talk button.",
+        # the wata:// scheme — the enroll page's configure link bounces back
+        # into the app through it (plan 0062 stage 3).
+        "CFBundleURLTypes": [
+            {"CFBundleURLName": BUNDLE_ID, "CFBundleURLSchemes": ["wata"]},
+        ],
         "UIDeviceFamily": [1],
         "UILaunchScreen": {},
         "UIRequiredDeviceCapabilities": ["arm64"],
