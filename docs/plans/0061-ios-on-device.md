@@ -46,8 +46,12 @@ commit and each usable on the phone before the next starts:
 
 ## Out of scope (deliberately)
 
-- The away-from-home transport story (iroh on iOS): at-home LAN HTTP to
-  the Mac's server is enough to iterate; roaming is its own plan.
+- ~~The away-from-home transport story (iroh on iOS): at-home LAN HTTP to
+  the Mac's server is enough to iterate; roaming is its own plan.~~
+  Superseded same day by plan 0062 (owner ruling): the login surface
+  choice exposed that LAN-HTTP login would fork the auth model, so iroh
+  + enrollment come to iOS now, and stage 3's login sheet is replaced by
+  the enroll surface.
 - Keychain-backed secrets (sandbox `secrets.json` stays until the app
   holds real long-lived credentials worth it).
 - APNs background receive, TestFlight/ad-hoc distribution to the
