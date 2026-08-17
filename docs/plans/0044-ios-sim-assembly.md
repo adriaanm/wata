@@ -79,7 +79,14 @@ glyphs, UIView+backgroundColor for rects, UIImageView for images), and
 an `interptest` argv mode running the same case tables wata-mac's does,
 executed in the simulator by the stage-2 harness.
 Gate: `just ios-interptest` green (all wata-mac interptest cases that
-are not AppKit-specific).
+are not AppKit-specific). Taken green 2026-08-17 (launch-to-verdict
+~3.5s warm): every mac case crossed except keyTranslation (raw macOS
+key codes — stage 4's touch mapping brings its own tests); the colour
+assertions read rendered pixels via iosui.RenderPixel since iOS UIColor
+has no component reads. Record: docs/design/wata-ios.md. One compiler
+wall, worked around and filed (`PRUNE-DANGLING-MODULE-INIT`): a
+module-init `go.callback` val nothing reachable reads still emits its
+literal while the def it calls is pruned.
 
 **Stage 4 — the bodies and the smoke.** wata-mac's bodies
 (main/applets/config/input-analog/netstatus/paint) cross with mac-only
