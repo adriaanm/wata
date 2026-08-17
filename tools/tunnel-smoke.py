@@ -317,6 +317,14 @@ def revoke_leg(env, client_bin, cli_cfg_dir, srv_cfg, node, base, token):
     seen = {r["node_id"]: r["age_ms"] for r in listing.get("last_seen", [])}
     check(node in seen and seen[node] >= 0,
           f"the enroll listing reports the node's last-seen — its session spoke (saw {seen.get(node)})")
+    # and the join the admin page renders (plan 0060): the bound account's
+    # session row names the node it was minted through, so the page can label
+    # it with the handset's nickname instead of leaving the admin to compare
+    # 64-hex strings.
+    _, s = api(base, "GET", "/_wata/v1/admin/status", None, token)
+    rows = {u.get("user"): u for u in s.get("users", [])}
+    check(any(x.get("node_id") == node for x in rows.get("kid1", {}).get("sessions", [])),
+          "the bound account's session row carries the node id the page joins on")
 
     status, body = api(base, "POST", f"/_wata/v1/admin/enroll/{node}/revoke", None, token)
     check(status == 200, f"revoke answers 200 (saw {status} {body})")

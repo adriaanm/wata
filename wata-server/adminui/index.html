@@ -23,6 +23,9 @@
   .muted { opacity: .6; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
   tr.target td { background: rgba(255, 196, 0, .22); }
+  details.sessions summary { cursor: pointer; opacity: .65; font-size: .85rem; padding: .1rem 0; }
+  table.sessions { width: auto; margin: .35rem 0 .5rem 1.2rem; font-size: .85rem; }
+  table.sessions th, table.sessions td { border-bottom: none; padding: .12rem 1.2rem .12rem 0; }
 </style>
 </head>
 <body>
@@ -77,7 +80,7 @@
 
   <h2 id="enrolled-head" class="hidden">Enrolled handsets</h2>
   <table id="enrolled" class="hidden">
-    <thead><tr><th>node id</th><th>account</th><th>last seen</th><th></th></tr></thead>
+    <thead><tr><th>handset</th><th>node id</th><th>account</th><th>last seen</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -224,25 +227,61 @@ function renderUsers(users) {
     }
     tr.append(actions);
     tb.append(tr);
-    // The account's sessions (plan 0059): which device, still in use? One
-    // muted line per live session — the light an admin needs before reaching
-    // for revoke. Last-seen is in-memory on the server, so after a restart it
+    // The account's sessions (plan 0059, table form plan 0060): which
+    // device, still in use? Collapsed by default — the summary carries the
+    // count and the freshest last-seen, which is the one number an admin
+    // scans for; the table inside joins each session to its handset by
+    // nickname. Last-seen is in-memory on the server, so after a restart it
     // honestly reads "not since restart" until the session speaks again.
     if (u.sessions && u.sessions.length) {
       const str = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = 6;
-      td.className = "muted";
-      td.textContent = u.sessions.map((s) =>
-        "session " + s.device_id +
-        " — " + (s.node_id ? "handset " + short(s.node_id) : "password login") +
-        ", created " + (s.created_age_ms < 0 ? "unknown" : ms(s.created_age_ms) + " ago") +
-        ", last seen " + (s.last_seen_age_ms < 0 ? "not since restart" : ms(s.last_seen_age_ms) + " ago")
-      ).join("  ·  ");
+      const ss = u.sessions.slice().sort((a, b) => seenOrder(a) - seenOrder(b));
+      const det = document.createElement("details");
+      det.className = "sessions";
+      const sum = document.createElement("summary");
+      const freshest = ss[0].last_seen_age_ms;
+      sum.textContent = ss.length + (ss.length === 1 ? " session" : " sessions") +
+        (freshest < 0 ? " — none seen since restart" : " — latest seen " + ms(freshest) + " ago");
+      det.append(sum, sessionTable(ss));
+      td.append(det);
       str.append(td);
       tb.append(str);
     }
   }
+}
+
+// freshest-seen first; "not since restart" (-1) sorts last.
+function seenOrder(s) {
+  return s.last_seen_age_ms < 0 ? Infinity : s.last_seen_age_ms;
+}
+
+function sessionTable(ss) {
+  const t = document.createElement("table");
+  t.className = "sessions";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const h of ["session", "via", "created", "last seen"]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    hr.append(th);
+  }
+  thead.append(hr);
+  const tbody = document.createElement("tbody");
+  for (const s of ss) {
+    const tr = document.createElement("tr");
+    cell(tr, s.device_id).className = "mono";
+    const via = cell(tr, s.node_id ? nameOf(s.node_id) : "password login");
+    if (s.node_id) { via.title = s.node_id; if (!nickOf(s.node_id)) via.className = "mono"; }
+    else via.className = "muted";
+    cell(tr, s.created_age_ms < 0 ? "unknown" : ms(s.created_age_ms) + " ago");
+    const seen = cell(tr, s.last_seen_age_ms < 0 ? "not since restart" : ms(s.last_seen_age_ms) + " ago");
+    if (s.last_seen_age_ms < 0) seen.className = "muted";
+    tbody.append(tr);
+  }
+  t.append(thead, tbody);
+  return t;
 }
 
 // The QR contract (plan 0021 / plan 0014): a handset that has minted its node
@@ -320,7 +359,20 @@ let lastPending = [];
 let lastAllowed = [];
 let lastUsers = [];
 let lastBindings = {};
+let lastNicknames = {};
 let lastSeenNodes = {};
+let lastListing = null;
+
+// the handset's admin-given nickname (plan 0060), if it has one.
+function nickOf(id) {
+  return lastNicknames[String(id || "").toLowerCase()] || "";
+}
+
+// how a node id renders everywhere: its nickname when named, the shortened
+// id otherwise. Callers that render this put the full id in the title.
+function nameOf(id) {
+  return nickOf(id) || short(id);
+}
 
 // Is this id already in the server's allowlist? A `"*"` entry admits every
 // peer, so it answers for any id — the same rule the server applies.
@@ -353,14 +405,18 @@ function accountPicker() {
   return { sel, input, chosen };
 }
 
-function renderEnroll(pending, allowed, users, bindings, seen) {
+function renderEnroll(listing) {
+  lastListing = listing || {};
+  const pending = lastListing.pending || [];
   lastPending = pending;
-  lastAllowed = (allowed || []).map((s) => String(s).toLowerCase());
-  lastUsers = users || [];
+  lastAllowed = (lastListing.allowlisted || []).map((s) => String(s).toLowerCase());
+  lastUsers = lastListing.users || [];
   lastBindings = {};
-  for (const b of bindings || []) lastBindings[String(b.node_id).toLowerCase()] = b.user;
+  for (const b of lastListing.bindings || []) lastBindings[String(b.node_id).toLowerCase()] = b.user;
+  lastNicknames = {};
+  for (const n of lastListing.nicknames || []) lastNicknames[String(n.node_id).toLowerCase()] = n.name;
   lastSeenNodes = {};
-  for (const r of seen || []) lastSeenNodes[String(r.node_id).toLowerCase()] = r.age_ms;
+  for (const r of lastListing.last_seen || []) lastSeenNodes[String(r.node_id).toLowerCase()] = r.age_ms;
   const table = $("enroll");
   const tb = table.querySelector("tbody");
   const target = enrollTarget();
@@ -370,7 +426,9 @@ function renderEnroll(pending, allowed, users, bindings, seen) {
   let found = null;
   for (const p of pending) {
     const tr = document.createElement("tr");
-    cell(tr, short(p.node_id)).className = "mono";
+    const idc = cell(tr, nameOf(p.node_id));
+    idc.title = p.node_id;
+    if (!nickOf(p.node_id)) idc.className = "mono";
     cell(tr, p.nonce).className = "mono";
     cell(tr, ms(p.age_ms));
     const pick = accountPicker();
@@ -454,7 +512,24 @@ function renderEnrolled() {
   const roster = new Set(lastUsers.map((u) => u.user));
   for (const id of ids) {
     const tr = document.createElement("tr");
-    cell(tr, short(id)).className = "mono";
+    // the nickname column (plan 0060): rename is a prompt; an empty answer
+    // clears the name, cancel changes nothing.
+    const namTd = document.createElement("td");
+    const nick = nickOf(id);
+    if (nick) { namTd.textContent = nick; }
+    else { namTd.textContent = "—"; namTd.className = "muted"; }
+    namTd.append(document.createTextNode(" "));
+    namTd.append(button(nick ? "rename" : "name", async () => {
+      const name = prompt("Name for handset " + short(id), nick);
+      if (name === null) return;
+      await api("POST", "/_wata/v1/admin/enroll/" + id + "/nickname", { name: name.trim() });
+      say(name.trim() ? "named " + short(id) + " “" + name.trim() + "”" : "cleared the name of " + short(id));
+      await refresh();
+    }));
+    tr.append(namTd);
+    const idTd = cell(tr, short(id));
+    idTd.className = "mono";
+    idTd.title = id;
     const who = lastBindings[id];
     const acct = document.createElement("td");
     const actions = document.createElement("td");
@@ -481,7 +556,7 @@ function renderEnrolled() {
     }
     actions.append(button("remove", async () => {
       const held = who ? " It is bound to " + who + "." : "";
-      if (!confirm("Remove handset " + short(id) + "?" + held +
+      if (!confirm("Remove handset " + nameOf(id) + "?" + held +
         " It will be signed out and refused until it is enrolled again.")) return;
       const r = await api("POST", "/_wata/v1/admin/enroll/" + id + "/revoke");
       const done = "removed " + short(id) + " (" + (r.revoked_sessions || 0) + " session(s) revoked)";
@@ -507,10 +582,12 @@ function renderEnrolled() {
 
 async function refresh() {
   const s = await api("GET", "/_wata/v1/admin/status");
-  renderStatus(s);
-  renderUsers(s.users);
   const e = await api("GET", "/_wata/v1/admin/enroll");
-  renderEnroll(e.pending || [], e.allowlisted || [], e.users || [], e.bindings || [], e.last_seen || []);
+  renderStatus(s);
+  // the enroll listing renders FIRST: it stashes the bindings and nicknames
+  // the account rows' session tables join against.
+  renderEnroll(e);
+  renderUsers(s.users);
 }
 
 // Exactly one of the three screens is up: first-run setup, the login form, or
@@ -577,8 +654,7 @@ $("code-form").addEventListener("submit", (e) => {
   location.hash = "#enroll/" + r.hit.node_id + "/" + r.hit.nonce;
   $("code-input").value = "";
   say("");
-  renderEnroll(lastPending, lastAllowed, lastUsers, Object.entries(lastBindings)
-    .map(([node_id, user]) => ({ node_id, user })));
+  renderEnroll(lastListing);
 });
 
 $("add-form").addEventListener("submit", async (e) => {

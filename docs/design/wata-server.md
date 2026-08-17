@@ -17,12 +17,12 @@ lines:
 | `membership.scala` | 86 | the room-membership state machine (join/invite/leave/ban transitions) |
 | `power.scala` | 80 | the `m.room.power_levels` authorization table |
 | `jsonnav.scala` | 204 | JSON object/field helpers over the `json` module's `Json` type |
-| `store.scala` | 1283 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping, media reclaim |
-| `persist.scala` | 347 | append-only JSONL journal + boot-time replay + old-journal media migration |
+| `store.scala` | 1360 | the single in-memory store: one `Mutex[StoreState]`, all reads/writes, the DM pair map, long-poll waiter bookkeeping, media reclaim |
+| `persist.scala` | 366 | append-only JSONL journal + boot-time replay + old-journal media migration |
 | `mediafiles.scala` | 89 | the file-backed media blob store under `<dataDir>/media/` |
 | `retain.scala` | 130 | the media retention sweep (boot + daily), favorites exempted |
 | `favorite.scala` | 100 | the favorite toggle endpoint + the `net.wata.favorite` marker |
-| `handlers.scala` | 386 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
+| `handlers.scala` | 390 | routing table entry, auth middleware, login/logout/whoami/profile/account-data handlers |
 | `keys.scala` | 83 | the E2EE device-key routes, as no-op stubs |
 | `dm.scala` | 308 | canonical DMs: the dialect endpoint, the `net.wata.dm` identity, the boot migration, the `m.direct` compat projection |
 | `family.scala` | 137 | the canonical family room: boot/provisioning ensure, the `net.wata.family` stamp, server-side joins (shared with groups) |
@@ -30,12 +30,12 @@ lines:
 | `rooms.scala` | 721 | createRoom/join/invite/leave/kick/ban/state/send/redact/receipt/upload/messages handlers |
 | `sync.scala` | 510 | `/sync` (initial + incremental + leave) and the long-poll wait |
 | `testhooks.scala` | 65 | fail-on-demand for the media edge; registered only under `WATA_TEST_HOOKS=1` |
-| `server.scala` | 517 | HTTP boot, mux registration, request edge, the `/admin` page edge, `SelfCheck` |
+| `server.scala` | 590 | HTTP boot, mux registration, request edge, the `/admin` page edge, `SelfCheck` |
 | `iolimit.scala` | 11 | app-owned facade: `io.LimitReader` (the request-body cap) |
 | `subtle.scala` | 12 | app-owned facade: `crypto/subtle` constant-time compare |
 | `pwhash.scala` | 222 | PBKDF2-HMAC-SHA256: the derivation, the stored-hash format, verification |
-| `adminapi.scala` | 330 | the admin surface: the admin gate, the ungated first-run `mode`/`setup` pair, `/_wata/v1/admin/…` status + accounts CRUD + enrolment routing |
-| `enroll.scala` | 555 | device enrolment: the unauthenticated announce, the bounded pending set, approve (allowlist file + live listener) / deny / revoke / bind |
+| `adminapi.scala` | 351 | the admin surface: the admin gate, the ungated first-run `mode`/`setup` pair, `/_wata/v1/admin/…` status + accounts CRUD + enrolment routing |
+| `enroll.scala` | 626 | device enrolment: the unauthenticated announce, the bounded pending set, approve (allowlist file + live listener) / deny / revoke / bind / nickname |
 | `devicecmd.scala` | 290 | the device-command mailbox: per-user queues + latest-wins reports behind their own mutex, the four routes, the long-poll wait — in-memory only, never journaled |
 | `osfile.scala` | 44 | app-owned facade: `os.WriteFile`/`MkdirAll`/`Remove`/`Rename`/`Stat`, plus `io/fs.FileInfo` |
 | `gocrypto.scala` | 54 | app-owned facades: `hash.Hash`, `crypto/sha256`, `crypto/hmac`, base64 `StdEncoding` |
@@ -238,6 +238,7 @@ dispatches), so a new admin route cannot be added ungated by accident.
 | `POST /_wata/v1/admin/enroll/{nodeId}/deny` | drop the pending row |
 | `POST /_wata/v1/admin/enroll/{nodeId}/revoke` | un-enrol: allowlist file, live listener, binding, and the node's sessions (see "Un-enrolling") |
 | `POST /_wata/v1/admin/enroll/{nodeId}/bind` | bind an already-allowlisted node to an account, creating it when the name is new |
+| `POST /_wata/v1/admin/enroll/{nodeId}/nickname` | set (empty: clear) the handset's display label (see "Handset nicknames") |
 
 Two of them are more than a file edit. A **rename** also runs the store's
 profile fan-out (`Store.setDisplayName`), which rewrites the user's
@@ -521,6 +522,37 @@ allowlisted id that HAS sessions — absence renders "—", age -1 "not
 since restart"), the enrolled table's "last seen" column, the freshest
 over the node's sessions.
 
+### Handset nicknames, and the node-id backfill (plan 0060)
+
+**Nicknames.** A handset (a node id) can carry an admin-given display
+label — a label and nothing else: not an account, not a credential,
+never sent to devices. `Nicknames` (bindings.scala) mirrors `Bindings`:
+a journaled `nick` op carrying `{node_id, name}`, last write wins, an
+empty name clears. `POST /_wata/v1/admin/enroll/{nodeId}/nickname
+{"name": …}` is 404 for a node the allowlist does not hold; the name is
+trimmed, at most 32 characters, control characters refused. A nickname
+deliberately survives revocation — it labels the physical object, so a
+re-enrolled handset keeps its name. The enroll listing carries
+`nicknames: [{node_id, name}]`, and the page renders the name wherever
+it would otherwise shorten a node id (the enrolled table's name column
+with its rename prompt, the pending rows, the per-account session
+table's "via" column — the session→handset join done by the page from
+the bindings and nicknames it already fetches; the sessions render as a
+`<details>` table, collapsed, its summary carrying the count and the
+freshest last-seen).
+
+**The backfill.** A session minted before device rows carried a node id
+replays with `node_id: ""` and could never be traced to its handset —
+its enrolled row read "last seen —" while the handset was demonstrably
+signed in. The repair rides the transport: every iroh request carries
+the handshake-proven `X-Wata-Node-Id` header, so `Router.requireAuth`
+passes it into `Store.deviceByToken`, and `adoptNode` rewrites a
+node-less row with the proven id and re-journals its `device` op
+(replay is keyed by `device_id`, so the repaired row wins after a
+reboot too). Rows that already carry a node id are never rewritten, and
+the TCP edge strips the header unconditionally, so a forged id cannot
+reach the adopt.
+
 ### Gates
 
 `tools/wata-admin-smoke.py` covers the announce, its validation, the
@@ -540,7 +572,10 @@ the bindings' journal round-trip across a reboot. For the lifecycle (plan
 the binding drop and the `unbind` op's reboot round-trip, `revoked_sessions`
 honestly 0 where no session is node-minted (password sessions survive a
 revoke), the bind route's 404/400 negatives, the inline create, and the
-dangling-name recreation.
+dangling-name recreation. For plan 0060 it pins the nickname surface
+(set/trim/overwrite/clear, the 404 off the allowlist, the 400s, the
+journal round-trip) and the backfill's TCP negative — an authenticated
+request with a forged trusted header backfills nothing.
 `tools/tunnel-smoke.py` runs the loop end to end over real iroh — the node the
 server just refused announces itself, an admin approves it **with an
 inline-created account**, and the **same key** is accepted by the **same
@@ -1340,7 +1375,7 @@ acceptance check for that run.
 - **`jsonnav.scala`** — `JsonNav`: field lookup/typed accessors on `Json`, object/array builder helpers (`obj1`..`obj4`, `arr1`, `endObj`), `errEnvelope`, `eventToJson`, and the account-data profile-merge helper.
 - **`power.scala`** — `Power`: the `m.room.power_levels` authorization table (send/state/redact/invite/kick/ban).
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
-- **`bindings.scala`** — `Bindings` (the journaled nodeId→user map an approval writes and a revocation unbinds) and `DeviceLogin` (`POST /_wata/v1/device-login`: the trusted-header check, then a fresh session for the bound account, minted with the proven node id on the row).
+- **`bindings.scala`** — `Bindings` (the journaled nodeId→user map an approval writes and a revocation unbinds), `Nicknames` (the journaled nodeId→label map, plan 0060), and `DeviceLogin` (`POST /_wata/v1/device-login`: the trusted-header check, then a fresh session for the bound account, minted with the proven node id on the row).
 - **`devicecmd.scala`** — `DeviceCmd`: the device-command mailbox (queue / poll / report / read-report), the admin gate on the admin half, the two-credential device auth, and its own waiter list for the poll's long-poll.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.

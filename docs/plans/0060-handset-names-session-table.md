@@ -1,6 +1,17 @@
 # 0060 — handset nicknames, the session table, and the last-seen backfill
 
-Status: accepted
+Status: done
+
+> **Done note.** Landed as planned. Verification: `just ci` green —
+> admin-smoke carries the nickname CRUD + journal round-trip and the
+> forged-TCP-header no-backfill negative; tunnel-smoke carries the
+> session→node join assert beside its existing last-seen pair. The page's
+> render logic (collapsed session table, name column, the nickname join)
+> was additionally exercised headlessly against a live seeded server
+> (scratch harness, not committed — page JS stays outside the gates, as
+> before). The live deployment picks up the backfill on its next server
+> restart; its pre-0058 session repairs itself on the handset's first
+> request after that.
 
 ## The problem
 

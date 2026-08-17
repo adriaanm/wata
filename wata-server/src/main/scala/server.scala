@@ -249,6 +249,7 @@ object Server:
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/deny", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/revoke", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/bind", h)
+    mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/nickname", h)
     // the fail-on-demand test hook (testhooks.scala): REGISTERED only under
     // WATA_TEST_HOOKS=1 — without the env var the path 404s like any other
     // unknown path, so the production surface is unchanged.

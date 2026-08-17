@@ -148,18 +148,40 @@ object Store:
    *  stored key, never on the guess. Work is constant per request in the
    *  guess and linear in the device count — family-sized here, so a handful
    *  of compares. */
-  def deviceByToken(token: String): Option[Device] =
-    cell.withLock(st => touchResolved(st, resolveToken(st.tokens, foldTokens(st.tokens, token))))
+  /** `nodeId` is the request's transport-proven peer id ("" off the TCP
+   *  path, where the edge strips the header) — see `adoptNode`. */
+  def deviceByToken(token: String, nodeId: String): Option[Device] =
+    cell.withLock(st => touchResolved(st, resolveToken(st.tokens, foldTokens(st.tokens, token)), nodeId))
 
   /** stamp the session's last-seen as it authenticates (plan 0059) — one map
    *  write under the lock this lookup already holds. */
-  def touchResolved(st: StoreState, d: Option[Device]): Option[Device] = d match
-    case s: Some[Device] => touchHit(st, s.value)
+  def touchResolved(st: StoreState, d: Option[Device], nodeId: String): Option[Device] = d match
+    case s: Some[Device] => touchHit(st, adoptNode(st, s.value, nodeId))
     case None => None
 
   def touchHit(st: StoreState, d: Device): Option[Device] =
     st.lastSeenDev = HashMap.put(st.lastSeenDev, d.deviceId, nowMs())
     Some(d)
+
+  /** the node-id backfill (plan 0060): a session minted before device rows
+   *  carried a node id replays with `node_id: ""` and can never be traced
+   *  to its handset — but an authenticated request arriving over iroh
+   *  proves, via the transport-injected header, which node the token
+   *  speaks through RIGHT NOW. So the proven id is adopted onto the row
+   *  and the `device` op re-journaled; replay is keyed by device_id, so
+   *  the repaired row wins after a reboot too. Rows that already carry a
+   *  node id are never rewritten, and the TCP edge strips the header
+   *  unconditionally (irohnet.StripNodeID), so a forged id cannot reach
+   *  this. */
+  def adoptNode(st: StoreState, d: Device, nodeId: String): Device =
+    if nodeId == "" || d.nodeId != "" then d
+    else adopted(st, Device(d.deviceId, d.userId, d.accessToken, nodeId, d.createdMs))
+
+  def adopted(st: StoreState, d: Device): Device =
+    st.devices = HashMap.put(st.devices, d.deviceId, d)
+    st.tokens = HashMap.put(st.tokens, d.accessToken, d)
+    if Journal.enabled then Journal.rec(Journal.deviceOp(d)) else ()
+    d
 
   /** "" when no stored token constant-time-matches the guess. */
   def foldTokens(tokens: HashMap[String, Device], token: String): String =

@@ -17,6 +17,7 @@ import sgo.{Mutex, mutex}
  *  POST /_wata/v1/admin/enroll/{nodeId}/deny                     (admin)
  *  POST /_wata/v1/admin/enroll/{nodeId}/revoke                   (admin)
  *  POST /_wata/v1/admin/enroll/{nodeId}/bind      {user}         (admin)
+ *  POST /_wata/v1/admin/enroll/{nodeId}/nickname  {name}         (admin)
  *  }}}
  *
  *  **The announce is deliberately unauthenticated and deliberately inert.** A
@@ -244,6 +245,7 @@ object Enroll:
     fs = ("allowlisted", JArr(ids)) :: fs
     fs = ("users", JArr(rosterRows(Config.allUsers(), Nil))) :: fs
     fs = ("bindings", JArr(bindingRows(Bindings.all(), Nil))) :: fs
+    fs = ("nicknames", JArr(nickRows(Nicknames.all(), Nil))) :: fs
     fs = ("last_seen", JArr(seenRows(ids, now, Nil))) :: fs
     endObj(fs)
 
@@ -283,6 +285,13 @@ object Enroll:
 
   def bindingRow(b: Binding): Json =
     obj2("node_id", JStr(b.nodeId), "user", JStr(b.user))
+
+  def nickRows(ns: List[Nickname], acc: List[Json]): List[Json] = ns match
+    case h :: t => nickRows(t, nickRow(h) :: acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def nickRow(n: Nickname): Json =
+    obj2("node_id", JStr(n.nodeId), "name", JStr(n.name))
 
   def allowlistIds(): List[Json] =
     val p = allowlistPath()
@@ -575,3 +584,43 @@ object Enroll:
   def bound(nodeId: String, lp: String): Either[MErr, Json] =
     Bindings.bind(nodeId, lp)
     Right(obj3("node_id", JStr(nodeId), "user", JStr(lp), "user_id", JStr(Store.userIdOf(lp))))
+
+  // ---- nicknaming a handset (plan 0060) -----------------------------------------
+
+  /** `POST /_wata/v1/admin/enroll/{nodeId}/nickname {name}` — set (or, with
+   *  an empty name, clear) the handset's display label. 404 for a node the
+   *  allowlist does not hold: a nickname labels an enrolled handset, and
+   *  accepting one for an arbitrary id would let the open pending surface be
+   *  decorated by name. The name is trimmed and capped at 32 characters,
+   *  control characters refused — it renders inline in the admin tables. */
+  def nicknameRoute(nodeId: String, body: String): Either[MErr, Json] =
+    if !allowlisted(nodeId) then Left(MErr(404, M_NOT_FOUND(), "That node id is not enrolled"))
+    else Json.tryParse(body) match
+      case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
+      case Right(j) => nickname2(nodeId, trimSpace(strField(j, "name", "")))
+
+  def nickname2(nodeId: String, name: String): Either[MErr, Json] =
+    if !validNickname(name) then Left(MErr(400, M_BAD_JSON(), "A nickname is at most 32 printable characters"))
+    else nicknamed(nodeId, name)
+
+  def nicknamed(nodeId: String, name: String): Either[MErr, Json] =
+    Nicknames.set(nodeId, name)
+    Right(obj2("node_id", JStr(nodeId), "name", JStr(name)))
+
+  /** empty clears, so "" is valid; otherwise 1..32 chars, none of them
+   *  control characters. */
+  def validNickname(s: String): Boolean =
+    s.length <= 32 && noControl(s, 0)
+
+  def noControl(s: String, i: scala.Int): Boolean =
+    if i >= s.length then true
+    else if s.charAt(i) < ' ' || s.charAt(i).toInt == 127 then false
+    else noControl(s, i + 1)
+
+  def trimSpace(s: String): String = trimLead(trimTail(s))
+
+  def trimLead(s: String): String =
+    if s.startsWith(" ") then trimLead(s.substring(1)) else s
+
+  def trimTail(s: String): String =
+    if s.endsWith(" ") then trimTail(s.substring(0, s.length - 1)) else s

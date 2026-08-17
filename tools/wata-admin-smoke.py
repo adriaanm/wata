@@ -40,7 +40,11 @@ of a pure function:
   * session visibility (plan 0059) — each account's sessions with mint time
     (durable, replays verbatim; a pre-plan journal row reads "unknown") and
     an in-memory last-seen that use advances and a reboot honestly resets;
-    the enroll listing's last_seen rows exist only for nodes with sessions.
+    the enroll listing's last_seen rows exist only for nodes with sessions;
+  * handset nicknames (plan 0060) — set/overwrite/clear behind the admin gate,
+    404 off the allowlist, journaled (the reboot leg re-checks), and the
+    node-id backfill's TCP negative: a forged trusted header on an
+    authenticated request backfills nothing.
 
 The PBKDF2 derivation itself is oracled elsewhere: `wata-server selfcheck`
 prints the published test vectors and `tools/wata-smoke.sh` byte-compares them
@@ -78,6 +82,7 @@ ADMIN_ROUTES = [
     ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/deny", None),
     ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/revoke", None),
     ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/bind", {"user": "bob"}),
+    ("POST", f"/_wata/v1/admin/enroll/{NODE_A}/nickname", {"name": "x"}),
 ]
 
 failures = []
@@ -238,6 +243,7 @@ def run(server, env, tmp):
         enrolment(atok, btok, iroh)
         provisioning(atok, users)
         session_visibility(atok)
+        nicknames(atok)
         unenrol(atok, users, iroh)
     finally:
         stop_server(proc, log)
@@ -737,6 +743,54 @@ def session_visibility(atok):
           "no enrolled node has sessions on the TCP path, so NO last_seen rows — absence, not zero")
 
 
+def nicknames(atok):
+    """Handset nicknames (plan 0060): an admin-given display label per
+    enrolled node id, journaled (the reboot leg re-checks), 404 for a node
+    the allowlist does not hold. Also the backfill negative that belongs on
+    the TCP path: an authenticated request with a FORGED trusted header must
+    not backfill a node id onto the password session — the strip makes the
+    header inert here, so no last_seen row may appear."""
+    print("nicknames: naming an enrolled handset")
+    one = node_id(1)          # enrolled since the approve leg
+    node_q = node_id(0x71)    # enrolled + bound; survives to the reboot leg
+
+    def nicks():
+        _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+        return {n["node_id"]: n["name"] for n in listing.get("nicknames", [])}
+
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_id(0xDEAD)}/nickname",
+              {"name": "ghost"}, atok)[0] == 404,
+          "naming a node the allowlist does not hold is 404")
+    check(req("POST", f"/_wata/v1/admin/enroll/{one}/nickname",
+              {"name": "x" * 33}, atok)[0] == 400,
+          "a 33-char name is refused")
+    check(req("POST", f"/_wata/v1/admin/enroll/{one}/nickname",
+              {"name": "bad\tname"}, atok)[0] == 400,
+          "a control character is refused")
+    status, body, _ = req("POST", f"/_wata/v1/admin/enroll/{one}/nickname",
+                          {"name": "  Kid one  "}, atok)
+    check(status == 200 and body.get("name") == "Kid one",
+          f"the name is set, trimmed (saw {status} {body})")
+    check(nicks().get(one) == "Kid one", "the listing carries the nickname")
+    check(req("POST", f"/_wata/v1/admin/enroll/{one}/nickname",
+              {"name": "Kid ONE"}, atok)[0] == 200 and nicks().get(one) == "Kid ONE",
+          "a re-name overwrites")
+    check(req("POST", f"/_wata/v1/admin/enroll/{one}/nickname",
+              {"name": ""}, atok)[0] == 200 and one not in nicks(),
+          "an empty name clears — absence, not an empty string")
+    check(req("POST", f"/_wata/v1/admin/enroll/{node_q}/nickname",
+              {"name": "Alma's handset"}, atok)[0] == 200,
+          "the name the reboot leg re-checks is set")
+
+    print("nicknames: no backfill from a forged TCP header")
+    check(req("GET", "/_matrix/client/v3/account/whoami", None, atok,
+              headers={"X-Wata-Node-Id": one})[0] == 200,
+          "an authenticated request with a forged trusted header still answers")
+    _, listing, _ = req("GET", "/_wata/v1/admin/enroll", None, atok)
+    check(listing.get("last_seen") == [],
+          "it did NOT backfill a node id onto the password session — no last_seen row appears")
+
+
 def unenrol(atok, users, iroh):
     """The enrolment lifecycle (plan 0058), TCP-level. What can be asserted
     here: the revoke route's durable half (the allowlist rewrite, atomic,
@@ -852,6 +906,13 @@ def after_reboot(users):
           f"the surviving bindings round-trip the reboot (saw {binds})")
     check(node_id(0x70) not in binds,
           "the revoked node's UNBIND replays too — a reboot does not resurrect it")
+
+    print("reboot: nicknames replay from the journal (plan 0060)")
+    nicks = {n["node_id"]: n["name"] for n in listing.get("nicknames", [])}
+    check(nicks.get(node_id(0x71)) == "Alma's handset",
+          f"the handset nickname round-trips the reboot (saw {nicks})")
+    check(node_id(1) not in nicks,
+          "a cleared nickname stays cleared — the clear op replays last")
 
     print("reboot: session facts (plan 0059)")
     _, s, _ = req("GET", "/_wata/v1/admin/status", None, atok)

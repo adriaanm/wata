@@ -54,6 +54,8 @@ import sgo.{Mutex, mutex}
  *                              so replay in commit order converges on the
  *                              latest binding. `unbind` (plan 0058) is
  *                              written only by an enrolment revocation
+ *   - `nick`                 — a handset's admin-given nickname (plan 0060);
+ *                              last write wins, an empty name clears
  *
  *  NOT logged (transient by nature): long-poll waiters (in-flight goroutines).
  */
@@ -215,6 +217,15 @@ object Journal:
     endObj(fs)
 
   /** an enrolment revocation dropped the binding (plan 0058). */
+  /** a handset nickname: the node id and its admin-given label (plan 0060);
+   *  an empty name records a clear. Last write wins on replay. */
+  def nickOp(nodeId: String, name: String): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("nick")) :: fs
+    fs = ("node_id", JStr(nodeId)) :: fs
+    fs = ("name", JStr(name)) :: fs
+    endObj(fs)
+
   def unbindOp(nodeId: String): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("op", JStr("unbind")) :: fs
@@ -290,6 +301,7 @@ object Journal:
     else if op == "dmpair" then Store.replayDmPair(DmPair(strField(j, "a", ""), strField(j, "b", ""), strField(j, "room_id", "")))
     else if op == "bind" then Bindings.replayBind(strField(j, "node_id", ""), strField(j, "user", ""))
     else if op == "unbind" then Bindings.replayUnbind(strField(j, "node_id", ""))
+    else if op == "nick" then Nicknames.replay(strField(j, "node_id", ""), strField(j, "name", ""))
     else ()
 
   def acctOf(j: Json): AcctData =

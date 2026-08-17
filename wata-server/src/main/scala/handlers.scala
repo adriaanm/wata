@@ -175,14 +175,18 @@ object Router:
 
   // ---- access-token middleware -----------------------------------------------
 
+  /** the transport-proven node id rides along (plan 0060): on the iroh path
+   *  the bridge injected it, on TCP the edge stripped it to "" — so the
+   *  store can backfill a pre-0058 session row's node id from the very
+   *  request that authenticates it. */
   def requireAuth(r: go.net.http.Request): Either[MErr, Auth] =
     val h = r.header.get("Authorization")
     if !h.startsWith("Bearer ") then Left(MErr(401, M_MISSING_TOKEN(), "Missing access token"))
-    else requireAuthTok(h)
+    else requireAuthTok(h, r.header.get(DeviceLogin.NODE_HEADER))
 
-  def requireAuthTok(h: String): Either[MErr, Auth] =
+  def requireAuthTok(h: String, nodeId: String): Either[MErr, Auth] =
     val token = h.substring(7)
-    Store.deviceByToken(token) match
+    Store.deviceByToken(token, nodeId) match
       case None => Left(MErr(401, M_UNKNOWN_TOKEN(), "Unknown access token"))
       case s: Some[Device] => Right(Auth(s.value.userId, s.value.deviceId))
 

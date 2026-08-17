@@ -40,6 +40,7 @@ import sgo.{Mutex, mutex}
  *  POST   /_wata/v1/admin/enroll/{nodeId}/deny
  *  POST   /_wata/v1/admin/enroll/{nodeId}/revoke
  *  POST   /_wata/v1/admin/enroll/{nodeId}/bind
+ *  POST   /_wata/v1/admin/enroll/{nodeId}/nickname
  *  }}}
  *
  *  The enrolment rows are enroll.scala's; only the routing lives here, since
@@ -144,12 +145,14 @@ object Admin:
     else Left(MErr(404, M_UNRECOGNIZED(), "Unrecognized request"))
 
   /** approve carries the optional account binding in its body (plan 0027);
-   *  revoke and bind are plan 0058's lifecycle verbs. */
+   *  revoke and bind are plan 0058's lifecycle verbs; nickname is plan
+   *  0060's display label. */
   def enrollVerb(nodeId: String, verb: String, body: String): Either[MErr, Json] =
     if verb == "approve" then Enroll.approve(nodeId, body)
     else if verb == "deny" then Enroll.deny(nodeId)
     else if verb == "revoke" then Enroll.revoke(nodeId)
     else if verb == "bind" then Enroll.bindRoute(nodeId, body)
+    else if verb == "nickname" then Enroll.nicknameRoute(nodeId, body)
     else Left(MErr(404, M_UNRECOGNIZED(), "Unrecognized request"))
 
   def usersRoute(m: String, body: String): Either[MErr, Json] =

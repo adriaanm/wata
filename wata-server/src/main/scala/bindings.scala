@@ -98,6 +98,48 @@ object Bindings:
    *  allowlisted ids so an enrolled handset's row can name its account. */
   def all(): List[Binding] = cell.withLock(st => st.items)
 
+/** Handset nicknames (plan 0060): an admin-given display label per node id.
+ *  A label and nothing else — not an account, not a credential, never sent
+ *  to devices; the admin page renders it wherever it would otherwise show a
+ *  truncated node id. Journaled like bindings (`nick` op, last write wins,
+ *  an empty name clears), and deliberately NOT dropped by an enrolment
+ *  revocation: the name labels the physical handset, so a re-enrolled
+ *  device keeps it. */
+case class Nickname(nodeId: String, name: String)
+
+class NickState:
+  var items: List[Nickname] = Nil
+
+object Nicknames:
+  private val cell: Mutex[NickState] = mutex(new NickState())
+
+  /** name (or, with "", un-name) `nodeId`. Journaled. */
+  def set(nodeId: String, name: String): Unit =
+    put(nodeId, name)
+    Journal.rec(Journal.nickOp(nodeId, name))
+
+  /** the replay path: same reseat, no re-journaling. */
+  def replay(nodeId: String, name: String): Unit = put(nodeId, name)
+
+  def put(nodeId: String, name: String): Unit =
+    cell.withLock(st => st.items = withName(withoutNode(st.items, nodeId, Nil), nodeId, name))
+
+  def withName(xs: List[Nickname], nodeId: String, name: String): List[Nickname] =
+    if name == "" then xs else Nickname(nodeId, name) :: xs
+
+  def withoutNode(xs: List[Nickname], nodeId: String, acc: List[Nickname]): List[Nickname] = xs match
+    case h :: t => withoutStep(h, t, nodeId, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def withoutStep(h: Nickname, t: List[Nickname], nodeId: String, acc: List[Nickname]): List[Nickname] =
+    var acc2: List[Nickname] = acc
+    if h.nodeId == nodeId then acc2 = acc else acc2 = h :: acc2
+    withoutNode(t, nodeId, acc2)
+
+  /** every nickname — the admin enroll listing renders these beside the
+   *  bindings so the page can label handsets by name. */
+  def all(): List[Nickname] = cell.withLock(st => st.items)
+
 object DeviceLogin:
   /** the trusted header the iroh bridge injects (go-pkgs/irohnet/nodeid.go).
    *  Its presence IS the transport check: both edges strip inbound copies,
