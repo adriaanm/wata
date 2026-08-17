@@ -10,10 +10,9 @@ bundles it by hand and runs it on the shared simulator device
 printed line, the `wata-mac interptest` discipline: `interptest: PASS`
 present and no FAIL lines, or this exits non-zero.
 
-Gotcha (plan 0044): the FIRST launch on a cold-booted fresh runtime can
-blow the watchdog with zero output and no crash report; a rerun on the
-warm device is the discriminator, so a zero-line first run is retried
-once before failing.
+Console capture is lossy (cold-runtime first launch, pty attach racing a
+fast app) — simrun.launch_expect_verdict retries a run whose output never
+reached a done marker; see its docstring.
 
 Stages (each runnable alone with --only): build, bundle, run.
 Needs Xcode + an iOS simulator runtime; not in ci.
@@ -68,16 +67,9 @@ def stage_run():
     sc = simrun.simctl()
     udid = simrun.ensure_device(sc)
     try:
-        for attempt in (1, 2):
-            lines, elapsed, missing = simrun.launch_and_expect(
-                sc, udid, APP, BUNDLE_ID, [PASS_RE], done_res=DONE_RES,
-                timeout=90, args=["interptest"])
-            if lines or attempt == 2:
-                break
-            # the cold-runtime first-launch gotcha: zero output, retry once
-            # on the now-warm device before believing the app is at fault
-            print("ios-interptest: first launch produced no output "
-                  "(cold runtime?) — retrying once on the warm device")
+        lines, elapsed, missing = simrun.launch_expect_verdict(
+            sc, udid, APP, BUNDLE_ID, [PASS_RE], done_res=DONE_RES,
+            timeout=90, args=["interptest"])
         print(f"ios-interptest: launch-to-verdict {elapsed:.2f}s")
         fails = [l for l in lines if l.startswith("interptest: FAIL")]
         for f in fails:

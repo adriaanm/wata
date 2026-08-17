@@ -67,7 +67,7 @@ def stage_run():
     sc = simrun.simctl()
     udid = simrun.ensure_device(sc)
     try:
-        lines, elapsed, missing = simrun.launch_and_expect(
+        lines, elapsed, missing = simrun.launch_expect_verdict(
             sc, udid, APP, BUNDLE_ID, EXPECT, timeout=90,
             screenshot=OUT / "screen.png")
         print(f"hello: launch-to-all-checks {elapsed:.2f}s")

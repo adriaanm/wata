@@ -158,6 +158,29 @@ def launch_and_expect(sc, udid, app_path, bundle_id, expect,
     return lines, elapsed, missing
 
 
+def launch_expect_verdict(sc, udid, app_path, bundle_id, expect,
+                          done_res=(r"all checks passed", r"FAIL"),
+                          timeout=90, screenshot=None, args=(), attempts=2):
+    """launch_and_expect, retried while the done marker never arrives.
+
+    `--console-pty` capture is lossy two ways: a cold-booted fresh runtime's
+    first launch can produce nothing within the watchdog, and the pty attach
+    can race a fast app and drop its lines entirely. Emptiness is not the
+    tell for either — simctl's own `<bundle>: <pid>` line still lands in the
+    capture — so the discriminator is the done marker: a run that never
+    reached one is a broken capture and is retried on the now-warm device; a
+    run that did (PASS or FAIL alike) is a verdict and is judged as-is."""
+    for attempt in range(1, attempts + 1):
+        lines, elapsed, missing = launch_and_expect(
+            sc, udid, app_path, bundle_id, expect, done_res=done_res,
+            timeout=timeout, screenshot=screenshot, args=args)
+        if attempt == attempts or \
+                any(re.search(m, l) for l in lines for m in done_res):
+            return lines, elapsed, missing
+        print("simrun: no done marker in the capture — lost console output, "
+              "retrying on the warm device", file=sys.stderr)
+
+
 def shutdown(sc, udid):
     """Shut the device down (kept in the set for the next run)."""
     subprocess.run(sc + ["shutdown", udid], capture_output=True)

@@ -115,7 +115,7 @@ def stage_run():
     udid = simrun.ensure_device(sc)
     shot = OUT / "screen.png"
     try:
-        lines, elapsed, missing = simrun.launch_and_expect(
+        lines, elapsed, missing = simrun.launch_expect_verdict(
             sc, udid, APP, BUNDLE_ID, EXPECT, timeout=120, screenshot=shot)
         w, h, rgb = simrun.png_pixel(shot, 0.5, 0.5)
         print(f"spike: screenshot {w}x{h}, centre pixel rgb{rgb}")
