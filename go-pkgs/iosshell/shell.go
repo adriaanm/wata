@@ -63,11 +63,19 @@ var (
 
 	uiApplicationMain func(argc int32, argv uintptr, principal objc.ID, delegate objc.ID) int32
 
-	selDidLaunch = objc.RegisterName("application:didFinishLaunchingWithOptions:")
-	selAllocSel  = objc.RegisterName("alloc")
-	selInitSel   = objc.RegisterName("init")
-	selView      = objc.RegisterName("view")
+	selDidLaunch      = objc.RegisterName("application:didFinishLaunchingWithOptions:")
+	selAllocSel       = objc.RegisterName("alloc")
+	selInitSel        = objc.RegisterName("init")
+	selView           = objc.RegisterName("view")
+	selSafeAreaInsets = objc.RegisterName("safeAreaInsets")
 )
+
+// uiEdgeInsets mirrors UIEdgeInsets — the safeAreaInsets property's return.
+// Not in the generated bindings (no UIEdgeInsets on the allowlist); a raw
+// struct return here is the same shell-glue category as selView above.
+type uiEdgeInsets struct {
+	Top, Left, Bottom, Right float64
+}
 
 // Start loads UIKit and Foundation, synthesizes the app delegate class, and
 // binds UIApplicationMain — no UI yet: UIKit only allows that inside its own
@@ -124,10 +132,25 @@ func didFinishLaunching() {
 	cv := uikit.UIView{ID: vc.Send(selView)}
 	w.SetRootViewController(uikit.UIViewController{ID: vc})
 	w.MakeKeyAndVisible()
+	// The container is NOT the controller's view but a subview capped to
+	// the window's safe area, so nothing the app sizes from
+	// ContainerBounds — the stage or the keypad — renders under the
+	// notch/status bar or the home indicator. The window's insets are
+	// valid once it is key and attached to a screen; a device with no
+	// insets reads zero and the container spans the full view.
+	ins := objc.Send[uiEdgeInsets](w.ID, selSafeAreaInsets)
+	sub := uikit.GetUIViewClass().Alloc().InitWithFrame(uikit.CGRect{
+		Origin: uikit.CGPoint{X: ins.Left, Y: ins.Top},
+		Size: uikit.CGSize{
+			Width:  b.Size.Width - ins.Left - ins.Right,
+			Height: b.Size.Height - ins.Top - ins.Bottom,
+		},
+	})
+	cv.AddSubview(sub)
 	mu.Lock()
 	window = w
 	rootVC = vc
-	container = cv
+	container = sub
 	ready := readyFn
 	mu.Unlock()
 	iosui.PoolPop(pool)
