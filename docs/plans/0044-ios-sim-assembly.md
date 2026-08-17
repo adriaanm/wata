@@ -63,7 +63,13 @@ cross-class cast facets, and the raw-RGBA-to-`UIImage` crossing
 is facade-bindable and stays out of Go.
 Gate: a hello built on iosshell (not the spike) boots in the simulator
 and paints — the spike's own assertions, re-taken through the product
-packages.
+packages. Taken green 2026-08-17 (runtime restored; `just ios-hello`
+5.75s, `just ios-spike` 2.91s): the hello's band probes read
+top=ff0000 / bottom=0000ff, so iosui's render-flip convention is
+empirically right — no CTM change. First launch on a cold-booted fresh
+runtime can exceed the 90s watchdog with zero markers and no crash
+report; a rerun on the warm device is the discriminator before
+suspecting the app.
 
 **Stage 3 — the interpreter and its tests.** `wata-ios/` is born:
 `uikit.scala` (the facade — value structs, defined scalars, bound-subset
