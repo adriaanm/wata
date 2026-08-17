@@ -1,6 +1,6 @@
 # 0044 — the iOS client, simulator first
 
-Status: accepted
+Status: done (all four stages taken green; stage notes inline below)
 
 ## Problem
 
@@ -97,7 +97,18 @@ viable input mapping; real interaction design is `ADULT-UX-NONHAPPY`).
 simulator against a live wata-server, assert the boot screen frames and
 the login applet paints. `just ios-smoke`; not in ci (Xcode-gated),
 same posture as nativeui-tests/mac-smoke.
-Gate: ios-smoke green.
+Gate: ios-smoke green. Taken green 2026-08-17 (launch-to-verdict 1.7s):
+boot screen painted before the session connected (`ready` paints it
+inline, so the connect wait never shows a blank window), alice logged
+in, the contact list painted — asserted by printed screen/paint-probe
+lines, since there is no headless mode and no TreeDump. Deltas from the
+stage text as written: key input is the shell's touch KEYPAD (one
+UIButton per key of the handset's model, `iosshell/keypad.go` —
+target-action where the applets expect keys, per the minimal-viable
+ruling), audio is a stub thread answering record/play with honest
+errors, and the stores are sandbox files (`secrets.json` in place of
+the mac keychain — the iOS keychain is the signed-device legs' work).
+Record: docs/design/wata-ios.md.
 
 ## Verification
 
