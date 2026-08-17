@@ -1,48 +1,489 @@
 import language.experimental.saferExceptions
 
-/** wata-ios: the iOS client (plan 0044) — wata-mac's architecture with UIKit
- *  under it, simulator-first. Stage 3 holds the retained interpreter
- *  (iosstage.scala) and its test suite; the bodies — the screens, the pump,
- *  the client session — cross in stage 4, so the default path is a stub.
+/** wata-ios: the iOS client (plan 0044) — wata-fb's screens on the retained
+ *  UIKit backend, wata-mac's pump with the mac-only seams swapped
+ *  (macshell -> iosshell, the audio thread stubbed off, key input as the
+ *  shell's touch keypad).
+ *
+ *    WATA_IOS_HS / WATA_IOS_USER / WATA_IOS_PASS (simctl launch passes them
+ *    as SIMCTL_CHILD_*): login is from the environment, with the stores
+ *    remembering across launches (config.scala). There is no login sheet
+ *    yet — that surface is ADULT-UX-NONHAPPY's iOS half.
  *
  *  THE SHELL'S INVERSION (go-pkgs/iosshell): UIKit builds the UI inside its
  *  own launch callback and UIApplicationMain never returns, so main goes
- *  `iosshell.start()` → `iosshell.runApp(ready)`, and everything after — for
- *  now, running the interptest — happens inside `ready`, a `go.callback`
- *  trampoline the shell invokes on the main thread once the window is key
- *  and visible.
+ *  `start()` → `runApp(ready)`; `ready` (a `go.callback` trampoline, main
+ *  thread) creates the stage, adopts its root, lays the keypad, paints the
+ *  BOOT SCREEN — the session's connect wait happens behind a painted frame,
+ *  not a blank window — and forks the session goroutine.
  *
- *  Argv modes (simctl launch passes arguments through to the process):
+ *  THE PUMP is wata-mac's frame shape: drain the runtime's `UiEvent` queue,
+ *  read the snapshot/connection, drain the keypad into
+ *  `WataLogic.handleInput`, drain the (stub) audio thread's events, tick,
+ *  body, diff, and hand the script to the retained interpreter (`IosStage`)
+ *  — which publishes to the main queue (there is no headless mode). Dropped
+ *  mac surfaces: the window title, the Dock badge, banners, the Devices
+ *  window, the login sheet, the leak-bisect arms.
  *
- *    wata-ios interptest   — the retained interpreter's suite
- *                            (interptest.scala; tools/ios-interptest.py runs
- *                            it in the simulator and greps the verdict)
- *    wata-ios              — the stage-4 stub: prints one line and returns */
+ *  THE ASSERTABLE LINES (tools/ios-smoke.py's surface — launchd owns the
+ *  process exit, so printed lines are the verdict, the interptest rule):
+ *    ready <userId> / login failed        — the connect wait's outcome
+ *    screen boot|contacts|conversation    — the top-level screen changed
+ *    paint <screen> lit=<n>               — an offscreen render of the live
+ *                                           stage found <n> non-black pixels
+ *                                           (the proof UIKit really painted)
+ *    notify: play|noted "…" "…" badge=<n> — the arrival decision (noted =
+ *                                           no banner surface on iOS yet)
+ *
+ *  Argv modes: `interptest` runs the retained interpreter's suite
+ *  (interptest.scala) instead of the client. */
 object Main:
 
-  /** the ready trampoline, minted ONCE at module init (the registration
-   *  contract) — the shell calls it on the main thread inside
-   *  UIApplicationMain, which is the interptest's UIKit thread. */
+  /** the trampolines, minted ONCE at module init (the registration
+   *  contract) — the shell invokes them on the main thread. */
   val interptestCb: go.Uintptr = go.callback(() => Main.runInterptest())
+  val readyCb: go.Uintptr = go.callback(() => Pump.onReady())
 
   def main(args: Array[String]): Unit =
     if args.length > 0 && args(0) == "interptest" then
       go.iosshell.start()
       go.iosshell.runApp(interptestCb) // never returns
-    else
-      // stage 4 brings the client; until then the launch is a visible stub
-      println("wata-ios: stage-3 build — only the interptest argv mode runs")
+    else runClient(args)
+
+  def runClient(args: Array[String]): Unit =
+    val hs = pick(args, 0, "WATA_IOS_HS", "")
+    val user = pick(args, 1, "WATA_IOS_USER", "")
+    val passIn = pick(args, 2, "WATA_IOS_PASS", "")
+    var cfg = FbConfig.resolve(hs, user, passIn)
+    // prime the walkie-talkie toggle's cell (every config write re-emits it)
+    val primed = FbConfig.loadNotifyMode()
+    // the password that got us in is worth keeping only if it is the one
+    // just supplied; a stored one is already where it belongs.
+    if passIn != "" then FbConfig.savePassword(cfg.homeserver, cfg.username, passIn)
+    Pump.setConfig(cfg)
+    go.iosshell.start()
+    go.iosshell.runApp(readyCb) // never returns
 
   def runInterptest(): Unit =
     // PRUNE-DANGLING-MODULE-INIT: keep the frame-handoff seam linked. The
     // pruner drops `drainPending` when nothing reachable references `submit`
-    // (stage 4's pump is its real caller), but the module init still emits
-    // the `applyCb` callback literal that CALLS it — the emitted Go then
-    // does not compile. This inline no-op submit is the reference that keeps
-    // submit -> applyCb -> drainPending in the program until the pump lands.
+    // (the client pump is its real caller, absent from an interptest-focused
+    // slice), but the module init still emits the `applyCb` callback literal
+    // that CALLS it — the emitted Go then does not compile. This inline
+    // no-op submit keeps submit -> applyCb -> drainPending in the program.
     IosStage.submit(Nil)
     val failures = InterpTest.run()
     // The verdict travels by the printed line: launchd owns the process's
     // exit, so the harness greps `interptest: PASS`/`FAIL` and terminates
     // the app itself. Nothing to do here but stay in the runloop.
     ()
+
+  /** enough to attempt a session: a name, and either a password or a stored
+   *  token to try first. */
+  def hasCredentials(c: ClientConfig): Boolean =
+    c.username != "" && (c.password != "" || c.stored.accessToken != "")
+
+  /** positional argument `i` wins, else the env var, else the default. */
+  def pick(args: Array[String], i: scala.Int, env: String, dflt: String): String =
+    var out = go.sys.getenv(env)
+    if out == "" then out = dflt
+    if args.length > i && args(i) != "" then out = args(i)
+    out
+
+/** one pump step's carried state — wata-mac's PumpSt verbatim (the wata
+ *  applet state, the last tree, the two-step quit's arm window, the frame
+ *  clock, the quit edge, the outbox marks, and the notify marks). */
+case class PumpSt(
+  wata: WataState,
+  last: Option[View],
+  quitArm: scala.Double,
+  lastMs: Long,
+  quit: Boolean,
+  unsent: List[String],
+  undelivered: List[String],
+  marks: NotifyState
+)
+
+object Pump:
+
+  val FRAME_MS: Long = 33L
+  val QUIT_ARM_S: scala.Double = 2.0
+
+  /** the config the ready trampoline picks up (the callback literal captures
+   *  nothing — module cells are its reach, IosStage's applyCb idiom). */
+  private val cfgC: sgo.Atomic[Option[ClientConfig]] = sgo.atomic(None)
+  /** the stage's root and scale, for the paint probe. */
+  private val rootC: sgo.Atomic[Option[go.uikit.UIView]] = sgo.atomic(None)
+  private val scaleC: sgo.Atomic[Int] = sgo.atomic(1)
+  /** which screen the pending paint probe reports on. */
+  private val probeScreenC: sgo.Atomic[String] = sgo.atomic("")
+  /** the last screen name printed (one `screen` line per change). */
+  private val screenC: sgo.Atomic[String] = sgo.atomic("")
+
+  /** the paint-probe trampoline: renders the live stage on the main queue
+   *  AFTER the published frames applied (one serial queue, publish order). */
+  val probeCb: go.Uintptr = go.callback(() => Pump.runProbe())
+
+  def setConfig(cfg: ClientConfig): Unit = cfgC.set(Some(cfg))
+
+  def initial(clock: Clock): PumpSt =
+    PumpSt(WataLogic.initial(), None, 0.0, clock.nowUnixMillis(), false, Nil, Nil,
+      Notify.initial())
+
+  def scale(): scala.Int =
+    var out = IosStr.num(go.sys.getenv("WATA_IOS_SCALE"), 2)
+    if out < 1 then out = 1
+    out
+
+  def connectMs(): Long = IosStr.num(go.sys.getenv("WATA_IOS_CONNECT_MS"), 30000).toLong
+
+  // ---- the ready hop (main thread, inside UIApplicationMain) ----------------
+
+  def onReady(): Unit =
+    val sc = scale()
+    scaleC.set(sc)
+    val pool = go.iosui.poolPush()
+    val root = IosStage.create(sc, true)
+    go.iosui.poolPop(pool)
+    go.iosshell.adoptRoot(root)
+    go.iosshell.addKeypad()
+    rootC.set(Some(root))
+    // Paint the boot screen NOW, inline (this is the UIKit thread): the
+    // session's connect wait runs behind a painted "starting up..." frame.
+    // The pump's first frame then root-PSets over it.
+    val pool2 = go.iosui.poolPush()
+    IosStage.setTree(bootTree())
+    go.iosui.poolPop(pool2)
+    noteScreen("boot")
+    sgo.spawn(() => Pump.session())
+
+  /** the pre-session boot screen: the same body the pump would build before
+   *  `everLive`, from an initial state and an empty context. */
+  def bootTree(): View =
+    WataLogic.bodyBoot(NetStatus.poll(Disconnected()), Disconnected(),
+      false, false, false, NetStatus.clockOk())
+
+  // ---- the session ----------------------------------------------------------
+
+  /** the client both stages of the session run: `makeWithAudioStored`, so a
+   *  recording queued while the server was unreachable survives the app
+   *  closing (the audio itself is the stub thread's). */
+  def startAudioClient(cfg: ClientConfig): Handle =
+    ClientHandle.startClient(
+      Runtime.makeWithAudioStored(cfg, IosCaps.httpDo(), IosCaps.clock(), FbConfig.outbox()))
+
+  /** the token this session actually got, kept for the next launch — written
+   *  once per session and only when it is real. */
+  private val savedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  def persistSession(c: MatrixClient): Unit =
+    if !savedC.get() then
+      val creds = Runtime.lastAuth
+      if creds.accessToken != "" then
+        savedC.set(true)
+        FbConfig.saveLogin(c.cfg.homeserver, c.cfg.username, creds)
+
+  def session(): Unit = cfgC.get() match
+    case c: Some[ClientConfig] =>
+      val cfg = c.value
+      if !Main.hasCredentials(cfg) then
+        println("wata-ios: set WATA_IOS_USER (and WATA_IOS_PASS), or store a session first")
+      else
+        val h = startAudioClient(cfg)
+        pump(h)
+        h.stop()
+        val joined = ClientHandle.join(h, 5000L)
+        println("session ended")
+    case None => println("wata-ios: no config")
+
+  /** `Runtime.waitForConnection(Syncing)`, except a `ConnAuthRejected` ends
+   *  the wait at once (wata-mac's shape). */
+  def waitLiveOrRejected(h: Handle, timeoutMs: Long): Boolean =
+    val deadline = h.client.clock.nowUnixMillis() + timeoutMs
+    var live = false
+    var run = true
+    while run do
+      if isRejected(h.connection()) then run = false
+      else if h.client.clock.nowUnixMillis() >= deadline then run = false
+      else
+        Runtime.pollEvent(h.client) match
+          case s: Some[UiEvent] =>
+            if Runtime.isConnEvent(s.value, Syncing()) then
+              live = true
+              run = false
+          case None => h.client.clock.sleepMs(20L)
+    live
+
+  def pump(h: Handle): Unit =
+    val clock = IosCaps.clock()
+    NetStatus.reset()
+    val live = waitLiveOrRejected(h, connectMs())
+    if live then println("ready " + Runtime.lastAuth.userId)
+    else println("login failed") // stored creds keep pumping on the boot screen (plan 0022's never-terminate)
+    sgo.supervised {
+      val evts = sgo.makeChan[AudioEvt](16)
+      val audioCmds = h.client.audioCmds
+      sgo.fork(AudioThread.mainLoop(audioCmds, evts, false))
+      var st = initial(clock)
+      // A rejected session ends the pump; there is no sheet to bounce to
+      // yet, so the printed line is the surface (ADULT-UX-NONHAPPY's iOS
+      // half owns the ask-again arc). The two-step quit edge only ever
+      // re-arms: an iOS app does not terminate itself.
+      while !st.quit && !isRejected(h.connection()) do
+        val took = h.waitEvent(FRAME_MS)
+        st = frame(h, clock, evts, st)
+      audioCmds.send(AcQuit())
+    }
+    if isRejected(h.connection()) then println("rejected")
+
+  def isRejected(c: ConnectionState): Boolean = c match
+    case _: ConnAuthRejected => true
+    case _                   => false
+
+  // ---- one frame ------------------------------------------------------------
+
+  /** one frame: UI events -> flash/outbox, keys -> input, audio events, tick,
+   *  body, diff, publish — wata-mac's frame minus the mac chrome. */
+  def frame(h: Handle, clock: Clock, evts: sgo.Chan[AudioEvt], st0: PumpSt): PumpSt =
+    val nowMs = clock.nowUnixMillis()
+    val dt = clampDt(nowMs - st0.lastMs).toDouble / 1000.0
+    var st = PumpSt(st0.wata, st0.last, st0.quitArm, nowMs, st0.quit, st0.unsent, st0.undelivered, st0.marks)
+    st = drainUiEvents(h, st)
+    val snap = h.snapshot()
+    val conn = h.connection()
+    val net = NetStatus.poll(conn)
+    NetStatus.logTransition(net, conn, NetStatus.clockOk())
+    NetStatus.logSnapshot(snap, conn)
+    persistSession(h.client)
+    if NetStatus.takePipeArrival() then Runtime.retryNow(h.client)
+    val ctx = FrameCtx(snap, conn, net, h.client, h.client.audioCmds, evts,
+      st.unsent, st.undelivered, st.quitArm > 0.0)
+    st = applyKeys(st, ctx)
+    st = drainAudio(st, ctx)
+    st = notifyStep(h, st, snap)
+    st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
+      st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
+      st.unsent, st.undelivered,
+      NetStatus.everLive(), FbCaps.transportUnavailable(), None, false, NetStatus.clockOk(),
+      nowMs)
+    st.last match
+      case old: Some[View] => patchTo(old.value, v)
+      case None            => IosStage.submitTree(v)
+    noteScreen(screenName(st.wata))
+    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+
+  def patchTo(old: View, v: View): Unit =
+    val ps = Diff.diff(old, v)
+    if lenPatches(ps) > 0 then IosStage.submitScript(ps)
+
+  def lenPatches(ps: List[Patch]): Int =
+    var n = 0
+    var cur = ps
+    var going = true
+    while going do
+      cur match
+        case _ :: t =>
+          n += 1
+          cur = t
+        case Nil => going = false
+    n
+
+  def clampDt(raw: Long): Long =
+    if raw < 0L then 0L else if raw > 1000L then 1000L else raw
+
+  /** the quit confirmation ages out (0 = unarmed). */
+  def tickArm(arm: scala.Double, dt: scala.Double): scala.Double =
+    var out = arm
+    if arm > 0.0 then
+      out = arm - dt
+      if out < 0.0 then out = 0.0
+    out
+
+  // ---- the screen line + the paint probe ------------------------------------
+
+  def screenName(s: WataState): String =
+    if !NetStatus.everLive() then "boot"
+    else s.view match
+      case _: VContacts     => "contacts"
+      case _: VConversation => "conversation"
+
+  /** print `screen <name>` on change and queue a paint probe for it — the
+   *  probe runs on the main queue AFTER the frame that changed it applied. */
+  def noteScreen(name: String): Unit =
+    if screenC.getAndSet(name) != name then
+      println("screen " + name)
+      probeScreenC.set(name)
+      go.iosui.onMain(probeCb)
+
+  /** render the live stage offscreen and count non-black pixels over a
+   *  coarse grid (stopping early — each probe is a full layer render). Every
+   *  screen draws SOMETHING light on the black stage, so lit=0 means UIKit
+   *  painted nothing where a tree was submitted. */
+  def runProbe(): Unit = rootC.get() match
+    case r: Some[go.uikit.UIView] =>
+      val sc = scaleC.get()
+      var lit = 0
+      var probes = 0
+      var y = 4
+      while y < 128 && lit < 8 do
+        var x = 2
+        while x < 160 && lit < 8 do
+          val c = go.iosui.renderPixel(r.value, x * sc + sc / 2, y * sc + sc / 2)
+          probes += 1
+          if c > 0 then lit += 1
+          x += 12
+        y += 8
+      println("paint " + probeScreenC.get() + " lit=" + lit + "/" + probes)
+    case None => ()
+
+  // ---- the two mailbox drains ------------------------------------------------
+
+  /** the runtime's `UiEvent` queue, ONCE per frame (plan 0009's one-drain
+   *  rule). */
+  def drainUiEvents(h: Handle, st0: PumpSt): PumpSt =
+    var st = st0
+    var run = true
+    while run do
+      Runtime.pollEvent(h.client) match
+        case e: Some[UiEvent] => st = onUiEvent(st, e.value)
+        case None => run = false
+    st
+
+  def onUiEvent(st: PumpSt, e: UiEvent): PumpSt = e match
+    case _: EvSendComplete =>
+      withWata(st, WataLogic.notifySend(st.wata, false))
+    case _: EvSendFailed =>
+      withWata(st, WataLogic.notifySend(st.wata, true))
+    case pe: EvPlaybackError =>
+      withWata(st, WataLogic.notifyPlayError(st.wata, pe.fetchFailed))
+    case ob: EvOutbox =>
+      PumpSt(st.wata, st.last, st.quitArm, st.lastMs, st.quit, ob.unsent, ob.undelivered, st.marks)
+    case _ => st // EvConn -> h.connection(), EvSnapshot -> h.snapshot()
+
+  /** the audio thread's `AudioEvt` queue, ONCE per frame. The echo events
+   *  never occur here (the stub emits none), but the filter stays — the
+   *  predicate documents the seam. */
+  def drainAudio(st0: PumpSt, ctx: FrameCtx): PumpSt =
+    var st = st0
+    var run = true
+    while run do
+      ctx.audioEvts.tryReceive() match
+        case e: Some[AudioEvt] => st = onAudioEvt(st, e.value, ctx)
+        case None => run = false
+    st
+
+  def onAudioEvt(st: PumpSt, e: AudioEvt, ctx: FrameCtx): PumpSt =
+    if isEchoEvt(e) then st
+    else
+      noteAudioStub(e)
+      withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
+
+  /** the first stubbed-audio failure per run names the cause once — the
+   *  grid's flash says MIC FAILED, this says why (the audio stack is the
+   *  hardware-gated PTT leg's). */
+  private val audioToldC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  def noteAudioStub(e: AudioEvt): Unit = e match
+    case _: AeRecordingError =>
+      if !audioToldC.get() then
+        audioToldC.set(true)
+        println("audio: stubbed off (plan 0044 — no capture/playback in the simulator client)")
+    case _ => ()
+
+  def isEchoEvt(e: AudioEvt): Boolean = e match
+    case _: AeEchoRecording => true
+    case _: AeEchoPlaying   => true
+    case _: AeEchoDone      => true
+    case _: AeEchoError     => true
+    case _                  => false
+
+  // ---- arrival notification --------------------------------------------------
+
+  /** the arrival edge, once a frame (wataclient's `Notify`, shared with the
+   *  handset and the mac). iOS has no banner/badge surface yet, so the
+   *  DECISION line is the whole presentation: `play` when walkie-talkie mode
+   *  auto-plays (which the stub audio thread will fail — honestly), `noted`
+   *  otherwise. Real notifications ride the signed-device legs (APNs is
+   *  hardware-gated). */
+  def notifyStep(h: Handle, st0: PumpSt, snap: StateSnapshot): PumpSt =
+    val r = Notify.step(st0.marks, snap)
+    val badge = Notify.totalUnplayed(snap)
+    var st = PumpSt(st0.wata, st0.last, st0.quitArm, st0.lastMs, st0.quit,
+      st0.unsent, st0.undelivered, r.marks)
+    var cur = r.arrivals
+    var going = true
+    while going do
+      cur match
+        case c: ::[Arrival] =>
+          st = announce(h, st, c.head, badge)
+          cur = c.tail
+        case Nil => going = false
+    st
+
+  def announce(h: Handle, st: PumpSt, a: Arrival, badge: scala.Int): PumpSt =
+    var out = st
+    if Notify.playsNow(FbConfig.notifyMode()) && canAutoPlay(st.wata) then
+      Runtime.sendAction(h.client, ActPlay(a.mxcUrl))
+      out = withWata(st, WataLogic.withPlaying(st.wata, true, a.roomId, a.eventId))
+      println(notifyLine("play", a, badge))
+    else println(notifyLine("noted", a, badge))
+    out
+
+  def canAutoPlay(s: WataState): Boolean = !s.playing && !s.pttHeld
+
+  def notifyLine(what: String, a: Arrival, badge: scala.Int): String =
+    "notify: " + what + " \"" + Notify.title(a) + "\" \"" + Notify.body(a) +
+      "\" badge=" + badge
+
+  def withWata(st: PumpSt, w: WataState): PumpSt =
+    PumpSt(w, st.last, st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+
+  // ---- input ----------------------------------------------------------------
+
+  /** drain the keypad into the applet — and run the two-step quit edge as
+   *  the device loop does, though on iOS the confirmed edge only ends the
+   *  session loop (an app does not self-terminate). The queue carries
+   *  IosKeys codes: the buttons are the model, no translation table. */
+  def applyKeys(st0: PumpSt, ctx: FrameCtx): PumpSt =
+    var st = st0
+    var going = true
+    while going do
+      val packed = go.iosshell.nextKey()
+      if packed < 0 then going = false
+      else
+        val k = packed / 4
+        if k != IosKeys.NONE && k <= IosKeys.PTT then
+          st = applyKey(st, KeyEvent(keyOf(k), stateOf(packed % 4)), ctx)
+    st
+
+  def keyOf(code: scala.Int): Key =
+    if code == IosKeys.UP then KUp()
+    else if code == IosKeys.DOWN then KDown()
+    else if code == IosKeys.LEFT then KLeft()
+    else if code == IosKeys.RIGHT then KRight()
+    else if code == IosKeys.ENTER then KEnter()
+    else if code == IosKeys.BACK then KBack()
+    else if code == IosKeys.PTT then KPtt()
+    else KUnknown()
+
+  def stateOf(phase: scala.Int): KeyState =
+    if phase == 1 then Pressed()
+    else if phase == 2 then Repeat()
+    else Released()
+
+  def applyKey(st: PumpSt, ev: KeyEvent, ctx: FrameCtx): PumpSt =
+    val edge = isQuitEdge(st.wata, ev)
+    var quit = st.quit
+    var arm = st.quitArm
+    if edge && arm > 0.0 then quit = true
+    if edge then arm = QUIT_ARM_S
+    PumpSt(WataLogic.handleInput(st.wata, ev.key, ev.state, ctx), st.last, arm, st.lastMs, quit,
+      st.unsent, st.undelivered, st.marks)
+
+  def isQuitEdge(s: WataState, ev: KeyEvent): Boolean =
+    Shell.isPressed(ev.state) && Shell.isBackKey(ev.key) && isContacts(s.view)
+
+  def isContacts(v: WataView): Boolean = v match
+    case _: VContacts => true
+    case _            => false

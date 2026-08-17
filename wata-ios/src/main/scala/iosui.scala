@@ -64,3 +64,12 @@ object iosshell:
   @go.name("ContainerBounds") def containerBounds(): uikit.CGRect = ???
   /** splice the stage's root into the window's container (main thread). */
   @go.name("AdoptRoot") def adoptRoot(v: uikit.UIView): Unit = ???
+
+  // ---- the touch keypad (keypad.go — the minimal viable input mapping) ------
+  /** lay the key buttons into the container (main thread, inside `ready`). */
+  @go.name("AddKeypad") def addKeypad(): Unit = ???
+  /** one pending key event as `code*4 + phase` (IosKeys codes, phase 0
+   *  release / 1 press), or -1 — never blocks. */
+  @go.name("NextKey") def nextKey(): scala.Int = ???
+  /** inject a key edge into the same queue the buttons feed. */
+  @go.name("PushKey") def pushKey(code: scala.Int, phase: scala.Int): Unit = ???

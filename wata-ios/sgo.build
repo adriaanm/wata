@@ -1,8 +1,8 @@
 # sgo.build (schema: see the sgola tree's core/sgo.build). wata-ios is an APP
-# over core + wataui: the iOS client (plan 0044), wata-mac's architecture with
-# UIKit under it. Today it holds the retained interpreter (iosstage.scala) and
-# its interptest argv mode; the bodies cross in stage 4, which is when json +
-# wataclient join the dep chain.
+# over core + json + wataclient + wataui: the iOS client (plan 0044),
+# wata-mac's architecture with UIKit under it — wata-fb's screen bodies
+# (copied in, honest duplication) on the retained UIKit stage, the audio
+# thread stubbed off, key input as the shell's touch keypad.
 mode app
 emitname wata-ios
 binname wata-ios
@@ -19,3 +19,7 @@ optreport
 godep github.com/adriaanm/wata/go-pkgs/iosshell go-pkgs/iosshell
 godep github.com/adriaanm/wata/go-pkgs/iosui go-pkgs/iosui
 godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt
+# the timeout-carrying http.Client constructor (plan 0045 slice 1) — the
+# net/http facade binds the Client type, not its fields, so the per-request
+# Timeout comes from this tiny Go package, same as wata-fb and wata-mac
+godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc
