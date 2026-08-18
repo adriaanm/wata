@@ -388,3 +388,48 @@ Next: tier 3's client half — productizing the PTT hello into wata-ios.
 It is device-only and should wait on the owner's tier-2 on-device leg
 (`IOS-PUSH-ON-DEVICE`), since building a live arc on an unproven
 foundation is how a session spends a day on the wrong bug.
+
+### 2026-08-18 — tier 3, client half: landed BUILD-CHECKED, not proven
+
+`79b14e1`: the channel manager, both delegates, join/leave against the
+family room, the ephemeral token POST, the transmit path through the
+framework, the `macaudio` session handoff, and a profile-driven
+entitlement/background-mode stage in `tools/ios-device.py`.
+
+**Nothing in this chunk is behaviourally tested, and no gate here can
+test it** — the PushToTalk framework does not exist in a simulator.
+What was verified is that it compiles, links and perturbs nothing:
+`ios-build-check`, `facade-check`, `ios-smoke` (latency 0.03s,
+unperturbed), `ios-push-smoke`, `ios-interptest` and `just ci`, all
+re-run here, all 0. The chunk was briefed NOT to fabricate a mock PTT
+layer for a green gate, and did not.
+
+The design decisions worth keeping are folded into
+`docs/design/wata-ios.md` (the session handoff, the single transmit
+path, the derived talk event, the foreground-join rule). The owner's
+ordered device checklist is in the plan's Verification section.
+
+Two decisions worth noting here:
+
+- **`incomingPushResult` is answered synchronously** with the
+  payload's `activeSpeaker` — an unanswered PTT push costs the app its
+  channel, so leaving it unimplemented was not an option. It does not
+  yet fetch and play the message; that receive half is open.
+- **`tools/ios-device.py` reads entitlements OFF the profile** and
+  writes the PTT background modes only when the profile grants both
+  capabilities, so the owner's existing flow is unbroken until they do
+  the portal step. `WATA_IOS_REQUIRE_PTT=1` turns the missing
+  capability into a refusal.
+
+### 2026-08-18 — an unrelated red gate, verified not ours
+
+`just mac-smoke` is RED, and was already red before this epic: it
+fails identically at the pre-epic commit `be3504d`, checked in a
+clean worktree with the toolchain linked in (the first attempt proved
+nothing — a fresh worktree has no `.toolchain`, which is gitignored).
+Diagnosed while confirming: the contacts footer legend is now
+`UP/DN sel OK open PTT talk` while `tools/mac-smoke.py` still asserts
+the exact old string — a stale assertion, not a product regression.
+Filed as `MAC-SMOKE-STALE-LEGEND`. A permanently red gate masks every
+real regression behind it, so it is worth fixing promptly even though
+it is nobody's current task.

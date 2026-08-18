@@ -102,6 +102,39 @@ pump with the mac-only seams swapped.
   parsing the embedded provisioning profile can tell an app whether
   its token is a sandbox or production one, and every build this
   repo produces is a sandbox build — an App Store build must set it.
+- **The PushToTalk channel is the live arc** (plan 0065 tier 3),
+  **build-checked only** — the framework does not exist in a
+  simulator, so none of this is exercised by any gate here; it is
+  the hardware-proven hello (`tools/bindgen/hello/`) productized.
+  `iosshell/ptt.go` holds the channel manager, both delegates and
+  join/leave against the family room, whose channel UUID is derived
+  in Go from the family room id so every launch and every family
+  device lands on the same channel. Joining REQUIRES the app to be
+  foregrounded — the server can never conscript a phone into a
+  channel — so a refusal reports its reason and retries; after a
+  reboot or an explicit Leave the user must reopen the app once.
+  The ephemeral token goes to `/_wata/v1/push/channel/join` and is
+  kept in a table apart from the stable alert token, since it dies
+  with the join.
+  **The audio-session handoff** is the subtle part: `macaudio`'s
+  `session_ios.go` carries an owner flag flipped SYNCHRONOUSLY from
+  the activate/deactivate delegate callbacks, never through the pump
+  — a 33 ms frame is too late for a yield that must be true the
+  instant the framework says so. While the framework owns the
+  session, `sessionActivate` sets nothing: no `setCategory:`, no
+  `setActive:` — those two calls ARE the incompatibility plan 0008
+  records, and the session handed over is already configured. The
+  engine is started if stopped, because a transmission that woke the
+  app finds none running. On deactivate our own category is restored
+  so playback after a transmission works. Both directions are
+  best-effort and log-only: an unreclaimable session must never wedge
+  the app.
+  Transmit is ONE path — while joined, the on-screen PTT button goes
+  through the framework rather than the applet, and recording starts
+  on a derived event (both `didBeginTransmitting` and
+  `didActivateAudioSession` seen, in either order — nothing documents
+  their order) turned into the same `KPtt` edge the button made, so
+  the system UI, the session and the applet cannot drift.
 - **The stores are sandbox files** (`config.scala`): wata-mac's three
   stores with the keychain swapped for `secrets.json` (0600) in the
   app's own data container — the honest simulator-grade store; the iOS

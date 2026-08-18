@@ -1,6 +1,10 @@
 # 0065 — inbound messages on iOS: the three delivery tiers
 
-Status: proposed
+Status: accepted — all three tiers are landed and gated as far as this
+machine can gate them. Tier 1 is finished outright. Tiers 2 and 3 wait
+on the owner's device legs (`IOS-PUSH-ON-DEVICE`, `IOS-PUSH-TO-TALK`),
+because a simulator gets no APNs device token and has no PushToTalk
+framework at all. Not `done` until those pass — plan 0063's precedent.
 
 `[IOS-INBOUND-MESSAGES]` `[IOS-PUSH-TO-TALK]`
 
@@ -235,7 +239,48 @@ someone else's server is not a supported configuration.
   two transports' numbers compared, then the owner's roundtrip — a
   message sent from the mac or the BQ268 appears and plays on the
   phone within seconds, with the app open.
-- Tiers 2 and 3: specified when reached.
+- Tier 2: the fake-APNs server smoke, and `just ios-push-smoke`
+  (`simctl push`) for the presentation half. The registration half is
+  device-only.
+- Tier 3: the fake-APNs PTT smoke server-side; the client side is
+  build-checked only and unexercised by construction.
+
+### The owner's device legs, in order
+
+Everything above is gated as far as a machine without a phone, an
+entitlement or an Apple key can gate it. What is left, ordered so each
+step's evidence is visible before the next depends on it:
+
+1. **Portal.** Enable *Push Notifications* AND *Push to Talk* on the
+   App ID, regenerate the development profile, drop it at
+   `tools/ios-device/WataIos.mobileprovision`. Both capabilities:
+   without `aps-environment` the channel manager refuses to
+   instantiate at all.
+2. **Sign.** `just ios-device` should print the background modes and
+   both entitlements it took FROM the profile, and codesign should
+   succeed. A profile without the capability still produces exactly
+   the bundle this script always produced, so nothing breaks before
+   step 1 is done.
+3. **Tier 2's registration**, the half no gate reaches:
+   `push: device token …` then the server registration line in
+   `just ios-log`.
+4. **Tier 2 end to end**: a real `.p8` on the server, then a message
+   from the mac or the BQ268 with the phone backgrounded — banner,
+   tap, and the tap opening the right conversation.
+5. **Tier 3's channel**: `ptt: channel manager ready`, then
+   `ptt: joined`, the system banner naming the family, and the
+   ephemeral token registering with the server.
+6. **Tier 3's transmit** from the Dynamic Island / lock screen, and
+   with it **the session handoff — the riskiest thing in the epic**:
+   does the capture graph produce audio on the framework's session
+   rather than silence or a 0 Hz input format, does the engine
+   survive activate→deactivate, and does playing a received message
+   still work after a transmission?
+7. **Leave and restoration**: leaving stops the pushes, and the app
+   must be reopened to re-join (by design, not a bug).
+8. **An inbound `pushtotalk` push**. Note the woken app does not yet
+   fetch and play the message — that receive half is deliberately
+   still open.
 
 ## Out of scope
 
