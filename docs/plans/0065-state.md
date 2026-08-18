@@ -12,7 +12,7 @@ its durable content has moved into the plan and the design docs.
 |------|------|-------|
 | 1 | foreground sync latency | **done** — measured, gated, nothing to reduce |
 | 2 | `alert` pushes | **done** — gated; on-device leg is `IOS-PUSH-ON-DEVICE` |
-| 3 | `pushtotalk` pushes | not started |
+| 3 | `pushtotalk` pushes | server half **done**; client half device-only, blocked |
 
 ## Log
 
@@ -324,3 +324,67 @@ Decisions made in the chunk, accepted:
 Next: tier 3 (`pushtotalk` pushes and the live arc), noting that tier
 2's own on-device leg is unproven — tier 3 builds on a foundation the
 owner has not yet field-tested.
+
+### 2026-08-18 — tier 3, server half: ephemeral tokens and the pushtotalk push
+
+`e38f153`: `POST /_wata/v1/push/channel/{join,leave}`, channel rows
+kept apart from tier 2's stable alert rows, the `pushtotalk`-typed
+push at the `.voip-ptt` topic, and `tools/wata-ptt-smoke.py` (26
+checks) in `just ci`. `go-pkgs/apns` grew per-send topic and push-type
+overrides and a PTT payload.
+
+Verified here: the module tests, both smokes, and a full `just ci` —
+**exit 0**.
+
+Decisions made in the chunk, all accepted:
+
+- **Both tokens → PushToTalk wins exclusively, with the alert as a
+  FALLBACK.** The two answer the same question at different levels, so
+  sending both would give one message a banner *and* a live handover.
+  A device with a live channel token is dropped from the alert list;
+  its alert row is used only if the channel push is REJECTED, and then
+  that same message goes out as an alert. Losing the handover is not a
+  reason to lose the message. Both target lists are built BEFORE
+  either is pushed — otherwise the fallback and the ordinary alert leg
+  double-push. That ordering is load-bearing and silent; the gate's
+  "exactly once" assertion is what would catch a regression.
+- **Any 4xx deletes a channel row, not just 410.** A phone that left
+  the channel yields `400 BadDeviceToken`. Deliberately stricter than
+  tier 2's 410-only rule, and correct because an ephemeral token APNs
+  refuses is never coming back — the client mints a fresh one on the
+  next join.
+- **Channel rows are journaled.** "Ephemeral" describes the token's
+  binding to a join, not durability across OUR restart: the framework
+  maintains the channel across app termination, and re-joining needs a
+  foregrounded user action the server cannot trigger, so dropping the
+  table on boot would silence exactly the phone tier 3 exists to wake.
+  A genuinely dead token is self-correcting via the 4xx rule.
+- The apns client cache is now keyed by (host, TOPIC) — it was host
+  alone, which would have served PTT pushes carrying the bare bundle
+  id as `apns-topic`.
+
+What this gate does NOT prove — the seam left for the phone:
+
+- **No PushToTalk framework exists anywhere in it.** The fake Apple
+  accepts whatever we send; nothing shows iOS accepts our payload,
+  that `activeSpeaker` is the key the framework wants, or that the
+  app is woken into live audio.
+- The `.voip-ptt` topic and the `pushtotalk` type are asserted against
+  our own constants. Mitigating this: the topic is corroborated by
+  plan 0008's independent 2026-08-04 reading of Apple's docs, so it is
+  two sources rather than one — but a wrong constant would still pass
+  every check here and fail every real push with `TopicDisallowed`.
+- Transport is plaintext HTTP/1.1 as in tier 2; HTTP/2 and the JWT
+  stay gated by the module's own tests.
+- No entitlement, portal or signing leg. Real APNs refuses a PTT push
+  without the push-to-talk entitlement on the App ID.
+- Sandbox-vs-production host selection is untested for BOTH tiers —
+  the gates always use the `WATA_APNS_HOST` override.
+- Apple's "speaker stopped" convention (an empty `activeSpeaker`) is
+  representable but unused; nothing decides when the server would
+  send it. That belongs with the client half.
+
+Next: tier 3's client half — productizing the PTT hello into wata-ios.
+It is device-only and should wait on the owner's tier-2 on-device leg
+(`IOS-PUSH-ON-DEVICE`), since building a live arc on an unproven
+foundation is how a session spends a day on the wrong bug.
