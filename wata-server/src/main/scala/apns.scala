@@ -40,3 +40,15 @@ object apns:
    *  `badge` below 0 leaves the app's badge count alone. */
   @go.name("Push") def push(host: String, deviceToken: String, title: String, body: String,
                             roomId: String, eventId: String, badge: go.Int): go.Int throws sgo.GoError = ???
+
+  /** `apns.PushChannel(host, token, speaker, roomId, eventId)` — one
+   *  PushToTalk push to an EPHEMERAL channel token (plan 0065 tier 3). Same
+   *  answer discipline as `push`: the HTTP status, a throw only when no
+   *  verdict was reached. It differs from `push` in everything Apple looks at
+   *  — `apns-push-type: pushtotalk`, the topic is the bundle id plus
+   *  `.voip-ptt`, and the payload names the ACTIVE SPEAKER rather than a
+   *  banner, since the system hands this push to the PushToTalk framework
+   *  instead of presenting it. A 4xx (410 Gone, or 400 BadDeviceToken for a
+   *  channel the phone has left) means the token is dead. */
+  @go.name("PushChannel") def pushChannel(host: String, deviceToken: String, speaker: String,
+                                          roomId: String, eventId: String): go.Int throws sgo.GoError = ???

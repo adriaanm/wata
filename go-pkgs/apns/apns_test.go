@@ -383,3 +383,51 @@ func TestAlertPayloadOmitsEmptyBadge(t *testing.T) {
 		t.Errorf("payload with badge=3 missing badge key: %s", out2)
 	}
 }
+
+// TestPushToTalkRequestShape asserts what makes a PushToTalk push different
+// from an alert on the wire: the push type, the topic override, and a body
+// with no aps dictionary in it at all.
+func TestPushToTalkRequestShape(t *testing.T) {
+	key := testKey(t)
+	f := newFakeAPNs(t, key, func(string) (int, string) { return 200, "" })
+	defer f.close()
+	c := newClient(t, f, key, func() time.Time { return time.Unix(2000, 0) })
+
+	opts := SendOptions{PushType: PushTypePushToTalk, Topic: "com.example.wata" + PTTTopicSuffix}
+	if _, err := c.Send(context.Background(), "ephemeral1", ChannelPayload("Bob", "room9", "event9"), opts); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	req := f.lastRequest(t)
+	if req.pushType != "pushtotalk" {
+		t.Errorf("apns-push-type = %q, want pushtotalk", req.pushType)
+	}
+	if req.topic != "com.example.wata.voip-ptt" {
+		t.Errorf("apns-topic = %q, want the .voip-ptt topic, not the bare bundle id", req.topic)
+	}
+	if req.path != "/3/device/ephemeral1" {
+		t.Errorf("path = %q", req.path)
+	}
+	if strings.Contains(string(req.body), "aps") {
+		t.Errorf("a pushtotalk body carries an aps dictionary: %s", req.body)
+	}
+	var payload PTTPayload
+	if err := json.Unmarshal(req.body, &payload); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	if payload.ActiveSpeaker != "Bob" {
+		t.Errorf("activeSpeaker = %q, want Bob", payload.ActiveSpeaker)
+	}
+	if payload.RoomID != "room9" || payload.EventID != "event9" {
+		t.Errorf("room/event = %q/%q", payload.RoomID, payload.EventID)
+	}
+
+	// The same Client still sends alerts to the bare bundle id: the topic is a
+	// per-request override, not a mutation.
+	if _, err := c.Send(context.Background(), "stable1", AlertPayload("Bob", "hi", "r", "e", nil), SendOptions{}); err != nil {
+		t.Fatalf("Send (alert): %v", err)
+	}
+	if got := f.lastRequest(t).topic; got != "com.example.wata" {
+		t.Errorf("apns-topic after a PTT push = %q, want the bare bundle id", got)
+	}
+}

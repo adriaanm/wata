@@ -49,6 +49,8 @@ object Router:
     // session's own device.
     else if Push.isRegisterPath(path) then Push.register(r, body)
     else if Push.isUnregisterPath(path) then Push.unregister(r)
+    else if Push.isChannelJoinPath(path) then Push.channelJoin(r, body)
+    else if Push.isChannelLeavePath(path) then Push.channelLeave(r)
     else if TestHooks.enabled && isTestFailPath(path) then TestHooks.route(body)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)

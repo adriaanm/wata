@@ -253,6 +253,9 @@ object Server:
     // own device's token, or drops it.
     mux.handle("POST /_wata/v1/push/register", h)
     mux.handle("POST /_wata/v1/push/unregister", h)
+    // the PushToTalk channel's ephemeral token: minted per join, dead on leave.
+    mux.handle("POST /_wata/v1/push/channel/join", h)
+    mux.handle("POST /_wata/v1/push/channel/leave", h)
     mux.handle("GET /_wata/v1/admin/enroll", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/approve", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/deny", h)

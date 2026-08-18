@@ -650,7 +650,7 @@ in-memory-only property across a restart.
 
 ## Push notifications (APNs)
 
-`push.scala` + `apns.scala` + `go-pkgs/apns` (plan 0065 tier 2). A polling
+`push.scala` + `apns.scala` + `go-pkgs/apns` (plan 0065, tiers 2 and 3). A polling
 client only hears a message while it is running; iOS suspends a backgrounded
 app and tears down its sockets, so reaching a phone in a pocket is APNs or
 nothing. The server half is a registration endpoint and a per-message
@@ -659,7 +659,9 @@ fan-out.
 | route | who | what it does |
 |---|---|---|
 | `POST /_wata/v1/push/register` | any session | store `{platform, token, env}` against the CALLING session's device; `token` mandatory, `platform` defaults to `ios`, re-registration overwrites |
-| `POST /_wata/v1/push/unregister` | any session | drop the calling session's registration |
+| `POST /_wata/v1/push/unregister` | any session | drop the calling session's registrations, both kinds |
+| `POST /_wata/v1/push/channel/join` | any session | store the PushToTalk channel's ephemeral `{token, env}` against the calling session's device, replacing whatever it held |
+| `POST /_wata/v1/push/channel/leave` | any session | the channel is gone: delete that row |
 
 **Registrations are keyed twice.** The row is stored per (user, device), and a
 register also drops any other row carrying the same token: an APNs token
@@ -693,6 +695,44 @@ and cheap today, and the first thing to revisit if a timeline ever grows.
 dead; a pusher that ignores it re-sends to an uninstalled app forever. The
 delete is journaled, so a dead token does not come back on the next boot.
 
+### The PushToTalk channel token (tier 3)
+
+A second, structurally different token, in its own table (`ChannelRegs`) with
+its own lifetime. The PushToTalk framework mints an **ephemeral push token per
+channel JOIN**, and it is dead the moment the channel is left — so it is
+deliberately not a field on `PushReg`: one row per lifetime makes "push a
+channel token after the channel is gone" hard to write rather than merely
+discouraged. Join replaces (a device holds exactly one live channel token,
+never a set); leave deletes; `push/unregister` deletes both kinds, since it
+means "stop pushing to this device".
+
+Its push differs in every header Apple looks at: `apns-push-type: pushtotalk`,
+and the topic is the bundle id plus **`.voip-ptt`** — a *different* topic from
+the one alerts go to, served by the same bundle. The body has no `aps`
+dictionary at all: it is `activeSpeaker` (the sender's display name, which the
+framework makes the woken app report back) plus the same `room_id`/`event_id`.
+`apns.PushChannel` sends it, and `Client`s are cached per (host, topic) so the
+two topics coexist under one set of credentials.
+
+**A device holding both tokens is pushed once, the PushToTalk way.** Both
+tokens answer "a message arrived", at different levels — the channel push
+wakes the app into live audio, the alert asks for a tap — so sending both
+would give one message a banner *and* a handover. The alert registration stays
+on the shelf as the **fallback**: a channel push rejected with any 4xx (410
+Gone, or the 400 `BadDeviceToken` a token whose channel is gone answers)
+deletes the channel row and sends that same message as an alert instead.
+Losing the live handover is not a reason to lose the message. Both target
+lists are built before either is pushed, so the fallback cannot double up with
+the ordinary alert leg.
+
+That 4xx rule is stricter than the alert path's 410-only one, on purpose: an
+ephemeral token APNs will not take is not coming back, and the client mints a
+fresh one on its next join. The rows are journaled (`pttjoin` / `pttleave`)
+for the same reason alert registrations are, and *not* because the token is
+durable — the framework keeps the channel across app termination, so the token
+is still live after a server restart, and re-joining requires a foregrounded
+user action the server cannot trigger.
+
 **Configuration is the operator's own.** APNs keys are team-owned with no
 delegation primitive, so a self-hoster brings their own developer account,
 bundle id and key — nothing here is a baked-in constant:
@@ -719,8 +759,8 @@ App Store build's against production only.
 HTTP/2 POST, neither expressible in the dialect, so `go-pkgs/apns` is plain Go
 (no external dependency: `crypto/ecdsa` signs, `net/http` negotiates HTTP/2 on
 its own). Its `Client`/`Config`/`Payload` shapes do not cross the frontier —
-`go.apns` (`apns.scala`) binds three flat calls, `Configure` / `Configured` /
-`HostFor` / `Push`, over strings and ints, with the credentials as
+`go.apns` (`apns.scala`) binds five flat calls, `Configure` / `Configured` /
+`HostFor` / `Push` / `PushChannel`, over strings and ints, with the credentials as
 package-level state armed once at boot (the shape `go.irohnet` uses for this
 process's live listener). `Push` answers the HTTP status; a rejection is a
 status, not a throw, and APNs' own `reason` is printed rather than swallowed.
@@ -733,7 +773,15 @@ ES256 key — no developer account, no phone, no portal: registration and its
 auth, one push per message to the right device, the sender's own device
 excluded, re-registration not doubling, 410 deleting the registration,
 unregister, survival across a restart, and the no-configuration case staying
-completely silent.
+completely silent. `tools/wata-ptt-smoke.py` (`just ptt-smoke`, in `just ci`)
+does the same for the channel token, which is the whole gateable part of tier
+3 — the PushToTalk framework exists only on a phone: the pushtotalk type and
+the `.voip-ptt` topic, the active speaker in the payload, silence after a
+leave, a re-join replacing rather than accumulating, the both-tokens rule and
+its rejected-channel fallback, unregister dropping both, survival across a
+restart, and silence with no APNs configured. The two share
+`tools/pushkit.py` — the fake Apple, the throwaway key, the build, and the
+server harness.
 
 ## Request lifecycle
 
@@ -1256,7 +1304,8 @@ nodeId -> user, plan 0027 — a re-bind of the same node overwrites, so
 replay in commit order converges on the latest binding; `unbind`, plan 0058,
 is written only by an enrolment revocation), and `pushreg` / `pushunreg` /
 `pushforget` (APNs push registrations, plan 0065 — see "Push notifications"
-above). The `device` op carries the
+above) and `pttjoin` / `pttleave` (the PushToTalk channel's ephemeral token,
+one live row per device). The `device` op carries the
 node id the session was minted through (plan 0058); replay reads a missing
 field as `""`, so older journals stay loadable. Long-poll waiters are
 explicitly *not* logged (they're in-flight goroutines, transient by nature).
@@ -1472,7 +1521,7 @@ is a human step outside this gate (the sudo prompt is its confirmation);
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
 - **`bindings.scala`** — `Bindings` (the journaled nodeId→user map an approval writes and a revocation unbinds), `Nicknames` (the journaled nodeId→label map, plan 0060), and `DeviceLogin` (`POST /_wata/v1/device-login`: the trusted-header check, then a fresh session for the bound account, minted with the proven node id on the row).
 - **`devicecmd.scala`** — `DeviceCmd`: the device-command mailbox (queue / poll / report / read-report), the admin gate on the admin half, the two-credential device auth, and its own waiter list for the poll's long-poll.
-- **`push.scala`** — `PushRegs` (the journaled per-(user, device) APNs registrations, also keyed by token), `PushCfg` (the operator's `WATA_APNS_*` credentials, armed at boot or absent), and `Push` (the two register routes, the per-message fan-out, the badge count, and the 410-deletes-the-registration rule).
+- **`push.scala`** — `PushRegs` (the journaled per-(user, device) APNs registrations, also keyed by token), `PushCfg` (the operator's `WATA_APNS_*` credentials, armed at boot or absent), `ChannelRegs` (the PushToTalk channel's ephemeral per-device token, replaced on every join and deleted on leave), and `Push` (the four registration routes, the per-message fan-out over both kinds of token, the badge count, the 410-deletes-the-registration rule, and the channel push's 4xx fallback to the alert).
 - **`apns.scala`** — `go.apns`: the app-owned facade for `go-pkgs/apns`, four flat calls over strings and ints (`Configure`/`Configured`/`HostFor`/`Push`); none of the Go package's struct shapes cross the frontier.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.

@@ -161,3 +161,84 @@ func TestFacadeHostFor(t *testing.T) {
 		}
 	}
 }
+
+// TestFacadePushChannel covers the tier-3 half of the facade: the ephemeral
+// channel token is pushed at the .voip-ptt topic with the pushtotalk type and
+// a body naming the active speaker, and a dead channel token comes back as a
+// status the caller must act on.
+func TestFacadePushChannel(t *testing.T) {
+	defer resetFacade()
+	resetFacade()
+
+	if _, err := PushChannel("http://127.0.0.1:1", "tok", "Bob", "!r", "$e"); err == nil {
+		t.Fatal("PushChannel without Configure returned no error")
+	}
+
+	var gotPath, gotTopic, gotType, gotAuth string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotTopic = r.URL.Path, r.Header.Get("apns-topic")
+		gotType, gotAuth = r.Header.Get("apns-push-type"), r.Header.Get("authorization")
+		gotBody, _ = io.ReadAll(r.Body)
+		if strings.HasSuffix(r.URL.Path, "/leftchannel") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"reason":"BadDeviceToken"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := Configure("TEAM1", "KEY1", "com.example.wata", writeP8(t)); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	status, err := PushChannel(srv.URL, "ephemeral1", "Bob", "!room:localhost", "$ev:localhost")
+	if err != nil {
+		t.Fatalf("PushChannel: %v", err)
+	}
+	if status != 200 {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if gotPath != "/3/device/ephemeral1" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotTopic != "com.example.wata.voip-ptt" {
+		t.Errorf("apns-topic = %q, want the bundle id plus %s", gotTopic, PTTTopicSuffix)
+	}
+	if gotType != "pushtotalk" {
+		t.Errorf("apns-push-type = %q, want pushtotalk", gotType)
+	}
+	if !strings.HasPrefix(gotAuth, "bearer ") {
+		t.Errorf("authorization = %q", gotAuth)
+	}
+	var payload PTTPayload
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("payload: %v (%s)", err, gotBody)
+	}
+	if payload.ActiveSpeaker != "Bob" {
+		t.Errorf("activeSpeaker = %q", payload.ActiveSpeaker)
+	}
+	if payload.RoomID != "!room:localhost" || payload.EventID != "$ev:localhost" {
+		t.Errorf("room/event = %q/%q", payload.RoomID, payload.EventID)
+	}
+
+	// An alert through the same package still goes to the bare bundle id: the
+	// two topics coexist, one Client cached per (host, topic).
+	if _, err := Push(srv.URL, "stable1", "Bob", "hi", "!r", "$e", -1); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if gotTopic != "com.example.wata" {
+		t.Errorf("alert apns-topic = %q, want the bare bundle id", gotTopic)
+	}
+
+	// A token whose channel is gone answers 400 BadDeviceToken; that is a
+	// status, not a throw, and the caller deletes the row on it.
+	status, err = PushChannel(srv.URL, "leftchannel", "Bob", "!r", "$e")
+	if err != nil {
+		t.Fatalf("PushChannel (dead token): %v", err)
+	}
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", status)
+	}
+}

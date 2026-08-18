@@ -118,12 +118,21 @@ func (c *Client) bearerToken() (string, error) {
 }
 
 // PushType selects the apns-push-type header. Alert is the tier-2 case: a
-// visible, time-sensitive notification.
+// visible, time-sensitive notification. PushToTalk is tier 3's: the
+// PushToTalk framework wakes the app into live audio and never shows a
+// banner, and APNs rejects it unless the topic carries the PTTTopicSuffix.
 type PushType string
 
 const (
-	PushTypeAlert PushType = "alert"
+	PushTypeAlert      PushType = "alert"
+	PushTypePushToTalk PushType = "pushtotalk"
 )
+
+// PTTTopicSuffix is what a PushToTalk push's apns-topic adds to the app's
+// bundle id. It is a DIFFERENT topic from the app's own — the same bundle
+// serves both, and sending a pushtotalk push to the bare bundle id is
+// rejected.
+const PTTTopicSuffix = ".voip-ptt"
 
 // SendOptions overrides the per-request headers. The zero value sends an
 // alert push at normal priority that APNs may hold and coalesce, expiring
@@ -132,6 +141,12 @@ type SendOptions struct {
 	PushType   PushType      // default PushTypeAlert
 	Priority   int           // default 10 (send immediately); Apple also accepts 5 and 1
 	Expiration time.Duration // default 0 (do not store for later delivery)
+
+	// Topic overrides the Client's apns-topic for this one request. Empty
+	// means the Config's Topic. A PushToTalk push needs it: its topic is the
+	// bundle id plus PTTTopicSuffix, while the same Client's alert pushes go
+	// to the bare bundle id.
+	Topic string
 }
 
 func (o SendOptions) pushType() PushType {
@@ -139,6 +154,13 @@ func (o SendOptions) pushType() PushType {
 		return PushTypeAlert
 	}
 	return o.PushType
+}
+
+func (o SendOptions) topic(dflt string) string {
+	if o.Topic == "" {
+		return dflt
+	}
+	return o.Topic
 }
 
 func (o SendOptions) priority() int {
@@ -173,7 +195,11 @@ func (r *Result) OK() bool {
 // Send POSTs payload to deviceToken. The request path, method and headers
 // follow Apple's HTTP/2 provider API exactly, so a local fake server can
 // assert them byte for byte.
-func (c *Client) Send(ctx context.Context, deviceToken string, payload Payload, opts SendOptions) (*Result, error) {
+//
+// payload is any JSON-marshalable body: Payload for an alert, PTTPayload for
+// a PushToTalk push, whose shapes have nothing in common (a PTT push carries
+// no aps dictionary at all).
+func (c *Client) Send(ctx context.Context, deviceToken string, payload any, opts SendOptions) (*Result, error) {
 	tok, err := c.bearerToken()
 	if err != nil {
 		return nil, err
@@ -190,7 +216,7 @@ func (c *Client) Send(ctx context.Context, deviceToken string, payload Payload, 
 		return nil, fmt.Errorf("apns: build request: %w", err)
 	}
 	req.Header.Set("authorization", "bearer "+tok)
-	req.Header.Set("apns-topic", c.cfg.Topic)
+	req.Header.Set("apns-topic", opts.topic(c.cfg.Topic))
 	req.Header.Set("apns-push-type", string(opts.pushType()))
 	req.Header.Set("apns-priority", strconv.Itoa(opts.priority()))
 	req.Header.Set("apns-expiration", strconv.FormatInt(expirationHeader(opts.Expiration, c.now()), 10))

@@ -35,6 +35,27 @@ type Payload struct {
 	EventID string `json:"event_id,omitempty"`
 }
 
+// PTTPayload is a PushToTalk push's whole body, and it shares nothing with
+// Payload: there is no aps dictionary, because the system never presents this
+// push — it hands it to the PushToTalk framework, which wakes the app and
+// asks it to report the active speaker back. `activeSpeaker` is what the
+// framework requires the payload to name; an empty one means the speaker
+// stopped.
+//
+// The room and event ids ride along as wata's own keys, exactly as they do on
+// an alert, so the woken app knows which clip to fetch and play.
+type PTTPayload struct {
+	ActiveSpeaker string `json:"activeSpeaker"`
+	RoomID        string `json:"room_id,omitempty"`
+	EventID       string `json:"event_id,omitempty"`
+}
+
+// ChannelPayload builds the PushToTalk push for one arriving message:
+// speaker is the display name the framework shows as the active speaker.
+func ChannelPayload(speaker, roomID, eventID string) PTTPayload {
+	return PTTPayload{ActiveSpeaker: speaker, RoomID: roomID, EventID: eventID}
+}
+
 // AlertPayload builds the time-sensitive message-arrived notification tier
 // 2 sends: a title/body alert with the default sound, marked
 // time-sensitive, carrying the room and event id a tap needs to open the

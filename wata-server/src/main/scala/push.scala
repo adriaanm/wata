@@ -49,8 +49,44 @@ import sgo.{Mutex, mutex}
  *  team-owned, so a self-hoster brings their own developer account or none at
  *  all. Registrations are still accepted and stored (a client may register
  *  before the operator configures a key); the fan-out simply returns.
+ *
+ *  **Tier 3 adds a second, ephemeral kind of token** (`ChannelReg` below).
+ *
+ *  {{{
+ *  POST /_wata/v1/push/channel/join   {"token": "<hex>", "env": "sandbox"}
+ *  POST /_wata/v1/push/channel/leave  {}
+ *  }}}
+ *
+ *  A PushToTalk channel token is minted anew on every channel join and is dead
+ *  after leave, so it lives in its OWN row with its own lifetime — join
+ *  replaces, leave deletes — rather than as a field beside the stable alert
+ *  token. `push/unregister` drops both: it means "stop pushing to this
+ *  device".
+ *
+ *  **A device holding both is pushed ONCE, the PushToTalk way.** The two
+ *  tokens answer the same question — "a message arrived" — at different
+ *  levels: the `pushtotalk` push wakes the app straight into live audio, while
+ *  the alert asks the user to tap. Sending both would give one message a
+ *  banner AND a live handover. So when a device has a live channel token, the
+ *  channel push is what it gets, and its alert registration stays on the shelf
+ *  as the FALLBACK: if the channel push is rejected (a 4xx — the token is
+ *  dead, the phone left the channel and the leave never reached us), the row
+ *  is deleted and the alert goes out for that same message. The user hears
+ *  about it either way; nobody hears about it twice.
  */
 case class PushReg(userId: String, deviceId: String, platform: String, token: String, env: String)
+
+/** A PushToTalk channel registration (plan 0065 tier 3) — a SECOND, and
+ *  structurally different, kind of push token.
+ *
+ *  The PushToTalk framework mints an ephemeral push token per channel JOIN and
+ *  the token is dead the moment the channel is left. It is deliberately NOT a
+ *  field on `PushReg`: one row per lifetime, so the shape of the data makes
+ *  "push a channel token after the channel is gone" hard to write rather than
+ *  merely discouraged. A re-join REPLACES the row (the device holds exactly
+ *  one live channel token, never a set), and a leave deletes it.
+ */
+case class ChannelReg(userId: String, deviceId: String, token: String, env: String)
 
 class PushState:
   var items: List[PushReg] = Nil
@@ -117,6 +153,19 @@ object PushRegs:
   /** this user's registrations. */
   def ofUser(userId: String): List[PushReg] = collectUser(all(), userId, Nil)
 
+  /** this device's registration, as a list of at most one — the fallback a
+   *  rejected channel push reaches for. */
+  def ofDevice(deviceId: String): List[PushReg] = collectDevice(all(), deviceId, Nil)
+
+  def collectDevice(xs: List[PushReg], deviceId: String, acc: List[PushReg]): List[PushReg] = xs match
+    case h :: t => collectDeviceStep(h, t, deviceId, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def collectDeviceStep(h: PushReg, t: List[PushReg], deviceId: String, acc: List[PushReg]): List[PushReg] =
+    var acc2: List[PushReg] = acc
+    if h.deviceId == deviceId then acc2 = h :: acc2
+    collectDevice(t, deviceId, acc2)
+
   def collectUser(xs: List[PushReg], userId: String, acc: List[PushReg]): List[PushReg] = xs match
     case h :: t => collectUserStep(h, t, userId, acc)
     case Nil  => ListOps.reverse(acc)
@@ -125,6 +174,75 @@ object PushRegs:
     var acc2: List[PushReg] = acc
     if h.userId == userId then acc2 = h :: acc2
     collectUser(t, userId, acc2)
+
+class ChannelState:
+  var items: List[ChannelReg] = Nil
+
+/** The live PushToTalk channel tokens, one row per device at most.
+ *
+ *  Journaled like the alert registrations (`pttjoin` / `pttleave`), for the
+ *  same reason and not because the token is durable: the framework keeps the
+ *  channel across app termination, so the token a phone handed us before the
+ *  server restarted is still the live one. Dropping the table on restart would
+ *  silence exactly the phone tier 3 exists to wake, and the phone cannot fix
+ *  it by itself — re-joining a channel requires a foregrounded user action.
+ *  A token that HAS died is self-correcting: APNs rejects it and the row goes.
+ */
+object ChannelRegs:
+  private val cell: Mutex[ChannelState] = mutex(new ChannelState())
+
+  /** a channel join: this device's one live channel token, replacing whatever
+   *  it held before. Journaled. */
+  def join(reg: ChannelReg): Unit =
+    joinLocal(reg)
+    Journal.rec(Journal.pttJoinOp(reg))
+
+  def replayJoin(reg: ChannelReg): Unit = joinLocal(reg)
+
+  def joinLocal(reg: ChannelReg): Unit =
+    cell.withLock(st => st.items = reg :: without(st.items, reg.deviceId, Nil))
+
+  /** the channel was left (or the token was rejected): the token is dead and
+   *  must never be pushed to again. Journaled. */
+  def leave(deviceId: String): Unit =
+    leaveLocal(deviceId)
+    Journal.rec(Journal.pttLeaveOp(deviceId))
+
+  def replayLeave(deviceId: String): Unit = leaveLocal(deviceId)
+
+  def leaveLocal(deviceId: String): Unit =
+    cell.withLock(st => st.items = without(st.items, deviceId, Nil))
+
+  def without(xs: List[ChannelReg], deviceId: String, acc: List[ChannelReg]): List[ChannelReg] = xs match
+    case h :: t => withoutStep(h, t, deviceId, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def withoutStep(h: ChannelReg, t: List[ChannelReg], deviceId: String, acc: List[ChannelReg]): List[ChannelReg] =
+    var acc2: List[ChannelReg] = acc
+    if h.deviceId == deviceId then acc2 = acc else acc2 = h :: acc2
+    without(t, deviceId, acc2)
+
+  def all(): List[ChannelReg] = cell.withLock(st => st.items)
+
+  /** this user's live channel tokens (one per device that has joined). */
+  def ofUser(userId: String): List[ChannelReg] = collectUser(all(), userId, Nil)
+
+  def collectUser(xs: List[ChannelReg], userId: String, acc: List[ChannelReg]): List[ChannelReg] = xs match
+    case h :: t => collectUserStep(h, t, userId, acc)
+    case Nil  => ListOps.reverse(acc)
+
+  def collectUserStep(h: ChannelReg, t: List[ChannelReg], userId: String, acc: List[ChannelReg]): List[ChannelReg] =
+    var acc2: List[ChannelReg] = acc
+    if h.userId == userId then acc2 = h :: acc2
+    collectUser(t, userId, acc2)
+
+  /** does this device hold a live channel token? The alert fan-out asks, and
+   *  skips the device if so — see the both-tokens rule above. */
+  def has(deviceId: String): Boolean = hasIn(all(), deviceId)
+
+  def hasIn(xs: List[ChannelReg], deviceId: String): Boolean = xs match
+    case h :: t => if h.deviceId == deviceId then true else hasIn(t, deviceId)
+    case Nil  => false
 
 /** The operator's APNs credentials, read at boot from the environment.
  *
@@ -178,6 +296,10 @@ object Push:
   def isRegisterPath(path: String): Boolean = path == "/_wata/v1/push/register"
   /** `POST /_wata/v1/push/unregister` */
   def isUnregisterPath(path: String): Boolean = path == "/_wata/v1/push/unregister"
+  /** `POST /_wata/v1/push/channel/join` */
+  def isChannelJoinPath(path: String): Boolean = path == "/_wata/v1/push/channel/join"
+  /** `POST /_wata/v1/push/channel/leave` */
+  def isChannelLeavePath(path: String): Boolean = path == "/_wata/v1/push/channel/leave"
 
   // ---- registration ------------------------------------------------------------
 
@@ -204,11 +326,44 @@ object Push:
     val p = strField(j, "platform", "")
     if p == "" then "ios" else p
 
+  /** unregister means "stop pushing to this device", so it drops the channel
+   *  token as well as the stable one. A client that only left the channel says
+   *  so with `push/channel/leave`. */
   def unregister(r: go.net.http.Request): Either[MErr, Json] = Router.requireAuth(r) match
     case l: Left[MErr, Auth]   => Left(l.left)
     case rr: Right[MErr, Auth] =>
       PushRegs.dropDevice(rr.right.deviceId)
+      ChannelRegs.leave(rr.right.deviceId)
       Right(obj1("registered", JBool(false)))
+
+  // ---- the ephemeral channel token (tier 3) ------------------------------------
+
+  /** the app joined the PushToTalk channel and the framework handed it a fresh
+   *  ephemeral token. It replaces whatever this device held: a channel token
+   *  is per-join, and the previous one is already dead. */
+  def channelJoin(r: go.net.http.Request, body: String): Either[MErr, Json] = Router.requireAuth(r) match
+    case l: Left[MErr, Auth]   => Left(l.left)
+    case rr: Right[MErr, Auth] => channelJoinBody(rr.right, body)
+
+  def channelJoinBody(auth: Auth, body: String): Either[MErr, Json] = Json.tryParse(body) match
+    case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
+    case Right(j) => channelJoinParsed(auth, j)
+
+  def channelJoinParsed(auth: Auth, j: Json): Either[MErr, Json] =
+    val token = strField(j, "token", "")
+    if token == "" then Left(MErr(400, M_BAD_JSON(), "Channel join has no token"))
+    else channelJoinOk(auth, j, token)
+
+  def channelJoinOk(auth: Auth, j: Json, token: String): Either[MErr, Json] =
+    ChannelRegs.join(ChannelReg(auth.userId, auth.deviceId, token, strField(j, "env", "")))
+    Right(obj1("channel", JBool(true)))
+
+  /** the app left the channel: the token it handed us is dead as of now. */
+  def channelLeave(r: go.net.http.Request): Either[MErr, Json] = Router.requireAuth(r) match
+    case l: Left[MErr, Auth]   => Left(l.left)
+    case rr: Right[MErr, Auth] =>
+      ChannelRegs.leave(rr.right.deviceId)
+      Right(obj1("channel", JBool(false)))
 
   // ---- the fan-out --------------------------------------------------------------
 
@@ -220,8 +375,18 @@ object Push:
     if !PushCfg.enabled || ev.etype != "m.room.message" then ()
     else go.spawn(() => fanOut(roomId, ev, senderDeviceId))
 
+  /** Both target lists are built BEFORE either is pushed, and that ordering is
+   *  load-bearing: a rejected channel push deletes its row and falls back to
+   *  that device's alert, so an alert list computed afterwards would push the
+   *  same message a second time. */
   def fanOut(roomId: String, ev: Event, senderDeviceId: String): Unit =
-    pushEach(targets(joinedMembers(roomId), senderDeviceId, Nil), roomId, ev, senderName(ev.sender), bodyText(ev))
+    val members = joinedMembers(roomId)
+    val speaker = senderName(ev.sender)
+    val text = bodyText(ev)
+    val alerts = targets(members, senderDeviceId, Nil)
+    val channels = chanTargets(members, senderDeviceId, Nil)
+    pushChannelEach(channels, roomId, ev, speaker, text)
+    pushEach(alerts, roomId, ev, speaker, text)
 
   /** every join-or-invite member of the room, from its state — the same walk,
    *  and the same population, `Store.notifyRoomMembers` wakes. Invited counts:
@@ -243,9 +408,11 @@ object Push:
       acc2 = ev.stateKey :: acc2
     membersIn(t, acc2)
 
-  /** the registrations to push to: every member's, minus the sending session's
-   *  own device (the sender's OTHER devices still get one — a message sent
-   *  from the mac should still reach the pocket). */
+  /** the ALERT registrations to push to: every member's, minus the sending
+   *  session's own device (the sender's OTHER devices still get one — a
+   *  message sent from the mac should still reach the pocket), and minus every
+   *  device holding a live channel token, which gets the PushToTalk push
+   *  instead. */
   def targets(members: List[String], senderDeviceId: String, acc: List[PushReg]): List[PushReg] = members match
     case h :: t => targetsStep(h, t, senderDeviceId, acc)
     case Nil  => acc
@@ -259,8 +426,26 @@ object Push:
 
   def addRegsStep(h: PushReg, t: List[PushReg], senderDeviceId: String, acc: List[PushReg]): List[PushReg] =
     var acc2: List[PushReg] = acc
-    if h.deviceId != senderDeviceId then acc2 = h :: acc2
+    if h.deviceId != senderDeviceId && !ChannelRegs.has(h.deviceId) then acc2 = h :: acc2
     addRegs(t, senderDeviceId, acc2)
+
+  /** the CHANNEL registrations to push to, by the same rule minus the
+   *  channel-token exclusion (this is the list it excludes them for). */
+  def chanTargets(members: List[String], senderDeviceId: String, acc: List[ChannelReg]): List[ChannelReg] = members match
+    case h :: t => chanTargetsStep(h, t, senderDeviceId, acc)
+    case Nil  => acc
+
+  def chanTargetsStep(h: String, t: List[String], senderDeviceId: String, acc: List[ChannelReg]): List[ChannelReg] =
+    chanTargets(t, senderDeviceId, addChans(ChannelRegs.ofUser(h), senderDeviceId, acc))
+
+  def addChans(xs: List[ChannelReg], senderDeviceId: String, acc: List[ChannelReg]): List[ChannelReg] = xs match
+    case h :: t => addChansStep(h, t, senderDeviceId, acc)
+    case Nil  => acc
+
+  def addChansStep(h: ChannelReg, t: List[ChannelReg], senderDeviceId: String, acc: List[ChannelReg]): List[ChannelReg] =
+    var acc2: List[ChannelReg] = acc
+    if h.deviceId != senderDeviceId then acc2 = h :: acc2
+    addChans(t, senderDeviceId, acc2)
 
   def pushEach(xs: List[PushReg], roomId: String, ev: Event, title: String, body: String): Unit = xs match
     case h :: t => pushEachStep(h, t, roomId, ev, title, body)
@@ -282,6 +467,38 @@ object Push:
       ()
     catch case e: sgo.GoError => println("wata: push failed for " + reg.userId + ": " + e.message)
     if status == 410 then forget(reg) else ()
+
+  def pushChannelEach(xs: List[ChannelReg], roomId: String, ev: Event, speaker: String, text: String): Unit = xs match
+    case h :: t => pushChannelEachStep(h, t, roomId, ev, speaker, text)
+    case Nil  => ()
+
+  def pushChannelEachStep(h: ChannelReg, t: List[ChannelReg], roomId: String, ev: Event, speaker: String, text: String): Unit =
+    pushChannelOne(h, roomId, ev, speaker, text)
+    pushChannelEach(t, roomId, ev, speaker, text)
+
+  /** one PushToTalk push. The payload names the ACTIVE SPEAKER, which is what
+   *  the framework makes the woken app report back.
+   *
+   *  Any 4xx deletes the channel registration — stricter than the alert path's
+   *  410-only rule, and deliberately: an ephemeral token that APNs will not
+   *  take is not coming back (a phone that left the channel answers 400
+   *  `BadDeviceToken`, an uninstalled app 410), and the client mints a fresh
+   *  one on its next join anyway. The message is then delivered by that
+   *  device's alert registration instead, if it has one — losing the live
+   *  handover is not a reason to lose the message. */
+  def pushChannelOne(reg: ChannelReg, roomId: String, ev: Event, speaker: String, text: String): Unit =
+    var status = 0
+    try
+      val v = go.apns.pushChannel(PushCfg.hostFor(reg.env), reg.token, speaker, roomId, ev.eventId)
+      status = v.toInt
+      ()
+    catch case e: sgo.GoError => println("wata: channel push failed for " + reg.userId + ": " + e.message)
+    if status >= 400 && status < 500 then channelDead(reg, roomId, ev, speaker, text) else ()
+
+  def channelDead(reg: ChannelReg, roomId: String, ev: Event, speaker: String, text: String): Unit =
+    println("wata: APNs rejected the channel token for " + reg.userId + ", dropping it and falling back to an alert")
+    ChannelRegs.leave(reg.deviceId)
+    pushEach(PushRegs.ofDevice(reg.deviceId), roomId, ev, speaker, text)
 
   def forget(reg: PushReg): Unit =
     println("wata: APNs reports the token gone, dropping the registration for " + reg.userId)

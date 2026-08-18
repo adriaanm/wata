@@ -60,6 +60,11 @@ import sgo.{Mutex, mutex}
  *                              0065); a registration that does not survive a
  *                              restart is a phone that goes silent until it
  *                              happens to re-register
+ *   - `pttjoin` / `pttleave` — the PushToTalk channel's ephemeral push token
+ *                              (plan 0065 tier 3); one live row per device,
+ *                              and re-joining a channel needs the user to
+ *                              foreground the app, so the row outlives a
+ *                              server restart
  *
  *  NOT logged (transient by nature): long-poll waiters (in-flight goroutines).
  */
@@ -259,6 +264,25 @@ object Journal:
     fs = ("token", JStr(token)) :: fs
     endObj(fs)
 
+  /** a PushToTalk channel join (plan 0065 tier 3): the device's one live
+   *  ephemeral channel token, replacing whatever it held. */
+  def pttJoinOp(reg: ChannelReg): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("pttjoin")) :: fs
+    fs = ("user_id", JStr(reg.userId)) :: fs
+    fs = ("device_id", JStr(reg.deviceId)) :: fs
+    fs = ("token", JStr(reg.token)) :: fs
+    fs = ("env", JStr(reg.env)) :: fs
+    endObj(fs)
+
+  /** the channel was left, or APNs rejected its token: it is dead, and must
+   *  stay dead across a restart. */
+  def pttLeaveOp(deviceId: String): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("pttleave")) :: fs
+    fs = ("device_id", JStr(deviceId)) :: fs
+    endObj(fs)
+
   def unbindOp(nodeId: String): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("op", JStr("unbind")) :: fs
@@ -338,6 +362,8 @@ object Journal:
     else if op == "pushreg" then PushRegs.replayPut(pushRegOf(j))
     else if op == "pushunreg" then PushRegs.replayDropDevice(strField(j, "device_id", ""))
     else if op == "pushforget" then PushRegs.replayForget(strField(j, "token", ""))
+    else if op == "pttjoin" then ChannelRegs.replayJoin(pttRegOf(j))
+    else if op == "pttleave" then ChannelRegs.replayLeave(strField(j, "device_id", ""))
     else ()
 
   def acctOf(j: Json): AcctData =
@@ -353,6 +379,10 @@ object Journal:
 
   def pushRegOf(j: Json): PushReg =
     PushReg(strField(j, "user_id", ""), strField(j, "device_id", ""), strField(j, "platform", ""),
+      strField(j, "token", ""), strField(j, "env", ""))
+
+  def pttRegOf(j: Json): ChannelReg =
+    ChannelReg(strField(j, "user_id", ""), strField(j, "device_id", ""),
       strField(j, "token", ""), strField(j, "env", ""))
 
   def receiptOf(j: Json): Receipt =
