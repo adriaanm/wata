@@ -46,6 +46,15 @@ object FbConfig:
     if home != "" then out = home + "/Library/Application Support/wata"
     out
 
+  /** the persistent log (plan 0064): `$HOME/Documents/wata.log` — Documents
+   *  exists in every iOS sandbox and is what `just ios-log` copies off the
+   *  phone. "" with no `$HOME` (no sandbox — skip the tee). */
+  def logPath(): String =
+    val home = go.sys.getenv("HOME")
+    var out = ""
+    if home != "" then out = home + "/Documents/wata.log"
+    out
+
   def path(): String =
     var p = go.sys.getenv(ENV_PATH)
     if p == "" then

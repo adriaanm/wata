@@ -2,8 +2,8 @@ import language.experimental.saferExceptions
 
 /** wata-ios: the iOS client (plan 0044) — wata-fb's screens on the retained
  *  UIKit backend, wata-mac's pump with the mac-only seams swapped
- *  (macshell -> iosshell, the audio thread stubbed off, key input as the
- *  shell's touch keypad).
+ *  (macshell -> iosshell, real audio via the shared macaudio backend —
+ *  plan 0063, key input as the shell's touch keypad).
  *
  *    WATA_IOS_HS / WATA_IOS_USER / WATA_IOS_PASS (simctl launch passes them
  *    as SIMCTL_CHILD_*): login is from the environment, with the stores
@@ -19,7 +19,7 @@ import language.experimental.saferExceptions
  *
  *  THE PUMP is wata-mac's frame shape: drain the runtime's `UiEvent` queue,
  *  read the snapshot/connection, drain the keypad into
- *  `WataLogic.handleInput`, drain the (stub) audio thread's events, tick,
+ *  `WataLogic.handleInput`, drain the audio thread's events, tick,
  *  body, diff, and hand the script to the retained interpreter (`IosStage`)
  *  — which publishes to the main queue (there is no headless mode). Dropped
  *  mac surfaces: the window title, the Dock badge, banners, the Devices
@@ -45,10 +45,20 @@ object Main:
   val readyCb: go.Uintptr = go.callback(() => Pump.onReady())
 
   def main(args: Array[String]): Unit =
+    initLog()
     if args.length > 0 && args(0) == "interptest" then
       go.iosshell.start()
       go.iosshell.runApp(interptestCb) // never returns
     else runClient(args)
+
+  /** plan 0064: tee stdout+stderr into the sandbox log FIRST, so an
+   *  icon-tap launch's lines survive to be pulled by `just ios-log`; the
+   *  console copy keeps tethered launches and the harnesses unchanged. */
+  def initLog(): Unit =
+    val p = FbConfig.logPath()
+    if p != "" then
+      val err = go.iosshell.teeLog(p)
+      if err != "" then println("log: tee failed: " + err)
 
   def runClient(args: Array[String]): Unit =
     val hs = pick(args, 0, "WATA_IOS_HS", "")
@@ -164,7 +174,7 @@ object Pump:
 
   /** the client both stages of the session run: `makeWithAudioStored`, so a
    *  recording queued while the server was unreachable survives the app
-   *  closing (the audio itself is the stub thread's). */
+   *  closing. */
   def startAudioClient(cfg: ClientConfig): Handle =
     ClientHandle.startClient(
       Runtime.makeWithAudioStored(cfg, IosCaps.httpDo(), IosCaps.clock(), FbConfig.outbox()))
@@ -423,8 +433,8 @@ object Pump:
     case _ => st // EvConn -> h.connection(), EvSnapshot -> h.snapshot()
 
   /** the audio thread's `AudioEvt` queue, ONCE per frame. The echo events
-   *  never occur here (the stub emits none), but the filter stays — the
-   *  predicate documents the seam. */
+   *  are filtered as on the mac: the settings applet's echo UI is the
+   *  handset's surface, not this client's. */
   def drainAudio(st0: PumpSt, ctx: FrameCtx): PumpSt =
     var st = st0
     var run = true
@@ -436,21 +446,7 @@ object Pump:
 
   def onAudioEvt(st: PumpSt, e: AudioEvt, ctx: FrameCtx): PumpSt =
     if isEchoEvt(e) then st
-    else
-      noteAudioStub(e)
-      withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
-
-  /** the first stubbed-audio failure per run names the cause once — the
-   *  grid's flash says MIC FAILED, this says why (the audio stack is the
-   *  hardware-gated PTT leg's). */
-  private val audioToldC: sgo.Atomic[Boolean] = sgo.atomic(false)
-
-  def noteAudioStub(e: AudioEvt): Unit = e match
-    case _: AeRecordingError =>
-      if !audioToldC.get() then
-        audioToldC.set(true)
-        println("audio: stubbed off (plan 0044 — no capture/playback in the simulator client)")
-    case _ => ()
+    else withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
 
   def isEchoEvt(e: AudioEvt): Boolean = e match
     case _: AeEchoRecording => true
@@ -464,7 +460,7 @@ object Pump:
   /** the arrival edge, once a frame (wataclient's `Notify`, shared with the
    *  handset and the mac). iOS has no banner/badge surface yet, so the
    *  DECISION line is the whole presentation: `play` when walkie-talkie mode
-   *  auto-plays (which the stub audio thread will fail — honestly), `noted`
+   *  auto-plays, `noted`
    *  otherwise. Real notifications ride the signed-device legs (APNs is
    *  hardware-gated). */
   def notifyStep(h: Handle, st0: PumpSt, snap: StateSnapshot): PumpSt =

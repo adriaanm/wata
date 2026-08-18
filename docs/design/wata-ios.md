@@ -113,6 +113,28 @@ pump with the mac-only seams swapped.
   is the "did UIKit really paint it" evidence a windowless-assertion
   harness needs, since there is no TreeDump and no headless REPL.
 
+## The persistent log (plan 0064)
+
+On a physical iPhone the app's stdout/stderr are visible only through
+a tethered `devicectl … launch --console`, so the first thing `main`
+does — before any output — is `go.iosshell.teeLog(FbConfig.logPath())`:
+`iosshell.TeeLog` (log.go) dup2's a pipe under fds 1 and 2 and copies
+every chunk to BOTH the original console (tethered launches and the
+simulator harnesses keep their output unchanged) and
+`Documents/wata.log` in the app's sandbox — truncated at each launch,
+growth capped at 4 MiB per run (past the cap the console copy
+continues, the file stops). Raw fd work is not expressible in the
+dialect, so the mechanism is Go; the facade returns "" or the error
+text, and a failed tee is printed and ignored. Pull the log off the
+phone with `just ios-log` (tools/ios-log.py): `devicectl device copy
+from --domain-type appDataContainer --domain-identifier
+$WATA_BUNDLE_ID --source Documents/wata.log`, device from
+`--device`/`$WATA_DEVICE` or the single attached iPhone. Audio
+failures are readable there because the shared audio thread's
+non-throws boundaries (wata-fb's audiothread.scala — the handset and
+the mac print the same lines) name their cause:
+`audio: <record|play|playback|echo record|echo play> failed: <err>`.
+
 ## The gates
 
 - `just ios-build-check` — vet + build of uikit/iosui/iosshell, the

@@ -81,3 +81,10 @@ object iosshell:
   /** open a URL in its owning app (Safari for http) — any thread, the shell
    *  hops to the main queue itself; fire-and-forget. */
   @go.name("OpenURL") def openURL(u: String): Unit = ???
+
+  // ---- the persistent app log (plan 0064) -----------------------------------
+  /** tee this process's stdout+stderr into `path` (truncated at open, growth
+   *  capped) — the original console keeps every line, so tethered launches
+   *  and the harnesses are unchanged. Call FIRST in main, before any output.
+   *  "" on success, else the error text. */
+  @go.name("TeeLog") def teeLog(path: String): String = ???

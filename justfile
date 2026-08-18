@@ -180,6 +180,12 @@ ios-build-check:
 ios-device *FLAGS:
     tools/ios-device.py {{FLAGS}}
 
+# pull wata-ios's on-device log (Documents/wata.log, plan 0064) over
+# devicectl and print it. Device from --device/$WATA_DEVICE or the single
+# attached iPhone; bundle id from --bundle-id/$WATA_BUNDLE_ID. Needs Xcode.
+ios-log *FLAGS:
+    tools/ios-log.py {{FLAGS}}
+
 # Apple bindings: the runtime leg — the generated Foundation wrappers driven
 # against this Mac's ObjC runtime (dispatch, blocks, NSError**, and a
 # synthesized delegate class Foundation itself calls). Needs macOS; not in ci.

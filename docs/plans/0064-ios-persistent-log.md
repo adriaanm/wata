@@ -1,6 +1,9 @@
 # 0064 — wata-ios: a persistent on-device log, and audio errors that name their cause
 
-Status: accepted
+Status: done — ci + ios-smoke + ios-enroll-smoke green 2026-08-18, and
+the tee verified in the simulator sandbox (both streams in
+Documents/wata.log, 0600, harness output unchanged); the on-phone pull
+awaits the owner's next `just ios-device` install
 
 ## The problem
 
