@@ -11,7 +11,7 @@ its durable content has moved into the plan and the design docs.
 | tier | what | state |
 |------|------|-------|
 | 1 | foreground sync latency | **done** — measured, gated, nothing to reduce |
-| 2 | `alert` pushes | in progress |
+| 2 | `alert` pushes | **done** — gated; on-device leg is `IOS-PUSH-ON-DEVICE` |
 | 3 | `pushtotalk` pushes | not started |
 
 ## Log
@@ -265,3 +265,62 @@ until that install re-registers.
 
 Next: chunk C — the iOS client half (permission, token registration,
 notification presentation), gated with `simctl push`.
+
+### 2026-08-18 — tier 2, chunk C: the iOS client half landed; tier 2 done
+
+`dc2e89a`: `iosshell/push.go` (four delegate methods on the same
+synthesized `WataAppDelegate`), `wata-ios/push.scala` (the
+registration POST, retried until 200, re-armed per session),
+`main.scala`'s one-drain `pushStep`, three names added to the
+`usernotifications` bindgen allowlist, and
+`tools/ios-push-smoke.py` + `just ios-push-smoke`.
+
+Verified here: `just ios-build-check` (0), `just ios-push-smoke` (0),
+`just ios-smoke` (0, **inbound latency 0.00s — unperturbed**). No
+bindgen refusal blocked anything; the refusal list is byte-identical
+to before.
+
+**Reviewer change on top of the chunk**: the smoke's PASS line claimed
+the app "registered for remote notifications" when registration had in
+fact FAILED. A green line that overstates what ran is worse than a red
+one, so it now states exactly what each half proves.
+
+What tier 2's gates prove, and what they cannot:
+
+- **Presentation — proven.** `simctl push` → the delegate fired,
+  wata's room and event ids came out of `userInfo` intact, the app
+  told iOS to present.
+- **Registration — proven only as SURVIVABLE FAILURE.** A
+  hand-bundled ad-hoc-signed simulator app has no `aps-environment`
+  entitlement, so no device token is ever issued: `push.scala`'s
+  POST has never executed in a gate, and neither has the hex
+  encoding of a real token, the server storing it, the
+  token-changed re-registration, or the retry.
+- **The tap is unexercised** — no harness can tap a banner.
+- **Nothing touches Apple**: no APNs connection, no
+  `interruption-level: time-sensitive` breaking through Focus, no
+  lock-screen or backgrounded delivery, no badge.
+
+That residue is now `IOS-PUSH-ON-DEVICE` in the queue, with the
+owner's three steps in order.
+
+Decisions made in the chunk, accepted:
+
+- **`WATA_IOS_APNS_ENV`, defaulting to sandbox.** Nothing short of
+  parsing the embedded provisioning profile tells an app whether its
+  token is sandbox or production, and every build this repo produces
+  is a sandbox build. An App Store build must set it — flagged by the
+  implementer as the decision most likely to bite, and worth
+  re-reading the day a TestFlight build exists.
+- Fixed 10s retry rather than a backoff: a registration that never
+  lands is a phone that never rings, and it is one small POST.
+- `registerForPush` runs from the `ready` hop, not the launch
+  callback, so `interptest` raises no permission prompt.
+- `tools/ios-device.py` deliberately UNTOUCHED: adding
+  `aps-environment` would make signing fail until the App ID has the
+  Push Notifications capability. That is an owner/portal step, not a
+  blind edit.
+
+Next: tier 3 (`pushtotalk` pushes and the live arc), noting that tier
+2's own on-device leg is unproven — tier 3 builds on a foundation the
+owner has not yet field-tested.

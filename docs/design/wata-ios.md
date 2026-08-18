@@ -80,6 +80,28 @@ pump with the mac-only seams swapped.
   still surfaces as MIC FAILED per command, never a wedge. Foreground
   only: the PushToTalk framework (background transmit) is a follow-up
   plan.
+- **Push notifications are the out-of-app inbound path** (plan 0065
+  tier 2). iOS suspends a backgrounded app and tears down its
+  sockets, so the sync loop is a FOREGROUND mechanism by
+  construction and anything reaching a closed app is an APNs push.
+  `iosshell/push.go` installs four delegate methods on the same
+  synthesized `WataAppDelegate` (the UIApplication delegate and the
+  `UNUserNotificationCenter` delegate are one object, as in Apple's
+  template): the device token (NSData → hex, QUEUED rather than
+  latched so a re-issue is seen), the registration failure (queued
+  as a note — survivable, never a wedge), the foreground
+  presentation answer, and the tap. Everything queues; the pump
+  drains it once a frame and prints `push: …`. `push.scala` POSTs
+  each token to the server's `/_wata/v1/push/register` as the
+  calling session, retrying every 10s until 200 and re-arming on a
+  new session; a tap opens its conversation through the SAME edge
+  ENTER makes, so the frame loop has no special case. Registration
+  is armed from the `ready` hop rather than the launch callback, so
+  `interptest` never raises a permission prompt. The environment is
+  `WATA_IOS_APNS_ENV`, defaulting to sandbox: nothing short of
+  parsing the embedded provisioning profile can tell an app whether
+  its token is a sandbox or production one, and every build this
+  repo produces is a sandbox build — an App Store build must set it.
 - **The stores are sandbox files** (`config.scala`): wata-mac's three
   stores with the keychain swapped for `secrets.json` (0600) in the
   app's own data container — the honest simulator-grade store; the iOS
@@ -123,20 +145,26 @@ pump with the mac-only seams swapped.
 Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
 for the body.
 
-> `[IOS-INBOUND-MESSAGES]` **Open: the phone sends but does not
-> receive.** Owner report, 2026-08-18, on the phone: recording and
-> sending a voice message works end to end (plan 0063's roundtrip —
-> the BQ268 receives and plays it), but a message sent TO the phone
-> never surfaces there. Unknown at filing which half is broken: the
-> sync arriving at all over iroh, the arrival decision
-> (`notify: play|noted` — iOS prints `noted` because there is no
-> banner surface, so a message could be arriving and going nowhere
-> visible), the conversation view not repainting, or playback. The
-> first evidence is the persistent log (`just ios-log`, plan 0064):
-> it carries the session's own lines and every audio failure with its
-> cause. This blocks `[IOS-PUSH-TO-TALK]` — a walkie-talkie that
-> cannot hear is not worth backgrounding — and is the owner's next
-> priority.
+> `[IOS-PUSH-ON-DEVICE]` **Open: the owner's on-device leg for push.**
+> Plan 0065's tiers 1 and 2 are done and gated, but the simulator can
+> prove only half of the client: a hand-bundled ad-hoc-signed app has
+> no `aps-environment` entitlement, so it never receives a device
+> token and `push.scala`'s POST has never executed in a gate. What
+> the simulator DOES prove is that the failure is delivered, logged
+> and survived, and that a real wata payload is presented with its
+> room and event ids intact. First-proven on the phone, in order:
+> (1) enable Push Notifications on the App ID and add
+> `aps-environment: development` to `tools/ios-device.py`'s sign
+> stage — deliberately NOT done blind, since claiming an entitlement
+> the profile does not grant makes signing fail; (2) confirm
+> `push: device token …` then the server registration in
+> `just ios-log`; (3) point the server at a real `.p8` and send from
+> the mac or the BQ268 with the phone backgrounded — the banner, the
+> tap, and `push: tap room=…` opening the right conversation are all
+> unexercised until then. The inbound report that started plan 0065
+> was NOT a delivery failure: foreground delivery measures instant on
+> both transports, and the delay was the platform suspending a
+> backgrounded app, which is what this tier closes.
 
 > `[IOS-PUSH-TO-TALK]` **Open: the PushToTalk framework, background
 > transmit, and the system PTT UI.** Plan 0063 deliberately shipped

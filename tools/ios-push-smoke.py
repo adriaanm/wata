@@ -186,9 +186,17 @@ def main():
             sys.exit(1)
         if not pushed["ok"]:
             sys.exit(1)
-        print("ios-push-smoke: PASS — wata-ios registered for remote "
-              "notifications, and a wata APNs payload delivered by `simctl "
-              "push` was presented and read (room and event ids intact)")
+        # Deliberately precise about the registration half: a hand-bundled
+        # ad-hoc-signed simulator app has no `aps-environment` entitlement, so
+        # NO device token is ever issued here and `push.scala`'s POST to the
+        # server never runs. What this gate proves of registration is that the
+        # failure is delivered, logged and survived — not that registering
+        # works. The presentation half is proven outright.
+        print("ios-push-smoke: PASS — wata-ios survived the simulator's "
+              "expected registration failure (no aps-environment ⇒ no device "
+              "token), and a wata APNs payload delivered by `simctl push` was "
+              "presented and read (room and event ids intact). The real "
+              "registration POST is on-device only.")
     finally:
         simrun.shutdown(sc, udid)
         stop_server(proc, log)
