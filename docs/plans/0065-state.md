@@ -433,3 +433,68 @@ the exact old string — a stale assertion, not a product regression.
 Filed as `MAC-SMOKE-STALE-LEGEND`. A permanently red gate masks every
 real regression behind it, so it is worth fixing promptly even though
 it is nobody's current task.
+
+### 2026-08-18 — LIVE ON HARDWARE: the push path works end to end
+
+Against the owner's iPhone (`foon`) and the real APNs sandbox, with
+the server holding a real `.p8`. What the phone's log shows:
+
+```
+push: authorized
+push: device token (64 hex chars)
+ptt: restoring the channel
+ptt: ephemeral token (64 hex chars)
+ptt: joined (restoration)
+ptt: channel manager ready
+push: registered with the server
+ptt: channel registered with the server
+notify: noted "Alma" "sent you a voice message" badge=5
+ptt: incoming push (Alma)
+macaudio: PushToTalk owns the audio session
+ptt: audio session activated
+```
+
+Everything the simulator could not reach is now proven:
+
+- **A real APNs device token was issued and POSTed** —
+  `push.scala`'s registration, which had never executed in any gate.
+- **The channel manager instantiated in the wata app**, so the
+  profile-driven sign stage writes correct entitlements. The portal
+  step turned out to be already done: the app rides the
+  `net.wa-ta.hello` identity, whose App ID already carries Push
+  Notifications AND Push to Talk (profile valid to 2027).
+- **The ephemeral channel token registered** — tier 3's whole server
+  contract.
+- **Real `pushtotalk` pushes were delivered** from our own server: the
+  right topic, the right push type, the entitlement, the JWT, the
+  fan-out. Three of them, one per message from the BQ268.
+- **The session handoff engaged**: `macaudio: PushToTalk owns the
+  audio session`.
+- `joined (restoration)` — the framework restoring the channel across
+  launches, and our restoration delegate answering with the
+  descriptor.
+
+**And the user saw nothing.** That is plan 0065's own ruling, which is
+premature rather than wrong: a `pushtotalk` push shows no banner, it
+wakes the app to play live audio, and the receive half does not yet
+play anything. Suppressing the alert for a channel-holding device
+therefore bought pure silence — strictly worse than the banner it
+replaced. Fixed in `afa81d1` with a named constant
+(`Push.ChannelSuppressesAlert = false`) carrying the reasoning and the
+condition for flipping it: the same commit that lands the receive
+half. The 4xx fallback is gated on the same constant, since with the
+alert already sent a fallback would double-deliver.
+
+Two operational notes from the session:
+
+- `just server-package` builds the STUB transport; `server-install`
+  defaults to `--iroh` and packaging by hand bypasses that. The server
+  started, armed the pusher, and exited on `irohnet: stub build`.
+  Always `just server-package --iroh` when staging by hand.
+- `tools/ios-log.py` defaults to bundle id `net.wa-ta.ios` while the
+  app is signed `net.wa-ta.hello`, so it needs
+  `WATA_BUNDLE_ID=net.wa-ta.hello`. That is `IOS-ON-DEVICE`'s stale
+  identity biting; worth resolving rather than remembering.
+- A successful push logs NOTHING server-side, which made "did it even
+  fire?" unanswerable from the log and sent this debugging through the
+  journal instead. Worth a line.
