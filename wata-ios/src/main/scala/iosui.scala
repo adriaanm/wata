@@ -142,10 +142,19 @@ object iosshell:
   /** how long ago that push ARRIVED, in ms — a suspended app runs no frames,
    *  so the pump can drain a push long after the framework delivered it. */
   @go.name("PTTPlayAgeMs") def pttPlayAgeMs(): scala.Int = ???
+  /** the episode id of that push. It goes back into `pttSpeakerStopped`, so an
+   *  episode can only ever end itself. */
+  @go.name("PTTPlayEpisode") def pttPlayEpisode(): scala.Int = ???
+  /** is the audio session that is active RIGHT NOW the one that push asked
+   *  for — activated, and activated after the push arrived? "Some session is
+   *  active" is not enough: a rapid second message would play on the previous
+   *  episode's session and die when that one is torn down. */
+  @go.name("PTTPlayReady") def pttPlayReady(): Boolean = ???
   /** end a receive episode: clear the channel's active remote participant, so
    *  the system takes the speaker off screen and hands the audio session
-   *  back. An episode nobody ends never ends. */
-  @go.name("PTTSpeakerStopped") def pttSpeakerStopped(): Unit = ???
+   *  back. An episode nobody ends never ends — and one that is no longer
+   *  current ends nothing, which is what `episode` is for. */
+  @go.name("PTTSpeakerStopped") def pttSpeakerStopped(episode: scala.Int): Unit = ???
 
   // ---- the persistent app log (plan 0064) -----------------------------------
   /** tee this process's stdout+stderr into `path` (truncated at open, growth

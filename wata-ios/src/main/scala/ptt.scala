@@ -56,12 +56,21 @@ import language.experimental.saferExceptions
  *    carries the push's own ARRIVAL time (`pttPlayAgeMs`) and the window is
  *    measured from that, not from the frame that drained it — a pump that
  *    starts five minutes later must not suddenly play a stale message.
- *  - **Nothing plays before the session handover.** Answering the push only
- *    ASKS for the audio session; it is activated later, on
+ *  - **Nothing plays before THIS push's session handover.** Answering the push
+ *    only ASKS for the audio session; it is activated later, on
  *    `didActivateAudioSession`, and that activation reconfigures the session
  *    under the running engine — which stops the engine and strands whatever
  *    was scheduled, with no error and no completion handler. So the play waits
- *    for the handover as well as for the event.
+ *    for the handover as well as for the event. "A session is active" is not
+ *    the same question and answering it was the rapid-fire bug: a second
+ *    message arriving while the first episode is still winding down finds a
+ *    live session, plays on it, and is killed when that older episode's
+ *    deactivation lands. The shell counts activations so the app can ask for
+ *    the one its own push asked for (`pttPlayReady`).
+ *  - **An episode may only end itself.** Every episode carries the id of the
+ *    push that opened it, and `finish` names it; if a newer push has taken
+ *    the speaker since, the shell drops the request. Otherwise a failed
+ *    playback tears down the message that arrived after it.
  *  - **The fetch IS the sync.** The event may not be in the local timeline
  *    yet; when the sync brings it in it appears in the snapshot with its mxc
  *    url, which is what playing needs anyway. So the resolve is retried once
@@ -122,11 +131,12 @@ object PttChan:
   private val speakingC: sgo.Atomic[Boolean] = sgo.atomic(false)
   /** the clock reading at which the episode is ended regardless. */
   private val episodeUntilC: sgo.Atomic[Long] = sgo.atomic(0L)
-  /** has the framework handed the audio session over? Nothing may play before
-   *  it has — see `resolve`. */
-  private val sessionOnC: sgo.Atomic[Boolean] = sgo.atomic(false)
   /** the playback this episode started reported a failure. */
   private val failedC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  /** which episode the app is serving — the id of the push that opened it.
+   *  Only that episode may end itself (`finish`), so a message whose playback
+   *  fails cannot tear down the message that arrived after it. */
+  private val episodeC: sgo.Atomic[Int] = sgo.atomic(0)
 
   /** is the PushToTalk arc armed at all? `WATA_IOS_PTT=0` turns it off, which
    *  is the only way to run this build as a plain audio app — a joined app
@@ -180,14 +190,7 @@ object PttChan:
       tokenC.set("")
       doneC.set("")
       leaveC.set(true)
-      sessionOnC.set(false)
       if speakingC.get() then finish("the channel was left")
-      st
-    else if e == "audio session activated" then
-      sessionOnC.set(true)
-      st
-    else if e == "audio session deactivated" then
-      sessionOnC.set(false)
       st
     else st
 
@@ -241,6 +244,10 @@ object PttChan:
    *  row already shows. The deadline is measured from the push's arrival, so a
    *  pump that only starts running now inherits the time already spent. */
   def arm(h: Handle, room: String, event: String, ageMs: Long, nowMs: Long): Unit =
+    // the newest push owns the episode from here: an older one that is still
+    // in flight can no longer end anything (`finish` names its own id).
+    episodeC.set(go.iosshell.pttPlayEpisode())
+    failedC.set(false)
     speakingC.set(true)
     episodeUntilC.set(nowMs + EPISODE_MAX_MS)
     if room == "" || event == "" then finish("the push named no message")
@@ -278,7 +285,7 @@ object PttChan:
     else if nowMs >= playUntilC.get() then
       finish("gave up on " + playEventC.get() + " (" + whyStuck() + ")")
       st
-    else if !sessionOnC.get() then st
+    else if !go.iosshell.pttPlayReady() then st
     else
       val url = mxcOf(ctx.snap.conversations, room, playEventC.get())
       if url == "" then st
@@ -287,7 +294,7 @@ object PttChan:
   /** which of the two waits ran out — the difference matters and costs one
    *  line to say. */
   def whyStuck(): String =
-    if !sessionOnC.get() then "the audio session was never handed over"
+    if !go.iosshell.pttPlayReady() then "no audio session for this push"
     else "not synced in time"
 
   /** play it, on the session the framework activated for exactly this, and
@@ -298,7 +305,6 @@ object PttChan:
   def play(h: Handle, st: PumpSt, ctx: FrameCtx, room: String, event: String,
            url: String): PumpSt =
     playRoomC.set("")
-    failedC.set(false)
     var out = Pump.openRoom(st, ctx, room)
     Runtime.sendAction(h.client, ActPlay(url))
     out = Pump.withWata(out, WataLogic.withPlaying(out.wata, true, room, event))
@@ -329,12 +335,15 @@ object PttChan:
    *  releases the audio session back to the app. Every exit comes through
    *  here. */
   def finish(why: String): Unit =
-    println("ptt: speaker done (" + why + ")")
+    val ep = episodeC.get()
+    println("ptt: speaker done #" + ep + " (" + why + ")")
     playRoomC.set("")
     playEventC.set("")
     speakingC.set(false)
     failedC.set(false)
-    go.iosshell.pttSpeakerStopped()
+    // named, so an episode that is no longer current ends nothing: the shell
+    // drops the call when a newer push owns the speaker.
+    go.iosshell.pttSpeakerStopped(ep)
 
   def mxcOf(xs: List[Conversation], roomId: String, eventId: String): String = xs match
     case h :: t => mxcOfStep(h, t, roomId, eventId)

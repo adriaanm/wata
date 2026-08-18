@@ -204,20 +204,39 @@ object AudioThread:
 
   // ---- playback (Ogg -> opus decode -> playMessage) ---------------------------
 
-  /** the non-throws boundary; returns keep-running (false = quit mid-play). */
+  /** the non-throws boundary; returns keep-running (false = quit mid-play).
+   *
+   *  A DECODE FAILURE IS RETRIED ONCE, with a fresh decoder. The bytes are
+   *  fully downloaded before they get here (`Runtime.execPlay` reads the whole
+   *  media response and only then hands it over), so a decode that fails is
+   *  not a truncated file — it is the codec refusing. On iOS that has been
+   *  seen as `FillComplexBuffer(decode): '!con'` on a converter created
+   *  moments earlier, during rapid-fire PushToTalk episodes, which is what a
+   *  contended or torn-down codec resource looks like. A second attempt costs
+   *  one decode pass of a message we are otherwise about to drop, and it makes
+   *  the log say which kind of failure this is: healed on the retry means
+   *  transient, failed twice means the media or the format is genuinely bad. */
   def doPlay(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt], ogg: Bytes): Boolean =
+    var code = tryPlay(cmds, evts, ogg, false)
+    if code == -1 then code = tryPlay(cmds, evts, ogg, true)
+    if code == -1 then
+      evts.trySend(AePlaybackError())
+      ()
+    code != CodeQuit
+
+  /** one decode+play attempt; -1 = the decoder tier threw. */
+  def tryPlay(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt], ogg: Bytes,
+              isRetry: Boolean): Int =
     var code = 0
     try
       val c = playSession(cmds, evts, ogg)
       code = c
     catch
       case e: sgo.GoError =>
-        println("audio: play failed: " + e.getMessage)
+        println("audio: play failed" + (if isRetry then " on the retry too: " else ", retrying: ") +
+          e.getMessage)
         code = -1
-    if code == -1 then
-      evts.trySend(AePlaybackError())
-      ()
-    code != CodeQuit
+    code
 
   /** decoder tier: close-and-rethrow. */
   def playSession(cmds: sgo.Chan[AudioCmd], evts: sgo.Chan[AudioEvt],

@@ -248,9 +248,9 @@ func PTTSessionActivated() {
 	pttEpoch++
 	pttMu.Unlock()
 	log.Printf("macaudio: PushToTalk owns the audio session")
-	logSessionState("PushToTalk activated")
 	noteSessionChanged()
 	resetForSession()
+	logSessionState("PushToTalk activated")
 }
 
 // PTTSessionDeactivated: the episode is over and the session is the app's
@@ -297,8 +297,12 @@ func reclaimSession() {
 		log.Printf("macaudio: the audio session was not reclaimed; the engine is "+
 			"reset anyway: %s", errDetail(err))
 	}
-	logSessionState("reclaimed by wata")
+	// AFTER the reset, not before. Logged before it, this line reported the
+	// window between "category set" and "engine started" — which while a
+	// channel is joined has no active session at all, and so printed inCh=0
+	// and read as a broken microphone (device log, 2026-08-18).
 	resetForSession()
+	logSessionState("reclaimed by wata")
 }
 
 // PTTEpisodeEnded: the app has told the framework this episode is finished
@@ -398,26 +402,47 @@ func resetForSession() {
 	})
 }
 
-// logSessionState prints what the session actually IS at a handoff. The two
-// directions are not symmetric — the framework configures a session for a
-// transmission and another for an incoming message, and neither is the app's
-// own PlayAndRecord+DefaultToSpeaker — so a category, a mode and a sample rate
-// in the log is what turns "no audio" into a diagnosis. Best-effort: a missing
-// selector prints nothing rather than failing anything.
+// logSessionState prints what the session actually IS. The framework's session
+// for an episode, the framework's for a transmission, and the app's own are all
+// different, so a category, a mode and a sample rate in the log is what turns
+// "no audio" into a diagnosis. Best-effort: a missing selector prints nothing
+// rather than failing anything.
+//
+// inRate is the ENGINE's input node format, and it is the number that predicts
+// recording — a 0 there is plan 0063's failure, an IO unit brought up
+// output-only, and OpenCapture refuses on it. The session's own inCh is
+// reported too but reads 0 whenever the session is not ACTIVE, which while a
+// channel is joined is most of the time (the app may not activate it; the
+// engine's start does). So inCh=0 on its own says nothing; inCh=0 with
+// inRate=0 says recording is broken.
+//
+// WHEN it is called matters as much as what it prints: after an engine reset,
+// never between setting a category and starting the engine, or it describes a
+// state that lasted a millisecond.
 func logSessionState(what string) {
+	inRate := 0.0
+	if e := engineOrNil(); e != nil {
+		inPool(func() {
+			// the same reach OpenCapture makes, and the same value it
+			// refuses on (capture.go).
+			node := av.AVAudioNode{ID: e.eng.InputNode().ID}
+			inRate = node.OutputFormatForBus(0).SampleRate()
+		})
+	}
 	inPool(func() {
 		s := objc.ID(objc.GetClass("AVAudioSession")).Send(selSharedInstance)
 		if s == 0 {
 			return
 		}
 		log.Printf("macaudio: session %s: category=%s mode=%s rate=%.0f "+
-			"outCh=%d inCh=%d",
+			"outCh=%d inCh=%d engineInRate=%.0f",
 			what,
 			objcrt.GoString(s.Send(selCategory)),
 			objcrt.GoString(s.Send(selMode)),
 			objc.Send[float64](s, selSampleRate),
 			objc.Send[int](s, selOutputChannels),
-			objc.Send[int](s, selInputChannels))
+			objc.Send[int](s, selInputChannels),
+			inRate)
 	})
 }
 
