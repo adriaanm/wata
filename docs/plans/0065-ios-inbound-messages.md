@@ -66,9 +66,52 @@ the per-join ephemeral channel token waking the app straight into
 live audio with no tap. This is `IOS-PUSH-TO-TALK`, and it reuses
 tier 2's pusher.
 
-Tiers 2 and 3 are sketched here and specified when reached — tier 1's
-diagnosis may change what they need. This document is updated as each
-tier lands; `0065-state.md` carries the running state.
+Tier 3 is sketched here and specified when reached. This document is
+updated as each tier lands; `0065-state.md` carries the running state.
+
+## Tier 2 in detail
+
+**The pusher is a plain-Go module.** APNs token auth needs an ES256
+JWT and an HTTP/2 POST, neither expressible in the dialect, so
+`go-pkgs/apns` is ordinary Go behind a thin facade — the shape
+`go-pkgs/irohnet` and `go-pkgs/audio` already use. It needs **no
+external dependency**: `crypto/ecdsa` + `crypto/x509` sign the JWT,
+and Go's `net/http` negotiates HTTP/2 over TLS by itself.
+
+- `POST https://api{,.sandbox}.push.apple.com/3/device/<token>`,
+  headers `authorization: bearer <jwt>`, `apns-topic` (the bundle id),
+  `apns-push-type`, `apns-priority`, `apns-expiration`.
+- The JWT is cached and refreshed on a timer — Apple rejects a token
+  younger than 20 minutes on refresh and older than 60.
+- **410 Gone means the token is dead** and the caller must forget it;
+  a pusher that ignores this re-sends to uninstalled apps forever.
+  4xx reasons are surfaced, not swallowed.
+
+**Registration is a wata endpoint.** `POST /_wata/v1/push/register`
+`{platform, token, env}` authenticated as the calling device, stored
+per (user, device) — `devicecmd.scala` is the structural model. The
+token is per-install and changes; re-registration overwrites.
+
+**When a push fires.** A message event landing in a room pushes to
+every registered device of every room member except the sender's own.
+Deliberately NOT conditioned on "is that device currently syncing":
+the check is racy, and iOS already suppresses a banner the foreground
+app consumes. Simple and idempotent beats clever here.
+
+**How it is gated without Apple credentials.** The APNs host is
+configurable, so a local fake APNs server standing in for Apple gates
+the whole path: the module's own Go tests assert the JWT header and
+claims, the request path and headers, and the 410-forgets-the-token
+rule; a server-side scenario asserts that sending a message to a
+registered device produces a push with the right payload. Nothing in
+this tier needs a real key, a phone, or the developer portal — those
+are needed only for the owner's final on-device leg.
+
+**Client-side** (`simctl push` gates it without a real APNs
+connection): permission request, `registerForRemoteNotifications`,
+the token POSTed to the server, and the notification presented. The
+payload carries `interruption-level: time-sensitive` and the room and
+event ids, so a tap can open the right conversation.
 
 ## Platform facts this rests on
 
