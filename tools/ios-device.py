@@ -19,6 +19,17 @@ The sign stage needs what only the owner can mint:
 
 The install stage targets $WATA_DEVICE, or auto-picks when exactly one
 iPhone is attached (`xcrun devicectl list devices`).
+
+ENTITLEMENTS ARE READ OFF THE PROFILE, NEVER ASSERTED (plan 0065). Claiming
+an entitlement the profile does not grant makes codesign fail with a message
+that names neither the capability nor the portal, so this script decodes the
+embedded profile and claims only what it finds: `aps-environment` (tier 2's
+push token) and `com.apple.developer.push-to-talk` with the `push-to-talk`
+and `audio` background modes (tier 3's channel). What is missing is REPORTED,
+with the portal step that would grant it, and the build goes on — an app
+without those entitlements still runs, and says so in its own log
+(`push: remote registration failed`, `ptt: no channel manager: …`). Set
+WATA_IOS_REQUIRE_PTT=1 to turn the report into a refusal instead.
 """
 
 import argparse
@@ -45,9 +56,72 @@ BUNDLE_ID = os.environ.get("WATA_BUNDLE_ID", "net.wa-ta.ios")
 TEAM_ID = os.environ.get("WATA_TEAM_ID", "")
 
 
+PTT_ENT = "com.apple.developer.push-to-talk"
+APS_ENT = "aps-environment"
+
+
 def run(cmd, **kw):
     print("+", " ".join(str(c) for c in cmd))
     subprocess.run([str(c) for c in cmd], check=True, **kw)
+
+
+def profile_path():
+    return pathlib.Path(os.environ.get(
+        "WATA_PROFILE", HERE / "ios-device" / "WataIos.mobileprovision"))
+
+
+def profile_grants():
+    """The entitlements the provisioning profile GRANTS, or {} when there is
+    no profile (or it cannot be decoded — the sign stage reports that itself).
+
+    A .mobileprovision is a CMS-signed plist; `security cms -D` unwraps it.
+    """
+    p = profile_path()
+    if not p.exists():
+        return {}
+    r = subprocess.run(["security", "cms", "-D", "-i", str(p)],
+                       capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        print(f"note: could not decode {p} ({r.stderr.decode().strip()});"
+              " treating it as granting nothing extra")
+        return {}
+    try:
+        return plistlib.loads(r.stdout).get("Entitlements", {})
+    except Exception as e:  # a profile we cannot parse is one we cannot trust
+        print(f"note: could not parse {p}'s entitlements ({e})")
+        return {}
+
+
+def ptt_granted(grants):
+    """Does the profile carry BOTH entitlements the PushToTalk channel needs?
+
+    `aps-environment` is not optional for PTT: without it PTChannelManager
+    refuses to instantiate at all (`missingPushServerEnvironment`, observed on
+    hardware — tools/bindgen/hello/README.md).
+    """
+    return bool(grants.get(PTT_ENT)) and bool(grants.get(APS_ENT))
+
+
+def report_missing(grants):
+    """Say exactly what the profile lacks and what would grant it. Returns the
+    list of missing entitlements."""
+    missing = [e for e in (APS_ENT, PTT_ENT) if not grants.get(e)]
+    if not missing:
+        return missing
+    print(
+        f"\nnote: {profile_path().name} does not grant: {', '.join(missing)}\n"
+        f"      The app builds, installs and runs without them; what does NOT\n"
+        f"      work is push ({APS_ENT}) and the PushToTalk channel\n"
+        f"      ({PTT_ENT} — and PTT needs both).\n"
+        f"      To grant them: developer.apple.com/account → Identifiers →\n"
+        f"      {BUNDLE_ID} → enable Push Notifications and Push to Talk, then\n"
+        f"      regenerate the development profile and download it over\n"
+        f"      {profile_path()}.\n"
+        f"      Set WATA_IOS_REQUIRE_PTT=1 to make this a hard failure.\n")
+    if os.environ.get("WATA_IOS_REQUIRE_PTT") == "1":
+        raise SystemExit("WATA_IOS_REQUIRE_PTT=1 and the profile is missing "
+                         + ", ".join(missing))
+    return missing
 
 
 def build():
@@ -95,6 +169,15 @@ def bundle():
         "UIRequiredDeviceCapabilities": ["arm64"],
         "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
     }
+    # Background modes ride the ENTITLEMENT, not a wish: `push-to-talk` is
+    # meaningless (and, declared alone, misleading in the bundle) without
+    # com.apple.developer.push-to-talk, and `audio` is what keeps the capture
+    # graph alive across the transmission the framework starts. Declared only
+    # when the profile grants the capability, so a build for a profile without
+    # it is byte-for-byte the bundle this script has always produced.
+    if ptt_granted(profile_grants()):
+        info["UIBackgroundModes"] = ["audio", "push-to-talk"]
+        print("Info.plist: UIBackgroundModes = audio, push-to-talk")
     (APP / "Info.plist").write_bytes(plistlib.dumps(info))
     print(f"bundled {APP} (unsigned)")
 
@@ -105,8 +188,7 @@ def sign():
             "WATA_TEAM_ID is not set; the entitlements stamp the team id.\n"
             "Find yours on developer.apple.com/account (Membership)."
         )
-    profile = pathlib.Path(os.environ.get(
-        "WATA_PROFILE", HERE / "ios-device" / "WataIos.mobileprovision"))
+    profile = profile_path()
     if not profile.exists():
         raise SystemExit(
             f"no provisioning profile at {profile}.\n"
@@ -114,13 +196,34 @@ def sign():
             "target device; drop it there or point WATA_PROFILE at it."
         )
     shutil.copy(profile, APP / "embedded.mobileprovision")
-    # Minimal claims: what the app uses today. The PTT + aps-environment
-    # entitlements join in plan 0061 stage 4 with the real audio.
+    # What the app uses, INTERSECTED with what the profile grants: an
+    # entitlement claimed beyond the profile is a codesign failure that names
+    # nothing useful, so the two push entitlements are added only when they
+    # are there and their absence is reported with the portal step.
     ents = {
         "application-identifier": f"{TEAM_ID}.{BUNDLE_ID}",
         "com.apple.developer.team-identifier": TEAM_ID,
         "get-task-allow": True,
     }
+    grants = profile_grants()
+    if grants.get(APS_ENT):
+        # the value is the profile's ("development" for a dev profile); it
+        # decides which APNs host mints this install's token.
+        ents[APS_ENT] = grants[APS_ENT]
+        print(f"entitlement: {APS_ENT} = {grants[APS_ENT]}")
+    if grants.get(PTT_ENT):
+        ents[PTT_ENT] = True
+        print(f"entitlement: {PTT_ENT}")
+    report_missing(grants)
+    if ptt_granted(grants) and "push-to-talk" not in plistlib.loads(
+            (APP / "Info.plist").read_bytes()).get("UIBackgroundModes", []):
+        # bundle ran before the profile gained the capability: the app would
+        # sign with the entitlement and still be unable to run in the
+        # background. Say so rather than shipping the mismatch silently.
+        raise SystemExit(
+            "the profile grants push-to-talk but the bundled Info.plist has no\n"
+            "push-to-talk background mode — re-run the bundle stage\n"
+            "(tools/ios-device.py --only bundle) and sign again.")
     resolved = OUT / "WataIos.resolved.entitlements"
     resolved.write_bytes(plistlib.dumps(ents))
     identity = os.environ.get("WATA_SIGN_IDENTITY", "Apple Development")

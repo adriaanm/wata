@@ -104,6 +104,34 @@ object iosshell:
   /** was the push `takePush` last returned a TAP? (open its conversation). */
   @go.name("PushTapped") def pushTapped(): Boolean = ???
 
+  // ---- PushToTalk (plan 0065 tier 3, ptt.go) ---------------------------------
+  /** load PushToTalk and ask the system for the channel manager the framework
+   *  requires at LAUNCH (without one it tears down the app's channel and its
+   *  ability to receive pushes). Called from the ready hop, once; inert when
+   *  the framework is missing (every simulator) or the build carries no
+   *  entitlement — the reason is queued as an event. */
+  @go.name("PTTStart") def pttStart(): Unit = ???
+  /** join the one channel: `name` is what the system UI shows, `key` is what
+   *  its UUID is derived from (the family room id). "" when the request went
+   *  out, else why it did not — a background join is refused by the framework
+   *  and by the product (no server conscripts a phone into a channel). */
+  @go.name("PTTJoin") def pttJoin(name: String, key: String): String = ???
+  /** leave the channel (the ephemeral push token dies with it). */
+  @go.name("PTTLeave") def pttLeave(): Unit = ???
+  /** request the framework to begin/stop transmitting — the on-screen PTT
+   *  button's path while a channel is joined, so it and the system talk
+   *  button take the same one. */
+  @go.name("PTTTransmit") def pttTransmit(on: Boolean): Unit = ???
+  /** is a channel joined right now? */
+  @go.name("PTTJoined") def pttJoined(): Boolean = ???
+  /** the oldest thing the framework told the app, or "" — printed as `ptt: …`;
+   *  `talk on <system|app>`, `talk off` and `left` are also decisions. */
+  @go.name("TakePTTEvent") def takePttEvent(): String = ???
+  /** the oldest EPHEMERAL push token (hex), or "". One per join, dead after
+   *  the leave — it goes to `/_wata/v1/push/channel/join`, never to tier 2's
+   *  registration. */
+  @go.name("TakePTTToken") def takePttToken(): String = ???
+
   // ---- the persistent app log (plan 0064) -----------------------------------
   /** tee this process's stdout+stderr into `path` (truncated at open, growth
    *  capped) — the original console keeps every line, so tethered launches

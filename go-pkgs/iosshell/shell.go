@@ -128,8 +128,10 @@ func Start() {
 			return true
 		}},
 	}
-	// the APNs callbacks (push.go) ride the same class.
+	// the APNs callbacks (push.go) and the foreground-state ones the
+	// PushToTalk join gate needs (ptt.go) ride the same class.
 	methods = append(methods, pushMethods()...)
+	methods = append(methods, pttMethods()...)
 	if _, err := objc.RegisterClass(delegateClass, objc.GetClass("NSObject"), nil, nil,
 		methods); err != nil {
 		panic("iosshell: RegisterClass " + delegateClass + ": " + err.Error())

@@ -38,6 +38,11 @@ import language.experimental.saferExceptions
  *                                           device token, the registration's
  *                                           outcome, and every notification
  *                                           iOS handed the app
+ *    ptt: …                               — PushToTalk (plan 0065 tier 3):
+ *                                           every channel-manager delegate
+ *                                           callback, the ephemeral token's
+ *                                           registration, and the join's
+ *                                           refusals
  *
  *  Argv modes: `interptest` runs the retained interpreter's suite
  *  (interptest.scala) instead of the client. */
@@ -162,6 +167,10 @@ object Pump:
     // and registerForRemoteNotifications. Here rather than in the shell's
     // launch callback so `interptest` never raises a permission prompt.
     go.iosshell.registerForPush()
+    // PushToTalk (plan 0065 tier 3): the framework requires a channel manager
+    // at LAUNCH whether or not this app will ever join, so it is created here
+    // and not at the first join. Inert wherever the framework is missing.
+    go.iosshell.pttStart()
     rootC.set(Some(root))
     // Paint the boot screen NOW, inline (this is the UIKit thread): the
     // session's connect wait runs behind a painted "starting up..." frame.
@@ -289,6 +298,7 @@ object Pump:
     val clock = IosCaps.clock()
     NetStatus.reset()
     PushReg.newSession()
+    PttChan.newSession()
     val live = waitLiveOrRejected(h, connectMs())
     if live then println("ready " + Runtime.lastAuth.userId)
     else println("login failed") // stored creds keep pumping on the boot screen (plan 0022's never-terminate)
@@ -340,6 +350,7 @@ object Pump:
     st = applyKeys(st, ctx)
     st = drainAudio(st, ctx)
     st = pushStep(h, st, ctx, nowMs)
+    st = PttChan.step(h, st, ctx, nowMs)
     st = notifyStep(h, st, snap)
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
       st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
@@ -559,7 +570,13 @@ object Pump:
   /** drain the keypad into the applet — and run the two-step quit edge as
    *  the device loop does, though on iOS the confirmed edge only ends the
    *  session loop (an app does not self-terminate). The queue carries
-   *  IosKeys codes: the buttons are the model, no translation table. */
+   *  IosKeys codes: the buttons are the model, no translation table.
+   *
+   *  ONE key is not applied directly: while a PushToTalk channel is joined
+   *  the PTT button REQUESTS a transmission instead (ptt.scala), and the
+   *  recording starts when the framework says the transmission is live and
+   *  the audio session is activated. Same path as the system talk button,
+   *  and the system UI cannot fall out of step with what is recording. */
   def applyKeys(st0: PumpSt, ctx: FrameCtx): PumpSt =
     var st = st0
     var going = true
@@ -569,8 +586,17 @@ object Pump:
       else
         val k = packed / 4
         if k != IosKeys.NONE && k <= IosKeys.PTT then
-          st = applyKey(st, KeyEvent(keyOf(k), stateOf(packed % 4)), ctx)
+          val ks = stateOf(packed % 4)
+          if k == IosKeys.PTT && PttChan.routing() then requestTransmit(ks)
+          else st = applyKey(st, KeyEvent(keyOf(k), ks), ctx)
     st
+
+  /** the on-screen PTT button while a channel is joined: press asks the
+   *  framework to transmit, release asks it to stop. A repeat is neither. */
+  def requestTransmit(ks: KeyState): Unit = ks match
+    case Pressed()  => go.iosshell.pttTransmit(true)
+    case Released() => go.iosshell.pttTransmit(false)
+    case _          => ()
 
   def keyOf(code: scala.Int): Key =
     if code == IosKeys.UP then KUp()

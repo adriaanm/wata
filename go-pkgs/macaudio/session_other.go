@@ -11,3 +11,10 @@ func sessionActivate() error { return nil }
 // On macOS the HAL vends the input device's format whether or not the engine
 // has ever touched its input node, so there is nothing to prepare.
 func prepareInput(e av.AVAudioEngine) {}
+
+// The PushToTalk session handoff (session_ios.go) has no meaning without an
+// AVAudioSession. The two entry points still exist on every platform because
+// go-pkgs/iosshell, which is a darwin package rather than an ios one, calls
+// them from the channel manager's delegate.
+func PTTSessionActivated()   {}
+func PTTSessionDeactivated() {}
