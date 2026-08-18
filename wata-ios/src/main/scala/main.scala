@@ -173,7 +173,16 @@ object Pump:
     // PushToTalk (plan 0065 tier 3): the framework requires a channel manager
     // at LAUNCH whether or not this app will ever join, so it is created here
     // and not at the first join. Inert wherever the framework is missing.
-    go.iosshell.pttStart()
+    //
+    // WATA_IOS_PTT=0 skips it entirely, which also drops any channel the
+    // system restored (an app that instantiates no manager loses its
+    // channels). That is the A/B for the one thing about a joined app that
+    // cannot be settled off-device: a joined app may not activate its own
+    // audio session, so if ordinary playback turns out to need that, the same
+    // build with this variable set says so in one launch — and stays a
+    // working walkie-talkie meanwhile, minus the system talk button.
+    if PttChan.enabled() then go.iosshell.pttStart()
+    else println("ptt: disabled by WATA_IOS_PTT=0")
     rootC.set(Some(root))
     // Paint the boot screen NOW, inline (this is the UIKit thread): the
     // session's connect wait runs behind a painted "starting up..." frame.

@@ -77,9 +77,14 @@ type engine struct {
 var (
 	setupOnce sync.Once
 	setupDone bool
-	setupErr  error
 	fakeMode  bool
-	eng       *engine
+
+	// engMu guards the engine and the remembered build failure. The audio
+	// thread builds it; on iOS a PushToTalk session transition can arrive on a
+	// framework thread and try again (see ensureEngine).
+	engMu    sync.Mutex
+	setupErr error
+	eng      *engine
 
 	// The buffer handed to the player by the previous PlayMessage, released at
 	// the START of the next one. scheduleBuffer:completionHandler: fires when
@@ -146,22 +151,58 @@ func SetupMixer() {
 			log.Printf("macaudio: WATA_MAC_AUDIO=fake — synthetic mic, clock speaker, real codec")
 			return
 		}
+		engMu.Lock()
 		setupErr = startEngine()
+		engMu.Unlock()
 		if setupErr != nil {
 			log.Printf("macaudio: SetupMixer failed, audio is unavailable: %v", setupErr)
 		}
 	})
 }
 
+// ensureEngine builds the engine if a previous attempt left none. iOS only in
+// practice: a launch whose session activation was refused because a PushToTalk
+// channel was already restored used to end here permanently, with every later
+// play answering the remembered error. A session transition is a new set of
+// conditions and worth one more attempt.
+func ensureEngine() {
+	engMu.Lock()
+	defer engMu.Unlock()
+	if !setupDone || fakeMode || eng != nil {
+		return
+	}
+	if setupErr = startEngine(); setupErr != nil {
+		log.Printf("macaudio: the engine still cannot be built: %v", setupErr)
+		return
+	}
+	log.Printf("macaudio: the engine was built on a retry — audio is available again")
+}
+
+// engineOrNil is the engine, or nil, without the diagnosis audioEngine gives.
+func engineOrNil() *engine {
+	engMu.Lock()
+	defer engMu.Unlock()
+	return eng
+}
+
 func startEngine() error {
 	if err := loadAudioToolbox(); err != nil {
 		return err
 	}
-	// iOS only (no-op elsewhere): the AVAudioSession category decides what
-	// the IO unit is configured with, so it is set and activated before the
-	// engine exists. See session_ios.go.
+	// iOS only (no-op elsewhere): the AVAudioSession category decides what the
+	// IO unit is configured with, so it is applied before the engine exists.
+	//
+	// A FAILURE HERE IS NOT FATAL, and that is the whole lesson of the
+	// 2026-08-18 device log: a PushToTalk app joined to a channel is REFUSED
+	// its own setActive: ('ent?', missing entitlement), because activation is
+	// the framework's. Returning that error built no engine and made every
+	// later PlayMessage and OpenCapture answer with it — an app with no audio
+	// at all, including for messages the user tapped. The engine's own start,
+	// below, is the real test of whether audio works; it activates the session
+	// on the app's behalf when the app may not. See session_ios.go.
 	if err := sessionActivate(); err != nil {
-		return err
+		log.Printf("macaudio: the audio session was not fully configured, "+
+			"building the engine anyway: %v", err)
 	}
 	var err error
 	inPool(func() {
@@ -194,6 +235,12 @@ func startEngine() error {
 		}
 		eng = &engine{eng: e, player: player, mixer: mixer, fmt48: f48}
 	})
+	if err == nil {
+		// The success side of the story. Until this line existed the log only
+		// ever mentioned the engine when it FAILED, so "audio is available"
+		// was never a thing the device log said.
+		log.Printf("macaudio: the audio engine is running")
+	}
 	return err
 }
 
@@ -202,13 +249,20 @@ func audioEngine() (*engine, error) {
 	if !setupDone {
 		return nil, errors.New("macaudio: SetupMixer has not run (the audio thread calls it once at start)")
 	}
-	if setupErr != nil {
-		return nil, setupErr
+	// One more attempt before answering with a stale failure: the conditions
+	// that defeated the build (a PushToTalk channel joined before the audio
+	// thread started) may be gone by now.
+	ensureEngine()
+	engMu.Lock()
+	e, err := eng, setupErr
+	engMu.Unlock()
+	if e != nil {
+		return e, nil
 	}
-	if eng == nil {
-		return nil, errors.New("macaudio: no engine (fake backend is active)")
+	if err != nil {
+		return nil, err
 	}
-	return eng, nil
+	return nil, errors.New("macaudio: no engine (fake backend is active)")
 }
 
 // ── PCM buffer channel access ───────────────────────────────────────────────

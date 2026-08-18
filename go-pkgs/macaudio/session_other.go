@@ -19,3 +19,4 @@ func prepareInput(e av.AVAudioEngine) {}
 func PTTSessionActivated()     {}
 func PTTSessionDeactivated()   {}
 func PTTEpisodeEnded(_ string) {}
+func PTTChannelJoined(_ bool)  {}

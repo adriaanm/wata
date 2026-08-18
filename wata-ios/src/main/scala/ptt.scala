@@ -128,6 +128,11 @@ object PttChan:
   /** the playback this episode started reported a failure. */
   private val failedC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
+  /** is the PushToTalk arc armed at all? `WATA_IOS_PTT=0` turns it off, which
+   *  is the only way to run this build as a plain audio app — a joined app
+   *  does not own its audio session. */
+  def enabled(): Boolean = go.sys.getenv("WATA_IOS_PTT") != "0"
+
   /** a session started (or restarted onto another server): the new server
    *  knows nothing about this device's channel. */
   def newSession(): Unit =

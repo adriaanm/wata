@@ -25,6 +25,12 @@
 //     payload and returned here. The room and event the push names ARE queued
 //     — fetching and playing that message is the pump's job (ptt.scala).
 //
+// JOINING HANDS THE AUDIO SESSION OVER FOR GOOD, not just for an episode: a
+// joined app's own -setActive: is refused by iOS with 'ent?' (missing
+// entitlement). So the join and leave delegates tell macaudio directly — a
+// restoration join lands before the audio thread has even started, and macaudio
+// has to know before it builds its engine.
+//
 // AN EPISODE ENDS WHEN THE APP SAYS SO. Reporting an active remote participant
 // is what makes the system show "<name> speaking" and hold the audio session
 // activated, and the framework holds both until the app clears the participant
@@ -187,6 +193,11 @@ func pttStart() {
 			pttMu.Lock()
 			pttJoined = true
 			pttMu.Unlock()
+			// From here the framework, not the app, activates the audio
+			// session — including on a RESTORATION join, which lands before
+			// the audio thread has started. macaudio must know before it
+			// builds its engine, so this is a direct call like the handoff.
+			macaudio.PTTChannelJoined(true)
 			why := "request"
 			if reason == pt.PTChannelJoinReasonChannelRestoration {
 				why = "restoration"
@@ -206,8 +217,10 @@ func pttStart() {
 				pttNote("talk off")
 			}
 			// No channel, no episode: whatever the framework still held it is
-			// not coming back through a delegate now.
+			// not coming back through a delegate now, and self-activation is
+			// the app's again.
 			macaudio.PTTEpisodeEnded("the channel was left")
+			macaudio.PTTChannelJoined(false)
 			pttNote("left")
 		},
 		ChannelManagerFailedToJoinChannelWithUUIDError: func(

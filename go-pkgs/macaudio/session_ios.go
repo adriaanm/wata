@@ -17,17 +17,41 @@
 // A press before the grant fails per-command (MIC FAILED), which is the
 // audio thread's honest surface for it; the next press works.
 //
-// SESSION OWNERSHIP AND PushToTalk (plan 0065 tier 3). While a PTT
-// transmission is in progress the FRAMEWORK owns the audio session: it
-// configures and activates one and hands it to the app through
-// channelManager:didActivateAudioSession:, and an app that activates its own
-// session underneath that is what plan 0008 records as incompatible. So this
-// file has an owner flag — PTTSessionActivated/PTTSessionDeactivated, called
-// synchronously from those two delegate callbacks (go-pkgs/iosshell/ptt.go),
-// never through the pump: the engine can be started on any thread and the
-// yield has to be true the instant the framework says so.
+// SESSION OWNERSHIP AND PushToTalk (plan 0065 tier 3). A joined PushToTalk app
+// does not own its audio session at all — the FRAMEWORK activates it, for a
+// transmission or for an incoming message, and hands it over through
+// channelManager:didActivateAudioSession:.
 //
-// While the framework owns it:
+// THE SCOPE OF THAT IS THE JOIN, NOT THE EPISODE, and it is enforced by iOS
+// rather than by convention. Device log 2026-08-18, an app joined by channel
+// restoration at launch:
+//
+//	ptt: joined (restoration)
+//	macaudio: SetupMixer failed, audio is unavailable: macaudio: setActive:
+//	  Session activation failed (NSOSStatusErrorDomain 1701737535 'ent?')
+//
+// 'ent?' is AVAudioSessionErrorCodeMissingEntitlement (0x656E743F, confirmed in
+// CoreAudioTypes' AudioSessionTypes.h): "the app does not have the required
+// entitlements to perform an operation". No episode was in progress — the app
+// had merely JOINED. An earlier build where manual playback worked ran
+// SetupMixer BEFORE the join and self-activated successfully, which is the
+// control: self-activation is refused exactly while joined.
+//
+// That refusal used to be FATAL. startEngine returned it, SetupMixer remembered
+// it, and every later PlayMessage/OpenCapture answered with it — so an app that
+// happened to restore its channel before its audio thread started had no audio
+// at all, for the whole process, including messages the user tapped. Two rules
+// follow, and both are here:
+//
+//   - setActive: is called ONLY when nothing else owns the session. Joined
+//     (rule: category only) and mid-episode (rule: nothing at all) never reach
+//     it. The engine's own start implicitly activates the session on the app's
+//     behalf, which is AVFAudio's call and not ours.
+//   - a session step that fails is LOGGED AND SURVIVED, never fatal. The engine
+//     start is the real test of whether audio works; a session error with a
+//     started engine is the PushToTalk case, not a broken app.
+//
+// While the framework owns it (an episode is live):
 //   - sessionActivate() sets NOTHING: no category, no setActive. The session
 //     the framework handed over is already configured for the episode, and
 //     both calls are exactly what must not race it.
@@ -51,12 +75,12 @@
 // the session over (wata-ios/ptt.scala). Playing first and being interrupted
 // is not a race this file can win on its own.
 //
-// When the framework gives it back (didDeactivateAudioSession), the app is a
-// plain foreground audio app again: our own category is set and activated and
-// a stopped engine restarted, so playing a received message after a
-// transmission works. Both directions are best-effort and only logged — an
-// audio session that cannot be reclaimed must not wedge the app, and the
-// audio thread already reports per-command failures.
+// When the framework gives it back (didDeactivateAudioSession) the app is a
+// plain audio app again — as far as the JOIN allows: still joined means still
+// category-only. Only leaving the channel restores self-activation. Every
+// direction is best-effort and only logged; an audio session that cannot be
+// reclaimed must not wedge the app, and the audio thread already reports
+// per-command failures.
 //
 // THE HAND-BACK CANNOT BE WAITED FOR FOREVER. Observed on hardware
 // 2026-08-18: five incoming `pushtotalk` pushes produced five
@@ -137,16 +161,82 @@ const (
 	reclaimGap   = 500 * time.Millisecond
 )
 
-// pttOwns is set for as long as the PushToTalk framework owns the audio
-// session. Guarded by pttMu, which also serializes the handoff calls against
-// each other (they arrive on the framework's threads). pttEpoch counts
-// ownership transitions, so a grace timer can tell "still the episode I armed
-// for" from "the framework already handed back, or took it again".
-var (
-	pttMu    sync.Mutex
-	pttOwns  bool
-	pttEpoch uint64
+// Who may do what to the audio session right now.
+const (
+	// nothing else owns it: our category, and our setActive.
+	ruleOwn = iota
+	// a PushToTalk channel is JOINED: the category is still ours to set (it is
+	// what puts ordinary playback on the speaker), but setActive: is the
+	// framework's alone and iOS refuses ours with 'ent?'.
+	ruleJoined
+	// an episode is live and the framework has handed over an ACTIVATED
+	// session configured for it: touch nothing.
+	ruleEpisode
 )
+
+// pttJoined is true while a PushToTalk channel is joined; pttOwns while the
+// framework has an episode's session handed over. Guarded by pttMu, which also
+// serializes the handoff calls against each other (they arrive on the
+// framework's threads). pttEpoch counts ownership transitions, so a grace timer
+// can tell "still the episode I armed for" from "the framework already handed
+// back, or took it again".
+var (
+	pttMu     sync.Mutex
+	pttJoined bool
+	pttOwns   bool
+	pttEpoch  uint64
+)
+
+// PTTChannelJoined records whether a channel is joined. Call it from
+// channelManager:didJoinChannelWithUUID: and :didLeaveChannelWithUUID: —
+// including the RESTORATION join, which is how an app that was killed comes
+// back already joined before its audio thread has even started.
+func PTTChannelJoined(joined bool) {
+	pttMu.Lock()
+	was := pttJoined
+	pttJoined = joined
+	pttMu.Unlock()
+	if was == joined {
+		return
+	}
+	if joined {
+		log.Printf("macaudio: a PushToTalk channel is joined — the framework " +
+			"owns audio session activation from here")
+		// Build the engine if a failed activation left us without one, and
+		// re-run it against the rule that now applies.
+		resetForSession()
+		return
+	}
+	log.Printf("macaudio: the PushToTalk channel is gone — the audio session is " +
+		"the app's own again")
+	noteSessionChanged()
+	reclaimSession()
+}
+
+// sessionRule answers who may touch the session right now.
+func sessionRule() int {
+	pttMu.Lock()
+	defer pttMu.Unlock()
+	switch {
+	case pttOwns:
+		return ruleEpisode
+	case pttJoined:
+		return ruleJoined
+	default:
+		return ruleOwn
+	}
+}
+
+func ruleName(r int) string {
+	switch r {
+	case ruleEpisode:
+		return "episode (the framework's)"
+	case ruleJoined:
+		return "joined (category only, no setActive)"
+	default:
+		return "own"
+	}
+}
 
 // PTTSessionActivated: the PushToTalk framework has handed the app an
 // ACTIVATED session — for a transmission, or for an incoming message it woke
@@ -183,10 +273,14 @@ func PTTSessionDeactivated() {
 	reclaimSession()
 }
 
-// reclaimSession takes the session back for the app: our own category, active,
-// and an engine reset so its IO unit is built against the session that is
-// actually current. Retried, because the first attempt can land while
-// PushToTalk is still tearing its own session down.
+// reclaimSession applies whatever rule now holds and resets the engine against
+// it. Retried, because the first attempt can land while PushToTalk is still
+// tearing its own session down.
+//
+// It ALWAYS resets the engine, even when every attempt failed: an engine is
+// what plays audio, a session activation is only what makes it loud, and while
+// a channel is joined the activation is not ours to make in the first place.
+// Refusing to reset on a session error is what left the app mute.
 func reclaimSession() {
 	var err error
 	for i := 0; i < reclaimTries; i++ {
@@ -194,15 +288,17 @@ func reclaimSession() {
 			time.Sleep(reclaimGap)
 		}
 		if err = sessionActivate(); err == nil {
-			logSessionState("reclaimed by wata")
-			resetForSession()
-			return
+			break
 		}
-		log.Printf("macaudio: reclaiming the audio session failed (try %d/%d): %v",
-			i+1, reclaimTries, err)
+		log.Printf("macaudio: reclaiming the audio session failed (try %d/%d): %s",
+			i+1, reclaimTries, errDetail(err))
 	}
-	log.Printf("macaudio: the audio session could not be reclaimed; audio is "+
-		"unavailable until the next session change: %v", err)
+	if err != nil {
+		log.Printf("macaudio: the audio session was not reclaimed; the engine is "+
+			"reset anyway: %s", errDetail(err))
+	}
+	logSessionState("reclaimed by wata")
+	resetForSession()
 }
 
 // PTTEpisodeEnded: the app has told the framework this episode is finished
@@ -273,13 +369,6 @@ func fourCC(code int) string {
 	return string(b)
 }
 
-// pttOwned answers whether the framework holds the session right now.
-func pttOwned() bool {
-	pttMu.Lock()
-	defer pttMu.Unlock()
-	return pttOwns
-}
-
 // resetForSession rebuilds the engine's relationship with the audio session
 // that is now current. It is deliberately a full STOP and start rather than
 // "start it if it stopped": the engine configures its IO unit from the session
@@ -290,7 +379,11 @@ func pttOwned() bool {
 // same reset PlayMessage does for the capture case, and for the same reason:
 // the completion handler never fires).
 func resetForSession() {
-	e := eng
+	// A launch whose session activation was refused (joined by restoration
+	// before the audio thread started) has no engine at all. A session
+	// transition is exactly when it is worth another try.
+	ensureEngine()
+	e := engineOrNil()
 	if e == nil {
 		return
 	}
@@ -328,11 +421,17 @@ func logSessionState(what string) {
 	})
 }
 
+// sessionActivate applies as much of the app's own session configuration as
+// the current rule allows. It NEVER reports "the session is the framework's"
+// as an error: that is the normal state of a joined walkie-talkie, and the
+// caller's job is to build an engine either way.
 func sessionActivate() error {
-	if pttOwned() {
-		// The framework's session is live and configured; setting a category
-		// or activating on top of it is the incompatibility itself.
-		log.Printf("macaudio: PushToTalk owns the session — not activating our own")
+	rule := sessionRule()
+	if rule == ruleEpisode {
+		// The framework's session is live and configured for this episode;
+		// setting a category or activating on top of it is the
+		// incompatibility itself.
+		log.Printf("macaudio: PushToTalk owns the session — leaving it alone")
 		return nil
 	}
 	if _, err := purego.Dlopen(
@@ -358,10 +457,21 @@ func sessionActivate() error {
 			out = fmt.Errorf("macaudio: setCategory PlayAndRecord: %s", errDetail(catErr.Err()))
 			return
 		}
-		var actErr objcrt.ErrOut
-		if !objc.Send[bool](s, selSetActiveError, true, actErr.Ptr()) {
-			out = fmt.Errorf("macaudio: setActive: %s", errDetail(actErr.Err()))
-			return
+		// setActive: is the ENTITLEMENT-GATED half. A joined PushToTalk app is
+		// refused with 'ent?' (AVAudioSessionErrorCodeMissingEntitlement) — the
+		// framework activates the session, and only it may. Asking anyway
+		// produces exactly the error that used to leave this app with no audio
+		// at all, so while joined the app does not ask: the engine's own start
+		// activates the session on its behalf, which is AVFAudio's call.
+		if rule == ruleJoined {
+			log.Printf("macaudio: a PushToTalk channel is joined — category set, " +
+				"setActive left to the framework")
+		} else {
+			var actErr objcrt.ErrOut
+			if !objc.Send[bool](s, selSetActiveError, true, actErr.Ptr()) {
+				out = fmt.Errorf("macaudio: setActive: %s", errDetail(actErr.Err()))
+				return
+			}
 		}
 		// Fire-and-forget: the answer is only logged (a press before the grant
 		// fails per-command, the next one works). ONCE: sessionActivate runs
