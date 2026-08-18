@@ -66,8 +66,55 @@ the per-join ephemeral channel token waking the app straight into
 live audio with no tap. This is `IOS-PUSH-TO-TALK`, and it reuses
 tier 2's pusher.
 
-Tier 3 is sketched here and specified when reached. This document is
-updated as each tier lands; `0065-state.md` carries the running state.
+This document is updated as each tier lands; `0065-state.md` carries
+the running state.
+
+## Tier 3 in detail
+
+**Tier 3 cannot be gated in the simulator at all.** The PushToTalk
+framework exists only on iOS hardware — there is no PTT service in a
+simulator (`tools/bindgen/hello/README.md` records this; it is why the
+hello is a device-only gate). That single fact shapes the tier:
+everything gateable is pushed to the server side, the client side is
+build-checked and then proven on the phone, and the tier does not
+pretend otherwise.
+
+**Server side — gateable today, no Apple involvement.** The channel's
+**ephemeral push token** is a second, structurally different kind of
+registration: minted anew on every channel join, delivered by
+`channelManager(_:receivedEphemeralPushToken:)`, and DEAD after
+leave. It must not be stored in the same row as the stable
+`alert` token from tier 2, or a stale channel token will be pushed
+long after the channel is gone. The push differs too:
+`apns-push-type: pushtotalk`, topic `<bundle-id>.voip-ptt` (note the
+suffix — a different topic from the app's own), and a payload naming
+the active speaker. All of this gates against the fake APNs exactly
+as tier 2's did.
+
+**Client side — device-only.** The channel manager, both delegates,
+join/leave, and the transmit arc already exist and are PROVEN on
+hardware in `tools/bindgen/hello/` (2026-08-17: join, ephemeral
+token, transmit, and the system handing over an activated
+`AVAudioSession`, every line a delegate callback arriving in Go).
+Tier 3's client work is productizing that hello into wata-ios and
+wiring it to the real audio thread and the real family room — plus
+`macaudio` yielding session ownership to the framework for the
+duration of a transmission, since `session_ios.go` activates its own
+session today and plan 0008 records that as incompatible with PTT.
+
+**Entitlements and portal work are the owner's**, as in tier 2:
+`com.apple.developer.push-to-talk` plus the `push-to-talk` and
+`audio` background modes, and the App ID capability behind them.
+`tools/ios-device.py` is not edited blind — claiming an entitlement
+the profile does not grant makes signing fail.
+
+**Constraints from the framework that shape the product**, all
+recorded in `apple-dev-tooling.md`: joining requires a foregrounded
+user action, so no server can conscript a phone into a channel and
+the user must reopen the app once after a reboot or an explicit
+Leave; there is one PTT channel system-wide, so the family is ONE
+channel whose descriptor mutates rather than a channel per room; and
+transmit is half-duplex with cellular calls preempting it.
 
 ## Tier 2 in detail
 
