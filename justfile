@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike callback-spike interp-spike
+ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests apns-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike callback-spike interp-spike
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -150,6 +150,13 @@ callback-spike:
 # UI layer: portability/dependency tripwires, the differ's round-trip oracle
 wataui-tests:
     bash tools/wataui-tests.sh
+
+# the APNs pusher (plan 0065 tier 2): JWT header/claims/signature (raw
+# R||S, not ASN.1 DER), request shape, token caching/refresh, and the
+# 200/410/4xx outcomes — all against a local fake APNs server, no Apple
+# credentials or device involved. Portable Go; in ci.
+apns-tests:
+    cd go-pkgs/apns && GOWORK=off go test ./...
 
 # client core: portability tripwire, sync/fixture/ogg byte oracles
 client-tests:
