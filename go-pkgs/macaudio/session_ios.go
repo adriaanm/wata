@@ -29,10 +29,27 @@
 //
 // While the framework owns it:
 //   - sessionActivate() sets NOTHING: no category, no setActive. The session
-//     the framework handed over is already configured for the transmission,
-//     and both calls are exactly what must not race it.
-//   - the engine is STARTED if it is not running, because a transmission that
-//     woke the app finds no engine yet and the capture tap needs one.
+//     the framework handed over is already configured for the episode, and
+//     both calls are exactly what must not race it.
+//   - the engine is RESET — stopped and started — because it configures its IO
+//     unit from the session at start, and a session whose category, mode or
+//     sample rate changed underneath a running engine leaves that unit built
+//     for the old one. That is silence, not an error.
+//
+// A SESSION CHANGE ALSO KILLS WHATEVER IS PLAYING, and it does it silently:
+// the engine stops, the player node keeps a schedule nothing will consume, and
+// scheduleBuffer:completionHandler: never fires. Device log, 2026-08-18:
+//
+//	ptt: playing $fbQ…                                   <- the app scheduled it
+//	macaudio: PushToTalk owns the audio session           <- and THEN this
+//	audio: playback failed: playback of 61440 frames never completed
+//
+// Two things follow, and both are here. Every transition calls
+// noteSessionChanged (engine.go), so a blocked PlayMessage learns at once
+// instead of waiting out dur+5s. And the ORDERING is the client's to get
+// right: wata-ios does not play a woken message until the framework has handed
+// the session over (wata-ios/ptt.scala). Playing first and being interrupted
+// is not a race this file can win on its own.
 //
 // When the framework gives it back (didDeactivateAudioSession), the app is a
 // plain foreground audio app again: our own category is set and activated and
@@ -61,6 +78,7 @@
 package macaudio
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -84,6 +102,11 @@ var (
 	selSetCategoryOptsError = objc.RegisterName("setCategory:withOptions:error:")
 	selSetActiveError       = objc.RegisterName("setActive:error:")
 	selRequestRecordPerm    = objc.RegisterName("requestRecordPermission:")
+	selCategory             = objc.RegisterName("category")
+	selMode                 = objc.RegisterName("mode")
+	selSampleRate           = objc.RegisterName("sampleRate")
+	selOutputChannels       = objc.RegisterName("outputNumberOfChannels")
+	selInputChannels        = objc.RegisterName("inputNumberOfChannels")
 )
 
 // AVAudioSessionCategoryOptions bits (AVAudioSessionTypes.h).
@@ -93,10 +116,26 @@ const (
 )
 
 // How long the app waits for didDeactivateAudioSession after it has told the
-// framework the episode is over. See the header: this bounds one async
-// acknowledgement, so it is generous by three orders of magnitude rather than
-// tuned.
-const pttHandbackGrace = 2 * time.Second
+// framework the episode is over. It bounds one async acknowledgement the app
+// has already requested — not how long audio lasts.
+//
+// It was 2s, and the device log of 2026-08-18 shows 2s is INSIDE the
+// framework's own teardown: the backstop fired, its setActive lost to a
+// session PushToTalk was still tearing down ("Session activation failed"), and
+// didDeactivateAudioSession arrived immediately afterwards. So the grace has
+// to sit outside that teardown, which is the one thing it must not race.
+// Waiting longer costs nothing — the real callback still does the reclaim the
+// moment it lands, and this only decides how long a framework that never calls
+// back can hold the flag.
+const pttHandbackGrace = 10 * time.Second
+
+// How many times, and how far apart, a reclaim is retried. The failure it
+// exists for is transient by construction (the framework is mid-teardown), and
+// an app left with no active session plays nothing at all.
+const (
+	reclaimTries = 4
+	reclaimGap   = 500 * time.Millisecond
+)
 
 // pttOwns is set for as long as the PushToTalk framework owns the audio
 // session. Guarded by pttMu, which also serializes the handoff calls against
@@ -119,27 +158,51 @@ func PTTSessionActivated() {
 	pttEpoch++
 	pttMu.Unlock()
 	log.Printf("macaudio: PushToTalk owns the audio session")
-	startIfStopped()
+	logSessionState("PushToTalk activated")
+	noteSessionChanged()
+	resetForSession()
 }
 
 // PTTSessionDeactivated: the episode is over and the session is the app's
 // problem again. Call it from channelManager:didDeactivateAudioSession: — or,
 // when that never comes, from the grace timer PTTEpisodeEnded arms.
+// The reclaim runs even when the flag was ALREADY down — the backstop may have
+// dropped it and then failed to activate, and this callback is the moment the
+// framework is finally out of the way. An early return there is how the app
+// ends up with no active session at all.
 func PTTSessionDeactivated() {
 	pttMu.Lock()
 	was := pttOwns
 	pttOwns = false
 	pttEpoch++
 	pttMu.Unlock()
-	if !was {
-		return
+	if was {
+		log.Printf("macaudio: PushToTalk released the audio session")
 	}
-	log.Printf("macaudio: PushToTalk released the audio session")
-	if err := sessionActivate(); err != nil {
-		log.Printf("macaudio: reclaiming the audio session failed: %v", err)
-		return
+	noteSessionChanged()
+	reclaimSession()
+}
+
+// reclaimSession takes the session back for the app: our own category, active,
+// and an engine reset so its IO unit is built against the session that is
+// actually current. Retried, because the first attempt can land while
+// PushToTalk is still tearing its own session down.
+func reclaimSession() {
+	var err error
+	for i := 0; i < reclaimTries; i++ {
+		if i > 0 {
+			time.Sleep(reclaimGap)
+		}
+		if err = sessionActivate(); err == nil {
+			logSessionState("reclaimed by wata")
+			resetForSession()
+			return
+		}
+		log.Printf("macaudio: reclaiming the audio session failed (try %d/%d): %v",
+			i+1, reclaimTries, err)
 	}
-	startIfStopped()
+	log.Printf("macaudio: the audio session could not be reclaimed; audio is "+
+		"unavailable until the next session change: %v", err)
 }
 
 // PTTEpisodeEnded: the app has told the framework this episode is finished
@@ -174,6 +237,42 @@ func PTTEpisodeEnded(reason string) {
 	}()
 }
 
+// errDetail spells an NSError out with its DOMAIN and CODE, and with the code
+// as a four-char code when it reads as one. Every AVAudioSession error is
+// documented by its four-char code ('!act' is busy, '!pla' cannot start
+// playing, '!pri' insufficient priority) while its localizedDescription is the
+// same "Session activation failed" for several of them — so the description
+// alone, which is all NSError.Error() prints, does not identify the failure.
+func errDetail(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	var ns *objcrt.NSError
+	if !errors.As(err, &ns) {
+		return err.Error()
+	}
+	out := fmt.Sprintf("%s (%s %d", ns.Description, ns.Domain, ns.Code)
+	if s := fourCC(ns.Code); s != "" {
+		out += " '" + s + "'"
+	}
+	return out + ")"
+}
+
+// fourCC renders a code as its four printable ASCII bytes, or "" when it is
+// not one.
+func fourCC(code int) string {
+	if code <= 0 || code > 0x7fffffff {
+		return ""
+	}
+	b := []byte{byte(code >> 24), byte(code >> 16), byte(code >> 8), byte(code)}
+	for _, c := range b {
+		if c < 0x20 || c > 0x7e {
+			return ""
+		}
+	}
+	return string(b)
+}
+
 // pttOwned answers whether the framework holds the session right now.
 func pttOwned() bool {
 	pttMu.Lock()
@@ -181,20 +280,51 @@ func pttOwned() bool {
 	return pttOwns
 }
 
-// startIfStopped restarts the shared engine when it exists and is not
-// running — the session under it changed, which is what stops it.
-func startIfStopped() {
+// resetForSession rebuilds the engine's relationship with the audio session
+// that is now current. It is deliberately a full STOP and start rather than
+// "start it if it stopped": the engine configures its IO unit from the session
+// at start, and a session whose category, mode or sample rate changed
+// underneath a RUNNING engine leaves that unit configured for the old one —
+// which is silence rather than an error. Stopping first is also what clears
+// the player node, whose scheduled buffer the session change stranded (the
+// same reset PlayMessage does for the capture case, and for the same reason:
+// the completion handler never fires).
+func resetForSession() {
 	e := eng
 	if e == nil {
 		return
 	}
 	inPool(func() {
+		e.player.Stop()
 		if e.eng.Running() {
-			return
+			e.eng.Stop()
 		}
 		if ok, err := e.eng.StartAndReturnError(); !ok {
-			log.Printf("macaudio: engine restart after a session handoff: %v", err)
+			log.Printf("macaudio: engine restart after a session change: %v", err)
 		}
+	})
+}
+
+// logSessionState prints what the session actually IS at a handoff. The two
+// directions are not symmetric — the framework configures a session for a
+// transmission and another for an incoming message, and neither is the app's
+// own PlayAndRecord+DefaultToSpeaker — so a category, a mode and a sample rate
+// in the log is what turns "no audio" into a diagnosis. Best-effort: a missing
+// selector prints nothing rather than failing anything.
+func logSessionState(what string) {
+	inPool(func() {
+		s := objc.ID(objc.GetClass("AVAudioSession")).Send(selSharedInstance)
+		if s == 0 {
+			return
+		}
+		log.Printf("macaudio: session %s: category=%s mode=%s rate=%.0f "+
+			"outCh=%d inCh=%d",
+			what,
+			objcrt.GoString(s.Send(selCategory)),
+			objcrt.GoString(s.Send(selMode)),
+			objc.Send[float64](s, selSampleRate),
+			objc.Send[int](s, selOutputChannels),
+			objc.Send[int](s, selInputChannels))
 	})
 }
 
@@ -225,12 +355,12 @@ func sessionActivate() error {
 		var catErr objcrt.ErrOut
 		if !objc.Send[bool](s, selSetCategoryOptsError, category,
 			uintptr(optAllowBluetooth|optDefaultToSpeaker), catErr.Ptr()) {
-			out = fmt.Errorf("macaudio: setCategory PlayAndRecord: %w", catErr.Err())
+			out = fmt.Errorf("macaudio: setCategory PlayAndRecord: %s", errDetail(catErr.Err()))
 			return
 		}
 		var actErr objcrt.ErrOut
 		if !objc.Send[bool](s, selSetActiveError, true, actErr.Ptr()) {
-			out = fmt.Errorf("macaudio: setActive: %w", actErr.Err())
+			out = fmt.Errorf("macaudio: setActive: %s", errDetail(actErr.Err()))
 			return
 		}
 		// Fire-and-forget: the answer is only logged (a press before the grant

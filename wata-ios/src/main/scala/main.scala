@@ -451,6 +451,8 @@ object Pump:
     case _: EvSendFailed =>
       withWata(st, WataLogic.notifySend(st.wata, true))
     case pe: EvPlaybackError =>
+      // a PTT episode's own playback failing must not be reported as played.
+      PttChan.notePlayFailed()
       withWata(st, WataLogic.notifyPlayError(st.wata, pe.fetchFailed))
     case ob: EvOutbox =>
       PumpSt(st.wata, st.last, st.quitArm, st.lastMs, st.quit, ob.unsent, ob.undelivered, st.marks)
@@ -470,7 +472,13 @@ object Pump:
 
   def onAudioEvt(st: PumpSt, e: AudioEvt, ctx: FrameCtx): PumpSt =
     if isEchoEvt(e) then st
-    else withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
+    else
+      if isPlayFail(e) then PttChan.notePlayFailed()
+      withWata(st, WataLogic.onAudioEvent(st.wata, e, ctx))
+
+  def isPlayFail(e: AudioEvt): Boolean = e match
+    case _: AePlaybackError => true
+    case _                  => false
 
   def isEchoEvt(e: AudioEvt): Boolean = e match
     case _: AeEchoRecording => true

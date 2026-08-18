@@ -56,6 +56,12 @@ import language.experimental.saferExceptions
  *    carries the push's own ARRIVAL time (`pttPlayAgeMs`) and the window is
  *    measured from that, not from the frame that drained it — a pump that
  *    starts five minutes later must not suddenly play a stale message.
+ *  - **Nothing plays before the session handover.** Answering the push only
+ *    ASKS for the audio session; it is activated later, on
+ *    `didActivateAudioSession`, and that activation reconfigures the session
+ *    under the running engine — which stops the engine and strands whatever
+ *    was scheduled, with no error and no completion handler. So the play waits
+ *    for the handover as well as for the event.
  *  - **The fetch IS the sync.** The event may not be in the local timeline
  *    yet; when the sync brings it in it appears in the snapshot with its mxc
  *    url, which is what playing needs anyway. So the resolve is retried once
@@ -116,6 +122,11 @@ object PttChan:
   private val speakingC: sgo.Atomic[Boolean] = sgo.atomic(false)
   /** the clock reading at which the episode is ended regardless. */
   private val episodeUntilC: sgo.Atomic[Long] = sgo.atomic(0L)
+  /** has the framework handed the audio session over? Nothing may play before
+   *  it has — see `resolve`. */
+  private val sessionOnC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  /** the playback this episode started reported a failure. */
+  private val failedC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
   /** a session started (or restarted onto another server): the new server
    *  knows nothing about this device's channel. */
@@ -164,7 +175,14 @@ object PttChan:
       tokenC.set("")
       doneC.set("")
       leaveC.set(true)
+      sessionOnC.set(false)
       if speakingC.get() then finish("the channel was left")
+      st
+    else if e == "audio session activated" then
+      sessionOnC.set(true)
+      st
+    else if e == "audio session deactivated" then
+      sessionOnC.set(false)
       st
     else st
 
@@ -230,19 +248,42 @@ object PttChan:
       // the client could be doing is more urgent than this one event.
       Runtime.retryNow(h.client)
 
-  /** the message is playable as soon as the sync puts it in the snapshot with
-   *  its mxc url — that IS the fetch. Retried every frame until the window
-   *  runs out. */
+  /** TWO things have to be true before a woken message may play, and the
+   *  second one is not obvious.
+   *
+   *  The message must be in the snapshot with its mxc url — the sync putting
+   *  it there IS the fetch, retried every frame.
+   *
+   *  And the FRAMEWORK MUST HAVE HANDED THE AUDIO SESSION OVER. Answering the
+   *  push with an active speaker only ASKS for the session; the activation
+   *  arrives later, on `channelManager:didActivateAudioSession:`. Playing
+   *  before it lands does not merely play on the wrong session — the
+   *  activation reconfigures the session under the running engine, which stops
+   *  the engine and strands the buffer the player node had scheduled, and its
+   *  completion handler never fires. Device log 2026-08-18: `ptt: playing`,
+   *  then `PushToTalk owns the audio session`, then
+   *  `playback of 61440 frames never completed`, and nothing audible.
+   *
+   *  Both waits share one deadline. A handover that never arrives is a
+   *  diagnosable give-up, not a fallback onto a session that is about to be
+   *  taken away — and the alert push still delivers the message. */
   def resolve(h: Handle, st: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
     val room = playRoomC.get()
     if room == "" then st
     else if nowMs >= playUntilC.get() then
-      finish("gave up on " + playEventC.get() + " (not synced in time)")
+      finish("gave up on " + playEventC.get() + " (" + whyStuck() + ")")
       st
+    else if !sessionOnC.get() then st
     else
       val url = mxcOf(ctx.snap.conversations, room, playEventC.get())
       if url == "" then st
       else play(h, st, ctx, room, playEventC.get(), url)
+
+  /** which of the two waits ran out — the difference matters and costs one
+   *  line to say. */
+  def whyStuck(): String =
+    if !sessionOnC.get() then "the audio session was never handed over"
+    else "not synced in time"
 
   /** play it, on the session the framework activated for exactly this, and
    *  open its conversation — the user woken by a walkie-talkie should find
@@ -252,6 +293,7 @@ object PttChan:
   def play(h: Handle, st: PumpSt, ctx: FrameCtx, room: String, event: String,
            url: String): PumpSt =
     playRoomC.set("")
+    failedC.set(false)
     var out = Pump.openRoom(st, ctx, room)
     Runtime.sendAction(h.client, ActPlay(url))
     out = Pump.withWata(out, WataLogic.withPlaying(out.wata, true, room, event))
@@ -260,11 +302,23 @@ object PttChan:
 
   /** the episode is over once the playback the app started has stopped — the
    *  audio thread reports both the end and the failure, and both clear
-   *  `playing`. The cap catches a playback that reports neither. */
+   *  `playing`. The cap catches a playback that reports neither.
+   *
+   *  The line says which of the two it was. A `speaker done (played)` printed
+   *  over a playback that errored is exactly the green that overstates what
+   *  ran, and this log is the only surface the receive half has. */
   def endStep(st: PumpSt, nowMs: Long): Unit =
     if !speakingC.get() then ()
-    else if playRoomC.get() == "" && !st.wata.playing then finish("played")
+    else if playRoomC.get() == "" && !st.wata.playing then
+      if failedC.get() then finish("playback FAILED") else finish("played")
     else if nowMs >= episodeUntilC.get() then finish("the episode outran its cap")
+
+  /** the runtime or the audio thread reported a failed playback. Called from
+   *  the pump's two drains, because neither the fetch failure (`EvPlaybackError`)
+   *  nor the audio-thread failure (`AePlaybackError`) is distinguishable from a
+   *  clean finish by the applet state they leave behind — both just clear
+   *  `playing`. */
+  def notePlayFailed(): Unit = if speakingC.get() then failedC.set(true)
 
   /** end the episode: clear the speaker, which takes it off the system UI and
    *  releases the audio session back to the app. Every exit comes through
@@ -274,6 +328,7 @@ object PttChan:
     playRoomC.set("")
     playEventC.set("")
     speakingC.set(false)
+    failedC.set(false)
     go.iosshell.pttSpeakerStopped()
 
   def mxcOf(xs: List[Conversation], roomId: String, eventId: String): String = xs match

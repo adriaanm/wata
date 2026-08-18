@@ -90,6 +90,39 @@ var (
 	pending objc.ID
 )
 
+// The audio session generation. On iOS the AVAudioSession can be reconfigured
+// underneath a running engine by something that is not this package —
+// PushToTalk activating its own session for an episode, and handing it back
+// afterwards. That stops the engine and strands whatever the player node had
+// scheduled: its completion handler never fires (the same failure the reset in
+// PlayMessage exists for, arriving from the other direction). So every session
+// transition closes the current watch channel, and a blocked playback learns
+// about it immediately instead of waiting out its timeout.
+//
+// Nothing outside session_ios.go ever calls noteSessionChanged, so on macOS the
+// channel is created once and never closed.
+var (
+	sessMu    sync.Mutex
+	sessWatch = make(chan struct{})
+)
+
+// sessionWatch is a channel closed by the NEXT session transition. Take it
+// before scheduling anything and select on it while waiting.
+func sessionWatch() <-chan struct{} {
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	return sessWatch
+}
+
+// noteSessionChanged wakes everything waiting on the current generation and
+// arms the next.
+func noteSessionChanged() {
+	sessMu.Lock()
+	close(sessWatch)
+	sessWatch = make(chan struct{})
+	sessMu.Unlock()
+}
+
 // SetupMixer prepares the audio hardware. It is called EXACTLY ONCE, at audio
 // thread start — that is the device contract (per-recording route switching
 // crashed the BQ268's ADSP) and this package keeps it, building the engine and
@@ -240,6 +273,9 @@ func PlayMessage(pcm []byte, vol int) (int, error) {
 
 	t0 := time.Now()
 	done := make(chan struct{})
+	// Taken BEFORE the buffer is scheduled: a session change between here and
+	// the select below closes it, and this playback is dead either way.
+	sess := sessionWatch()
 	var scheduleErr error
 	inPool(func() {
 		if pending != 0 {
@@ -284,6 +320,14 @@ func PlayMessage(pcm []byte, vol int) (int, error) {
 	dur := time.Duration(frames) * time.Second / SampleRate
 	select {
 	case <-done:
+	case <-sess:
+		// The audio session was reconfigured under the running engine (on iOS
+		// that is PushToTalk taking it, or handing it back). The engine stops,
+		// the player node keeps a schedule nothing will consume, and the
+		// completion handler NEVER fires — so waiting out the timeout below
+		// would spend dur+5s to learn what is already known.
+		setPlayStats(fmt.Sprintf("frames=%d SESSION-CHANGED after %.1fs", frames, time.Since(t0).Seconds()))
+		return 0, fmt.Errorf("macaudio: the audio session changed under the playback of %d frames", frames)
 	case <-time.After(dur + 5*time.Second):
 		setPlayStats(fmt.Sprintf("frames=%d TIMEOUT after %.1fs", frames, time.Since(t0).Seconds()))
 		return 0, fmt.Errorf("macaudio: playback of %d frames never completed", frames)
