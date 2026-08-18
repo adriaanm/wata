@@ -536,3 +536,85 @@ no longer justified by the decode line.
 Remaining device legs are tier 3's alone: transmit from the system UI,
 the session handoff under a real transmission, leave, restoration, and
 the receive half once it lands.
+
+### 2026-08-18 — tier 3, the receive half made a BURST rather than a message
+
+Owner's hardware run: four voice messages sent in quick succession from
+the BQ268 to the iPhone. Only the first played. The other three sat
+until `speaker done #4 (gave up on $kxJ8… (no audio session for this
+push))` — and the owner then played all three by hand, fine. So the
+media was good and the auto-play gating was wrong, in two independent
+ways:
+
+1. **The readiness gate was per PUSH, the activation is per SPEAKER.**
+   `pttPlayReady` waited for a `didActivateAudioSession` attributable
+   to that push. Answering a second push while the speaker is still up
+   produces no new activation, so pushes #2–#4 waited out the window.
+   The commit that introduced it (`c1d653e`) was fixing a real bug —
+   an activation reconfigures the session under the running engine, so
+   a message that plays across one is silently killed — which is why
+   this was not reverted to "is a session active".
+2. **`arm` dropped messages: the LAST push won.** Each push overwrote
+   the single armed room/event, so #1–#3 were never candidates. With
+   push-to-talk, four in a row is the ordinary case.
+
+The fix models the receive half as **one speaker episode draining a
+FIFO of messages**:
+
+- An EPISODE is one raised speaker, not one push (`iosshell/ptt.go`:
+  `pttEpisodeSeq`/`pttEpisodeLive`/`pttEpisodeGen`). The first push
+  raises it, later pushes JOIN it, and it comes down when the app says
+  the burst is done. `PTTPlayReady` now asks whether the EPISODE's
+  handover has landed — so a message joining a live episode is ready at
+  once (same session, no boundary crossed) while a push arriving after
+  the speaker came down opens a new episode and waits for its own fresh
+  activation. Both halves of the original bug are closed by the same
+  change of unit. `PTTSpeakerStopped`'s stale-drop now compares episode
+  ids, which is what it always meant to compare.
+- The queue and its deadlines are PORTABLE and live in wataclient
+  (`playq.scala`), because that is the part that failed and it is
+  testable with no phone: `wata-fb playqtest`, eight scripted bursts
+  over a virtual clock, byte-diffed by `just client-tests` (check 9/9).
+  Drilled: reinstating last-one-wins in `PlayQ.offer` makes scenario 2
+  fail loudly, so the new assertion can fail.
+- **A message's window counts only its own waiting.** `PLAY_WINDOW_MS`
+  is charged to a message only while it is at the HEAD of the queue
+  with nothing playing, plus the age it arrived with. Four messages
+  whose playback together outlasts the window therefore all play (the
+  oracle's scenario 2: 4×8s of audio against a 20s window). A message
+  that never resolves costs itself the window and the ones behind it
+  nothing.
+- `EPISODE_MAX_MS` became `PlayQ.NO_PROGRESS_MS`, renewed by every
+  offer, start and finish: a draining burst never reaches it, and only
+  a playback that reports neither an end nor a failure does.
+- One race closed while in there: a push landing between the pump's
+  drain and its decision to end the episode used to be stranded (no
+  speaker, no session, a 20s give-up). `PTTPlayPending` is asked before
+  any episode is closed.
+- The log reads as a burst: `incoming push #2 ep=1 …`, `play #2 ep=1
+  …`, `playing $ev (2 more queued)`, a per-message `gave up on $ev
+  (…)` that no longer ends the episode, and one closing `speaker done
+  #1 (played 3, gave up on 1)` — counts, never a bare "played" over a
+  failure.
+
+Verified here: `just ci` (0, includes `fb-smoke` and the new oracle),
+`just ios-build-check` (0), `just ios-interptest` (0), `just ios-smoke`
+(0, inbound latency 0.00s — unperturbed), `just ios-push-smoke` (0).
+
+**Asserted but NOT observed, and the reviewer's device leg should watch
+for it**: that the framework issues a fresh `didActivateAudioSession`
+for the SECOND and later episodes. We have never seen a
+`didDeactivateAudioSession` at all — the `PushToTalk released the audio
+session` line in the 2026-08-18 log can equally be `macaudio`'s own
+grace-timer reclaim (`PTTEpisodeEnded`). If the framework neither
+deactivates nor re-activates after the app clears the speaker, every
+episode after the first will give up with "no audio session for this
+episode" and the log will say so plainly. That failure is
+self-correcting per burst (the speaker comes down, the next push opens
+a fresh episode), and the strict gate is deliberate: playing onto a
+session that is about to be reconfigured is the failure that produces
+silence with no error at all.
+
+Next: the owner's device leg for the receive half — a burst of three or
+four from the BQ268 with the phone locked, and `just ios-log` showing
+one `speaker done` per burst with the counts adding up.

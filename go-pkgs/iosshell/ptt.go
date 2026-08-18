@@ -31,16 +31,24 @@
 // restoration join lands before the audio thread has even started, and macaudio
 // has to know before it builds its engine.
 //
-// AN EPISODE ENDS WHEN THE APP SAYS SO. Reporting an active remote participant
-// is what makes the system show "<name> speaking" and hold the audio session
-// activated, and the framework holds both until the app clears the participant
-// again (PTTSpeakerStopped). Nothing times out on its own: on hardware
-// 2026-08-18 five incoming pushes produced five `audio session activated` and
-// not one `deactivated`, because this file never cleared the speaker. So the
-// receive half owns the whole episode — answer the push, play the message,
-// then clear the speaker — and macaudio is told the episode is over at the
-// same moment, so its ownership flag cannot latch on a callback that may never
-// arrive (go-pkgs/macaudio/session_ios.go).
+// AN EPISODE IS ONE RAISED SPEAKER, NOT ONE PUSH, AND IT ENDS WHEN THE APP SAYS
+// SO. Reporting an active remote participant is what makes the system show
+// "<name> speaking" and hold the audio session activated, and the framework
+// holds both until the app clears the participant again (PTTSpeakerStopped).
+// Nothing times out on its own: on hardware 2026-08-18 five incoming pushes
+// produced five `audio session activated` and not one `deactivated`, because
+// this file never cleared the speaker.
+//
+// A push arriving while that speaker is still up therefore JOINS the episode —
+// no second speaker, no second activation — which is why pttEpisodeSeq, not
+// pttPushSeq, is the identity the app ends things by, and why PTTPlayReady
+// asks about the episode's handover rather than a per-push one. Four messages
+// in a row is what a walkie-talkie does; on hardware 2026-08-18 the per-push
+// version of both answers played the first and gave up on the other three.
+// So the receive half owns the whole burst — answer every push, play them in
+// order on the one session, then clear the speaker — and macaudio is told the
+// episode is over at the same moment, so its ownership flag cannot latch on a
+// callback that may never arrive (go-pkgs/macaudio/session_ios.go).
 //
 // TALKING is a state, not an edge: recording may only start once the framework
 // has BOTH begun the transmission and handed over an activated session, and
@@ -109,13 +117,25 @@ var (
 	// taken" is unambiguous — push.go's pushCur idiom).
 	pttPlays   []pttPlay
 	pttPlayCur pttPlay
-	// EPISODE IDENTITY. pttPushSeq numbers incoming pushes and is the id of
-	// the episode the newest one opened; pttActivations counts
-	// didActivateAudioSession callbacks. Together they answer the two
-	// questions a rapid-fire arrival makes real: is the session that is active
-	// right now the one THIS push asked for, and is the episode I am about to
-	// end still the current one?
+	// EPISODE IDENTITY. An EPISODE is one raised speaker, not one push: the
+	// first push raises it, every push arriving while it is still up joins it,
+	// and it comes down when the app says the whole burst is done. So
+	// pttPushSeq only numbers pushes for the log, while pttEpisodeSeq is the
+	// identity that matters — the id the app names when it ends an episode,
+	// and the thing a stale end is checked against.
+	//
+	// pttEpisodeLive is what makes "joins it" expressible: it is true from the
+	// push that raised the speaker until PTTSpeakerStopped clears it.
+	// pttActivations counts didActivateAudioSession callbacks and
+	// pttEpisodeGen is that count as the episode opened, which together answer
+	// the question a rapid-fire arrival makes real: has THIS episode's session
+	// handover landed? A push joining a live episode inherits the answer,
+	// because the session it will play on is the one already under it and no
+	// activation boundary is crossed.
 	pttPushSeq     uint64
+	pttEpisodeSeq  uint64
+	pttEpisodeLive bool
+	pttEpisodeGen  uint64
 	pttActivations uint64
 	// foreground? A channel may only be joined from the foreground
 	// (PTChannelError.appNotForeground), so the app tracks its own state
@@ -139,13 +159,11 @@ type pttPlay struct {
 	roomID  string
 	eventID string
 	at      time.Time
-	// the episode this push opened, and the activation count at the moment it
-	// arrived. The session that will carry it is the NEXT activation after
-	// that count — not whichever session happens to be active when the pump
-	// gets round to the request, which may be a previous episode's, already
-	// on its way out.
-	seq       uint64
-	activeGen uint64
+	// seq numbers the push (for the log); episode is the raised speaker it
+	// belongs to, which is what the app names when it ends the episode. Every
+	// push of one burst carries the SAME episode.
+	seq     uint64
+	episode uint64
 }
 
 // pttMethods are the two lifecycle callbacks the join gate needs, installed on
@@ -226,6 +244,7 @@ func pttStart() {
 			pttJoined = false
 			pttTransmitting = false
 			pttSessionOn = false
+			pttEpisodeLive = false
 			talking := pttTalking
 			pttTalking = false
 			pttMu.Unlock()
@@ -329,12 +348,21 @@ func pttStart() {
 			}
 			pttMu.Lock()
 			pttPushSeq++
+			// A speaker that is already up stays up and its session stays
+			// activated, so this push JOINS that episode; only a push that
+			// finds the speaker DOWN opens a new one, and only a new one has
+			// its own session handover to wait for.
+			if !pttEpisodeLive {
+				pttEpisodeLive = true
+				pttEpisodeSeq++
+				pttEpisodeGen = pttActivations
+			}
 			play := pttPlay{
-				roomID:    dictString(objc.ID(payload.ID), "room_id"),
-				eventID:   dictString(objc.ID(payload.ID), "event_id"),
-				at:        time.Now(),
-				seq:       pttPushSeq,
-				activeGen: pttActivations,
+				roomID:  dictString(objc.ID(payload.ID), "room_id"),
+				eventID: dictString(objc.ID(payload.ID), "event_id"),
+				at:      time.Now(),
+				seq:     pttPushSeq,
+				episode: pttEpisodeSeq,
 			}
 			pttMu.Unlock()
 			// The push names the channel it is for, and on a launch the push
@@ -350,8 +378,8 @@ func pttStart() {
 			pttMu.Lock()
 			pttPlays = append(pttPlays, play)
 			pttMu.Unlock()
-			pttNote("incoming push #%d (%s) room=%s event=%s",
-				play.seq, who, play.roomID, play.eventID)
+			pttNote("incoming push #%d ep=%d (%s) room=%s event=%s",
+				play.seq, play.episode, who, play.roomID, play.eventID)
 			p := pt.GetPTParticipantClass().Alloc().InitWithNameImage(who, pt.UIImage{})
 			return pt.GetPTPushResultClass().PushResultForActiveRemoteParticipant(p)
 		},
@@ -544,37 +572,57 @@ func TakePTTPlay() string {
 	pttPlayCur = pttPlays[0]
 	pttPlays = pttPlays[1:]
 	return "play #" + strconv.FormatUint(pttPlayCur.seq, 10) +
+		" ep=" + strconv.FormatUint(pttPlayCur.episode, 10) +
 		" room=" + pttPlayCur.roomID + " event=" + pttPlayCur.eventID
 }
 
-// PTTPlayEpisode is the episode id of the push TakePTTPlay last returned. It
-// goes back into PTTSpeakerStopped, so an episode can only ever end itself.
+// PTTPlayPending reports whether any pushes are still waiting for the pump to
+// drain them. The pump asks before it ends an episode: a push that landed
+// after this frame's drain belongs to the episode about to be closed, and
+// closing it would strand that message with no speaker on screen and no
+// session under it.
+func PTTPlayPending() bool {
+	pttMu.Lock()
+	defer pttMu.Unlock()
+	return len(pttPlays) > 0
+}
+
+// PTTPlayEpisode is the episode id of the push TakePTTPlay last returned —
+// the raised speaker it belongs to, shared with every other push of the same
+// burst. It goes back into PTTSpeakerStopped, so an episode can only ever end
+// itself.
 func PTTPlayEpisode() int {
 	pttMu.Lock()
 	defer pttMu.Unlock()
-	return int(pttPlayCur.seq)
+	return int(pttPlayCur.episode)
 }
 
 // PTTPlayReady reports whether the audio session that is active right now is
-// the one THIS push asked for: activated, and activated AFTER the push
-// arrived.
+// THIS EPISODE's: activated, and activated after the episode opened.
 //
-// "Is a session active" is not enough, and that is the rapid-fire bug. A push
-// answered while the previous episode's session is still up finds
-// pttSessionOn already true, plays on it, and is killed a moment later when
-// that older episode's deactivation lands — device log 2026-08-18:
+// The gate is per EPISODE, not per push, and the difference is the whole
+// rapid-fire story. Per push it was wrong in both directions:
 //
-//	ptt: playing $kyO5…
-//	macaudio: PushToTalk released the audio session
-//	audio: playback failed: the audio session changed under the playback
+//   - "is a session active" answers yes to a push answered while the PREVIOUS
+//     episode's session is still up. It plays on it, and is killed a moment
+//     later when that older episode's deactivation lands — device log
+//     2026-08-18: `ptt: playing $kyO5…`, `PushToTalk released the audio
+//     session`, `the audio session changed under the playback`.
+//   - "an activation attributable to THIS PUSH" answers no to every push after
+//     the first of a burst, because a speaker that is already up produces no
+//     new activation. Device log 2026-08-18: four messages, one played, three
+//     waited out their window and gave up with "no audio session for this
+//     push".
 //
-// Counting activations makes "the session for this push" expressible, and the
-// count is taken in the push callback rather than when the pump drains it, so
-// an activation that arrives in between is correctly attributed.
+// The episode is what the session actually belongs to: one raised speaker, one
+// activation, however many pushes join it. A push that opens a NEW episode
+// waits for its own fresh activation — the speaker came down, the framework
+// took the session back, and playing across that boundary is what the first
+// bullet describes.
 func PTTPlayReady() bool {
 	pttMu.Lock()
 	defer pttMu.Unlock()
-	return pttSessionOn && pttActivations > pttPlayCur.activeGen
+	return pttEpisodeLive && pttSessionOn && pttActivations > pttEpisodeGen
 }
 
 // PTTPlayRoom is the room id of the push TakePTTPlay last returned.
@@ -622,24 +670,28 @@ func PTTPlayAgeMs() int {
 // hardware behaviour recorded in this file's header.
 //
 // AN EPISODE MAY ONLY END ITSELF. `episode` is the id PTTPlayEpisode handed
-// out; if a newer push has arrived since, the speaker on screen and the
-// session in play belong to THAT episode and this call does nothing. Without
-// the check a failed or finished playback tears down the episode that
-// succeeded it — which is half of the rapid-fire failure, the other half being
-// the session generation PTTPlayReady counts.
+// out — the raised speaker, not the push. If the app has since raised a NEW
+// speaker (this one came down and another push arrived), the speaker on screen
+// and the session in play belong to that episode and this call does nothing.
+// Without the check a failed or finished playback tears down the episode that
+// succeeded it.
 //
 // macaudio is told in the same breath and unconditionally, including when
 // there is no manager at all: its ownership flag must come back even if the
 // framework's own callback does not.
 func PTTSpeakerStopped(episode int) {
 	pttMu.Lock()
-	cur := pttPushSeq
-	pttMu.Unlock()
+	cur := pttEpisodeSeq
 	if episode > 0 && uint64(episode) != cur {
+		pttMu.Unlock()
 		pttNote("episode #%d is over, but #%d owns the speaker now — leaving it",
 			episode, cur)
 		return
 	}
+	// The speaker is coming down, so the NEXT push opens a fresh episode and
+	// waits for its own session handover.
+	pttEpisodeLive = false
+	pttMu.Unlock()
 	m, why := pttCurrent()
 	if why == "" {
 		inPTTPool(func() {

@@ -72,6 +72,13 @@ object Main:
     // the txn-seed oracle (plan 0048): restart may not replay txn ids; run by
     // client-tests against tools/wataclient-txn.expected.txt.
     else if args.length > 0 && args(0) == "txntest" then TxnTest.run()
+    // the woken-playback queue oracle (plan 0065 tier 3): a burst of pushes
+    // drains in arrival order on one audio episode, and a message's window
+    // counts only its own waiting. Pure scheduling, so it is pinned here
+    // rather than only on a phone; run by client-tests against
+    // tools/wataclient-playq.expected.txt.
+    else if args.length > 0 && args(0) == "playqtest" then
+      printReport(PlayQOracle.report())
     else if args.length > 1 && args(0) == "syncfix" then
       SyncFixDriver.run(args)
     else if args.length > 2 && args(0) == "integ" then

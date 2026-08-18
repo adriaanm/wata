@@ -1,0 +1,62 @@
+== playq: the constants ==
+  PLAY_WINDOW_MS=20000
+  NO_PROGRESS_MS=300000
+1 one message, resolved and played
+[  0.0s] push $a1 age=0ms depth=1
+[  0.0s] playing $a1
+[  3.0s] done $a1
+[  3.0s] burst done (played 1)
+2 a burst of four outlasting the window
+[  0.0s] push $b1 age=0ms depth=1
+[  0.0s] playing $b1
+[  0.5s] push $b2 age=0ms depth=1
+[  0.7s] push $b3 age=0ms depth=2
+[  1.0s] push $b4 age=0ms depth=3
+[  8.0s] done $b1
+[  8.0s] playing $b2 (2 more queued)
+[ 16.0s] done $b2
+[ 16.0s] playing $b3 (1 more queued)
+[ 24.0s] done $b3
+[ 24.0s] playing $b4
+[ 32.0s] done $b4
+[ 32.0s] burst done (played 4)
+3 the head never resolves, the next still plays
+[  0.0s] push $c1 age=0ms depth=1
+[  0.2s] push $c2 age=0ms depth=2
+[ 20.2s] gave up on $c1
+[ 20.5s] playing $c2
+[ 22.5s] done $c2
+[ 22.5s] burst done (played 1, gave up on 1)
+4 one arrives already past the window
+[  0.0s] push $d1 age=25000ms depth=1
+[  0.0s] push $d2 age=0ms depth=2
+[  0.0s] gave up on $d1
+[  0.2s] playing $d2
+[  2.2s] done $d2
+[  2.2s] burst done (played 1, gave up on 1)
+5 the session handover never arrives
+[  0.0s] push $e1 age=0ms depth=1
+[  0.5s] push $e2 age=0ms depth=2
+[ 20.2s] gave up on $e1
+[ 40.2s] gave up on $e2
+[ 40.2s] burst done (gave up on 2)
+6 a late handover, inside the window
+[  0.0s] push $f1 age=0ms depth=1
+[  0.5s] push $f2 age=0ms depth=2
+[ 12.0s] playing $f1 (1 more queued)
+[ 14.0s] done $f1
+[ 14.0s] playing $f2
+[ 16.0s] done $f2
+[ 16.0s] burst done (played 2)
+7 a failed playback is not a played one
+[  0.0s] push $g1 age=0ms depth=1
+[  0.0s] playing $g1
+[  0.2s] push $g2 age=0ms depth=1
+[  2.0s] FAILED $g1
+[  2.0s] playing $g2
+[  4.0s] done $g2
+[  4.0s] burst done (played 1, 1 FAILED)
+8 a playback that never ends hits the no-progress cap
+[  0.0s] push $h1 age=0ms depth=1
+[  0.0s] playing $h1
+[300.0s] burst wedged (nothing played)

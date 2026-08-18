@@ -617,6 +617,45 @@ bytes over a socket":
   thread that actually *consumes* them and drives real audio hardware
   lives in `wata-fb` (outside this module's scope), not here.
 
+## The woken-playback queue (`playq.scala`)
+
+`PlayQ` decides which of several messages a client was woken to play
+plays next, when one has waited too long to be worth playing live at
+all, and when the burst is over. Pure scheduling over a clock and a
+list — no audio, no platform, no session — which is why it is here and
+not in the client that has all three.
+
+Its only consumer today is wata-ios's PushToTalk receive half, where the
+platform forces the shape: the system raises ONE speaker and activates
+ONE audio session for a burst of pushes, and every message in that burst
+has to play on it, in order, one at a time. Two rules are the whole
+point, and both were got wrong on hardware first (2026-08-18):
+
+- **The burst is the unit, not the message.** A message arriving while
+  another is playing is appended; nothing is ever displaced by something
+  newer. Four voice messages in a row is what a walkie-talkie does. The
+  last-one-wins version played one of four.
+- **A message's window counts only its own waiting.**
+  `PLAY_WINDOW_MS` exists so a message does not play out of nowhere long
+  after it was sent — a phone that was asleep, media that never
+  resolves, a session handover that never arrives. It is charged against
+  a message only while that message is at the HEAD of the queue with
+  nothing playing, plus the age it arrived with (real waiting the client
+  did not observe). So a burst whose playback together outlasts the
+  window still plays in full, and a message that never resolves costs
+  itself the window and the ones behind it nothing.
+
+`NO_PROGRESS_MS` is a wedge-breaker, not a limit on burst length: every
+offer, start and finish renews it, so only a playback that reports
+neither an end nor a failure can reach it — which would otherwise hold a
+speaker on screen and an audio session out of the app's hands for the
+life of the process.
+
+`playqoracle.scala` drives it over a virtual clock with the caller's own
+loop written out once, so the composed behaviour is pinned rather than
+each function in isolation: `wata-fb playqtest`, byte-diffed against
+`tools/wataclient-playq.expected.txt` by `just client-tests`.
+
 ## `oracle.scala` and `capabilities.scala`
 
 - **`capabilities.scala`** is the capability seam: `HttpDo`
@@ -700,6 +739,8 @@ checked against a separately pinned expected-output file in CI.
 | `mhttp.scala` | 225 | The actual HTTP call surface for every Matrix endpoint this client uses, with 429 retry. |
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |
 | `outbox.scala` | 465 | The bounded, persistent outbox: the `OutboxStore` capability, `MemOutbox`, the classified send/retry policy, and the entry format. |
+| `playq.scala` | 166 | The woken-playback queue: a burst of messages a push woke the client to play, drained in arrival order, with the per-message live-play window and the no-progress cap. |
+| `playqoracle.scala` | 183 | The caller's serve loop over a virtual clock, eight scripted bursts, rendered as a deterministic transcript for CI pinning. |
 | `oracle.scala` | 398 | Portable byte-level self-test report (CRC, Ogg round trip, `Bytes`/`IArray` conformance) plus a foreign-container fixture walker. |
 | `runtime.scala` | 796 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |
 | `session.scala` | 41 | `Session` record (stored login credentials) and its JSON (de)serialization. |

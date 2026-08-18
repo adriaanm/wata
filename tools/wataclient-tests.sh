@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The wataclient library gate — eight checks over the portable client core.
+# The wataclient library gate — nine checks over the portable client core.
 #
 #   1. PORTABILITY TRIPWIRE: wataclient sources must have ZERO `go.*`
 #      references. The core is portable by construction: it reaches hardware,
@@ -41,6 +41,17 @@
 #      dedup into an old event. Byte-diffed against
 #      tools/wataclient-txn.expected.txt.
 #
+#   9. WOKEN-PLAYBACK QUEUE ORACLE: `wata-fb playqtest` runs
+#      PlayQOracle.report() (plan 0065 tier 3) — a burst of pushes drains in
+#      arrival order on one audio episode, a message's window counts only its
+#      own waiting (so four messages whose playback outlasts the window all
+#      play), a failed playback is never counted as played, and the
+#      no-progress cap ends a wedged burst. Byte-diffed against
+#      tools/wataclient-playq.expected.txt. wata-ios's PushToTalk receive half
+#      is the only consumer today and cannot be gated on a machine with no
+#      phone; the scheduling it got wrong on hardware is pure, and is gated
+#      here.
+#
 #   tools/wataclient-tests.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -49,7 +60,7 @@ WATA="$(pwd)"
 . "$WATA/tools/emitdir.sh"                        # emit paths from the module markers
 SRC="$WATA/wataclient/src/main/scala"
 
-echo "== wataclient-tests: 1/8 portability tripwire (zero go.* in $SRC) =="
+echo "== wataclient-tests: 1/9 portability tripwire (zero go.* in $SRC) =="
 # match a `go.` qualifier that is NOT part of `sgo.` (word-boundary before `go`).
 HITS=$(grep -rnE '(^|[^A-Za-z0-9_])go\.' "$SRC" || true)
 if [ -n "$HITS" ]; then
@@ -59,7 +70,7 @@ if [ -n "$HITS" ]; then
 fi
 echo "   ok — no go.* references"
 
-echo "== wataclient-tests: 2/8 sync-engine unit oracle (wata-fb synctest) =="
+echo "== wataclient-tests: 2/9 sync-engine unit oracle (wata-fb synctest) =="
 # The driver is wata-fb itself (it links core+json+wataclient). Hash-gated
 # build, so usually a no-op.
 ( cd "$WATA/wata-fb" && "$SGO" build ) >/dev/null || { echo "wataclient-tests FAIL: wata-fb build"; exit 1; }
@@ -70,7 +81,7 @@ if ! diff <("$FB" synctest) tools/wataclient-sync.expected.txt; then
 fi
 echo "   ok — 19 sync-engine scenarios byte-match the pinned expectations"
 
-echo "== wataclient-tests: 3/8 sync-engine fixture oracle (wata-fb syncfix) =="
+echo "== wataclient-tests: 3/9 sync-engine fixture oracle (wata-fb syncfix) =="
 # FIX stays repo-RELATIVE: the fixture paths echo into the oracle transcript
 # (the pinned expectation), so the spelling is part of the byte contract.
 FIX="wataclient/test-fixtures"
@@ -87,21 +98,21 @@ if ! diff <("$FB" syncfix \
 fi
 echo "   ok — live-server fixtures replay to the pinned events/state/snapshot"
 
-echo "== wataclient-tests: 4/8 Ogg/CRC byte oracle (wata-fb oggtest) =="
+echo "== wataclient-tests: 4/9 Ogg/CRC byte oracle (wata-fb oggtest) =="
 if ! diff <("$FB" oggtest) tools/wataclient-ogg.expected.txt; then
   echo "wataclient-tests FAIL: Ogg oracle diverged from the pinned expected"
   exit 1
 fi
 echo "   ok — OggOracle.report() byte-matches the pinned expected"
 
-echo "== wataclient-tests: 5/8 arrival-notification oracle (wata-fb notifytest) =="
+echo "== wataclient-tests: 5/9 arrival-notification oracle (wata-fb notifytest) =="
 if ! diff <("$FB" notifytest) tools/wataclient-notify.expected.txt; then
   echo "wataclient-tests FAIL: notify oracle diverged from the pinned expected"
   exit 1
 fi
 echo "   ok — NotifyOracle.report() byte-matches the pinned expected"
 
-echo "== wataclient-tests: 6/8 foreign-container fixture (wata-fb oggforeign) =="
+echo "== wataclient-tests: 6/9 foreign-container fixture (wata-fb oggforeign) =="
 FOREIGN="$WATA/go-pkgs/audio/testdata/tui-foreign.ogg"
 [ -f "$FOREIGN" ] || { echo "wataclient-tests FAIL: missing pinned fixture $FOREIGN"; exit 1; }
 if ! diff <("$FB" oggforeign "$FOREIGN") tools/wataclient-foreign.expected.txt; then
@@ -110,18 +121,25 @@ if ! diff <("$FB" oggforeign "$FOREIGN") tools/wataclient-foreign.expected.txt; 
 fi
 echo "   ok — foreign fixture parses to the pinned packets/granule/EOS shape"
 
-echo "== wataclient-tests: 7/8 pending-one-shot oracle (wata-fb oneshottest) =="
+echo "== wataclient-tests: 7/9 pending-one-shot oracle (wata-fb oneshottest) =="
 if ! diff <("$FB" oneshottest) tools/wataclient-oneshot.expected.txt; then
   echo "wataclient-tests FAIL: one-shot oracle diverged from the pinned expected"
   exit 1
 fi
 echo "   ok — refused delete/favorite retried to exactly-once, in-order delivery"
 
-echo "== wataclient-tests: 8/8 txn-seed oracle (wata-fb txntest) =="
+echo "== wataclient-tests: 8/9 txn-seed oracle (wata-fb txntest) =="
 if ! diff <("$FB" txntest) tools/wataclient-txn.expected.txt; then
   echo "wataclient-tests FAIL: txn-seed oracle diverged from the pinned expected"
   exit 1
 fi
 echo "   ok — clock-seeded, monotonic txn ids across reconstruction"
 
-echo "wataclient-tests: PASS (tripwire + sync unit/fixture + ogg + notify + foreign-container + one-shot + txn-seed oracles)"
+echo "== wataclient-tests: 9/9 woken-playback queue oracle (wata-fb playqtest) =="
+if ! diff <("$FB" playqtest) tools/wataclient-playq.expected.txt; then
+  echo "wataclient-tests FAIL: playq oracle diverged from the pinned expected"
+  exit 1
+fi
+echo "   ok — a burst of four drains in order; only the head ages; no false 'played'"
+
+echo "wataclient-tests: PASS (tripwire + sync unit/fixture + ogg + notify + foreign-container + one-shot + txn-seed + playq oracles)"

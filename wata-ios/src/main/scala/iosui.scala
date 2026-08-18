@@ -132,9 +132,15 @@ object iosshell:
    *  registration. */
   @go.name("TakePTTToken") def takePttToken(): String = ???
   /** the oldest message an incoming `pushtotalk` push named, described for
-   *  printing (`play room=… event=…`), or "". `pttPlayRoom`/`pttPlayEvent`/
-   *  `pttPlayAgeMs` answer for the one this call just handed out. */
+   *  printing (`play #n ep=e room=… event=…`), or "". `pttPlayRoom`/
+   *  `pttPlayEvent`/`pttPlayAgeMs`/`pttPlayEpisode` answer for the one this
+   *  call just handed out. */
   @go.name("TakePTTPlay") def takePttPlay(): String = ???
+  /** are there pushes the pump has not drained yet? Asked before an episode is
+   *  ended: a push that landed after this frame's drain belongs to the episode
+   *  about to be closed, and closing it would strand that message with no
+   *  speaker and no session. */
+  @go.name("PTTPlayPending") def pttPlayPending(): Boolean = ???
   /** the room id of the push `takePttPlay` last returned. */
   @go.name("PTTPlayRoom") def pttPlayRoom(): String = ???
   /** the event id of the push `takePttPlay` last returned. */
@@ -142,13 +148,16 @@ object iosshell:
   /** how long ago that push ARRIVED, in ms — a suspended app runs no frames,
    *  so the pump can drain a push long after the framework delivered it. */
   @go.name("PTTPlayAgeMs") def pttPlayAgeMs(): scala.Int = ???
-  /** the episode id of that push. It goes back into `pttSpeakerStopped`, so an
-   *  episode can only ever end itself. */
+  /** the episode of that push — the raised speaker it belongs to, shared with
+   *  every other push of the same burst. It goes back into
+   *  `pttSpeakerStopped`, so an episode can only ever end itself. */
   @go.name("PTTPlayEpisode") def pttPlayEpisode(): scala.Int = ???
-  /** is the audio session that is active RIGHT NOW the one that push asked
-   *  for — activated, and activated after the push arrived? "Some session is
-   *  active" is not enough: a rapid second message would play on the previous
-   *  episode's session and die when that one is torn down. */
+  /** has the audio session THIS EPISODE asked for been handed over —
+   *  activated, and activated after the episode opened? "Some session is
+   *  active" is not enough (a message would play on the previous episode's
+   *  session and die when that one is torn down), and per-PUSH is too strict
+   *  (a speaker that is already up produces no new activation, so every
+   *  message after a burst's first would wait for one that never comes). */
   @go.name("PTTPlayReady") def pttPlayReady(): Boolean = ???
   /** end a receive episode: clear the channel's active remote participant, so
    *  the system takes the speaker off screen and hands the audio session

@@ -135,6 +135,35 @@ pump with the mac-only seams swapped.
   `didActivateAudioSession` seen, in either order — nothing documents
   their order) turned into the same `KPtt` edge the button made, so
   the system UI, the session and the applet cannot drift.
+  **Receiving is a BURST on one episode.** An episode is one raised
+  speaker, not one push: the first `pushtotalk` push raises the
+  system speaker and the framework activates one audio session for
+  it; every push arriving while that speaker is still up joins the
+  same episode; the speaker comes down only when the app says the
+  whole burst is done (`PTTSpeakerStopped`, named with the episode
+  id, so a burst that is over cannot tear down the one after it).
+  `ptt.scala` queues what the pushes named and plays them in arrival
+  order, one at a time, on that one session — four messages in a row
+  is what a walkie-talkie does, and the last-one-wins version of this
+  played one of four on hardware (2026-08-18). The queue and its
+  deadlines are `wataclient`'s portable `PlayQ`, gated off-device by
+  `wata-fb playqtest`; what is iOS's is the session gate and the
+  speaker. **Nothing plays before the EPISODE's handover**: answering
+  a push only asks for the session, the activation arrives later on
+  `didActivateAudioSession`, and it reconfigures the session under
+  the running engine — which stops the engine and strands the
+  scheduled buffer with no error and no completion handler. So
+  `PTTPlayReady` counts activations against the episode: a message
+  joining a live episode is ready at once (same session, no boundary
+  crossed), while a push that finds the speaker down opens a new
+  episode and waits for its own fresh activation. "Is a session
+  active" is a different question, and answering it played messages
+  onto a session an older episode was about to take away.
+  A message that waits out `PlayQ.PLAY_WINDOW_MS` — no handover, or
+  the sync never brings its event in — is given up on and the burst
+  moves to the next; that window counts only the time a message
+  spends at the head of the queue, so a burst whose playback outlasts
+  it still plays in full.
 - **The stores are sandbox files** (`config.scala`): wata-mac's three
   stores with the keychain swapped for `secrets.json` (0600) in the
   app's own data container — the honest simulator-grade store; the iOS

@@ -42,43 +42,54 @@ import language.experimental.saferExceptions
  *  them) targets the family conversation; one the app's own button started
  *  keeps whatever conversation is open.
  *
- *  RECEIVING IS AN EPISODE THE APP OWNS FROM END TO END. A `pushtotalk` push
- *  shows no banner — it wakes the app so the app can play the message — and
- *  answering it with an active speaker is what activates the audio session and
- *  puts "<name> speaking" on the system UI. Both stay until the app clears the
- *  speaker again, so the arc here is: take the room and event the push named,
- *  wait for the sync to bring that event in, play it on the session the
- *  framework handed over, then end the episode. Three things shape it:
+ *  RECEIVING IS AN EPISODE THE APP OWNS FROM END TO END, AND AN EPISODE IS A
+ *  BURST, NOT A MESSAGE. A `pushtotalk` push shows no banner — it wakes the app
+ *  so the app can play the message — and answering it with an active speaker is
+ *  what activates the audio session and puts "<name> speaking" on the system
+ *  UI. Both stay until the app clears the speaker again. So the arc here is:
+ *  take every room and event the pushes name, queue them, play them in arrival
+ *  order on the one session the framework handed over, and clear the speaker
+ *  when there is nothing left. `PlayQ` (wataclient) is the queue and the
+ *  deadlines; this object is its platform half. Five things shape it:
  *
+ *  - **Four messages in a row is the ordinary case.** A walkie-talkie burst is
+ *    not an edge case, and the speaker stays up across the whole of it: pushes
+ *    APPEND, nothing is displaced by something newer. On hardware 2026-08-18 a
+ *    last-one-wins version of this played one of four and dropped three.
  *  - **The app may be suspended or cold.** The push is delivered to the
  *    framework, not to a running pump: the pump can start frames seconds
  *    later, and a cold launch has to log in and sync first. So the request
- *    carries the push's own ARRIVAL time (`pttPlayAgeMs`) and the window is
- *    measured from that, not from the frame that drained it — a pump that
- *    starts five minutes later must not suddenly play a stale message.
- *  - **Nothing plays before THIS push's session handover.** Answering the push
- *    only ASKS for the audio session; it is activated later, on
+ *    carries the push's own ARRIVAL time (`pttPlayAgeMs`) and each message's
+ *    window is seeded with it — a pump that starts five minutes later must not
+ *    suddenly play a stale message. But the window then counts only the time
+ *    that message spends AT THE HEAD of the queue waiting: a burst whose
+ *    playback outlasts the window must still play in full (`PlayQ`).
+ *  - **Nothing plays before THIS EPISODE's session handover.** Answering a
+ *    push only ASKS for the audio session; it is activated later, on
  *    `didActivateAudioSession`, and that activation reconfigures the session
  *    under the running engine — which stops the engine and strands whatever
- *    was scheduled, with no error and no completion handler. So the play waits
- *    for the handover as well as for the event. "A session is active" is not
- *    the same question and answering it was the rapid-fire bug: a second
- *    message arriving while the first episode is still winding down finds a
- *    live session, plays on it, and is killed when that older episode's
- *    deactivation lands. The shell counts activations so the app can ask for
- *    the one its own push asked for (`pttPlayReady`).
- *  - **An episode may only end itself.** Every episode carries the id of the
- *    push that opened it, and `finish` names it; if a newer push has taken
- *    the speaker since, the shell drops the request. Otherwise a failed
- *    playback tears down the message that arrived after it.
+ *    was scheduled, with no error and no completion handler. So the first play
+ *    waits for the handover. "A session is active" is not the same question,
+ *    and answering it was the original rapid-fire bug: a message arriving
+ *    while an older episode is winding down finds a live session, plays on it,
+ *    and is killed when that older episode's deactivation lands. The shell
+ *    counts activations against the EPISODE (`pttPlayReady`), so a message
+ *    joining a live episode is ready at once — same speaker, same session, no
+ *    boundary crossed — while a push arriving after the speaker came down
+ *    opens a new episode and waits for its own fresh activation.
+ *  - **An episode may only end itself.** The episode id is the shell's raised
+ *    speaker, shared by every push of the burst, and `finish` names it; if the
+ *    speaker has come down and been raised again since, the shell drops the
+ *    request. Otherwise a failed playback tears down the burst that succeeded
+ *    it.
  *  - **The fetch IS the sync.** The event may not be in the local timeline
  *    yet; when the sync brings it in it appears in the snapshot with its mxc
- *    url, which is what playing needs anyway. So the resolve is retried once
- *    per frame until `PLAY_WINDOW_MS` runs out, and arming it kicks the sync
- *    loop out of any backoff (`Runtime.retryNow`) — a suspended app's sockets
- *    were torn down while it slept.
- *  - **Every exit ends the episode.** Played, gave up, no message named, the
- *    channel left: each one clears the speaker, because an episode nobody
+ *    url, which is what playing needs anyway. So the head is retried once per
+ *    frame until its window runs out, and queuing kicks the sync loop out of
+ *    any backoff (`Runtime.retryNow`) — a suspended app's sockets were torn
+ *    down while it slept.
+ *  - **Every exit ends the episode.** Drained, given up on, no message named,
+ *    the channel left: each one clears the speaker, because an episode nobody
  *    ends never ends — on hardware 2026-08-18 five pushes activated the audio
  *    session and none of them ever released it. */
 object PttChan:
@@ -105,37 +116,19 @@ object PttChan:
    *  without a facade call per key event. */
   private val routingC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
-  /** how long after the framework delivered a `pushtotalk` push the message it
-   *  names is still worth playing live, measured from the push's own arrival.
-   *  It has to cover a COLD launch — the app was not running, so login and the
-   *  first sync are inside it — and it must not be so long that a message
-   *  plays out of nowhere after the user has put the phone away. Past it the
-   *  message is an ordinary unplayed arrival: the conversation row and the
-   *  badge are its surface, and the alert push is the one that asks for a tap. */
-  val PLAY_WINDOW_MS: Long = 20000L
-  /** a hard cap on one receive episode, only ever reached when the playback
-   *  neither finishes nor fails — the audio thread reports both, so this is a
-   *  wedge-breaker rather than a limit on how long a message may be. Without
-   *  it a playback that never reports would leave the speaker on the system UI
-   *  and the audio session in the framework's hands for the life of the app. */
-  val EPISODE_MAX_MS: Long = 300000L
-
-  /** the room and event a `pushtotalk` push named and the app has not resolved
-   *  yet; "" once it has been played or given up on. */
-  private val playRoomC: sgo.Atomic[String] = sgo.atomic("")
-  private val playEventC: sgo.Atomic[String] = sgo.atomic("")
-  /** the clock reading past which that message is no longer worth playing. */
-  private val playUntilC: sgo.Atomic[Long] = sgo.atomic(0L)
+  /** the messages the pushes named, in arrival order, with the deadlines that
+   *  decide when one is no longer worth playing live and when the burst has
+   *  wedged. The scheduling is portable and pinned by an oracle
+   *  (`wata-fb playqtest`); what is iOS's is everything around it. */
+  private val queueC: sgo.Atomic[PlayQState] = sgo.atomic(PlayQ.empty())
   /** a speaker is on the system UI and the framework's session is the app's to
    *  play on, until the app says the episode is over. */
   private val speakingC: sgo.Atomic[Boolean] = sgo.atomic(false)
-  /** the clock reading at which the episode is ended regardless. */
-  private val episodeUntilC: sgo.Atomic[Long] = sgo.atomic(0L)
-  /** the playback this episode started reported a failure. */
+  /** the playback the app started reported a failure. */
   private val failedC: sgo.Atomic[Boolean] = sgo.atomic(false)
-  /** which episode the app is serving — the id of the push that opened it.
-   *  Only that episode may end itself (`finish`), so a message whose playback
-   *  fails cannot tear down the message that arrived after it. */
+  /** which episode the app is serving — the shell's id for the raised speaker,
+   *  shared by every push of the burst. Only that episode may end itself
+   *  (`finish`), so a burst that is over cannot tear down the one after it. */
   private val episodeC: sgo.Atomic[Int] = sgo.atomic(0)
 
   /** is the PushToTalk arc armed at all? `WATA_IOS_PTT=0` turns it off, which
@@ -224,8 +217,9 @@ object PttChan:
 
   // ---- the receive half: the message the push woke the app for -----------------
 
-  /** once per frame: take what the pushes named, try to resolve and play the
-   *  one in hand, and end the episode when there is nothing left to do. */
+  /** once per frame: queue what the pushes named, notice a playback that has
+   *  stopped, serve the head of the queue, and end the episode when the queue
+   *  has drained. */
   def playStep(h: Handle, st0: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
     var going = true
     while going do
@@ -233,96 +227,135 @@ object PttChan:
       if p == "" then going = false
       else
         println("ptt: " + p)
-        arm(h, go.iosshell.pttPlayRoom(), go.iosshell.pttPlayEvent(),
-          go.iosshell.pttPlayAgeMs().toLong, nowMs)
-    val st = resolve(h, st0, ctx, nowMs)
+        offer(h, go.iosshell.pttPlayRoom(), go.iosshell.pttPlayEvent(),
+          go.iosshell.pttPlayEpisode(), go.iosshell.pttPlayAgeMs().toLong, nowMs)
+    queueC.set(PlayQ.tick(queueC.get(), nowMs))
+    endedStep(st0, nowMs)
+    val st = serveStep(h, st0, ctx, nowMs)
     endStep(st, nowMs)
     st
 
-  /** a push named a message. The LAST one wins: only one thing can play, and
-   *  an older push's message is an ordinary unplayed arrival the conversation
-   *  row already shows. The deadline is measured from the push's arrival, so a
-   *  pump that only starts running now inherits the time already spent. */
-  def arm(h: Handle, room: String, event: String, ageMs: Long, nowMs: Long): Unit =
-    // the newest push owns the episode from here: an older one that is still
-    // in flight can no longer end anything (`finish` names its own id).
-    episodeC.set(go.iosshell.pttPlayEpisode())
-    failedC.set(false)
-    speakingC.set(true)
-    episodeUntilC.set(nowMs + EPISODE_MAX_MS)
-    if room == "" || event == "" then finish("the push named no message")
+  /** a push named a message: it joins the back of the queue, and raises the
+   *  speaker if this is the burst's first. Nothing is displaced — an older
+   *  message is not less worth hearing because a newer one landed while it was
+   *  still playing. */
+  def offer(h: Handle, room: String, event: String, episode: Int, ageMs: Long,
+            nowMs: Long): Unit =
+    if room == "" || event == "" then noMessage(episode)
     else
-      playRoomC.set(room)
-      playEventC.set(event)
-      playUntilC.set(nowMs + PLAY_WINDOW_MS - ageMs)
+      if !speakingC.get() then
+        // the burst's first push owns the episode: the shell raised the
+        // speaker for it, and `finish` names this id when the burst is done.
+        episodeC.set(episode)
+        failedC.set(false)
+        speakingC.set(true)
+      queueC.set(PlayQ.offer(queueC.get(), room, event, ageMs, nowMs))
       // the app was almost certainly suspended, so its sync connection is gone
       // and the retry loop may be part-way through a backoff sleep. Nothing
       // the client could be doing is more urgent than this one event.
       Runtime.retryNow(h.client)
 
-  /** TWO things have to be true before a woken message may play, and the
-   *  second one is not obvious.
+  /** a push with no room or event in it. The shell has already raised a
+   *  speaker for it, so one has to come down — but only if this push is the
+   *  whole episode. Joining a burst that is playing, it is simply nothing to
+   *  play, and ending that burst here would cut off the message in the air. */
+  def noMessage(episode: Int): Unit =
+    if speakingC.get() then println("ptt: a push named no message")
+    else
+      episodeC.set(episode)
+      speakingC.set(true)
+      finish("the push named no message")
+
+  /** the playback the app started has stopped — the audio thread reports both
+   *  the end and the failure, and both clear `playing`, so only the failure
+   *  flag tells them apart. Counted before the head is served, so the next
+   *  message starts in the same frame the previous one ended. */
+  def endedStep(st: PumpSt, nowMs: Long): Unit =
+    if queueC.get().playing && !st.wata.playing then
+      queueC.set(PlayQ.finished(queueC.get(), nowMs, failedC.get()))
+      failedC.set(false)
+
+  /** the head of the queue, if nothing is playing: drop it if it has waited
+   *  out its window, else play it once TWO things are true — and the second
+   *  one is not obvious.
    *
    *  The message must be in the snapshot with its mxc url — the sync putting
    *  it there IS the fetch, retried every frame.
    *
-   *  And the FRAMEWORK MUST HAVE HANDED THE AUDIO SESSION OVER. Answering the
-   *  push with an active speaker only ASKS for the session; the activation
-   *  arrives later, on `channelManager:didActivateAudioSession:`. Playing
-   *  before it lands does not merely play on the wrong session — the
+   *  And the FRAMEWORK MUST HAVE HANDED THIS EPISODE'S AUDIO SESSION OVER.
+   *  Answering a push with an active speaker only ASKS for the session; the
+   *  activation arrives later, on `channelManager:didActivateAudioSession:`.
+   *  Playing before it lands does not merely play on the wrong session — the
    *  activation reconfigures the session under the running engine, which stops
    *  the engine and strands the buffer the player node had scheduled, and its
    *  completion handler never fires. Device log 2026-08-18: `ptt: playing`,
    *  then `PushToTalk owns the audio session`, then
    *  `playback of 61440 frames never completed`, and nothing audible.
    *
-   *  Both waits share one deadline. A handover that never arrives is a
-   *  diagnosable give-up, not a fallback onto a session that is about to be
-   *  taken away — and the alert push still delivers the message. */
-  def resolve(h: Handle, st: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
-    val room = playRoomC.get()
-    if room == "" then st
-    else if nowMs >= playUntilC.get() then
-      finish("gave up on " + playEventC.get() + " (" + whyStuck() + ")")
+   *  Both waits are charged to the head's own window. A handover that never
+   *  arrives is a diagnosable give-up, not a fallback onto a session that is
+   *  about to be taken away — and the alert push still delivers the message. */
+  def serveStep(h: Handle, st: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
+    val q = queueC.get()
+    if q.playing then st
+    else PlayQ.head(q) match
+      case s: Some[PlayQMsg] => serve(h, st, ctx, s.value, nowMs)
+      case None              => st
+
+  def serve(h: Handle, st: PumpSt, ctx: FrameCtx, m: PlayQMsg,
+            nowMs: Long): PumpSt =
+    if PlayQ.headStale(queueC.get()) then
+      // one message out of time does not end the burst: the next one gets its
+      // own turn, with its own window, on the next frame.
+      println("ptt: gave up on " + m.event + " (" + whyStuck() + ")")
+      queueC.set(PlayQ.dropHead(queueC.get(), nowMs))
       st
     else if !go.iosshell.pttPlayReady() then st
     else
-      val url = mxcOf(ctx.snap.conversations, room, playEventC.get())
+      val url = mxcOf(ctx.snap.conversations, m.room, m.event)
       if url == "" then st
-      else play(h, st, ctx, room, playEventC.get(), url)
+      else play(h, st, ctx, m, url, nowMs)
 
   /** which of the two waits ran out — the difference matters and costs one
    *  line to say. */
   def whyStuck(): String =
-    if !go.iosshell.pttPlayReady() then "no audio session for this push"
+    if !go.iosshell.pttPlayReady() then "no audio session for this episode"
     else "not synced in time"
 
-  /** play it, on the session the framework activated for exactly this, and
+  /** play it, on the session the framework activated for this episode, and
    *  open its conversation — the user woken by a walkie-talkie should find
    *  the thread it came from on screen. The applet's own play path
    *  (`withPlaying`) is what marks it playing, so the arrival announcement in
    *  the same frame does not play it a second time. */
-  def play(h: Handle, st: PumpSt, ctx: FrameCtx, room: String, event: String,
-           url: String): PumpSt =
-    playRoomC.set("")
-    var out = Pump.openRoom(st, ctx, room)
+  def play(h: Handle, st: PumpSt, ctx: FrameCtx, m: PlayQMsg, url: String,
+           nowMs: Long): PumpSt =
+    queueC.set(PlayQ.start(queueC.get(), nowMs))
+    var out = Pump.openRoom(st, ctx, m.room)
     Runtime.sendAction(h.client, ActPlay(url))
-    out = Pump.withWata(out, WataLogic.withPlaying(out.wata, true, room, event))
-    println("ptt: playing " + event)
+    out = Pump.withWata(out, WataLogic.withPlaying(out.wata, true, m.room, m.event))
+    println("ptt: playing " + m.event + PlayQ.behind(queueC.get()))
     out
 
-  /** the episode is over once the playback the app started has stopped — the
-   *  audio thread reports both the end and the failure, and both clear
-   *  `playing`. The cap catches a playback that reports neither.
+  /** the episode is over once the queue has drained and nothing is sounding.
+   *  The no-progress cap catches a playback that reports neither an end nor a
+   *  failure; it is renewed by every message, so a long burst never reaches
+   *  it.
    *
-   *  The line says which of the two it was. A `speaker done (played)` printed
-   *  over a playback that errored is exactly the green that overstates what
-   *  ran, and this log is the only surface the receive half has. */
+   *  The closing line says what the burst actually did. A `speaker done
+   *  (played)` printed over a playback that errored is exactly the green that
+   *  overstates what ran, and this log is the only surface the receive half
+   *  has. */
   def endStep(st: PumpSt, nowMs: Long): Unit =
     if !speakingC.get() then ()
-    else if playRoomC.get() == "" && !st.wata.playing then
-      if failedC.get() then finish("playback FAILED") else finish("played")
-    else if nowMs >= episodeUntilC.get() then finish("the episode outran its cap")
+    else
+      val q = queueC.get()
+      // `pttPlayPending` closes the one-frame race the drain leaves open: a
+      // push that landed after it belongs to THIS episode, and ending the
+      // episode would leave its message with no speaker and no session.
+      if PlayQ.isIdle(q) && !go.iosshell.pttPlayPending() then
+        finish(PlayQ.summary(q))
+      else if PlayQ.wedged(q, nowMs) then
+        finish("the episode outran its cap: " + PlayQ.summary(q))
 
   /** the runtime or the audio thread reported a failed playback. Called from
    *  the pump's two drains, because neither the fetch failure (`EvPlaybackError`)
@@ -337,8 +370,7 @@ object PttChan:
   def finish(why: String): Unit =
     val ep = episodeC.get()
     println("ptt: speaker done #" + ep + " (" + why + ")")
-    playRoomC.set("")
-    playEventC.set("")
+    queueC.set(PlayQ.empty())
     speakingC.set(false)
     failedC.set(false)
     // named, so an episode that is no longer current ends nothing: the shell
