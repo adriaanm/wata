@@ -207,3 +207,61 @@ correlation id for logs once real APNs is involved.
 
 Next: chunk B — the facade plus the server wiring (registration
 endpoint, push on message, the fake-APNs scenario).
+
+### 2026-08-18 — tier 2, chunk B: the server half landed
+
+`ff35898`: the facade, `POST /_wata/v1/push/register` with persistence
+and a forget path, the push-on-message fan-out, and
+`tools/wata-push-smoke.py` (19 assertions) wired into `just ci`.
+Verified here, not accepted on report: `go test -count=1` on the
+module, `tools/wata-push-smoke.py` (PASS), and a full `just ci` run in
+the foreground — **exit 0**. The gopls `undefined:` diagnostics on
+`facade.go` were the same `go.work` artifact as chunk A.
+
+**The facade bound cleanly with no dialect workaround and no sgola
+ticket** — `@go.bind` object, `go.Int` for Go `int`, `(int, error)` →
+`go.Int throws sgo.GoError`, `go.spawn` for the fan-out. That is a
+positive datum about the compiler, and worth reporting upstream as
+one: a non-trivial multi-step Go dependency reached from Sgola without
+a single restriction hit.
+
+Decisions the implementation had to make, all now folded into the plan
+text:
+
+- **"Every room member" was wrong**: it must be joined OR invited (the
+  population `Store.notifyRoomMembers` wakes). Caught by the gate — a
+  canonical DM leaves the peer holding an invite until they ask for
+  the room, so the first message in a DM pushed to nobody.
+- **The APNs host is per-registration**, not per-server: a dev-build
+  token is sandbox-only and an App Store token production-only, and
+  one server can hold both. `env` rides the row, server config is the
+  fallback, a host override is the test seam. **Confirmed.**
+- **Registrations are keyed by token as well as by (user, device)** —
+  one token is one app INSTALL, so a logout/login (fresh device id)
+  must drop the old row or the install collects a push per stale
+  registration.
+- **Only the sending DEVICE is excluded**, not the sending user: a
+  message sent from the mac should still reach that person's pocket.
+- **The badge is the recipient's unplayed count** across joined and
+  invited rooms. Costs a walk of the user's rooms per push — the
+  first thing to revisit if timelines grow.
+- Config is `WATA_APNS_*` env vars, matching `WATA_USERS` /
+  `WATA_LOG` / `WATA_IROH_CONFIG`; a broken key file is reported and
+  left disarmed rather than fatal.
+
+Two limits of the gate, stated so it is not over-trusted:
+
+- The smoke's fake APNs is plaintext, so Go falls back to HTTP/1.1.
+  The smoke proves the FAN-OUT (who is pushed, who is not, 410
+  deleting the row); the wire shape stays gated by `go-pkgs/apns`'s
+  own HTTP/2 tests. Nothing yet exercises both together.
+- `just ci` now needs `openssl` on PATH (the throwaway ES256 test key
+  — Python's stdlib cannot generate an EC key). Mild, but new.
+
+Real behaviour learned, not a bug: **re-login turns your own prior
+registration into a push target**, because the new session has a fresh
+device id and the old row is no longer "the sender's own device",
+until that install re-registers.
+
+Next: chunk C — the iOS client half (permission, token registration,
+notification presentation), gated with `simctl push`.

@@ -93,10 +93,27 @@ per (user, device) — `devicecmd.scala` is the structural model. The
 token is per-install and changes; re-registration overwrites.
 
 **When a push fires.** A message event landing in a room pushes to
-every registered device of every room member except the sender's own.
+every registered device of every member **joined OR invited** — the
+same population `Store.notifyRoomMembers` wakes. Joined-only is wrong
+and was caught by the gate: a canonical DM leaves the peer holding an
+invite until they ask for the room, so the very first message in a DM
+would push to nobody. Excluded is the sending DEVICE, not the sending
+user: a message sent from the mac should still reach that person's
+pocket.
+
 Deliberately NOT conditioned on "is that device currently syncing":
 the check is racy, and iOS already suppresses a banner the foreground
 app consumes. Simple and idempotent beats clever here.
+
+**The APNs host is per-registration, not per-server.** A dev-build
+token is valid against sandbox only and an App Store token against
+production only, and one server can hold both at once — so the `env`
+travels on the registration row, falling back to server config, with
+a host override as the test seam. Registrations are keyed by (user,
+device) AND by token: one token is one app INSTALL, so a
+logout/login, which mints a fresh device id, must drop the old row
+rather than leave the install collecting a push per stale
+registration.
 
 **How it is gated without Apple credentials.** The APNs host is
 configurable, so a local fake APNs server standing in for Apple gates
@@ -105,7 +122,19 @@ claims, the request path and headers, and the 410-forgets-the-token
 rule; a server-side scenario asserts that sending a message to a
 registered device produces a push with the right payload. Nothing in
 this tier needs a real key, a phone, or the developer portal — those
-are needed only for the owner's final on-device leg.
+are needed only for the owner's final on-device leg. One limit of
+that fake, worth stating so the gate is not over-trusted: the
+server's push path talks plaintext to it and Go therefore falls back
+to HTTP/1.1, so the SMOKE proves the fan-out (who gets pushed, who
+does not, what happens on 410) while the wire shape stays gated by
+`go-pkgs/apns`'s own HTTP/2 tests.
+
+**With no APNs configured the server behaves exactly as it does
+today** — no pushes, no errors, no startup failure, and registrations
+still accepted so client and operator ordering does not matter.
+Self-hosters without an Apple account are the normal case. A broken
+key file is reported and left disarmed rather than fatal: a
+homeserver a handset depends on comes up and says what it needs.
 
 **Client-side** (`simctl push` gates it without a real APNs
 connection): permission request, `registerForRemoteNotifications`,
