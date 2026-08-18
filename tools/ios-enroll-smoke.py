@@ -23,10 +23,12 @@ account by construction), the painted contact list, and finally INBOUND
 (plan 0065): bob sends a voice message into the family room from a
 host-side wata-tui over the server's plain-TCP admin listener, and the
 app — whose own transport is IROH, the one the phone actually runs — must
-print the `notify: noted` arrival. That last leg is the transport half of
-plan 0065's diagnosis: `ios-smoke` runs the same leg over plain HTTP, so
-the pair splits "the iroh transport under the sync long-poll" from
-everything else in one run.
+print the `notify: noted` arrival within simrun's latency budget. That
+last leg is the transport half of plan 0065's measurement: `ios-smoke`
+runs the same leg over plain HTTP, so the pair says what the iroh
+transport costs a message's delivery under the sync long-poll — the
+reported symptom is delay, not loss, and a gate that only proved
+"eventually" could not see it.
 
 Needs Xcode + a simulator runtime + the ios-sim irohnet archive
 (go-pkgs/irohnet/mklib.py ios-sim); not in ci.
@@ -215,7 +217,8 @@ def main():
         # the arrival line ENDS the run, and it lands before the sending tui
         # has exited — so the verdict waits for the sender's own thread before
         # reading `sent`, or a healthy run reports a failed sender.
-        sent, sent_done = {"ok": False}, threading.Event()
+        sent = {"ok": False, "at": None, "arrived": None}
+        sent_done = threading.Event()
 
         def send_link():
             """deliver the configure link, then FOREGROUND the app: `simctl
@@ -257,8 +260,8 @@ def main():
             the message lands MID-SESSION on a running iroh sync rather than
             in the first snapshot, which announces nothing by design."""
             time.sleep(1.0)
-            sent["ok"], _ = simrun.tui_send(tui_bin, env, BASE,
-                                            tag="ios-enroll-smoke")
+            sent["ok"], sent["at"], _ = simrun.tui_send(
+                tui_bin, env, BASE, tag="ios-enroll-smoke")
             sent_done.set()
 
         def pump():
@@ -276,6 +279,8 @@ def main():
                 if not acted["inbound"] and "paint contacts lit=" in line:
                     acted["inbound"] = True
                     threading.Thread(target=send_inbound, daemon=True).start()
+                if sent["arrived"] is None and re.search(simrun.NOTED_RE, line):
+                    sent["arrived"] = time.monotonic()
                 if any(re.search(m, line) for m in DONE_RES):
                     done.set()
             done.set()
@@ -301,11 +306,12 @@ def main():
             print("ios-enroll-smoke: bob's tui never reported `sent` — the "
                   "inbound leg's SENDER failed, so a missing arrival proves "
                   "nothing", file=sys.stderr)
+        fast = simrun.latency_ok("ios-enroll-smoke", sent["at"], sent["arrived"])
         if missing:
             for m in missing:
                 print("ios-enroll-smoke: MISSING " + m, file=sys.stderr)
             sys.exit(1)
-        if not sent["ok"]:
+        if not sent["ok"] or not fast:
             sys.exit(1)
         print("ios-enroll-smoke: PASS — fresh install, configure link, "
               "announce, approve, device-login, contacts painted, and bob's "

@@ -245,21 +245,72 @@ def tui_send(tui_bin, env, base, user="bob", password="testpass123",
     mechanism mac-smoke's inbound leg uses. The simulator shares the host's
     loopback, so a plain-HTTP `base` reaches the same server the app is
     talking to — the app's own transport is the thing under test, not the
-    sender's. Returns (ok, lines); prints both so a failed send is visible in
-    the gate's log next to the app's."""
+    sender's.
+
+    Returns (ok, sent_at, lines), `sent_at` being the monotonic clock reading
+    at the moment the tui reported `sent` — the start of the delivery latency
+    the gates bound. The tui's output is streamed rather than collected at
+    exit so that timestamp is the send, not the process teardown."""
     script = f"snap\nsend {conv} {fixture}\nquit\n"
     senv = dict(env, WATA_TUI_HS=base, WATA_TUI_USER=user,
                 WATA_TUI_PASS=password)
+    proc = subprocess.Popen([str(tui_bin)], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, env=senv, bufsize=1)
+    proc.stdin.write(script)
+    proc.stdin.flush()
+    proc.stdin.close()
+    lines, sent_at = [], None
+    for line in proc.stdout:
+        line = line.rstrip("\n")
+        if line.startswith("sent ") and sent_at is None:
+            sent_at = time.monotonic()
+        lines.append(line)
+        print(f"{tag}: {user}| {line}", flush=True)
     try:
-        r = subprocess.run([str(tui_bin)], input=script, capture_output=True,
-                           text=True, env=senv, timeout=timeout)
+        proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        proc.kill()
         print(f"{tag}: {user}'s tui timed out", flush=True)
-        return False, []
-    lines = (r.stdout + r.stderr).splitlines()
-    for ln in lines:
-        print(f"{tag}: {user}| {ln}", flush=True)
-    return any(ln.startswith("sent ") for ln in lines), lines
+    return sent_at is not None, sent_at, lines
+
+
+# The delivery bound both inbound legs assert, sent -> the app's `notify:`
+# line. Measured over four runs on this Mac (two per transport): 0.00s and
+# -0.01s on plain HTTP, -0.01s and -0.02s over iroh — i.e. BELOW the
+# measurement's own resolution on both, because the server wakes the sync
+# long-poll the moment the event lands rather than the client waiting out a
+# poll interval, and iroh costs nothing measurable over loopback.
+#
+# 15s is therefore not a fit to those numbers — nothing that small can be fit
+# — but a deliberately loose ceiling: three orders of magnitude of headroom
+# for a loaded machine, still far under the failure this exists to catch, a
+# delivery sliding from instant to tens of seconds. Tighten it only with a
+# distribution to argue from.
+LATENCY_BUDGET_S = 15.0
+
+
+def latency_ok(tag, sent_at, arrived_at, budget=LATENCY_BUDGET_S):
+    """Print and judge the sent -> arrival delay: from the sending tui saying
+    `sent` to the app printing its `notify:` line. The two endpoints are read
+    off two different pipes, so the resolution is ~0.1s and a small NEGATIVE
+    reading just means the arrival beat the sender's own stdout out of the
+    kernel — it is delivery inside the noise, not time travel.
+
+    A missing endpoint is not a latency failure — the caller's own
+    MISSING/sender checks own that — so it only reports here."""
+    if sent_at is None or arrived_at is None:
+        print(f"{tag}: no latency measurement (send or arrival missing)",
+              file=sys.stderr)
+        return True
+    dt = arrived_at - sent_at
+    print(f"{tag}: inbound latency {dt:.2f}s (±0.1s, budget {budget:.0f}s)",
+          flush=True)
+    if dt > budget:
+        print(f"{tag}: SLOW — the message took {dt:.2f}s to surface, over the "
+              f"{budget:.0f}s budget", file=sys.stderr)
+        return False
+    return True
 
 
 def shutdown(sc, udid):

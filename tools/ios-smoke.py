@@ -27,6 +27,12 @@ lines (launchd owns the process exit, the interptest rule):
                                           has no banner, so this printed
                                           decision line is the whole arrival
                                           surface — assert it, not a sound.
+                                          The leg is TIMED: the delay from
+                                          bob's `sent` to that line must stay
+                                          inside simrun.LATENCY_BUDGET_S, so a
+                                          delivery that slid from seconds to a
+                                          minute fails the gate instead of
+                                          passing it as "eventually".
 
 Modelled on tools/mac-smoke.py's server handling; the simulator legs ride
 tools/simrun.py (shared device, verdict-keyed retry) and the build reuses
@@ -151,7 +157,7 @@ def main():
     # thread links, starts, and pumps on iOS
     os.environ["SIMCTL_CHILD_WATA_MAC_AUDIO"] = "fake"
 
-    sent = {"ok": False}
+    sent = {"ok": False, "at": None, "arrived": None}
     # the arrival line ENDS the run, and it lands before the sending tui has
     # exited — so the verdict must wait for the sender's own thread before
     # reading `sent`, or a healthy run reports a failed sender.
@@ -163,8 +169,12 @@ def main():
         message really does arrive MID-SESSION rather than in the first
         snapshot (which announces nothing, by design)."""
         time.sleep(1.0)
-        sent["ok"], _ = simrun.tui_send(tui_bin, env, BASE, tag="ios-smoke")
+        sent["ok"], sent["at"], _ = simrun.tui_send(tui_bin, env, BASE,
+                                                    tag="ios-smoke")
         sent_done.set()
+
+    def mark_arrival():
+        sent["arrived"] = time.monotonic()
 
     sc = simrun.simctl()
     udid = simrun.ensure_device(sc)
@@ -172,18 +182,20 @@ def main():
         lines, elapsed, missing = simrun.launch_expect_verdict(
             sc, udid, APP, BUNDLE_ID, EXPECT, done_res=DONE_RES, timeout=120,
             screenshot=APP.parent / "smoke-screen.png",
-            on_match=[(r"paint contacts lit=", send_inbound)])
+            on_match=[(r"paint contacts lit=", send_inbound),
+                      (simrun.NOTED_RE, mark_arrival)])
         print(f"ios-smoke: launch-to-verdict {elapsed:.2f}s")
         sent_done.wait(180)
         if not sent["ok"]:
             print("ios-smoke: bob's tui never reported `sent` — the inbound "
                   "leg's SENDER failed, so a missing arrival proves nothing",
                   file=sys.stderr)
+        fast = simrun.latency_ok("ios-smoke", sent["at"], sent["arrived"])
         if missing:
             for m in missing:
                 print("ios-smoke: MISSING " + m, file=sys.stderr)
             sys.exit(1)
-        if not sent["ok"]:
+        if not sent["ok"] or not fast:
             sys.exit(1)
         print("ios-smoke: PASS — wata-ios booted in the simulator, painted "
               "the boot screen, logged in, painted the contact list and saw "

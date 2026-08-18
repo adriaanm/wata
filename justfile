@@ -449,14 +449,18 @@ ios-interptest *FLAGS:
 
 # the plan-0044 stage-4 gate: wata-ios in the simulator against a live
 # wata-server — the boot screen paints before the session connects, alice
-# logs in, the contact list paints (verdict = the app's printed lines, judged
-# by tools/ios-smoke.py). Needs Xcode + an iOS simulator runtime; not in ci.
+# logs in, the contact list paints, and a message bob sends mid-session over
+# plain HTTP surfaces (`notify:`) inside the latency budget (verdict = the
+# app's printed lines, judged by tools/ios-smoke.py). Needs Xcode + an iOS
+# simulator runtime; not in ci.
 ios-smoke:
     tools/ios-smoke.py
 
 # the plan-0062 gate: the whole phone-enrol flow in the simulator — fresh
 # install, wata://configure from the admin page's card, plain-TCP announce,
-# approve, passwordless device-login over iroh, contacts painted. Needs
+# approve, passwordless device-login over iroh, contacts painted, and an
+# inbound message surfacing over the iroh sync inside the latency budget
+# (the same leg ios-smoke runs over plain HTTP, so the pair times both). Needs
 # Xcode + a simulator runtime + the ios-sim irohnet archive; not in ci.
 ios-enroll-smoke:
     tools/ios-enroll-smoke.py
