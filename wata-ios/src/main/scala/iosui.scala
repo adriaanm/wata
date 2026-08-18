@@ -131,6 +131,21 @@ object iosshell:
    *  the leave — it goes to `/_wata/v1/push/channel/join`, never to tier 2's
    *  registration. */
   @go.name("TakePTTToken") def takePttToken(): String = ???
+  /** the oldest message an incoming `pushtotalk` push named, described for
+   *  printing (`play room=… event=…`), or "". `pttPlayRoom`/`pttPlayEvent`/
+   *  `pttPlayAgeMs` answer for the one this call just handed out. */
+  @go.name("TakePTTPlay") def takePttPlay(): String = ???
+  /** the room id of the push `takePttPlay` last returned. */
+  @go.name("PTTPlayRoom") def pttPlayRoom(): String = ???
+  /** the event id of the push `takePttPlay` last returned. */
+  @go.name("PTTPlayEvent") def pttPlayEvent(): String = ???
+  /** how long ago that push ARRIVED, in ms — a suspended app runs no frames,
+   *  so the pump can drain a push long after the framework delivered it. */
+  @go.name("PTTPlayAgeMs") def pttPlayAgeMs(): scala.Int = ???
+  /** end a receive episode: clear the channel's active remote participant, so
+   *  the system takes the speaker off screen and hands the audio session
+   *  back. An episode nobody ends never ends. */
+  @go.name("PTTSpeakerStopped") def pttSpeakerStopped(): Unit = ???
 
   // ---- the persistent app log (plan 0064) -----------------------------------
   /** tee this process's stdout+stderr into `path` (truncated at open, growth

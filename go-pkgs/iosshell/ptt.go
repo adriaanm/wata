@@ -22,7 +22,19 @@
 //   - the INCOMING PUSH RESULT. incomingPushResultForChannelManager: is a
 //     SYNCHRONOUS answer the system requires (a push it does not get an answer
 //     for costs the app its channel), so the active speaker is read off the
-//     payload and returned here.
+//     payload and returned here. The room and event the push names ARE queued
+//     — fetching and playing that message is the pump's job (ptt.scala).
+//
+// AN EPISODE ENDS WHEN THE APP SAYS SO. Reporting an active remote participant
+// is what makes the system show "<name> speaking" and hold the audio session
+// activated, and the framework holds both until the app clears the participant
+// again (PTTSpeakerStopped). Nothing times out on its own: on hardware
+// 2026-08-18 five incoming pushes produced five `audio session activated` and
+// not one `deactivated`, because this file never cleared the speaker. So the
+// receive half owns the whole episode — answer the push, play the message,
+// then clear the speaker — and macaudio is told the episode is over at the
+// same moment, so its ownership flag cannot latch on a callback that may never
+// arrive (go-pkgs/macaudio/session_ios.go).
 //
 // TALKING is a state, not an edge: recording may only start once the framework
 // has BOTH begun the transmission and handed over an activated session, and
@@ -47,6 +59,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	pt "github.com/adriaanm/wata/go-pkgs/appleptt"
 	"github.com/adriaanm/wata/go-pkgs/appleptt/objcrt"
@@ -84,6 +97,11 @@ var (
 	pttTokens []string
 	// the lines the pump drains and prints.
 	pttEvents []string
+	// the messages incoming `pushtotalk` pushes named, oldest first, and the
+	// one TakePTTPlay last handed out (only the pump drains, so "the last
+	// taken" is unambiguous — push.go's pushCur idiom).
+	pttPlays   []pttPlay
+	pttPlayCur pttPlay
 	// foreground? A channel may only be joined from the foreground
 	// (PTChannelError.appNotForeground), so the app tracks its own state
 	// rather than asking UIApplication off the main thread.
@@ -95,6 +113,18 @@ var (
 	selAppDidBecomeActive = objc.RegisterName("applicationDidBecomeActive:")
 	selAppWillResignAct   = objc.RegisterName("applicationWillResignActive:")
 )
+
+// pttPlay is one message an incoming `pushtotalk` push named: the room and
+// event ids off the payload (apns.PTTPayload's room_id/event_id) and WHEN the
+// push arrived. The arrival time matters because the app may be suspended or
+// cold when the push lands — the pump can start frames much later, and a
+// message is only worth playing live inside the window the framework gives the
+// woken app. The pump reads the age and decides; nothing here does.
+type pttPlay struct {
+	roomID  string
+	eventID string
+	at      time.Time
+}
 
 // pttMethods are the two lifecycle callbacks the join gate needs, installed on
 // the same synthesized WataAppDelegate as the launch, URL and APNs ones.
@@ -175,6 +205,9 @@ func pttStart() {
 			if talking {
 				pttNote("talk off")
 			}
+			// No channel, no episode: whatever the framework still held it is
+			// not coming back through a delegate now.
+			macaudio.PTTEpisodeEnded("the channel was left")
 			pttNote("left")
 		},
 		ChannelManagerFailedToJoinChannelWithUUIDError: func(
@@ -208,6 +241,10 @@ func pttStart() {
 			if talking {
 				pttNote("talk off")
 			}
+			// The transmission is over as far as the framework is concerned,
+			// so its hand-back is now owed; macaudio stops waiting for it
+			// after a grace period rather than forever.
+			macaudio.PTTEpisodeEnded("the transmission ended")
 			pttNote("transmit end")
 		},
 		ChannelManagerFailedToBeginTransmittingInChannelWithUUIDError: func(
@@ -247,13 +284,38 @@ func pttStart() {
 		// A `pushtotalk` push arriving for this channel. The answer is
 		// synchronous and mandatory; the speaker's name is the server's
 		// (apns.PTTPayload's activeSpeaker) and the system draws it.
+		//
+		// Reporting a participant here is what activates the audio session and
+		// puts the speaker on screen, and BOTH stay until the app clears the
+		// participant again — so the same payload's room and event ids are
+		// queued for the pump, which fetches that message, plays it on the
+		// session the framework just handed over, and then calls
+		// PTTSpeakerStopped to end the episode.
 		IncomingPushResultForChannelManagerChannelUUIDPushPayload: func(
-			_ pt.PTChannelManager, _ pt.NSUUID, payload pt.NSDictionary) pt.PTPushResult {
+			_ pt.PTChannelManager, u pt.NSUUID, payload pt.NSDictionary) pt.PTPushResult {
 			who := dictString(objc.ID(payload.ID), "activeSpeaker")
 			if who == "" {
 				who = "wata" // -initWithName: rejects an empty name
 			}
-			pttNote("incoming push (%s)", who)
+			play := pttPlay{
+				roomID:  dictString(objc.ID(payload.ID), "room_id"),
+				eventID: dictString(objc.ID(payload.ID), "event_id"),
+				at:      time.Now(),
+			}
+			// The push names the channel it is for, and on a launch the push
+			// itself woke that is the first time this process learns the uuid
+			// — PTTSpeakerStopped needs it.
+			inPTTPool(func() {
+				if s := u.UUIDString(); s != "" {
+					pttMu.Lock()
+					pttUUID = s
+					pttMu.Unlock()
+				}
+			})
+			pttMu.Lock()
+			pttPlays = append(pttPlays, play)
+			pttMu.Unlock()
+			pttNote("incoming push (%s) room=%s event=%s", who, play.roomID, play.eventID)
 			p := pt.GetPTParticipantClass().Alloc().InitWithNameImage(who, pt.UIImage{})
 			return pt.GetPTPushResultClass().PushResultForActiveRemoteParticipant(p)
 		},
@@ -431,6 +493,87 @@ func TakePTTToken() string {
 	t := pttTokens[0]
 	pttTokens = pttTokens[1:]
 	return t
+}
+
+// TakePTTPlay pops the oldest message an incoming `pushtotalk` push named,
+// described for the pump to print (`play room=… event=…`), or "" when none is
+// pending. PTTPlayRoom, PTTPlayEvent and PTTPlayAgeMs answer for the one it
+// just handed out.
+func TakePTTPlay() string {
+	pttMu.Lock()
+	defer pttMu.Unlock()
+	if len(pttPlays) == 0 {
+		return ""
+	}
+	pttPlayCur = pttPlays[0]
+	pttPlays = pttPlays[1:]
+	return "play room=" + pttPlayCur.roomID + " event=" + pttPlayCur.eventID
+}
+
+// PTTPlayRoom is the room id of the push TakePTTPlay last returned.
+func PTTPlayRoom() string {
+	pttMu.Lock()
+	defer pttMu.Unlock()
+	return pttPlayCur.roomID
+}
+
+// PTTPlayEvent is the event id of the push TakePTTPlay last returned.
+func PTTPlayEvent() string {
+	pttMu.Lock()
+	defer pttMu.Unlock()
+	return pttPlayCur.eventID
+}
+
+// PTTPlayAgeMs is how long ago the push TakePTTPlay last returned ARRIVED —
+// not how long ago it was taken. A suspended or cold app runs no frames, so
+// the pump can drain a push seconds after the framework delivered it, and the
+// live-audio window is measured from the push.
+func PTTPlayAgeMs() int {
+	pttMu.Lock()
+	at := pttPlayCur.at
+	pttMu.Unlock()
+	if at.IsZero() {
+		return 0
+	}
+	ms := time.Since(at).Milliseconds()
+	// A day is past every window there is, and keeps the value small enough
+	// that no arithmetic on the other side of the facade can surprise anyone.
+	if ms > 24*3600*1000 {
+		ms = 24 * 3600 * 1000
+	}
+	if ms < 0 {
+		ms = 0
+	}
+	return int(ms)
+}
+
+// PTTSpeakerStopped ends a RECEIVE episode: it clears the channel's active
+// remote participant, which takes the speaker off the system UI, unblocks
+// transmitting and lets the framework deactivate the audio session it handed
+// over. The pump calls it once the woken message has played, or once it has
+// given up on playing it — an episode nobody ends never ends, which is the
+// hardware behaviour recorded in this file's header.
+//
+// macaudio is told in the same breath and unconditionally, including when
+// there is no manager at all: its ownership flag must come back even if the
+// framework's own callback does not.
+func PTTSpeakerStopped() {
+	m, why := pttCurrent()
+	if why == "" {
+		inPTTPool(func() {
+			u, ok := pttUUIDObj()
+			if !ok {
+				return
+			}
+			m.SetActiveRemoteParticipantForChannelUUIDCompletionHandler(
+				pt.PTParticipant{}, u, func(err error) {
+					if err != nil {
+						pttNote("clearing the speaker failed: %s", errText(err))
+					}
+				})
+		})
+	}
+	macaudio.PTTEpisodeEnded("the incoming message finished")
 }
 
 // pttCurrent answers the manager, or why there is none.

@@ -426,15 +426,25 @@ object Push:
 
   /** `ChannelSuppressesAlert` is FALSE, and that is a deliberate, temporary
    *  state rather than an oversight. A `pushtotalk` push shows no banner: it
-   *  wakes the app to play live audio. Until the iOS client's PTT receive
-   *  half actually fetches and plays the woken message, suppressing the alert
-   *  for a channel-holding device buys silence — the phone is woken and then
-   *  does nothing, which is strictly worse than the banner it would have had.
+   *  wakes the app to play live audio. Suppressing the alert for a
+   *  channel-holding device is therefore only right once that app really does
+   *  play the message it was woken for — otherwise the phone is woken and does
+   *  nothing, which is strictly worse than the banner it would have had.
    *  Observed live on hardware 2026-08-18: three `ptt: incoming push (Alma)`
    *  lines on the phone, no notification of any kind for the user.
    *
-   *  Flip this to true in the same commit that lands the receive half, not
-   *  before, and not separately — the two only make sense together. */
+   *  The client's receive half now exists (wata-ios `ptt.scala`: the push's
+   *  room and event are resolved out of the sync and played on the session the
+   *  framework hands over). It is UNPROVEN — the PushToTalk framework does not
+   *  exist in a simulator, so nothing in this repo can exercise it — and this
+   *  flag is what makes an unproven receive half harmless: with it false the
+   *  alert still arrives, so a receive half that fails silently costs nothing
+   *  but the live handover.
+   *
+   *  Flip it to true when the phone has been seen to print `ptt: playing
+   *  <event>` and then `ptt: speaker done (played)` for a real push, and flip
+   *  the two `tools/wata-ptt-smoke.py` assertions that encode the current
+   *  behaviour in the same commit. */
   val ChannelSuppressesAlert = false
 
   def addRegsStep(h: PushReg, t: List[PushReg], senderDeviceId: String, acc: List[PushReg]): List[PushReg] =

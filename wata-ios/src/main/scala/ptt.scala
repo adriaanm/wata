@@ -40,7 +40,32 @@ import language.experimental.saferExceptions
  *  step, and it is the same path whichever button the user pressed. A
  *  transmission the SYSTEM started (the user has no wata screen in front of
  *  them) targets the family conversation; one the app's own button started
- *  keeps whatever conversation is open. */
+ *  keeps whatever conversation is open.
+ *
+ *  RECEIVING IS AN EPISODE THE APP OWNS FROM END TO END. A `pushtotalk` push
+ *  shows no banner — it wakes the app so the app can play the message — and
+ *  answering it with an active speaker is what activates the audio session and
+ *  puts "<name> speaking" on the system UI. Both stay until the app clears the
+ *  speaker again, so the arc here is: take the room and event the push named,
+ *  wait for the sync to bring that event in, play it on the session the
+ *  framework handed over, then end the episode. Three things shape it:
+ *
+ *  - **The app may be suspended or cold.** The push is delivered to the
+ *    framework, not to a running pump: the pump can start frames seconds
+ *    later, and a cold launch has to log in and sync first. So the request
+ *    carries the push's own ARRIVAL time (`pttPlayAgeMs`) and the window is
+ *    measured from that, not from the frame that drained it — a pump that
+ *    starts five minutes later must not suddenly play a stale message.
+ *  - **The fetch IS the sync.** The event may not be in the local timeline
+ *    yet; when the sync brings it in it appears in the snapshot with its mxc
+ *    url, which is what playing needs anyway. So the resolve is retried once
+ *    per frame until `PLAY_WINDOW_MS` runs out, and arming it kicks the sync
+ *    loop out of any backoff (`Runtime.retryNow`) — a suspended app's sockets
+ *    were torn down while it slept.
+ *  - **Every exit ends the episode.** Played, gave up, no message named, the
+ *    channel left: each one clears the speaker, because an episode nobody
+ *    ends never ends — on hardware 2026-08-18 five pushes activated the audio
+ *    session and none of them ever released it. */
 object PttChan:
 
   /** how long before a failed channel registration is tried again. */
@@ -65,19 +90,50 @@ object PttChan:
    *  without a facade call per key event. */
   private val routingC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
+  /** how long after the framework delivered a `pushtotalk` push the message it
+   *  names is still worth playing live, measured from the push's own arrival.
+   *  It has to cover a COLD launch — the app was not running, so login and the
+   *  first sync are inside it — and it must not be so long that a message
+   *  plays out of nowhere after the user has put the phone away. Past it the
+   *  message is an ordinary unplayed arrival: the conversation row and the
+   *  badge are its surface, and the alert push is the one that asks for a tap. */
+  val PLAY_WINDOW_MS: Long = 20000L
+  /** a hard cap on one receive episode, only ever reached when the playback
+   *  neither finishes nor fails — the audio thread reports both, so this is a
+   *  wedge-breaker rather than a limit on how long a message may be. Without
+   *  it a playback that never reports would leave the speaker on the system UI
+   *  and the audio session in the framework's hands for the life of the app. */
+  val EPISODE_MAX_MS: Long = 300000L
+
+  /** the room and event a `pushtotalk` push named and the app has not resolved
+   *  yet; "" once it has been played or given up on. */
+  private val playRoomC: sgo.Atomic[String] = sgo.atomic("")
+  private val playEventC: sgo.Atomic[String] = sgo.atomic("")
+  /** the clock reading past which that message is no longer worth playing. */
+  private val playUntilC: sgo.Atomic[Long] = sgo.atomic(0L)
+  /** a speaker is on the system UI and the framework's session is the app's to
+   *  play on, until the app says the episode is over. */
+  private val speakingC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  /** the clock reading at which the episode is ended regardless. */
+  private val episodeUntilC: sgo.Atomic[Long] = sgo.atomic(0L)
+
   /** a session started (or restarted onto another server): the new server
    *  knows nothing about this device's channel. */
   def newSession(): Unit =
     doneC.set("")
     nextAtC.set(0L)
     joinAtC.set(0L)
+    // a message this client cannot resolve any more: whatever episode the old
+    // session was in ends here rather than outliving it.
+    if speakingC.get() then finish("the session restarted")
 
   /** is the PTT button routed through the framework? True exactly while a
    *  channel is joined. */
   def routing(): Boolean = routingC.get()
 
   /** once per frame: drain what the framework said, keep the channel joined,
-   *  and keep the server's ephemeral registration current. */
+   *  keep the server's ephemeral registration current, and carry the receive
+   *  episode a push woke the app for. */
   def step(h: Handle, st0: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
     var st = st0
     var going = true
@@ -95,7 +151,7 @@ object PttChan:
       nextAtC.set(0L)
     postStep(h.client, nowMs)
     joinStep(ctx, nowMs)
-    st
+    playStep(h, st, ctx, nowMs)
 
   /** one line from the shell's queue. Only three of them are decisions; the
    *  rest are printed and dropped. */
@@ -108,6 +164,7 @@ object PttChan:
       tokenC.set("")
       doneC.set("")
       leaveC.set(true)
+      if speakingC.get() then finish("the channel was left")
       st
     else st
 
@@ -138,6 +195,102 @@ object PttChan:
   /** what the system UI calls this channel. */
   def channelName(ctx: FrameCtx): String =
     if ctx.snap.family.name != "" then ctx.snap.family.name else "wata"
+
+  // ---- the receive half: the message the push woke the app for -----------------
+
+  /** once per frame: take what the pushes named, try to resolve and play the
+   *  one in hand, and end the episode when there is nothing left to do. */
+  def playStep(h: Handle, st0: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
+    var going = true
+    while going do
+      val p = go.iosshell.takePttPlay()
+      if p == "" then going = false
+      else
+        println("ptt: " + p)
+        arm(h, go.iosshell.pttPlayRoom(), go.iosshell.pttPlayEvent(),
+          go.iosshell.pttPlayAgeMs().toLong, nowMs)
+    val st = resolve(h, st0, ctx, nowMs)
+    endStep(st, nowMs)
+    st
+
+  /** a push named a message. The LAST one wins: only one thing can play, and
+   *  an older push's message is an ordinary unplayed arrival the conversation
+   *  row already shows. The deadline is measured from the push's arrival, so a
+   *  pump that only starts running now inherits the time already spent. */
+  def arm(h: Handle, room: String, event: String, ageMs: Long, nowMs: Long): Unit =
+    speakingC.set(true)
+    episodeUntilC.set(nowMs + EPISODE_MAX_MS)
+    if room == "" || event == "" then finish("the push named no message")
+    else
+      playRoomC.set(room)
+      playEventC.set(event)
+      playUntilC.set(nowMs + PLAY_WINDOW_MS - ageMs)
+      // the app was almost certainly suspended, so its sync connection is gone
+      // and the retry loop may be part-way through a backoff sleep. Nothing
+      // the client could be doing is more urgent than this one event.
+      Runtime.retryNow(h.client)
+
+  /** the message is playable as soon as the sync puts it in the snapshot with
+   *  its mxc url — that IS the fetch. Retried every frame until the window
+   *  runs out. */
+  def resolve(h: Handle, st: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
+    val room = playRoomC.get()
+    if room == "" then st
+    else if nowMs >= playUntilC.get() then
+      finish("gave up on " + playEventC.get() + " (not synced in time)")
+      st
+    else
+      val url = mxcOf(ctx.snap.conversations, room, playEventC.get())
+      if url == "" then st
+      else play(h, st, ctx, room, playEventC.get(), url)
+
+  /** play it, on the session the framework activated for exactly this, and
+   *  open its conversation — the user woken by a walkie-talkie should find
+   *  the thread it came from on screen. The applet's own play path
+   *  (`withPlaying`) is what marks it playing, so the arrival announcement in
+   *  the same frame does not play it a second time. */
+  def play(h: Handle, st: PumpSt, ctx: FrameCtx, room: String, event: String,
+           url: String): PumpSt =
+    playRoomC.set("")
+    var out = Pump.openRoom(st, ctx, room)
+    Runtime.sendAction(h.client, ActPlay(url))
+    out = Pump.withWata(out, WataLogic.withPlaying(out.wata, true, room, event))
+    println("ptt: playing " + event)
+    out
+
+  /** the episode is over once the playback the app started has stopped — the
+   *  audio thread reports both the end and the failure, and both clear
+   *  `playing`. The cap catches a playback that reports neither. */
+  def endStep(st: PumpSt, nowMs: Long): Unit =
+    if !speakingC.get() then ()
+    else if playRoomC.get() == "" && !st.wata.playing then finish("played")
+    else if nowMs >= episodeUntilC.get() then finish("the episode outran its cap")
+
+  /** end the episode: clear the speaker, which takes it off the system UI and
+   *  releases the audio session back to the app. Every exit comes through
+   *  here. */
+  def finish(why: String): Unit =
+    println("ptt: speaker done (" + why + ")")
+    playRoomC.set("")
+    playEventC.set("")
+    speakingC.set(false)
+    go.iosshell.pttSpeakerStopped()
+
+  def mxcOf(xs: List[Conversation], roomId: String, eventId: String): String = xs match
+    case h :: t => mxcOfStep(h, t, roomId, eventId)
+    case Nil    => ""
+
+  def mxcOfStep(h: Conversation, t: List[Conversation], roomId: String,
+                eventId: String): String =
+    if h.roomId == roomId then mxcIn(h.messages, eventId)
+    else mxcOf(t, roomId, eventId)
+
+  def mxcIn(xs: List[VoiceMessage], eventId: String): String = xs match
+    case h :: t => mxcInStep(h, t, eventId)
+    case Nil    => ""
+
+  def mxcInStep(h: VoiceMessage, t: List[VoiceMessage], eventId: String): String =
+    if h.id == eventId then h.mxcUrl else mxcIn(t, eventId)
 
   // ---- the server's ephemeral registration -------------------------------------
 

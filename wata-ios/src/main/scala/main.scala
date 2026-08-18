@@ -41,8 +41,11 @@ import language.experimental.saferExceptions
  *    ptt: …                               — PushToTalk (plan 0065 tier 3):
  *                                           every channel-manager delegate
  *                                           callback, the ephemeral token's
- *                                           registration, and the join's
- *                                           refusals
+ *                                           registration, the join's refusals,
+ *                                           and the receive episode a push
+ *                                           woke the app for (`play room=…
+ *                                           event=…`, `playing <event>`,
+ *                                           `speaker done (<why>)`)
  *
  *  Argv modes: `interptest` runs the retained interpreter's suite
  *  (interptest.scala) instead of the client. */

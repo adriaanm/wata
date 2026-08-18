@@ -40,12 +40,31 @@
 // transmission works. Both directions are best-effort and only logged — an
 // audio session that cannot be reclaimed must not wedge the app, and the
 // audio thread already reports per-command failures.
+//
+// THE HAND-BACK CANNOT BE WAITED FOR FOREVER. Observed on hardware
+// 2026-08-18: five incoming `pushtotalk` pushes produced five
+// didActivateAudioSession callbacks and NOT ONE didDeactivateAudioSession, so
+// the flag below latched for the life of the process and every later
+// sessionActivate() silently did nothing. So ownership is scoped to an
+// EPISODE — one transmission, or one incoming message — and the app declares
+// the episode over itself (PTTEpisodeEnded) at the moment it has told the
+// framework so: it stopped transmitting, it cleared the active remote
+// participant, or the channel is gone.
+//
+// PTTEpisodeEnded does not drop ownership on the spot, because the framework
+// deactivates its session asynchronously after that and reclaiming underneath
+// that teardown is the same race the yield exists to avoid. It arms a GRACE
+// period instead and reclaims only if the callback has still not arrived.
+// pttHandbackGrace is therefore a bound on one asynchronous acknowledgement
+// the app has already requested — not a guess at how long audio lasts — and
+// the completion handlers it waits on normally fire in milliseconds.
 package macaudio
 
 import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	av "github.com/adriaanm/wata/go-pkgs/appleptt/avfaudio"
 	"github.com/adriaanm/wata/go-pkgs/appleptt/objcrt"
@@ -73,37 +92,86 @@ const (
 	optDefaultToSpeaker = 0x8
 )
 
+// How long the app waits for didDeactivateAudioSession after it has told the
+// framework the episode is over. See the header: this bounds one async
+// acknowledgement, so it is generous by three orders of magnitude rather than
+// tuned.
+const pttHandbackGrace = 2 * time.Second
+
 // pttOwns is set for as long as the PushToTalk framework owns the audio
-// session. Guarded by pttMu, which also serializes the two handoff calls
-// against each other (they arrive on the framework's threads).
+// session. Guarded by pttMu, which also serializes the handoff calls against
+// each other (they arrive on the framework's threads). pttEpoch counts
+// ownership transitions, so a grace timer can tell "still the episode I armed
+// for" from "the framework already handed back, or took it again".
 var (
-	pttMu   sync.Mutex
-	pttOwns bool
+	pttMu    sync.Mutex
+	pttOwns  bool
+	pttEpoch uint64
 )
 
 // PTTSessionActivated: the PushToTalk framework has handed the app an
-// ACTIVATED session for a transmission. Call it from
-// channelManager:didActivateAudioSession: before anything records.
+// ACTIVATED session — for a transmission, or for an incoming message it woke
+// the app to play. Call it from channelManager:didActivateAudioSession:
+// before anything records or plays.
 func PTTSessionActivated() {
 	pttMu.Lock()
 	pttOwns = true
+	pttEpoch++
 	pttMu.Unlock()
 	log.Printf("macaudio: PushToTalk owns the audio session")
 	startIfStopped()
 }
 
-// PTTSessionDeactivated: the transmission is over and the session is the
-// app's problem again. Call it from channelManager:didDeactivateAudioSession:.
+// PTTSessionDeactivated: the episode is over and the session is the app's
+// problem again. Call it from channelManager:didDeactivateAudioSession: — or,
+// when that never comes, from the grace timer PTTEpisodeEnded arms.
 func PTTSessionDeactivated() {
 	pttMu.Lock()
+	was := pttOwns
 	pttOwns = false
+	pttEpoch++
 	pttMu.Unlock()
+	if !was {
+		return
+	}
 	log.Printf("macaudio: PushToTalk released the audio session")
 	if err := sessionActivate(); err != nil {
 		log.Printf("macaudio: reclaiming the audio session failed: %v", err)
 		return
 	}
 	startIfStopped()
+}
+
+// PTTEpisodeEnded: the app has told the framework this episode is finished
+// (it stopped transmitting, it cleared the active remote participant, or the
+// channel is gone) and the hand-back is now owed. Ownership is NOT dropped
+// here — the framework tears its session down asynchronously and reclaiming
+// underneath that is the race the yield exists to avoid — but it stops being
+// open-ended: if didDeactivateAudioSession has still not arrived after
+// pttHandbackGrace, the app reclaims the session itself.
+//
+// Idempotent and cheap to over-call: a second call inside the same episode
+// arms a second timer that finds the epoch unchanged and does the same
+// nothing, and a call while the app does not own the session returns at once.
+func PTTEpisodeEnded(reason string) {
+	pttMu.Lock()
+	owns, epoch := pttOwns, pttEpoch
+	pttMu.Unlock()
+	if !owns {
+		return
+	}
+	go func() {
+		time.Sleep(pttHandbackGrace)
+		pttMu.Lock()
+		stale := pttOwns && pttEpoch == epoch
+		pttMu.Unlock()
+		if !stale {
+			return
+		}
+		log.Printf("macaudio: PushToTalk never handed the session back after %s "+
+			"(%v) — reclaiming it", reason, pttHandbackGrace)
+		PTTSessionDeactivated()
+	}()
 }
 
 // pttOwned answers whether the framework holds the session right now.

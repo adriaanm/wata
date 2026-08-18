@@ -13,8 +13,9 @@ func sessionActivate() error { return nil }
 func prepareInput(e av.AVAudioEngine) {}
 
 // The PushToTalk session handoff (session_ios.go) has no meaning without an
-// AVAudioSession. The two entry points still exist on every platform because
+// AVAudioSession. These entry points still exist on every platform because
 // go-pkgs/iosshell, which is a darwin package rather than an ios one, calls
-// them from the channel manager's delegate.
-func PTTSessionActivated()   {}
-func PTTSessionDeactivated() {}
+// them from the channel manager's delegate and from the receive path.
+func PTTSessionActivated()     {}
+func PTTSessionDeactivated()   {}
+func PTTEpisodeEnded(_ string) {}
