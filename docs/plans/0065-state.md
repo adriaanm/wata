@@ -498,3 +498,41 @@ Two operational notes from the session:
 - A successful push logs NOTHING server-side, which made "did it even
   fire?" unanswerable from the log and sent this debugging through the
   journal instead. Worth a line.
+
+### 2026-08-18 — tier 2 is DEVICE-PROVEN; and one hypothesis that did not survive
+
+With `afa81d1` deployed, the owner confirmed a notification delivered
+on the phone. Combined with the same run's log, tier 2 is now proven
+end to end on hardware, including the two paths no gate here could
+reach:
+
+```
+push: tap room=!Rz4sZuLaWNRB:localhost event=$HxvVjBevFjX5:localhost
+screen conversation
+```
+
+— the banner tapped, and the tap opening the RIGHT conversation
+through the same edge ENTER makes.
+
+**A correction worth keeping, because the reasoning was wrong in an
+instructive way.** The same log showed `audio: play failed:
+FillComplexBuffer(decode)` shortly after a PTT session activation, and
+it was tempting to read it as the audio-session handoff breaking
+playback. The owner then confirmed playback works fine on the phone.
+So that was a one-off — most likely a bad or partial media blob — and
+the causal story was invented, not observed. It was flagged to the
+implementer as CORRELATED-NOT-PROVEN when it was raised, and
+retracted when the evidence arrived; had it been asserted, a session
+lifecycle would now be carrying machinery justified by a coincidence.
+
+What survives that retraction, on its own separate evidence:
+**`ptt: audio session activated` arrived FIVE times with no matching
+`deactivated`, ever.** That is an observation about the callback and
+owes nothing to the playback error. So `macaudio`'s ownership flag can
+latch for the life of the process, and the receive half must not rely
+on a callback we have now watched fail to arrive. Sized to that, and
+no longer justified by the decode line.
+
+Remaining device legs are tier 3's alone: transmit from the system UI,
+the session handoff under a real transmission, leave, restoration, and
+the receive half once it lands.
