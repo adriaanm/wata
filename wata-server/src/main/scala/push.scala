@@ -63,16 +63,17 @@ import sgo.{Mutex, mutex}
  *  token. `push/unregister` drops both: it means "stop pushing to this
  *  device".
  *
- *  **A device holding both is pushed ONCE, the PushToTalk way.** The two
- *  tokens answer the same question — "a message arrived" — at different
- *  levels: the `pushtotalk` push wakes the app straight into live audio, while
- *  the alert asks the user to tap. Sending both would give one message a
- *  banner AND a live handover. So when a device has a live channel token, the
- *  channel push is what it gets, and its alert registration stays on the shelf
- *  as the FALLBACK: if the channel push is rejected (a 4xx — the token is
- *  dead, the phone left the channel and the leave never reached us), the row
- *  is deleted and the alert goes out for that same message. The user hears
- *  about it either way; nobody hears about it twice.
+ *  **A device holding both is currently pushed TWICE, on purpose and
+ *  temporarily** — see `ChannelSuppressesAlert`, which is the single switch
+ *  and carries the full reasoning. In short: the two tokens answer the same
+ *  question at different levels, and the intended end state is that a live
+ *  channel token wins and the alert stays on the shelf as a fallback. That
+ *  end state is only correct once the iOS client actually plays the message
+ *  a `pushtotalk` push wakes it for, because such a push shows no banner. It
+ *  was shipped ahead of that and observed on hardware (2026-08-18) to deliver
+ *  pure silence, so the suppression is off until the receive half is proven
+ *  on a device. A 4xx on the channel push therefore drops the row WITHOUT
+ *  re-sending the alert, which has already gone out in the same fan-out.
  */
 case class PushReg(userId: String, deviceId: String, platform: String, token: String, env: String)
 
