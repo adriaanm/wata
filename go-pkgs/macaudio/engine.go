@@ -151,6 +151,9 @@ func startEngine() error {
 		mixer := e.MainMixerNode() // engine property: autoreleased-only
 		mixer.ID.Send(selRetain)   // we keep it across pools
 		e.ConnectToFormat(av.AVAudioNode{ID: player.ID}, av.AVAudioNode{ID: mixer.ID}, f48)
+		// iOS only (no-op on macOS): the input node must exist before the
+		// first start or the IO unit comes up output-only. See session_ios.go.
+		prepareInput(e)
 		ok, startErr := e.StartAndReturnError()
 		if !ok {
 			err = fmt.Errorf("macaudio: AVAudioEngine start: %w", startErr)

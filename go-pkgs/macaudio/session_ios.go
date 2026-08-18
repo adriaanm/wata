@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log"
 
+	av "github.com/adriaanm/wata/go-pkgs/appleptt/avfaudio"
 	"github.com/adriaanm/wata/go-pkgs/appleptt/objcrt"
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
@@ -81,4 +82,16 @@ func sessionActivate() error {
 		s.Send(selRequestRecordPerm, recordPermBlock)
 	})
 	return out
+}
+
+// prepareInput touches the engine's input node BEFORE the engine's first
+// start. On iOS the engine configures its IO unit lazily: started without
+// the input node ever having been instantiated, it runs output-only, and the
+// input node then reports a 0 Hz format — OpenCapture's "no format" failure
+// on every PTT press, because its format check reads the running engine's
+// state before the tap-install restart could reconfigure it. Accessing the
+// node here makes the first start bring the unit up with input enabled, so
+// the hardware format is real from the first capture open.
+func prepareInput(e av.AVAudioEngine) {
+	e.InputNode()
 }
