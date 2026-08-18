@@ -1128,7 +1128,12 @@ the whole buffer to `playMessage`. `AcStopPlayback` is only honored
 between decode steps — once `playMessage` starts writing to the
 speaker, the message plays to completion, matching the same
 uninterruptible-write shape used elsewhere in this codebase's
-lower-level write loop.
+lower-level write loop. Every non-throws boundary that turns a
+`sgo.GoError` into an error event first prints
+`audio: <surface> failed: <e.getMessage>` — the catch is the only
+place the error text still exists (the events carry none), and the
+file is shared (wata-mac and wata-ios symlink it), so all three
+clients log the cause.
 
 **The startup chirp** (`chirp.scala`, `wata-fb/assets/chirp.ogg`) is the
 short walkie-talkie bleep the handset plays once its audio route exists, so

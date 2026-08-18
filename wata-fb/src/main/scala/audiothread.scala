@@ -18,7 +18,9 @@ import language.experimental.saferExceptions
  *  in statement position DROPS its error. So: loops with throwing calls live
  *  in `throws` functions with each call hoisted to a `val`; resource tiers
  *  close-and-rethrow in their catch (hand-rolled exit-edge duplication); the
- *  non-throws boundary catches once and turns failure into the error event.
+ *  non-throws boundary catches once, PRINTS the cause (`audio: <surface>
+ *  failed: <err>` — the catch is the only place the error text still
+ *  exists; the event carries none), and turns failure into the error event.
  *
  *  DELIBERATE NON-PORTS of quirks in the original client this was ported
  *  from:
@@ -106,7 +108,10 @@ object AudioThread:
     try
       val c = recordSession(cmds, evts)
       code = c
-    catch case e: sgo.GoError => code = -1
+    catch
+      case e: sgo.GoError =>
+        println("audio: record failed: " + e.getMessage)
+        code = -1
     if code == -1 then
       evts.trySend(AeRecordingError())
       ()
@@ -205,7 +210,10 @@ object AudioThread:
     try
       val c = playSession(cmds, evts, ogg)
       code = c
-    catch case e: sgo.GoError => code = -1
+    catch
+      case e: sgo.GoError =>
+        println("audio: play failed: " + e.getMessage)
+        code = -1
     if code == -1 then
       evts.trySend(AePlaybackError())
       ()
@@ -257,7 +265,10 @@ object AudioThread:
     try
       val n = go.audio.playMessage(GoBytes.fromPortable(pcm), PlayVol)
       ok = n >= 0
-    catch case e: sgo.GoError => ok = false
+    catch
+      case e: sgo.GoError =>
+        println("audio: playback failed: " + e.getMessage)
+        ok = false
     if ok then
       evts.trySend(AePlaybackDone())
       ()
@@ -285,7 +296,10 @@ object AudioThread:
     try
       val b = echoSession()
       out = b
-    catch case e: sgo.GoError => out = Bytes.empty
+    catch
+      case e: sgo.GoError =>
+        println("audio: echo record failed: " + e.getMessage)
+        out = Bytes.empty
     out
 
   def echoSession(): Bytes throws sgo.GoError =
@@ -334,7 +348,10 @@ object AudioThread:
     try
       val n = echoPlaySession(ogg)
       ok = n >= 0
-    catch case e: sgo.GoError => ok = false
+    catch
+      case e: sgo.GoError =>
+        println("audio: echo play failed: " + e.getMessage)
+        ok = false
     if ok then
       evts.trySend(AeEchoDone())
       ()
