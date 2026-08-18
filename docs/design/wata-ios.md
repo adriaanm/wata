@@ -169,11 +169,13 @@ for the body.
 > That is fine, because a self-hoster already needs their own
 > developer account to sideload the app at all: self-hosters bring
 > their own team, bundle id and key. The hosted tier (paid, v2 — our
-> server, our key, and no iroh) is the answer for everyone else. Only
-> one case is genuinely awkward and is not being solved now: shipping
-> OUR App Store build to a self-hoster, whose server then cannot push
-> without our key — the outs there are a thin push relay we operate
-> or nothing. Whether half 1 alone yields background RECEIVE over our
+> server, our key, and no iroh) is the answer for everyone else. The
+> remaining combination — our App Store build pointed at someone
+> else's server — is **not a supported configuration** (owner, same
+> ruling): that server could never push without our key, and the only
+> ways to make it work are a push relay we operate or handing out a
+> key, neither of which we want. Self-host means building it
+> yourself; using our build means using our service. Whether half 1 alone yields background RECEIVE over our
 > own iroh transport turns on whether a joined channel keeps the app
 > running rather than suspended — an Apple-docs claim to verify, not
 > assume, before the plan commits to it. Blocked on
