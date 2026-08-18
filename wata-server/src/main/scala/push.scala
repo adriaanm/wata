@@ -63,17 +63,11 @@ import sgo.{Mutex, mutex}
  *  token. `push/unregister` drops both: it means "stop pushing to this
  *  device".
  *
- *  **A device holding both is currently pushed TWICE, on purpose and
- *  temporarily** — see `ChannelSuppressesAlert`, which is the single switch
- *  and carries the full reasoning. In short: the two tokens answer the same
- *  question at different levels, and the intended end state is that a live
- *  channel token wins and the alert stays on the shelf as a fallback. That
- *  end state is only correct once the iOS client actually plays the message
- *  a `pushtotalk` push wakes it for, because such a push shows no banner. It
- *  was shipped ahead of that and observed on hardware (2026-08-18) to deliver
- *  pure silence, so the suppression is off until the receive half is proven
- *  on a device. A 4xx on the channel push therefore drops the row WITHOUT
- *  re-sending the alert, which has already gone out in the same fan-out.
+ *  **A device holding both gets the channel push ONLY** — see
+ *  `ChannelSuppressesAlert`, the single switch, which carries the reasoning
+ *  and what it costs. The two tokens answer the same question at different
+ *  levels: the live channel token wins, and the alert stays on the shelf as
+ *  the fallback a 4xx on the channel push falls back to.
  */
 case class PushReg(userId: String, deviceId: String, platform: String, token: String, env: String)
 
@@ -425,28 +419,31 @@ object Push:
     case h :: t => addRegsStep(h, t, senderDeviceId, acc)
     case Nil  => acc
 
-  /** `ChannelSuppressesAlert` is FALSE, and that is a deliberate, temporary
-   *  state rather than an oversight. A `pushtotalk` push shows no banner: it
-   *  wakes the app to play live audio. Suppressing the alert for a
-   *  channel-holding device is therefore only right once that app really does
-   *  play the message it was woken for — otherwise the phone is woken and does
-   *  nothing, which is strictly worse than the banner it would have had.
-   *  Observed live on hardware 2026-08-18: three `ptt: incoming push (Alma)`
-   *  lines on the phone, no notification of any kind for the user.
+  /** A device holding a live channel token gets the PushToTalk push and NOT
+   *  the alert: one message is one notification, and for a walkie-talkie the
+   *  better one is the one that plays the message out loud rather than the one
+   *  that asks for a tap.
    *
-   *  The client's receive half now exists (wata-ios `ptt.scala`: the push's
-   *  room and event are resolved out of the sync and played on the session the
-   *  framework hands over). It is UNPROVEN — the PushToTalk framework does not
-   *  exist in a simulator, so nothing in this repo can exercise it — and this
-   *  flag is what makes an unproven receive half harmless: with it false the
-   *  alert still arrives, so a receive half that fails silently costs nothing
-   *  but the live handover.
+   *  This is only correct because the iOS client's receive half is proven to
+   *  play what it is woken for — a `pushtotalk` push shows no banner, so
+   *  suppressing the alert for a client that fails to play delivers pure
+   *  silence, which is strictly worse than the banner it replaced. That is not
+   *  hypothetical: it is what the first hardware run did (2026-08-18, three
+   *  `ptt: incoming push` lines and no notification of any kind), which is why
+   *  this shipped false and stayed false until the device log showed a burst
+   *  played end to end — `playing <event>` per message, one closing `speaker
+   *  done #N (played N)`, on the session the framework handed over.
    *
-   *  Flip it to true when the phone has been seen to print `ptt: playing
-   *  <event>` and then `ptt: speaker done (played)` for a real push, and flip
-   *  the two `tools/wata-ptt-smoke.py` assertions that encode the current
-   *  behaviour in the same commit. */
-  val ChannelSuppressesAlert = false
+   *  What it costs: a message whose auto-play fails on a suspended phone is
+   *  now silent until the app is next opened, where it is an ordinary unplayed
+   *  arrival. The one failure the server can see it recovers from — a channel
+   *  token APNs rejects falls back to the device's alert (`channelDead`) and
+   *  the dead row is dropped, so the NEXT message goes straight to the alert.
+   *
+   *  Turning this back to false is the way to make an unproven receive half
+   *  harmless again; `tools/wata-ptt-smoke.py` asserts whichever way it points
+   *  and is what fails the day it moves. */
+  val ChannelSuppressesAlert = true
 
   def addRegsStep(h: PushReg, t: List[PushReg], senderDeviceId: String, acc: List[PushReg]): List[PushReg] =
     var acc2: List[PushReg] = acc

@@ -725,6 +725,17 @@ Losing the live handover is not a reason to lose the message. Both target
 lists are built before either is pushed, so the fallback cannot double up with
 the ordinary alert leg.
 
+The suppression is one constant (`Push.ChannelSuppressesAlert`) because it is
+only correct while the client really plays what it is woken for: a `pushtotalk`
+push shows no banner, so suppressing the alert for a client that fails to play
+delivers silence, which is worse than the banner it replaced. It shipped false
+for exactly that reason and went true on 2026-08-18, when a burst was seen to
+play end to end on the phone. What it costs is a message whose auto-play fails
+on a suspended device: silent until the app is next opened, where it is an
+ordinary unplayed arrival. Turning it false again is how an unproven receive
+half is made harmless; `tools/wata-ptt-smoke.py` asserts whichever way it
+points.
+
 That 4xx rule is stricter than the alert path's 410-only one, on purpose: an
 ephemeral token APNs will not take is not coming back, and the client mints a
 fresh one on its next join. The rows are journaled (`pttjoin` / `pttleave`)

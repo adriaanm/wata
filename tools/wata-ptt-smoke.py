@@ -21,7 +21,8 @@ What the run asserts:
   * a re-join REPLACES the token rather than accumulating — one message, one
     push, at the new token;
   * a device holding BOTH tokens gets the PushToTalk push and NOT the alert:
-    one message is one notification, and the channel push is the better one;
+    one message is one notification, and the channel push is the better one
+    (`Push.ChannelSuppressesAlert`, which carries what that costs);
   * unless APNs rejects the channel token, in which case that same message
     falls back to the device's alert — and the dead channel row is gone, so
     the next message goes straight to the alert with no wasted attempt;
@@ -126,41 +127,41 @@ def run(tmp):
         checks(fake.tokens(got) == ["bobchan3"],
                f"a re-join replaces the token wholesale (got {fake.tokens(got)})")
 
-        # -- both tokens: BOTH are sent, while Push.ChannelSuppressesAlert is false --
-        # A pushtotalk push shows no banner, and the iOS client's PTT receive half
-        # does not yet play the message it is woken for, so suppressing the alert
-        # here would buy pure silence — seen on hardware 2026-08-18. The server
-        # constant carries the reasoning and the condition for flipping it; these
-        # two assertions are what will fail the day it flips, which is the point.
+        # -- both tokens: the channel push WINS, the alert is suppressed ------------
+        # One message is one notification, and the channel push is the better one:
+        # it plays the message rather than asking for a tap. `ChannelSuppressesAlert`
+        # carries the reasoning and what it costs; these two assertions are what
+        # fail the day it moves, whichever way it moves.
         st, _ = register(srv, bob, "bobalert")
         checks(st == 200, "bob also holds a stable alert token")
         srv.send(alice, room, "with both tokens")
-        got = fake.take(2)
-        checks(sorted(fake.tokens(got)) == ["bobalert", "bobchan3"],
-               f"a device with both gets BOTH the alert and the channel push "
+        got = fake.take(1)
+        checks(fake.tokens(got) == ["bobchan3"],
+               f"a device with both gets the channel push and NOT the alert "
                f"(got {fake.tokens(got)})")
 
         # -- alice, alert-only, is unaffected ---------------------------------------
         alice2 = srv.login("alice")
         register(srv, alice2, "alicealert")
         srv.send(alice, room, "alice's other session")
-        got = fake.take(3)
-        checks(sorted(fake.tokens(got)) == ["alicealert", "bobalert", "bobchan3"],
+        got = fake.take(2)
+        checks(sorted(fake.tokens(got)) == ["alicealert", "bobchan3"],
                f"an alert-only device still gets its alert (got {fake.tokens(got)})")
         alert = [p for p in got if p.token == "alicealert"]
         checks(bool(alert) and alert[0].push_type == "alert" and alert[0].topic == BUNDLE,
                "the alert leg is untouched: alert type, the app's own topic")
 
-        # -- a rejected channel token is dropped, and does NOT re-send the alert -----
-        # The fallback exists for the suppressed case; with the alert already sent
-        # in the same fan-out, re-sending it here would deliver the message twice.
+        # -- a rejected channel token FALLS BACK to the alert, and is dropped --------
+        # Bob's alert was suppressed for this message, so the rejection is the only
+        # thing standing between him and silence: the fallback is what makes the
+        # suppression safe.
         with fake.lock:
             fake.bad.add("bobchan3")
         srv.send(alice, room, "to a dead channel")
         got = fake.take(3)
         checks(sorted(fake.tokens(got)) == ["alicealert", "bobalert", "bobchan3"],
-               f"the rejected channel push drops the row without double-sending "
-               f"bob's alert (got {fake.tokens(got)})")
+               f"a rejected channel push falls back to bob's alert rather than "
+               f"losing the message (got {fake.tokens(got)})")
         srv.send(alice, room, "after the rejection")
         got = fake.take(2)
         checks(fake.tokens(got) == ["alicealert", "bobalert"],

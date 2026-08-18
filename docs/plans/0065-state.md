@@ -12,7 +12,7 @@ its durable content has moved into the plan and the design docs.
 |------|------|-------|
 | 1 | foreground sync latency | **done** — measured, gated, nothing to reduce |
 | 2 | `alert` pushes | **done** — gated; on-device leg is `IOS-PUSH-ON-DEVICE` |
-| 3 | `pushtotalk` pushes | server half **done**; client half device-only, blocked |
+| 3 | `pushtotalk` pushes | **device-proven** — a burst plays on one speaker episode; the alert is suppressed for a channel-holding device |
 
 ## Log
 
@@ -618,3 +618,51 @@ silence with no error at all.
 Next: the owner's device leg for the receive half — a burst of three or
 four from the BQ268 with the phone locked, and `just ios-log` showing
 one `speaker done` per burst with the counts adding up.
+
+### 2026-08-18 — the burst plays on hardware, and the alert is suppressed
+
+The queue rewrite (`e875c85`) was seen to work on the phone. Two pushes
+arriving a second apart joined ONE episode and played in order:
+
+```
+ptt: incoming push #2 ep=2 (Alma) event=$A1XQWS…
+ptt: incoming push #3 ep=2 (Alma) event=$oaPL1…
+ptt: audio session activated
+ptt: playing $A1XQWS… (1 more queued)
+ptt: playing $oaPL1…
+ptt: speaker done #2 (played 2)
+```
+
+One raised speaker, one activation, one closing line — the shape the
+rewrite exists for.
+
+**The flagged risk did not materialise.** The implementer flagged that
+nothing had ever observed a `didDeactivateAudioSession`, so an episode
+after the first might never get its fresh activation and would give up
+strictly. Episode 1 ran at 20:03 and episode 2 got its own activation at
+20:11, so the framework does re-activate after the app lowers the
+speaker, and the strict per-episode gate is safe. That was the last
+thing standing between the receive half and being believed.
+
+**So `Push.ChannelSuppressesAlert` went TRUE**, with the
+`tools/wata-ptt-smoke.py` assertions that pin it. One message is now one
+notification for a channel-holding device, and the alert is the fallback
+`channelDead` reaches for. The smoke's rejection leg got stronger in the
+process: with the alert suppressed, the fallback is the only thing
+standing between a rejected channel token and silence, so that assertion
+now exercises the path it names rather than asserting an absence.
+
+**A confusion worth recording, because it cost a round trip.** The owner
+read the duplicate alert banner as a failure to auto-play. It was not —
+both pushes had played — but with both notifications arriving, "it
+played AND banner'd" is indistinguishable from "it only banner'd" unless
+you are reading the log. Shipping the safe-but-doubled state made the
+product unjudgeable by the person judging it. If a temporary belt-and-
+braces state changes what the user SEES, say plainly what the end state
+looks like before asking them to test.
+
+Open, not blocking: `macaudio: engine restart after a session change`
+failed with `2003329396` once (20:03), and the reclaimed session came
+back `inCh=0`. The transmit three seconds later worked, so it healed,
+but a recording engine that fails to restart after a handover is worth
+watching.
