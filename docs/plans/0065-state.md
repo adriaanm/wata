@@ -167,3 +167,43 @@ Harness gotchas from the chunk, kept because they generalize:
   iroh-capable tui.
 
 Next: tier 2.
+
+### 2026-08-18 — tier 2, chunk A: the pusher module landed
+
+`go-pkgs/apns` (`7487be4`): ES256 JWT auth, a configurable host, the
+alert payload builder, and `just apns-tests` wired into `ci`. No
+external dependency, as the plan required — stdlib crypto signs and
+`net/http` negotiates HTTP/2 by itself. Reviewed and re-run here from
+a clean cache (`go build`/`go vet`/`go test -count=1`/`gofmt -l` all
+green) rather than accepted on report; the gopls diagnostics claiming
+`undefined: mintToken` were a workspace artifact (the module is not in
+a `go.work`), not a real breakage.
+
+Two things the implementation got RIGHT that are worth keeping stated,
+because a later refactor could quietly undo either:
+
+- **The ECDSA JWT signature is raw R||S, not ASN.1 DER.** The natural
+  call — `(*ecdsa.PrivateKey).Sign`, the `crypto.Signer` method —
+  returns DER (~70–72 bytes, leading `0x30`), and every JWT/JWS ES256
+  consumer including APNs wants exactly 64 bytes for P-256. The code
+  calls `ecdsa.Sign` directly and `FillBytes`-pads R and S. A test
+  pins the 64-byte width, and it was drilled: swapping in the DER
+  path made it fail with "signature is 72 bytes, want exactly 64",
+  which is the only reason to believe a negative test.
+- **`error` is reserved for transport-level failure.** Every
+  HTTP-level outcome (200/410/4xx/5xx) comes back in the result, so
+  `Gone` and `Reason` cannot be silently dropped by an
+  `if err != nil` early return — which was the whole point of asking
+  for 410 as a checkable outcome rather than an error string.
+
+Open choice, accepted: the JWT refresh threshold is 45 minutes
+(`tokenRefreshAfter`), inside Apple's "not more often than 20, at
+least every 60" band with 15 minutes of margin against clock skew in
+either direction. Nothing suggests a better number; revisit only if
+real APNs rejects a token as stale.
+
+Also free and kept: `apns-id` from the response header, as a
+correlation id for logs once real APNs is involved.
+
+Next: chunk B — the facade plus the server wiring (registration
+endpoint, push on message, the fake-APNs scenario).
