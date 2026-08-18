@@ -13,6 +13,7 @@ import "github.com/ebitengine/purego/objc"
 
 // Selectors, registered once at package init.
 var (
+	selActionIdentifier                                    = objc.RegisterName("actionIdentifier")
 	selAddNotificationRequestWithCompletionHandler         = objc.RegisterName("addNotificationRequest:withCompletionHandler:")
 	selAlloc                                               = objc.RegisterName("alloc")
 	selAttachments                                         = objc.RegisterName("attachments")
@@ -22,6 +23,7 @@ var (
 	selContent                                             = objc.RegisterName("content")
 	selContentByUpdatingWithProviderError                  = objc.RegisterName("contentByUpdatingWithProvider:error:")
 	selCurrentNotificationCenter                           = objc.RegisterName("currentNotificationCenter")
+	selDate                                                = objc.RegisterName("date")
 	selDelegate                                            = objc.RegisterName("delegate")
 	selFilterCriteria                                      = objc.RegisterName("filterCriteria")
 	selGetDeliveredNotificationsWithCompletionHandler      = objc.RegisterName("getDeliveredNotificationsWithCompletionHandler:")
@@ -30,12 +32,14 @@ var (
 	selGetPendingNotificationRequestsWithCompletionHandler = objc.RegisterName("getPendingNotificationRequestsWithCompletionHandler:")
 	selIdentifier                                          = objc.RegisterName("identifier")
 	selLaunchImageName                                     = objc.RegisterName("launchImageName")
+	selNotification                                        = objc.RegisterName("notification")
 	selProvidesAppNotificationSettings                     = objc.RegisterName("providesAppNotificationSettings")
 	selRelevanceScore                                      = objc.RegisterName("relevanceScore")
 	selRemoveAllDeliveredNotifications                     = objc.RegisterName("removeAllDeliveredNotifications")
 	selRemoveAllPendingNotificationRequests                = objc.RegisterName("removeAllPendingNotificationRequests")
 	selRemoveDeliveredNotificationsWithIdentifiers         = objc.RegisterName("removeDeliveredNotificationsWithIdentifiers:")
 	selRemovePendingNotificationRequestsWithIdentifiers    = objc.RegisterName("removePendingNotificationRequestsWithIdentifiers:")
+	selRequest                                             = objc.RegisterName("request")
 	selRequestAuthorizationWithOptionsCompletionHandler    = objc.RegisterName("requestAuthorizationWithOptions:completionHandler:")
 	selRequestWithIdentifierContentTrigger                 = objc.RegisterName("requestWithIdentifier:content:trigger:")
 	selSetAttachments                                      = objc.RegisterName("setAttachments:")

@@ -228,15 +228,18 @@
         "UserNotifications/UserNotifications.h"
       ],
       "classes": [
-        "UNUserNotificationCenter",
-        "UNNotificationContent",
         "UNMutableNotificationContent",
+        "UNNotification",
+        "UNNotificationContent",
         "UNNotificationRequest",
-        "UNNotificationSettings"
+        "UNNotificationResponse",
+        "UNNotificationSettings",
+        "UNUserNotificationCenter"
       ],
       "enums": [
         "UNAuthorizationOptions",
-        "UNAuthorizationStatus"
+        "UNAuthorizationStatus",
+        "UNNotificationPresentationOptions"
       ],
       "opaque": [
         "NSArray",

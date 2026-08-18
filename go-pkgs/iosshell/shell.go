@@ -107,23 +107,31 @@ func Start() {
 		}
 	}
 	purego.RegisterLibFunc(&uiApplicationMain, uikitLib, "UIApplicationMain")
+	methods := []objc.MethodDef{
+		{Cmd: selDidLaunch, Fn: func(self objc.ID, _ objc.SEL, app objc.ID, opts objc.ID) bool {
+			// remembered for RegisterForPush (push.go): the notification
+			// centre's delegate is this same object.
+			mu.Lock()
+			delegateSelf = self
+			mu.Unlock()
+			didFinishLaunching()
+			return true
+		}},
+		// The wata:// scheme's inbound edge. iOS calls this for a launch
+		// URL too (after didFinishLaunching returns true), so one queue
+		// covers cold and warm opens.
+		{Cmd: selOpenURLOpts, Fn: func(self objc.ID, _ objc.SEL, app, url, opts objc.ID) bool {
+			s := objcrt.GoString(url.Send(selAbsoluteString))
+			mu.Lock()
+			urlQueue = append(urlQueue, s)
+			mu.Unlock()
+			return true
+		}},
+	}
+	// the APNs callbacks (push.go) ride the same class.
+	methods = append(methods, pushMethods()...)
 	if _, err := objc.RegisterClass(delegateClass, objc.GetClass("NSObject"), nil, nil,
-		[]objc.MethodDef{
-			{Cmd: selDidLaunch, Fn: func(self objc.ID, _ objc.SEL, app objc.ID, opts objc.ID) bool {
-				didFinishLaunching()
-				return true
-			}},
-			// The wata:// scheme's inbound edge. iOS calls this for a launch
-			// URL too (after didFinishLaunching returns true), so one queue
-			// covers cold and warm opens.
-			{Cmd: selOpenURLOpts, Fn: func(self objc.ID, _ objc.SEL, app, url, opts objc.ID) bool {
-				s := objcrt.GoString(url.Send(selAbsoluteString))
-				mu.Lock()
-				urlQueue = append(urlQueue, s)
-				mu.Unlock()
-				return true
-			}},
-		}); err != nil {
+		methods); err != nil {
 		panic("iosshell: RegisterClass " + delegateClass + ": " + err.Error())
 	}
 }

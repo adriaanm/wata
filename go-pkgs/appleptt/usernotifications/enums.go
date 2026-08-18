@@ -34,3 +34,14 @@ const (
 	UNAuthorizationStatusProvisional   UNAuthorizationStatus = 3
 	UNAuthorizationStatusEphemeral     UNAuthorizationStatus = 4
 )
+
+// UNNotificationPresentationOptions is the ObjC enum UNNotificationPresentationOptions (unsigned long).
+type UNNotificationPresentationOptions uint
+
+const (
+	UNNotificationPresentationOptionBadge  UNNotificationPresentationOptions = 1
+	UNNotificationPresentationOptionSound  UNNotificationPresentationOptions = 2
+	UNNotificationPresentationOptionAlert  UNNotificationPresentationOptions = 4
+	UNNotificationPresentationOptionList   UNNotificationPresentationOptions = 8
+	UNNotificationPresentationOptionBanner UNNotificationPresentationOptions = 16
+)

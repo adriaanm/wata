@@ -82,6 +82,28 @@ object iosshell:
    *  hops to the main queue itself; fire-and-forget. */
   @go.name("OpenURL") def openURL(u: String): Unit = ???
 
+  // ---- APNs (plan 0065 tier 2, push.go) -------------------------------------
+  /** ask for notification permission, become the notification centre's
+   *  delegate, and register for remote notifications. Any thread; the UIKit
+   *  work hops to the main queue itself. Called from the ready hop, so the
+   *  interptest mode raises no permission prompt. */
+  @go.name("RegisterForPush") def registerForPush(): Unit = ???
+  /** the oldest device token iOS has issued (hex), or "" — never blocks. iOS
+   *  RE-issues, so every value has to be posted to the server; a stale token
+   *  is a phone that never rings. */
+  @go.name("TakeDeviceToken") def takeDeviceToken(): String = ???
+  /** the oldest registration failure or authorization answer, or "" — what
+   *  the pump prints so a silently unregistered phone says so in the log. */
+  @go.name("TakePushNote") def takePushNote(): String = ???
+  /** the oldest push the app observed, described for printing
+   *  (`present room=… event=…`), or "". `pushRoom`/`pushTapped` answer for
+   *  the one this call just handed out. */
+  @go.name("TakePush") def takePush(): String = ???
+  /** the room id of the push `takePush` last returned. */
+  @go.name("PushRoom") def pushRoom(): String = ???
+  /** was the push `takePush` last returned a TAP? (open its conversation). */
+  @go.name("PushTapped") def pushTapped(): Boolean = ???
+
   // ---- the persistent app log (plan 0064) -----------------------------------
   /** tee this process's stdout+stderr into `path` (truncated at open, growth
    *  capped) — the original console keeps every line, so tethered launches

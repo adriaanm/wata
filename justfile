@@ -477,3 +477,10 @@ ios-smoke:
 ios-enroll-smoke:
     tools/ios-enroll-smoke.py
 
+# the plan-0065 tier-2 client gate: `xcrun simctl push` hands a realistic wata
+# APNs payload to the running app (no APNs connection, no Apple credentials),
+# and it must be presented and read — plus the registration attempt reported
+# either way. Needs Xcode + a simulator runtime; not in ci.
+ios-push-smoke:
+    tools/ios-push-smoke.py
+

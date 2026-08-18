@@ -34,6 +34,10 @@ import language.experimental.saferExceptions
  *                                           (the proof UIKit really painted)
  *    notify: play|noted "…" "…" badge=<n> — the arrival decision (noted =
  *                                           no banner surface on iOS yet)
+ *    push: …                              — APNs (plan 0065 tier 2): the
+ *                                           device token, the registration's
+ *                                           outcome, and every notification
+ *                                           iOS handed the app
  *
  *  Argv modes: `interptest` runs the retained interpreter's suite
  *  (interptest.scala) instead of the client. */
@@ -154,6 +158,10 @@ object Pump:
     go.iosui.poolPop(pool)
     go.iosshell.adoptRoot(root)
     go.iosshell.addKeypad()
+    // APNs (plan 0065 tier 2): permission, the notification-centre delegate
+    // and registerForRemoteNotifications. Here rather than in the shell's
+    // launch callback so `interptest` never raises a permission prompt.
+    go.iosshell.registerForPush()
     rootC.set(Some(root))
     // Paint the boot screen NOW, inline (this is the UIKit thread): the
     // session's connect wait runs behind a painted "starting up..." frame.
@@ -280,6 +288,7 @@ object Pump:
   def pump(h: Handle): Unit =
     val clock = IosCaps.clock()
     NetStatus.reset()
+    PushReg.newSession()
     val live = waitLiveOrRejected(h, connectMs())
     if live then println("ready " + Runtime.lastAuth.userId)
     else println("login failed") // stored creds keep pumping on the boot screen (plan 0022's never-terminate)
@@ -330,6 +339,7 @@ object Pump:
       st.unsent, st.undelivered, st.quitArm > 0.0)
     st = applyKeys(st, ctx)
     st = drainAudio(st, ctx)
+    st = pushStep(h, st, ctx, nowMs)
     st = notifyStep(h, st, snap)
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
       st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
@@ -454,6 +464,54 @@ object Pump:
     case _: AeEchoDone      => true
     case _: AeEchoError     => true
     case _                  => false
+
+  // ---- APNs (plan 0065 tier 2) -----------------------------------------------
+
+  /** the push mailbox, ONCE a frame (the one-drain rule): the registration's
+   *  own progress, then every notification iOS handed the app since the last
+   *  frame. The printed `push:` lines are this client's whole push surface —
+   *  the BANNER is the system's, drawn from the payload the server sent
+   *  (`interruption-level: time-sensitive`), and a foreground one is
+   *  presented by the shell's delegate answering banner|list|sound|badge.
+   *
+   *  A TAP opens its conversation, which is the same edge ENTER makes on the
+   *  contact list: select the row, ack its outbox, enter. Nothing about the
+   *  applet's state machine is special-cased for a push. */
+  def pushStep(h: Handle, st0: PumpSt, ctx: FrameCtx, nowMs: Long): PumpSt =
+    var note = go.iosshell.takePushNote()
+    while note != "" do
+      println("push: " + note)
+      note = go.iosshell.takePushNote()
+    PushReg.step(h.client, nowMs)
+    var st = st0
+    var going = true
+    while going do
+      val rec = go.iosshell.takePush()
+      if rec == "" then going = false
+      else
+        println("push: " + rec)
+        if go.iosshell.pushTapped() then
+          st = openRoom(st, ctx, go.iosshell.pushRoom())
+    st
+
+  /** open the conversation a tapped notification names, if this snapshot has
+   *  it — a room the client has not synced yet is simply left alone; the
+   *  arrival itself will bring the user there. */
+  def openRoom(st: PumpSt, ctx: FrameCtx, roomId: String): PumpSt =
+    val idx = indexOfRoom(ctx.snap.conversations, roomId, 0)
+    if idx < 0 then st
+    else
+      WataLogic.ackOutbox(ctx, idx)
+      withWata(st, WataLogic.enterConv(WataLogic.withSel(st.wata, idx, 0), idx))
+
+  def indexOfRoom(xs: List[Conversation], roomId: String, i: scala.Int): scala.Int = xs match
+    case h :: t => indexOfRoomStep(h, t, roomId, i)
+    case Nil    => -1
+
+  def indexOfRoomStep(h: Conversation, t: List[Conversation], roomId: String,
+                      i: scala.Int): scala.Int =
+    if roomId != "" && h.roomId == roomId then i
+    else indexOfRoom(t, roomId, i + 1)
 
   // ---- arrival notification --------------------------------------------------
 
