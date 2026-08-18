@@ -62,7 +62,7 @@ server PORT="8008":
 # Each script prints its own PASS; just stops at the first failure.
 #
 # the whole gate
-ci: smoke persist admin-smoke cmd-smoke fb-smoke wataui-tests client-tests apns-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike callback-spike interp-spike
+ci: smoke persist admin-smoke cmd-smoke push-smoke fb-smoke wataui-tests client-tests apns-tests integ golden fb-ui-tests bindgen-tests facade-check mac-build-check amd64-smoke tunnel-smoke objc-spike callback-spike interp-spike
 
 # homeserver: selfcheck, live Matrix session, long-poll concurrency, -race
 smoke:
@@ -81,6 +81,11 @@ admin-smoke:
 # delivery, latest-wins reports, in-memory-only across a restart
 cmd-smoke:
     tools/wata-cmd-smoke.py
+
+# homeserver: APNs pushes against a local fake Apple — registration, the
+# per-message fan-out, 410-forgets-the-token, and silence with no APNs config
+push-smoke:
+    tools/wata-push-smoke.py
 
 # device client: native build+run, armv7 cross-cgo build
 fb-smoke:

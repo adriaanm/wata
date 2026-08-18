@@ -56,6 +56,10 @@ import sgo.{Mutex, mutex}
  *                              written only by an enrolment revocation
  *   - `nick`                 — a handset's admin-given nickname (plan 0060);
  *                              last write wins, an empty name clears
+ *   - `pushreg` / `pushunreg` / `pushforget` — APNs push registrations (plan
+ *                              0065); a registration that does not survive a
+ *                              restart is a phone that goes silent until it
+ *                              happens to re-register
  *
  *  NOT logged (transient by nature): long-poll waiters (in-flight goroutines).
  */
@@ -226,6 +230,35 @@ object Journal:
     fs = ("name", JStr(name)) :: fs
     endObj(fs)
 
+  /** an APNs push registration (plan 0065): the concrete row. Replay applies
+   *  them in commit order, and a re-registration overwrites both its (user,
+   *  device) predecessor and any row holding the same token, so replay
+   *  converges on exactly the live set. */
+  def pushRegOp(reg: PushReg): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("pushreg")) :: fs
+    fs = ("user_id", JStr(reg.userId)) :: fs
+    fs = ("device_id", JStr(reg.deviceId)) :: fs
+    fs = ("platform", JStr(reg.platform)) :: fs
+    fs = ("token", JStr(reg.token)) :: fs
+    fs = ("env", JStr(reg.env)) :: fs
+    endObj(fs)
+
+  /** the client unregistered its own session. */
+  def pushUnregOp(deviceId: String): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("pushunreg")) :: fs
+    fs = ("device_id", JStr(deviceId)) :: fs
+    endObj(fs)
+
+  /** APNs answered 410 for the token: it is dead, and must stay dead across a
+   *  restart. */
+  def pushForgetOp(token: String): Json =
+    var fs: List[(String, Json)] = startObj
+    fs = ("op", JStr("pushforget")) :: fs
+    fs = ("token", JStr(token)) :: fs
+    endObj(fs)
+
   def unbindOp(nodeId: String): Json =
     var fs: List[(String, Json)] = startObj
     fs = ("op", JStr("unbind")) :: fs
@@ -302,6 +335,9 @@ object Journal:
     else if op == "bind" then Bindings.replayBind(strField(j, "node_id", ""), strField(j, "user", ""))
     else if op == "unbind" then Bindings.replayUnbind(strField(j, "node_id", ""))
     else if op == "nick" then Nicknames.replay(strField(j, "node_id", ""), strField(j, "name", ""))
+    else if op == "pushreg" then PushRegs.replayPut(pushRegOf(j))
+    else if op == "pushunreg" then PushRegs.replayDropDevice(strField(j, "device_id", ""))
+    else if op == "pushforget" then PushRegs.replayForget(strField(j, "token", ""))
     else ()
 
   def acctOf(j: Json): AcctData =
@@ -314,6 +350,10 @@ object Journal:
       boolField(j, "has_state_key"), strField(j, "state_key", ""),
       boolField(j, "has_redacts"), strField(j, "redacts", ""), jsonField(j, "unsigned"),
       longField(j, "seq"))
+
+  def pushRegOf(j: Json): PushReg =
+    PushReg(strField(j, "user_id", ""), strField(j, "device_id", ""), strField(j, "platform", ""),
+      strField(j, "token", ""), strField(j, "env", ""))
 
   def receiptOf(j: Json): Receipt =
     Receipt(strField(j, "room_id", ""), strField(j, "user_id", ""), strField(j, "event_id", ""),

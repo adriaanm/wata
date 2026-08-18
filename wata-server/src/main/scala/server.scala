@@ -148,6 +148,7 @@ object Server:
     Dm.migrate()                        // derive the pair map from replayed rooms
     Family.ensure()                     // the family room exists, everyone joined
     Retain.boot()                       // media retention: sweep now, then daily
+    PushCfg.boot()                      // APNs, if the operator configured a key
     val mux = go.net.http.newServeMux()
     val h = new WataHandler()
     registerRoutes(mux, h)
@@ -248,6 +249,10 @@ object Server:
     mux.handle("GET /_wata/v1/cmd/poll", h)
     mux.handle("POST /_wata/v1/cmd/report", h)
     mux.handle("GET /_wata/v1/cmd/{userId}/report", h)
+    // APNs push registration (push.scala, plan 0065): a session registers its
+    // own device's token, or drops it.
+    mux.handle("POST /_wata/v1/push/register", h)
+    mux.handle("POST /_wata/v1/push/unregister", h)
     mux.handle("GET /_wata/v1/admin/enroll", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/approve", h)
     mux.handle("POST /_wata/v1/admin/enroll/{nodeId}/deny", h)

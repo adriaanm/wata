@@ -45,6 +45,10 @@ object Router:
     else if DeviceCmd.isReportPath(path) then DeviceCmd.report(r, body)
     else if DeviceCmd.isReadReportPath(path, n) then DeviceCmd.readReport(r)
     else if DeviceCmd.isQueuePath(path, n) then DeviceCmd.queue(r, body)
+    // APNs push registration (push.scala, plan 0065): both act on the calling
+    // session's own device.
+    else if Push.isRegisterPath(path) then Push.register(r, body)
+    else if Push.isUnregisterPath(path) then Push.unregister(r)
     else if TestHooks.enabled && isTestFailPath(path) then TestHooks.route(body)
     else if path == "/_matrix/client/v3/createRoom" then Rooms.createRoom(r, body)
     else if isRoomVerb(path, n, 6, "messages") then Rooms.messages(r)

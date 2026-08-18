@@ -485,6 +485,7 @@ object Rooms:
 
   def send6(auth: Auth, roomId: String, txnId: String, ev: Event): Either[MErr, Json] =
     Store.notifyRoomMembers(roomId)
+    Push.messageLanded(roomId, ev, auth.deviceId)
     Store.setTxn(auth.deviceId, txnId, ev.eventId)
     Right(obj1("event_id", JStr(ev.eventId)))
 

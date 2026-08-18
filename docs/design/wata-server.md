@@ -648,6 +648,93 @@ routes, take-once delivery in queue order, the long-poll wake, latest-wins
 reports and their seq, the TCP-refused header path, and the
 in-memory-only property across a restart.
 
+## Push notifications (APNs)
+
+`push.scala` + `apns.scala` + `go-pkgs/apns` (plan 0065 tier 2). A polling
+client only hears a message while it is running; iOS suspends a backgrounded
+app and tears down its sockets, so reaching a phone in a pocket is APNs or
+nothing. The server half is a registration endpoint and a per-message
+fan-out.
+
+| route | who | what it does |
+|---|---|---|
+| `POST /_wata/v1/push/register` | any session | store `{platform, token, env}` against the CALLING session's device; `token` mandatory, `platform` defaults to `ios`, re-registration overwrites |
+| `POST /_wata/v1/push/unregister` | any session | drop the calling session's registration |
+
+**Registrations are keyed twice.** The row is stored per (user, device), and a
+register also drops any other row carrying the same token: an APNs token
+identifies one app *install*, and after a logout/login the same install
+arrives under a fresh device id. Without that drop the install would collect
+one push per stale row. They are **journaled** (`pushreg` / `pushunreg` /
+`pushforget`) — a registration lost on restart is a phone that goes silent
+until it happens to re-register, which is the defect this tier exists to fix.
+
+**When a push fires.** `Rooms.send6` calls `Push.messageLanded`, which for an
+`m.room.message` pushes to every join-or-invite member's registered devices
+*except the sending session's own device* — the sender's other sessions do get
+one. The population is the same one `Store.notifyRoomMembers` wakes, invited
+included, because a canonical DM leaves the peer holding an invite until they
+ask for the room and their first message is the one they most need. It is
+deliberately NOT conditioned on whether a device is currently syncing: the
+check is racy, and iOS suppresses a banner the foreground app consumes anyway.
+The fan-out runs on a spawned goroutine — a walkie-talkie send does not wait on
+Apple.
+
+The payload (`apns.AlertPayload`) is the sender's display name as the title,
+the message text (or `Voice message` for `m.audio`) as the body,
+`interruption-level: time-sensitive`, a badge count, and `room_id`/`event_id`
+as top-level custom keys so a tap can open the right conversation with no
+round trip. The badge is the recipient's unplayed count across their rooms:
+messages from someone else carrying no receipt of theirs (receipts are
+per-message, plan 0050). That is a walk of their rooms per push — family-sized
+and cheap today, and the first thing to revisit if a timeline ever grows.
+
+**410 Gone deletes the registration.** APNs answering 410 means the token is
+dead; a pusher that ignores it re-sends to an uninstalled app forever. The
+delete is journaled, so a dead token does not come back on the next boot.
+
+**Configuration is the operator's own.** APNs keys are team-owned with no
+delegation primitive, so a self-hoster brings their own developer account,
+bundle id and key — nothing here is a baked-in constant:
+
+```
+WATA_APNS_KEY=/etc/wata/AuthKey_ABC123.p8   the .p8 Auth Key; its presence arms the pusher
+WATA_APNS_KEY_ID=ABC123
+WATA_APNS_TEAM_ID=TEAM123
+WATA_APNS_BUNDLE_ID=com.example.wata        the apns-topic header
+WATA_APNS_ENV=sandbox|production            the default for a registration naming none
+WATA_APNS_HOST=https://…                    override the APNs host (a fake, a proxy)
+```
+
+With `WATA_APNS_KEY` unset — the normal case for a self-hosted install — the
+server behaves exactly as it did before this existed: registrations are still
+accepted and stored (a client may register before the operator configures a
+key), no push is attempted, nothing is logged, and boot is unchanged. A
+configured-but-broken key is reported in one line and left disarmed rather
+than made fatal. The host is chosen per REGISTRATION rather than server-wide,
+because a development build's token is valid against the sandbox only and an
+App Store build's against production only.
+
+**The Go module and its facade.** APNs token auth needs an ES256 JWT and an
+HTTP/2 POST, neither expressible in the dialect, so `go-pkgs/apns` is plain Go
+(no external dependency: `crypto/ecdsa` signs, `net/http` negotiates HTTP/2 on
+its own). Its `Client`/`Config`/`Payload` shapes do not cross the frontier —
+`go.apns` (`apns.scala`) binds three flat calls, `Configure` / `Configured` /
+`HostFor` / `Push`, over strings and ints, with the credentials as
+package-level state armed once at boot (the shape `go.irohnet` uses for this
+process's live listener). `Push` answers the HTTP status; a rejection is a
+status, not a throw, and APNs' own `reason` is printed rather than swallowed.
+
+**Gates.** `go-pkgs/apns`'s own Go tests (`just apns-tests`) cover the JWT and
+the wire shape against an HTTP/2 fake, plus the facade's key parsing, badge
+handling and 410 mapping. `tools/wata-push-smoke.py` (`just push-smoke`, in
+`just ci`) drives the whole path against a local fake Apple and a throwaway
+ES256 key — no developer account, no phone, no portal: registration and its
+auth, one push per message to the right device, the sender's own device
+excluded, re-registration not doubling, 410 deleting the registration,
+unregister, survival across a restart, and the no-configuration case staying
+completely silent.
+
 ## Request lifecycle
 
 Entry point: `Main.main` (`server.scala:123`) calls `Server.serve` (or
@@ -1167,7 +1254,9 @@ before the op — see "Media" above), `receipt`, `txn`, `dmpair` (a canonical
 DM's pair -> room claim), and `bind` / `unbind` (a device-account binding
 nodeId -> user, plan 0027 — a re-bind of the same node overwrites, so
 replay in commit order converges on the latest binding; `unbind`, plan 0058,
-is written only by an enrolment revocation). The `device` op carries the
+is written only by an enrolment revocation), and `pushreg` / `pushunreg` /
+`pushforget` (APNs push registrations, plan 0065 — see "Push notifications"
+above). The `device` op carries the
 node id the session was minted through (plan 0058); replay reads a missing
 field as `""`, so older journals stay loadable. Long-poll waiters are
 explicitly *not* logged (they're in-flight goroutines, transient by nature).
@@ -1383,6 +1472,8 @@ is a human step outside this gate (the sudo prompt is its confirmation);
 - **`store.scala`** — `StoreState` + `Store`: every store mutation and read, ID generation, the long-poll waiter lifecycle, and the boot-replay entry points (`replay*`) that `persist.scala` calls into.
 - **`bindings.scala`** — `Bindings` (the journaled nodeId→user map an approval writes and a revocation unbinds), `Nicknames` (the journaled nodeId→label map, plan 0060), and `DeviceLogin` (`POST /_wata/v1/device-login`: the trusted-header check, then a fresh session for the bound account, minted with the proven node id on the row).
 - **`devicecmd.scala`** — `DeviceCmd`: the device-command mailbox (queue / poll / report / read-report), the admin gate on the admin half, the two-credential device auth, and its own waiter list for the poll's long-poll.
+- **`push.scala`** — `PushRegs` (the journaled per-(user, device) APNs registrations, also keyed by token), `PushCfg` (the operator's `WATA_APNS_*` credentials, armed at boot or absent), and `Push` (the two register routes, the per-message fan-out, the badge count, and the 410-deletes-the-registration rule).
+- **`apns.scala`** — `go.apns`: the app-owned facade for `go-pkgs/apns`, four flat calls over strings and ints (`Configure`/`Configured`/`HostFor`/`Push`); none of the Go package's struct shapes cross the frontier.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
 - **`osfile.scala`** — `go.osfile`/`go.fsx`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove` for the blob store, `Rename` for the accounts file's atomic write, `Stat` for the sizes the status panel reports) plus `io/fs.FileInfo`; perms passed as literals, errors dropped except `Stat`'s.
