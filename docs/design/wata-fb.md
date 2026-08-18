@@ -1533,6 +1533,30 @@ falls back to the nearest surviving index, clamped, and re-anchors there.
 The `cursor-anchor` uiscript scenario pins all three rules through the
 `msgsel` probe.
 
+> `[FB-MSG-LIST-EDGES]` **Open: the two ends of the message list are
+> affordances, not walls.** Owner ask, 2026-08-18. Today up at row 0 and
+> down at the last row do nothing; both should step onto a row that acts
+> on the whole list, so the two things a walkie-talkie user wants after a
+> burst of arrivals are one key away from where the cursor already is.
+> - **Up past the newest message: a filter row.** Minimal — `all` /
+>   `unplayed` — selected by left/right on that row, taking effect on the
+>   rows below IMMEDIATELY (no confirm; the list is the feedback). It is a
+>   view filter, so it changes nothing on the server and nothing about
+>   what is played or read.
+> - **Down past the oldest message: mark all as played.** The counterpart
+>   to the filter — the way out of a conversation whose unplayed count is
+>   noise. It posts read receipts for the messages it clears, so it is
+>   real state, not a local badge reset, and it should say what it will do
+>   before it does it.
+>
+> Both interact with the anchor rules above: the filter changes which
+> messages exist in the list, so `clampMessages` must re-locate the
+> anchor across a filter change the way it does across a redaction, and
+> the edge rows must not themselves become anchorable messages. The
+> scroll window has to make room for them at each end. Goldens: the
+> `cursor-anchor` and `conversation-actions` uiscript scenarios are where
+> both belong.
+
 Playing a received clip is a full round-trip: `ActPlay(mxcUrl)` goes to
 `wataclient`, which downloads and hands PCM/Ogg bytes back through the
 `AudioEvt` channel, and `WataLogic.onAudioEvent`
