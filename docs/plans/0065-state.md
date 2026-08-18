@@ -10,8 +10,8 @@ its durable content has moved into the plan and the design docs.
 
 | tier | what | state |
 |------|------|-------|
-| 1 | foreground sync latency | in progress — gates first |
-| 2 | `alert` pushes | not started |
+| 1 | foreground sync latency | **done** — measured, gated, nothing to reduce |
+| 2 | `alert` pushes | in progress |
 | 3 | `pushtotalk` pushes | not started |
 
 ## Log
@@ -108,3 +108,62 @@ Two consequences worth keeping:
 - Tier 1's value moved from "fix it" to "know it, and never regress
   it". A correct-but-late arrival is a product defect for a
   walkie-talkie while every existing assertion passes.
+
+### 2026-08-18 — tier 1 closed: foreground delivery is instant, on both transports
+
+Both gate legs landed (`7544f34`) and both pass. Measured `sent` →
+the app's `notify:` line:
+
+| transport | gate | latency |
+|-----------|------|---------|
+| plain HTTP | `just ios-smoke` | 0.02s, 0.00s, −0.01s |
+| iroh | `just ios-enroll-smoke` | −0.00s, −0.01s, −0.02s |
+
+Reviewed and independently re-run by the main session (`just
+ios-smoke`, exit 0, latency −0.01s) rather than accepted on report.
+
+**iroh costs nothing measurable over plain HTTP** — both sit under the
+measurement's own ~0.1s resolution. A small NEGATIVE reading is real
+and expected: the two endpoints are read off different pipes and the
+arrival can beat the sender's own stdout out of the kernel. The server
+wakes the sync long-poll the instant the event lands; nobody waits out
+a poll interval on either transport. The budget is a deliberately
+loose 15s ceiling (`simrun.LATENCY_BUDGET_S`) — nothing this small can
+be fitted, so the bound exists to catch a slide to tens of seconds,
+not to police jitter. A negative control (sender suppressed) was run
+and correctly FAILS, so the new assertion can fail.
+
+**Conclusion: there is nothing to reduce in the foreground path**, and
+the owner's observed delay is device-side. The leading hypothesis is
+app suspension — a backgrounded iOS app is suspended with its sockets
+torn down, so a message sent while the phone is in a pocket cannot
+land until the app is next foregrounded, at which point it arrives
+"suddenly" and looks delayed. That is exactly the gap tiers 2 and 3
+exist to close, so it is not separately chased: if the hypothesis is
+right, tier 2 fixes it; if tier 2 lands and the phone still lags with
+the app OPEN, that is a new and much better-specified bug.
+
+Harness gotchas from the chunk, kept because they generalize:
+
+- **Never judge a gate through a pipe in this environment** — the
+  shell is fish, which has no `$PIPESTATUS` (it is `$pipestatus`), so
+  a failing run read as statusless. Redirect to a file and read
+  `$status`.
+- **A done-marker can race its own stimulus.** The arrival line ends
+  the run, and it lands BEFORE the sending tui exits — so reading the
+  sender's result straight after the launch returned reported a
+  failed sender on a healthy run. Both smokes now wait on an event
+  the sender sets. Any harness whose terminator can precede the
+  completion of the thing that caused it has this shape.
+- **Timestamp the stimulus as it happens, not at process exit** —
+  `tui_send` streams the tui's stdout and stamps the `sent` line, so
+  the measurement is delivery rather than process teardown.
+- `@phone` is already in the family room by construction (enrol's
+  approve-with-user runs `createBound` → `seeded` → `Family.ensure`),
+  so the enroll gate needed no extra setup to receive.
+- The enroll smoke's SENDER rides plain TCP deliberately (the iroh
+  server also serves matrix on its localhost admin listener), keeping
+  the leg a measurement of the APP's transport and avoiding an
+  iroh-capable tui.
+
+Next: tier 2.
