@@ -60,3 +60,28 @@ Next: the inbound leg on `ios-smoke` (plain HTTP) and on
 `ios-enroll-smoke` (iroh). Passing plain HTTP + failing iroh points at
 the transport; both passing points at the device, and `just ios-log`
 after a send-to-phone is the next probe.
+
+### 2026-08-18 — tier-2 groundwork (read-only, while tier 1 is in flight)
+
+Where an APNs pusher would land in `wata-server`, established so
+tier 2's brief can be concrete:
+
+- **Endpoint convention** is `/_wata/v1/…`, routed in `server.scala`
+  and mirrored one-for-one in the module that owns the surface.
+  `devicecmd.scala` is the closest structural model for a push
+  registration: per-device state, an admin side and a device side,
+  and it already long-polls.
+- **Feasibility of the push itself.** APNs token auth needs an ES256
+  (P-256 ECDSA) JWT and an HTTP/2 POST — neither expressible in the
+  dialect. The established shape for exactly this is a small plain-Go
+  module under `go-pkgs/` reached as a `godep` behind a narrow
+  facade, the way `go-pkgs/irohnet` and `go-pkgs/audio` already work;
+  the server's own `gocrypto.scala` shows the alternative (a
+  `@go.bind` facade per Go import path) which is right for stdlib
+  surface but wrong for a multi-step protocol. So: `go-pkgs/apns`,
+  facade-thin.
+- Config surface needed: key file (`.p8`), key id, team id, bundle
+  id, and the environment (`development` vs `production`, which are
+  different APNs hosts). Per the owner ruling these are the
+  self-hoster's OWN credentials, so they are ordinary server config,
+  not baked constants.
