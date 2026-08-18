@@ -126,32 +126,41 @@ def run(tmp):
         checks(fake.tokens(got) == ["bobchan3"],
                f"a re-join replaces the token wholesale (got {fake.tokens(got)})")
 
-        # -- both tokens: the channel push wins, the alert is not also sent ---------
+        # -- both tokens: BOTH are sent, while Push.ChannelSuppressesAlert is false --
+        # A pushtotalk push shows no banner, and the iOS client's PTT receive half
+        # does not yet play the message it is woken for, so suppressing the alert
+        # here would buy pure silence — seen on hardware 2026-08-18. The server
+        # constant carries the reasoning and the condition for flipping it; these
+        # two assertions are what will fail the day it flips, which is the point.
         st, _ = register(srv, bob, "bobalert")
         checks(st == 200, "bob also holds a stable alert token")
         srv.send(alice, room, "with both tokens")
-        got = fake.take(1)
-        checks(fake.tokens(got) == ["bobchan3"],
-               f"a device with both is pushed ONCE, at the channel token (got {fake.tokens(got)})")
+        got = fake.take(2)
+        checks(sorted(fake.tokens(got)) == ["bobalert", "bobchan3"],
+               f"a device with both gets BOTH the alert and the channel push "
+               f"(got {fake.tokens(got)})")
 
         # -- alice, alert-only, is unaffected ---------------------------------------
         alice2 = srv.login("alice")
         register(srv, alice2, "alicealert")
         srv.send(alice, room, "alice's other session")
-        got = fake.take(2)
-        checks(fake.tokens(got) == ["alicealert", "bobchan3"],
+        got = fake.take(3)
+        checks(sorted(fake.tokens(got)) == ["alicealert", "bobalert", "bobchan3"],
                f"an alert-only device still gets its alert (got {fake.tokens(got)})")
         alert = [p for p in got if p.token == "alicealert"]
         checks(bool(alert) and alert[0].push_type == "alert" and alert[0].topic == BUNDLE,
                "the alert leg is untouched: alert type, the app's own topic")
 
-        # -- a rejected channel token falls back to the alert, once ------------------
+        # -- a rejected channel token is dropped, and does NOT re-send the alert -----
+        # The fallback exists for the suppressed case; with the alert already sent
+        # in the same fan-out, re-sending it here would deliver the message twice.
         with fake.lock:
             fake.bad.add("bobchan3")
         srv.send(alice, room, "to a dead channel")
         got = fake.take(3)
-        checks(fake.tokens(got) == ["alicealert", "bobalert", "bobchan3"],
-               f"the rejected channel push falls back to bob's alert, and only once (got {fake.tokens(got)})")
+        checks(sorted(fake.tokens(got)) == ["alicealert", "bobalert", "bobchan3"],
+               f"the rejected channel push drops the row without double-sending "
+               f"bob's alert (got {fake.tokens(got)})")
         srv.send(alice, room, "after the rejection")
         got = fake.take(2)
         checks(fake.tokens(got) == ["alicealert", "bobalert"],

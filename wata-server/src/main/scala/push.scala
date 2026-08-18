@@ -424,9 +424,23 @@ object Push:
     case h :: t => addRegsStep(h, t, senderDeviceId, acc)
     case Nil  => acc
 
+  /** `ChannelSuppressesAlert` is FALSE, and that is a deliberate, temporary
+   *  state rather than an oversight. A `pushtotalk` push shows no banner: it
+   *  wakes the app to play live audio. Until the iOS client's PTT receive
+   *  half actually fetches and plays the woken message, suppressing the alert
+   *  for a channel-holding device buys silence — the phone is woken and then
+   *  does nothing, which is strictly worse than the banner it would have had.
+   *  Observed live on hardware 2026-08-18: three `ptt: incoming push (Alma)`
+   *  lines on the phone, no notification of any kind for the user.
+   *
+   *  Flip this to true in the same commit that lands the receive half, not
+   *  before, and not separately — the two only make sense together. */
+  val ChannelSuppressesAlert = false
+
   def addRegsStep(h: PushReg, t: List[PushReg], senderDeviceId: String, acc: List[PushReg]): List[PushReg] =
     var acc2: List[PushReg] = acc
-    if h.deviceId != senderDeviceId && !ChannelRegs.has(h.deviceId) then acc2 = h :: acc2
+    val suppressed = ChannelSuppressesAlert && ChannelRegs.has(h.deviceId)
+    if h.deviceId != senderDeviceId && !suppressed then acc2 = h :: acc2
     addRegs(t, senderDeviceId, acc2)
 
   /** the CHANNEL registrations to push to, by the same rule minus the
@@ -495,10 +509,16 @@ object Push:
     catch case e: sgo.GoError => println("wata: channel push failed for " + reg.userId + ": " + e.message)
     if status >= 400 && status < 500 then channelDead(reg, roomId, ev, speaker, text) else ()
 
+  /** The fallback alert is sent only when the alert was SUPPRESSED for this
+   *  device in the first place. With `ChannelSuppressesAlert` false the device
+   *  already received its alert in the same fan-out, and re-sending here would
+   *  deliver the same message twice. */
   def channelDead(reg: ChannelReg, roomId: String, ev: Event, speaker: String, text: String): Unit =
-    println("wata: APNs rejected the channel token for " + reg.userId + ", dropping it and falling back to an alert")
+    println("wata: APNs rejected the channel token for " + reg.userId + ", dropping it")
     ChannelRegs.leave(reg.deviceId)
-    pushEach(PushRegs.ofDevice(reg.deviceId), roomId, ev, speaker, text)
+    if ChannelSuppressesAlert then
+      pushEach(PushRegs.ofDevice(reg.deviceId), roomId, ev, speaker, text)
+    else ()
 
   def forget(reg: PushReg): Unit =
     println("wata: APNs reports the token gone, dropping the registration for " + reg.userId)
