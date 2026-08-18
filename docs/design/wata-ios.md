@@ -71,7 +71,12 @@ pump with the mac-only seams swapped.
   PlayAndRecord (DefaultToSpeaker — walkie-talkie audio belongs on the
   speaker — plus AllowBluetooth) and activated before the engine is
   built, with the record-permission ask fired there so the system
-  prompt lands at audio-thread start, not mid-PTT-press. A denied mic
+  prompt lands at audio-thread start, not mid-PTT-press; and its
+  `prepareInput`, which touches the engine's input node before the
+  first start — on iOS the IO unit is configured lazily, and an engine
+  started input-node-less runs output-only, the input node reporting a
+  0 Hz format on every capture open (found on hardware; macOS's HAL
+  vends the format regardless, so the mac never saw it). A denied mic
   still surfaces as MIC FAILED per command, never a wedge. Foreground
   only: the PushToTalk framework (background transmit) is a follow-up
   plan.

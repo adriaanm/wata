@@ -1,8 +1,15 @@
 # 0063 — real audio on iOS: the mac's backend under the shared audio thread
 
-Status: accepted; simulator legs green 2026-08-17 (ios-smoke +
-ios-enroll-smoke with the real thread over the fake backend, full ci) —
-awaiting the owner's on-phone mic roundtrip
+Status: done — on-phone mic roundtrip verified 2026-08-18 (message
+recorded on the iPhone, received and played on the BQ268). One hardware
+fix was needed on top of the simulator-green build: on iOS the engine's
+IO unit is configured lazily, so an engine started without its input
+node ever instantiated runs output-only and the input node reports a
+0 Hz format on every capture open ("input node reports no format").
+macaudio's `prepareInput` (platform-split, no-op on macOS) touches the
+input node before the engine's first start. Diagnosed via plan 0064's
+persistent log — the simulator legs could not have caught it (they run
+the fake backend).
 
 ## The problem
 
