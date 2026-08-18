@@ -10,7 +10,7 @@ its durable content has moved into the plan and the design docs.
 
 | tier | what | state |
 |------|------|-------|
-| 1 | foreground sync (the defect) | in progress — gates first |
+| 1 | foreground sync latency | in progress — gates first |
 | 2 | `alert` pushes | not started |
 | 3 | `pushtotalk` pushes | not started |
 
@@ -85,3 +85,26 @@ tier 2's brief can be concrete:
   different APNs hosts). Per the owner ruling these are the
   self-hoster's OWN credentials, so they are ordinary server config,
   not baked constants.
+
+### 2026-08-18 — CORRECTION: inbound is not broken, it is slow
+
+The owner re-tested: messages DO arrive on the phone, and the last one
+played correctly within seconds. The original report was DELAY, not
+loss. The defect hunt is void — plan 0065's problem statement is
+rewritten around latency, and the in-flight gate chunk was re-aimed
+mid-run: build the same two legs, but time `sent` → the app's
+`notify:` line, assert a bound, and report plain HTTP vs iroh
+separately.
+
+Two consequences worth keeping:
+
+- The reading below still stands, and one item of it is now the
+  likely explanation of the whole report rather than a caveat: the
+  default notify mode is quiet and iOS has no banner, so a message
+  that arrives while the owner is not looking at the conversation
+  leaves almost no trace. "Delayed" and "arrived quietly, noticed
+  later" are hard to tell apart from the outside — which is an
+  argument for tier 2 independent of any latency number.
+- Tier 1's value moved from "fix it" to "know it, and never regress
+  it". A correct-but-late arrival is a product defect for a
+  walkie-talkie while every existing assertion passes.

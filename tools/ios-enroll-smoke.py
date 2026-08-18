@@ -19,7 +19,14 @@ outside parties:
 Asserted, in order, off the app's own printed lines: the setup screen, the
 configure claim + session restart, the not-allowlisted announce landing
 200, then `ready @phone:` (device-login — no password exists for the
-account by construction) and the painted contact list.
+account by construction), the painted contact list, and finally INBOUND
+(plan 0065): bob sends a voice message into the family room from a
+host-side wata-tui over the server's plain-TCP admin listener, and the
+app — whose own transport is IROH, the one the phone actually runs — must
+print the `notify: noted` arrival. That last leg is the transport half of
+plan 0065's diagnosis: `ios-smoke` runs the same leg over plain HTTP, so
+the pair splits "the iroh transport under the sync long-poll" from
+everything else in one run.
 
 Needs Xcode + a simulator runtime + the ios-sim irohnet archive
 (go-pkgs/irohnet/mklib.py ios-sim); not in ci.
@@ -59,11 +66,11 @@ EXPECT = [
     r"session restarting \(configured\)",
     r"ready @phone:",
     r"paint contacts lit=[1-9]",
+    simrun.NOTED_RE,
 ]
 # NOT "login failed": the pre-approve session legitimately fails its first
 # login (401 not allowlisted) and keeps pumping — that is the arc, not an end.
-DONE_RES = (r"paint contacts lit=", r"rejected",
-            r"irohnet: client init failed")
+DONE_RES = (simrun.NOTED_RE, r"rejected", r"irohnet: client init failed")
 
 
 def sh(cmd, **kw):
@@ -89,17 +96,18 @@ def req(method, path, body=None, token=None):
 
 def build_env():
     probe = (
-        f'set -e; cd "{REPO}"; WATA="{REPO}"; . tools/sgo-env.sh; '
-        'printf "%s\\n%s\\n" "$SGO" "${GOTOOLCHAIN:-}"'
+        f'set -e; cd "{REPO}"; WATA="{REPO}"; . tools/sgo-env.sh; . tools/emitdir.sh; '
+        'printf "%s\\n%s\\n%s\\n" "$SGO" '
+        '"$(emitdir wata-tui)/$(binname wata-tui)" "${GOTOOLCHAIN:-}"'
     )
     out = subprocess.run(["bash", "-c", probe], capture_output=True, text=True)
     if out.returncode != 0:
         sys.exit("ios-enroll-smoke: sgo environment probe failed:\n" + out.stderr)
-    sgo, gotoolchain = out.stdout.strip().split("\n")
+    sgo, tui, gotoolchain = out.stdout.strip().split("\n")
     env = dict(os.environ)
     if gotoolchain:
         env["GOTOOLCHAIN"] = gotoolchain
-    return sgo, env
+    return sgo, tui, env
 
 
 def main():
@@ -108,12 +116,13 @@ def main():
     if not (IROHNET / "clib" / "ios_sim" / "libirohnet_ffi.a").exists():
         sys.exit("ios-enroll-smoke: no simulator irohnet archive — run "
                  "go-pkgs/irohnet/mklib.py ios-sim first")
-    sgo, env = build_env()
+    sgo, tui_bin, env = build_env()
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="ios-enroll-smoke."))
 
     # ---- builds: host lib + iroh server + keygen, sim lib + iroh app -------
     sh([sys.executable, IROHNET / "mklib.py"], cwd=IROHNET)
     sh([sgo, "build"], cwd=REPO / "wata-server", env=env)
+    sh([sgo, "build"], cwd=REPO / "wata-tui", env=env)   # bob, the inbound leg
     srv_emit = REPO / "wata-server" / ".sgo" / "wata-server"
     server_bin = srv_emit / "wata-server-iroh"
     keygen_bin = tmp / "keygen"
@@ -202,7 +211,11 @@ def main():
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1)
         lines, done = [], threading.Event()
-        acted = {"configure": False, "approve": False}
+        acted = {"configure": False, "approve": False, "inbound": False}
+        # the arrival line ENDS the run, and it lands before the sending tui
+        # has exited — so the verdict waits for the sender's own thread before
+        # reading `sent`, or a healthy run reports a failed sender.
+        sent, sent_done = {"ok": False}, threading.Event()
 
         def send_link():
             """deliver the configure link, then FOREGROUND the app: `simctl
@@ -238,6 +251,16 @@ def main():
                 time.sleep(0.5)
             print("ios-enroll-smoke: no pending row ever appeared", flush=True)
 
+        def send_inbound():
+            """the inbound leg: bob sends into the family room (which the
+            approve joined @phone to) once the contact list has painted, so
+            the message lands MID-SESSION on a running iroh sync rather than
+            in the first snapshot, which announces nothing by design."""
+            time.sleep(1.0)
+            sent["ok"], _ = simrun.tui_send(tui_bin, env, BASE,
+                                            tag="ios-enroll-smoke")
+            sent_done.set()
+
         def pump():
             for line in proc.stdout:
                 sys.stdout.write(line)
@@ -250,13 +273,16 @@ def main():
                     acted["approve"] = True
                     threading.Thread(target=approve_when_pending,
                                      daemon=True).start()
+                if not acted["inbound"] and "paint contacts lit=" in line:
+                    acted["inbound"] = True
+                    threading.Thread(target=send_inbound, daemon=True).start()
                 if any(re.search(m, line) for m in DONE_RES):
                     done.set()
             done.set()
 
         threading.Thread(target=pump, daemon=True).start()
-        if not done.wait(150):
-            print("ios-enroll-smoke: watchdog — no done marker within 150s",
+        if not done.wait(240):
+            print("ios-enroll-smoke: watchdog — no done marker within 240s",
                   file=sys.stderr)
         elapsed = time.time() - t0
         subprocess.run(sc + ["io", udid, "screenshot",
@@ -269,13 +295,21 @@ def main():
         text = "\n".join(lines)
         missing = [p for p in EXPECT if not re.search(p, text)]
         print(f"ios-enroll-smoke: launch-to-verdict {elapsed:.2f}s")
+        if acted["inbound"]:
+            sent_done.wait(180)
+        if acted["inbound"] and not sent["ok"]:
+            print("ios-enroll-smoke: bob's tui never reported `sent` — the "
+                  "inbound leg's SENDER failed, so a missing arrival proves "
+                  "nothing", file=sys.stderr)
         if missing:
             for m in missing:
                 print("ios-enroll-smoke: MISSING " + m, file=sys.stderr)
             sys.exit(1)
+        if not sent["ok"]:
+            sys.exit(1)
         print("ios-enroll-smoke: PASS — fresh install, configure link, "
-              "announce, approve, device-login, contacts painted; no "
-              "password anywhere")
+              "announce, approve, device-login, contacts painted, and bob's "
+              "voice message arrived over the iroh sync; no password anywhere")
     finally:
         server.terminate()
         try:

@@ -31,6 +31,14 @@ MIN_IOS = "17.0"
 DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17"
 DEVICE_NAME = "wata-ios"  # the one simulator device every harness shares
 
+REPO = pathlib.Path(__file__).resolve().parent.parent
+# the same voice fixture mac-smoke's inbound leg sends.
+FIXTURE = REPO / "go-pkgs" / "audio" / "testdata" / "tui-foreign.ogg"
+# the arrival the app prints when a message lands with the default notify mode
+# (MODE_QUIET): iOS has no banner, so `notify: noted` IS the arrival surface.
+# No ^/$ anchors — see launch_and_expect.
+NOTED_RE = r'notify: noted ".*" ".*" badge=[1-9]'
+
 
 def run(cmd, **kw):
     print("+ " + " ".join(str(c) for c in cmd), flush=True)
@@ -143,15 +151,32 @@ def approve_scheme(udid, scheme, bundle_id, ds=None):
     return True
 
 
+def fire_on_match(on_match):
+    """A per-launch line hook: `on_match` is a sequence of (regex, fn) pairs,
+    and the returned callable runs each fn ONCE, on its own thread, the first
+    time a printed line matches. That is how a harness acts on the app from
+    outside mid-run (the outside party bob sends a message once the contact
+    list has painted) without blocking the output pump."""
+    fired = set()
+
+    def feed(line):
+        for i, (pat, fn) in enumerate(on_match):
+            if i not in fired and re.search(pat, line):
+                fired.add(i)
+                threading.Thread(target=fn, daemon=True).start()
+    return feed
+
+
 def launch_and_expect(sc, udid, app_path, bundle_id, expect,
                       done_res=(r"all checks passed", r"FAIL"),
-                      timeout=90, screenshot=None, args=()):
+                      timeout=90, screenshot=None, args=(), on_match=()):
     """Boot (if needed), install, launch with a console pty, pump the app's
     stdout until a done marker (or the watchdog timeout), screenshot if
     asked, terminate. Returns (lines, elapsed_seconds, missing_patterns) —
     the caller judges. `expect` is a list of regexes that must each match
     somewhere in the output. `args` become the app's argv (simctl passes
-    everything after the bundle id through to the process)."""
+    everything after the bundle id through to the process). `on_match` is
+    fire_on_match's (regex, fn) pairs, fresh for each launch."""
     run(sc + ["bootstatus", udid, "-b"])
     run(sc + ["install", udid, str(app_path)])
     t0 = time.time()
@@ -160,12 +185,14 @@ def launch_and_expect(sc, udid, app_path, bundle_id, expect,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
     lines, done = [], threading.Event()
+    feed = fire_on_match(on_match)
 
     def pump():
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
             lines.append(line.rstrip("\n"))
+            feed(line)
             if any(re.search(m, line) for m in done_res):
                 done.set()
         done.set()
@@ -188,7 +215,8 @@ def launch_and_expect(sc, udid, app_path, bundle_id, expect,
 
 def launch_expect_verdict(sc, udid, app_path, bundle_id, expect,
                           done_res=(r"all checks passed", r"FAIL"),
-                          timeout=90, screenshot=None, args=(), attempts=2):
+                          timeout=90, screenshot=None, args=(), attempts=2,
+                          on_match=()):
     """launch_and_expect, retried while the done marker never arrives.
 
     `--console-pty` capture is lossy two ways: a cold-booted fresh runtime's
@@ -201,12 +229,37 @@ def launch_expect_verdict(sc, udid, app_path, bundle_id, expect,
     for attempt in range(1, attempts + 1):
         lines, elapsed, missing = launch_and_expect(
             sc, udid, app_path, bundle_id, expect, done_res=done_res,
-            timeout=timeout, screenshot=screenshot, args=args)
+            timeout=timeout, screenshot=screenshot, args=args,
+            on_match=on_match)
         if attempt == attempts or \
                 any(re.search(m, l) for l in lines for m in done_res):
             return lines, elapsed, missing
         print("simrun: no done marker in the capture — lost console output, "
               "retrying on the warm device", file=sys.stderr)
+
+
+def tui_send(tui_bin, env, base, user="bob", password="testpass123",
+             conv="1", fixture=FIXTURE, timeout=180, tag="inbound"):
+    """The outside party: `user` sends a voice message into conversation
+    `conv` (1 = the family room) through a host-side wata-tui, exactly the
+    mechanism mac-smoke's inbound leg uses. The simulator shares the host's
+    loopback, so a plain-HTTP `base` reaches the same server the app is
+    talking to — the app's own transport is the thing under test, not the
+    sender's. Returns (ok, lines); prints both so a failed send is visible in
+    the gate's log next to the app's."""
+    script = f"snap\nsend {conv} {fixture}\nquit\n"
+    senv = dict(env, WATA_TUI_HS=base, WATA_TUI_USER=user,
+                WATA_TUI_PASS=password)
+    try:
+        r = subprocess.run([str(tui_bin)], input=script, capture_output=True,
+                           text=True, env=senv, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"{tag}: {user}'s tui timed out", flush=True)
+        return False, []
+    lines = (r.stdout + r.stderr).splitlines()
+    for ln in lines:
+        print(f"{tag}: {user}| {ln}", flush=True)
+    return any(ln.startswith("sent ") for ln in lines), lines
 
 
 def shutdown(sc, udid):

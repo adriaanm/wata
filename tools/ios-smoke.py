@@ -18,6 +18,15 @@ lines (launchd owns the process exit, the interptest rule):
                                           list) painted — plan 0044's "the
                                           login applet paints", the applet a
                                           login lands on
+    notify: noted "…" … badge=<n>         INBOUND (plan 0065): once the
+                                          contact list has painted, bob sends
+                                          a voice message into the family room
+                                          from a host-side wata-tui, and the
+                                          app's sync must see it arrive. The
+                                          default notify mode is QUIET and iOS
+                                          has no banner, so this printed
+                                          decision line is the whole arrival
+                                          surface — assert it, not a sound.
 
 Modelled on tools/mac-smoke.py's server handling; the simulator legs ride
 tools/simrun.py (shared device, verdict-keyed retry) and the build reuses
@@ -31,6 +40,7 @@ import pathlib
 import random
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -54,28 +64,29 @@ EXPECT = [
     r"ready @alice:localhost",
     r"screen contacts",
     r"paint contacts lit=[1-9]",
+    simrun.NOTED_RE,
 ]
-# `paint contacts` is the success terminator; the failure lines end the run
-# early so a broken login does not sit out the watchdog.
-DONE_RES = (r"paint contacts lit=", r"login failed", r"rejected",
-            r"wata-ios: ")
+# the arrival is the success terminator; the failure lines end the run early so
+# a broken login does not sit out the watchdog.
+DONE_RES = (simrun.NOTED_RE, r"login failed", r"rejected", r"wata-ios: ")
 
 
 def build_env():
     """the sgo environment + the server binary path (mac-smoke's probe)."""
     probe = (
         f'set -e; cd "{REPO}"; WATA="{REPO}"; . tools/sgo-env.sh; . tools/emitdir.sh; '
-        'printf "%s\\n%s\\n%s\\n" '
-        '"$SGO" "$(emitdir wata-server)/$(binname wata-server)" "${GOTOOLCHAIN:-}"'
+        'printf "%s\\n%s\\n%s\\n%s\\n" '
+        '"$SGO" "$(emitdir wata-server)/$(binname wata-server)" '
+        '"$(emitdir wata-tui)/$(binname wata-tui)" "${GOTOOLCHAIN:-}"'
     )
     out = subprocess.run(["bash", "-c", probe], capture_output=True, text=True)
     if out.returncode != 0:
         sys.exit("ios-smoke: sgo environment probe failed:\n" + out.stderr)
-    sgo, server, gotoolchain = out.stdout.strip().split("\n")
+    sgo, server, tui, gotoolchain = out.stdout.strip().split("\n")
     env = dict(os.environ)
     if gotoolchain:
         env["GOTOOLCHAIN"] = gotoolchain
-    return sgo, server, env
+    return sgo, server, tui, env
 
 
 def our_listener(pid):
@@ -115,11 +126,12 @@ def stop_server(proc, log):
 def main():
     if sys.platform != "darwin":
         sys.exit("ios-smoke: macOS only")
-    sgo, server_bin, env = build_env()
+    sgo, server_bin, tui_bin, env = build_env()
 
-    r = subprocess.run([sgo, "build"], cwd=REPO / "wata-server", env=env)
-    if r.returncode != 0:
-        sys.exit("ios-smoke: wata-server build failed")
+    for module in ("wata-server", "wata-tui"):
+        r = subprocess.run([sgo, "build"], cwd=REPO / module, env=env)
+        if r.returncode != 0:
+            sys.exit(f"ios-smoke: {module} build failed")
     r = subprocess.run([str(HERE / "ios-interptest.py"),
                         "--only", "build", "--only", "bundle"])
     if r.returncode != 0:
@@ -139,19 +151,43 @@ def main():
     # thread links, starts, and pumps on iOS
     os.environ["SIMCTL_CHILD_WATA_MAC_AUDIO"] = "fake"
 
+    sent = {"ok": False}
+    # the arrival line ENDS the run, and it lands before the sending tui has
+    # exited — so the verdict must wait for the sender's own thread before
+    # reading `sent`, or a healthy run reports a failed sender.
+    sent_done = threading.Event()
+
+    def send_inbound():
+        """bob's half of the inbound leg, fired once the contact list has
+        painted — by then the app is logged in and its sync is running, so the
+        message really does arrive MID-SESSION rather than in the first
+        snapshot (which announces nothing, by design)."""
+        time.sleep(1.0)
+        sent["ok"], _ = simrun.tui_send(tui_bin, env, BASE, tag="ios-smoke")
+        sent_done.set()
+
     sc = simrun.simctl()
     udid = simrun.ensure_device(sc)
     try:
         lines, elapsed, missing = simrun.launch_expect_verdict(
-            sc, udid, APP, BUNDLE_ID, EXPECT, done_res=DONE_RES, timeout=90,
-            screenshot=APP.parent / "smoke-screen.png")
+            sc, udid, APP, BUNDLE_ID, EXPECT, done_res=DONE_RES, timeout=120,
+            screenshot=APP.parent / "smoke-screen.png",
+            on_match=[(r"paint contacts lit=", send_inbound)])
         print(f"ios-smoke: launch-to-verdict {elapsed:.2f}s")
+        sent_done.wait(180)
+        if not sent["ok"]:
+            print("ios-smoke: bob's tui never reported `sent` — the inbound "
+                  "leg's SENDER failed, so a missing arrival proves nothing",
+                  file=sys.stderr)
         if missing:
             for m in missing:
                 print("ios-smoke: MISSING " + m, file=sys.stderr)
             sys.exit(1)
+        if not sent["ok"]:
+            sys.exit(1)
         print("ios-smoke: PASS — wata-ios booted in the simulator, painted "
-              "the boot screen, logged in and painted the contact list")
+              "the boot screen, logged in, painted the contact list and saw "
+              "bob's voice message arrive over sync")
     finally:
         simrun.shutdown(sc, udid)
         stop_server(proc, log)

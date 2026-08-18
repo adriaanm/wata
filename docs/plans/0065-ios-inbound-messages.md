@@ -4,32 +4,34 @@ Status: proposed
 
 `[IOS-INBOUND-MESSAGES]` `[IOS-PUSH-TO-TALK]`
 
-The iPhone is a full wata client in one direction only. Plan 0063's
-roundtrip proved the send path on hardware — record on the phone, hear
-it on the BQ268 — but the owner reports (2026-08-18) that a message
-sent TO the phone never surfaces there. This plan covers inbound end
-to end, in three tiers that ship independently.
+The iPhone is a full wata client, but not yet a prompt one. This plan
+covers inbound delivery end to end, in three tiers that ship
+independently.
 
 ## The problem
 
-Two problems wearing one name, and separating them is most of the
+Inbound was first reported as broken and is not. The owner re-tested
+(2026-08-18): messages DO arrive on the phone, and the last one
+played correctly within seconds. The symptom was **delay**, not loss
+— which leaves two real problems, and separating them is most of the
 work:
 
-1. **A defect.** With the app open and a live session, an arriving
-   message should already appear: the sync engine, the arrival
-   decision (`Notify.step`) and the conversation view are all
-   PORTABLE code shared with wata-fb and wata-mac, where the same
-   arc is pinned by `mac-smoke`'s inbound leg (bob sends via the tui
+1. **Latency, unmeasured and ungated.** The whole inbound chain is
+   PORTABLE code shared with wata-fb and wata-mac, where the arc is
+   pinned by `mac-smoke`'s inbound leg (bob sends via the tui
    mid-session; the differ patches exactly the unplayed underline and
-   the badge). Nothing in that chain is iOS-specific, so the fault is
-   in what iOS does differ in — the iroh transport under the sync
-   long-poll, or the app's own lifecycle — and no iOS gate covers
-   inbound at all today. That gap is why this went unnoticed: both
-   simulator gates stop at "the contact list painted".
+   the badge). It demonstrably works on iOS too. What no gate
+   anywhere asserts is HOW FAST — and for a walkie-talkie, an arrival
+   that is correct but late is a product defect even though every
+   assertion passes. Both iOS gates stop at "the contact list
+   painted", so nothing would notice a regression from seconds to a
+   minute. Open question this tier answers: does the iroh long-poll
+   (what the phone actually runs) add material delay over plain
+   HTTP?
 
-2. **A structural gap.** Even fixed, tier 1 only works while the app
-   is FOREGROUNDED. iOS suspends a backgrounded app and tears down
-   its sockets, so a polling client cannot hear anything while the
+2. **A structural gap.** However fast tier 1 gets, it only works
+   while the app is FOREGROUNDED. iOS suspends a backgrounded app and
+   tears down its sockets, so a polling client is deaf while the
    phone is in a pocket — the state a walkie-talkie is normally in.
    Reaching a suspended app is APNs or nothing (`BGAppRefresh` is
    opportunistic — minutes to hours — and useless here). This is not
@@ -39,14 +41,14 @@ work:
 
 Three tiers, in this order, each independently useful:
 
-**Tier 1 — foreground sync (the defect).** Diagnose and fix inbound
-delivery with the app open, and pin it with the iOS gate that should
-have caught it. The gate comes FIRST: it is the diagnosis. An
-inbound leg on `ios-smoke` (plain HTTP) and on `ios-enroll-smoke`
-(iroh) splits the two candidate causes in one run — if the plain-HTTP
-leg passes and the iroh one fails, the fault is the transport under
-the long-poll; if both pass, the fault is device-only (lifecycle) and
-the phone's own log is next.
+**Tier 1 — foreground sync latency.** Measure inbound delivery with
+the app open, gate it, and reduce it if the measurement says there is
+something to reduce. The gate comes first because it is also the
+measurement: an inbound leg on `ios-smoke` (plain HTTP) and on
+`ios-enroll-smoke` (iroh), each timing `sent` → the app's `notify:`
+line and asserting an upper bound. Comparing the two transports
+answers whether iroh's long-poll is the cost. A bound, not just a
+pass: "eventually" cannot catch the regression that matters.
 
 **Tier 2 — `alert` pushes.** A server-side APNs pusher and a
 `/_wata/v1/push` registration endpoint (plan 0008's stated
@@ -101,14 +103,19 @@ someone else's server is not a supported configuration.
   conversation repaint.
 - `tools/ios-enroll-smoke.py`: the same leg over the iroh transport,
   which is what the phone actually runs.
-- The fix itself: unknown until the gates report. Recorded here when
-  it lands.
+- Both legs time `sent` → `notify:` and assert an upper bound chosen
+  from observed medians, not fitted to one run.
+- Any latency reduction the measurement justifies: unknown until the
+  gates report, and recorded here when it lands. The sync loop's
+  own cadence (long-poll timeout, retry backoff) is the first place
+  to look if the numbers are poor.
 
 ## Verification
 
-- Tier 1: both simulator gates green, then the owner's roundtrip in
-  the other direction — a message sent from the mac or the BQ268
-  appears and plays on the phone with the app open.
+- Tier 1: both simulator gates green WITH their latency bounds, the
+  two transports' numbers compared, then the owner's roundtrip — a
+  message sent from the mac or the BQ268 appears and plays on the
+  phone within seconds, with the app open.
 - Tiers 2 and 3: specified when reached.
 
 ## Out of scope
