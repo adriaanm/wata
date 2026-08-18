@@ -118,6 +118,67 @@ pump with the mac-only seams swapped.
   is the "did UIKit really paint it" evidence a windowless-assertion
   harness needs, since there is no TreeDump and no headless REPL.
 
+## Open work
+
+Items with a `[KEY]` tag have a line in `TODO.jsonl`; grep the key here
+for the body.
+
+> `[IOS-INBOUND-MESSAGES]` **Open: the phone sends but does not
+> receive.** Owner report, 2026-08-18, on the phone: recording and
+> sending a voice message works end to end (plan 0063's roundtrip —
+> the BQ268 receives and plays it), but a message sent TO the phone
+> never surfaces there. Unknown at filing which half is broken: the
+> sync arriving at all over iroh, the arrival decision
+> (`notify: play|noted` — iOS prints `noted` because there is no
+> banner surface, so a message could be arriving and going nowhere
+> visible), the conversation view not repainting, or playback. The
+> first evidence is the persistent log (`just ios-log`, plan 0064):
+> it carries the session's own lines and every audio failure with its
+> cause. This blocks `[IOS-PUSH-TO-TALK]` — a walkie-talkie that
+> cannot hear is not worth backgrounding — and is the owner's next
+> priority.
+
+> `[IOS-PUSH-TO-TALK]` **Open: the PushToTalk framework, background
+> transmit, and the system PTT UI.** Plan 0063 deliberately shipped
+> foreground-only voice; this is the follow-up it names. The hardware
+> risk is already retired — the PTT hello (`just ptt-hello`,
+> `tools/bindgen/hello/`) drove Apple's framework from Go on the
+> phone 2026-08-17: channel manager, join, ephemeral push token,
+> transmit, and the system handing over an activated
+> `AVAudioSession`, every line a delegate callback arriving in Go
+> through `go-pkgs/appleptt`. What is left is product work in two
+> halves, and only the first is self-contained: (1) TRANSMIT — join
+> the family channel while the app is up, let the system talk button
+> (Dynamic Island, lock screen) drive the same record/send arc the
+> on-screen PTT button drives, and let macaudio yield session
+> ownership to the framework for the duration of a transmission
+> (`session_ios.go` activates its own session today, which plan 0008
+> records as incompatible with PTT); plus the `push-to-talk` and
+> `audio` background modes and the `com.apple.developer.push-to-talk`
+> + `aps-environment` entitlements in `tools/ios-device.py` (the sign
+> stage's comment already promises them). (2) RECEIVE while
+> backgrounded — an APNs `pushtotalk` push to the per-join ephemeral
+> channel token, which needs a server-side APNs pusher and a
+> registration endpoint (plan 0008's prerequisites) and is a plan of
+> its own. **Owner ruling 2026-08-18 on APNs and self-hosting:** an
+> APNs credential is team-owned by construction — a `.p8` token key is
+> scoped to the whole team, the older `.p12` is per-App-ID but still
+> issued to the team, and a push is accepted only from credentials
+> authorized for the `apns-topic`'s bundle id. Apple offers no
+> delegation, so a family server cannot be handed a narrowed key.
+> That is fine, because a self-hoster already needs their own
+> developer account to sideload the app at all: self-hosters bring
+> their own team, bundle id and key. The hosted tier (paid, v2 — our
+> server, our key, and no iroh) is the answer for everyone else. Only
+> one case is genuinely awkward and is not being solved now: shipping
+> OUR App Store build to a self-hoster, whose server then cannot push
+> without our key — the outs there are a thin push relay we operate
+> or nothing. Whether half 1 alone yields background RECEIVE over our
+> own iroh transport turns on whether a joined channel keeps the app
+> running rather than suspended — an Apple-docs claim to verify, not
+> assume, before the plan commits to it. Blocked on
+> `[IOS-INBOUND-MESSAGES]`.
+
 ## The persistent log (plan 0064)
 
 On a physical iPhone the app's stdout/stderr are visible only through
