@@ -124,6 +124,10 @@ object iosshell:
   @go.name("PTTTransmit") def pttTransmit(on: Boolean): Unit = ???
   /** is a channel joined right now? */
   @go.name("PTTJoined") def pttJoined(): Boolean = ???
+  /** rename the joined channel, which is how the system UI says WHERE a press
+   *  will go (plan 0067). Same channel, no leave, no new token; also what the
+   *  restoration delegate hands back on the next launch. */
+  @go.name("PTTDescriptor") def pttDescriptor(name: String): Unit = ???
   /** tell the system UI whether wata's own service is reachable — "ready",
    *  "connecting" or "unavailable". The framework's default is `ready`, which
    *  stops being true the moment a sync drops, so the pump feeds this from the

@@ -39,8 +39,10 @@ import language.experimental.saferExceptions
  *  what keeps the system UI, the audio session and the app's own state in
  *  step, and it is the same path whichever button the user pressed. A
  *  transmission the SYSTEM started (the user has no wata screen in front of
- *  them) targets the family conversation; one the app's own button started
- *  keeps whatever conversation is open.
+ *  them) targets whatever the system UI SAID it would (plan 0067: the most
+ *  recent interaction by default, or a fixed conversation, with the channel's
+ *  name kept on it); one the app's own button started keeps whatever
+ *  conversation is open.
  *
  *  RECEIVING IS AN EPISODE THE APP OWNS FROM END TO END, AND AN EPISODE IS A
  *  BURST, NOT A MESSAGE. A `pushtotalk` push shows no banner — it wakes the app
@@ -117,6 +119,8 @@ object PttChan:
   private val routingC: sgo.Atomic[Boolean] = sgo.atomic(false)
   /** the service state the system UI was last told, "" before the first. */
   private val serviceC: sgo.Atomic[String] = sgo.atomic("")
+  /** the channel name the system UI was last given, "" before the first. */
+  private val descrC: sgo.Atomic[String] = sgo.atomic("")
 
   /** the messages the pushes named, in arrival order, with the deadlines that
    *  decide when one is no longer worth playing live and when the burst has
@@ -173,6 +177,7 @@ object PttChan:
     postStep(h.client, nowMs)
     joinStep(ctx, nowMs)
     serviceStep(ctx)
+    descriptorStep(ctx)
     playStep(h, st, ctx, nowMs)
 
   /** one line from the shell's queue. Only three of them are decisions; the
@@ -191,13 +196,118 @@ object PttChan:
     else st
 
   /** a transmission is live and the session is activated: press PTT. A
-   *  SYSTEM-started one opens the family conversation first — that is the
-   *  channel the system talk button belongs to, and the recording goes to
-   *  whichever conversation the applet is on. */
+   *  SYSTEM-started one opens the TARGET conversation first (plan 0067) — the
+   *  user had no wata screen in front of them, so the press means whatever the
+   *  system UI said it meant — and the recording goes to whichever conversation
+   *  the applet is on. One the app's own button started keeps what is open. */
   def talkOn(st: PumpSt, ctx: FrameCtx, fromSystem: Boolean): PumpSt =
     var out = st
-    if fromSystem then out = Pump.openRoom(out, ctx, ctx.snap.family.id)
+    if fromSystem then out = Pump.openRoom(out, ctx, target(ctx))
     key(out, ctx, Pressed())
+
+  // ---- where a system press goes, and saying so (plan 0067) -------------------
+
+  /** the room a system-started transmission goes to. Two modes: a FIXED
+   *  conversation the user chose, or — the default — the most recent
+   *  interaction, which is the one a walkie-talkie wants (you answer whoever
+   *  just talked). The family is the fallback and the cold-start answer.
+   *
+   *  A fixed target that no longer exists falls back rather than sending into
+   *  nothing: an account can be unenrolled, and a press must still go
+   *  somewhere the user can find. */
+  def target(ctx: FrameCtx): String =
+    targetRoom(ctx.snap.conversations, ctx.snap.family.id, FbConfig.pttTarget())
+
+  /** the rule itself, on plain values so it is testable without a session:
+   *  the fixed conversation when one is configured AND still exists, else the
+   *  most recent interaction, else the family. `interptest` pins all four
+   *  branches. */
+  def targetRoom(cs: List[Conversation], familyId: String, fixed: String): String =
+    val pinned = if fixed == "" then "" else roomOf(cs, fixed)
+    if pinned != "" then pinned
+    else
+      val recent = recentRoom(cs)
+      if recent != "" then recent else familyId
+
+  /** the room id of the conversation whose key is `k` (a room id, or a contact
+   *  id for a DM room that does not exist yet), or "" when there is none. */
+  def roomOf(cs: List[Conversation], k: String): String =
+    var out = ""
+    var rest = cs
+    var going = true
+    while going do
+      rest match
+        case h :: t =>
+          if h.roomId == k || (h.hasContact && h.contact.user.id == k) then out = h.roomId
+          rest = t
+        case Nil => going = false
+    out
+
+  /** the conversation holding the newest voice message, sent or received —
+   *  "the most recent interaction". Both directions land in the same timeline,
+   *  so one rule covers them. "" when nothing has happened yet. */
+  def recentRoom(cs0: List[Conversation]): String =
+    var best = ""
+    var bestAt = 0L
+    var cs = cs0
+    var going = true
+    while going do
+      cs match
+        case h :: t =>
+          val at = newestAt(h.messages)
+          if at > bestAt then
+            bestAt = at
+            best = h.roomId
+          cs = t
+        case Nil => going = false
+    best
+
+  /** the newest timestamp in a message list. The list's order is the
+   *  timeline's, but a max is cheap and does not depend on that. */
+  def newestAt(ms: List[VoiceMessage]): Long =
+    var out = 0L
+    var l = ms
+    var going = true
+    while going do
+      l match
+        case h :: t =>
+          if h.timestamp > out then out = h.timestamp
+          l = t
+        case Nil => going = false
+    out
+
+  /** keep the channel's NAME on the target, so the pill and the lock screen say
+   *  where a press will go before it goes there. One call per change. In the
+   *  default mode the target moves on its own as messages arrive, and this is
+   *  the only thing that makes that visible. */
+  def descriptorStep(ctx: FrameCtx): Unit =
+    if routingC.get() then
+      val name = targetName(ctx)
+      if name != "" && name != descrC.get() then
+        descrC.set(name)
+        go.iosshell.pttDescriptor(name)
+
+  /** what to call the target: the conversation's own name, else the family's,
+   *  else nothing (and then the channel keeps the name it has). */
+  def targetName(ctx: FrameCtx): String =
+    val out = nameOf(ctx.snap, target(ctx))
+    if out != "" then out else channelName(ctx)
+
+  /** what to call the target on the system UI. `Conversation.name` is set for
+   *  GROUPS only — a DM is named by its contact and the family thread by the
+   *  snapshot — so this goes through the same `convName` the contact list
+   *  renders rather than inventing a fourth naming rule. */
+  def nameOf(snap: StateSnapshot, room: String): String =
+    var out = ""
+    var rest = snap.conversations
+    var going = true
+    while going do
+      rest match
+        case h :: t =>
+          if h.roomId == room then out = WataLogic.convName(snap, h)
+          rest = t
+        case Nil => going = false
+    if out == "?" then "" else out
 
   def key(st: PumpSt, ctx: FrameCtx, ks: KeyState): PumpSt =
     Pump.withWata(st, WataLogic.handleInput(st.wata, KPtt(), ks, ctx))

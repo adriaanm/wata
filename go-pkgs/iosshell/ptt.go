@@ -605,6 +605,43 @@ func PTTTransmit(on bool) {
 	})
 }
 
+// PTTDescriptor renames the joined channel, which is how the system UI says
+// WHERE a press will go (plan 0067). iOS gives an app one channel and no
+// recipient picker, so the descriptor's name is the only place the target can
+// be seen — and in the default mode the target follows the most recent
+// interaction, i.e. it moves without the user doing anything. Showing it is
+// what makes that safe.
+//
+// Same UUID, no leave, no new ephemeral token: the channel identifies this
+// DEVICE's one channel, not the target. The name is also remembered for the
+// restoration delegate, so a relaunch comes back with what the user last saw
+// rather than whatever this process first joined with.
+func PTTDescriptor(name string) {
+	if name == "" {
+		return
+	}
+	pttMu.Lock()
+	pttName = name
+	pttMu.Unlock()
+	m, why := pttCurrent()
+	if why != "" {
+		return
+	}
+	inPTTPool(func() {
+		u, ok := pttUUIDObj()
+		if !ok {
+			return
+		}
+		d := pt.GetPTChannelDescriptorClass().Alloc().InitWithNameImage(name, pt.UIImage{})
+		m.SetChannelDescriptorForChannelUUIDCompletionHandler(d, u, func(err error) {
+			if err != nil {
+				pttNote("renaming the channel to %q failed: %s", name, errText(err))
+			}
+		})
+	})
+	pttNote("channel is %q", name)
+}
+
 // PTTServiceStatus tells the system UI whether wata's own service is reachable,
 // so the pill and the lock screen stop claiming a healthy channel while the app
 // knows its connection is down. `ready`, `connecting`, `unavailable` — the pump

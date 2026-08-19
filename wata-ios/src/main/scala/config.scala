@@ -182,6 +182,28 @@ object FbConfig:
     modeC.set(Notify.spellMode(m))
     writeStore(load(), loadPrefs())
 
+  // ---- where a system-started PTT press goes (plan 0067) -------------------
+
+  /** the FIXED transmission target's conversation key, or "" for the default
+   *  mode: follow the most recent interaction. Same cell-plus-file shape as
+   *  the notify mode, and for the same reason — `FbPrefs` is the settings
+   *  applet's positional record, shared with the handset, so an iOS-only
+   *  preference does not belong in it. */
+  private val pttTargetC: sgo.Atomic[String] = sgo.atomic("")
+
+  def loadPttTarget(): String =
+    val t = WJson.strField(readJson(), "ptt_target", "")
+    pttTargetC.set(t)
+    t
+
+  /** "" = follow the most recent interaction; else the conversation every
+   *  system press goes to. */
+  def pttTarget(): String = pttTargetC.get()
+
+  def savePttTarget(key: String): Unit =
+    pttTargetC.set(key)
+    writeStore(load(), loadPrefs())
+
   def prefsFrom(j: Json): FbPrefs =
     FbPrefs(WJson.longField(j, "brightness", 40L).toInt,
       WJson.longField(j, "screen_timeout_idx", 1L).toInt)
@@ -212,6 +234,7 @@ object FbConfig:
 
   def toJson(s: Session, p: FbPrefs): Json =
     var fs: List[(String, Json)] = Nil
+    fs = ("ptt_target", JStr(pttTargetC.get())) :: fs
     fs = ("notify_mode", JStr(modeC.get())) :: fs
     fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
     fs = ("brightness", JInt(p.brightness.toLong)) :: fs

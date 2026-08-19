@@ -301,6 +301,60 @@ object InterpTest:
     rgb565Components()
     expandAndScale()
     glyphMapping()
+    pttTargetRule()
+
+  /** plan 0067's target rule, on plain values: where a system-started PTT
+   *  press goes. The default follows the most recent interaction; a fixed
+   *  target wins while it exists and falls back when it does not (an account
+   *  can be unenrolled while the phone is asleep, and a press must still go
+   *  somewhere the user can find).
+   *
+   *  This is the only gate the rule gets: the framework does not exist in a
+   *  simulator, so nothing here can press the system talk button.
+   *
+   *  The NAME is asserted through the same path the contact list renders,
+   *  because `Conversation.name` is set for groups only — a DM is named by its
+   *  contact and the family thread by the snapshot. */
+  def pttTargetRule(): Unit =
+    val fam = famConv("!fam", 100L)
+    val bob = dmConv("!bob", "@bob:h", "Bob", 300L)
+    val alma = dmConv("!alma", "@alma:h", "Alma", 200L)
+    val all = fam :: bob :: alma :: Nil
+    check(PttChan.targetRoom(all, "!fam", "") == "!bob",
+      "ptt target: the default must follow the most recent interaction")
+    check(PttChan.targetRoom(fam :: Nil, "!fam", "") == "!fam",
+      "ptt target: one conversation with traffic is the target")
+    check(PttChan.targetRoom(Nil, "!fam", "") == "!fam",
+      "ptt target: with no traffic at all the family is the target")
+    check(PttChan.targetRoom(all, "!fam", "!alma") == "!alma",
+      "ptt target: a fixed room id must win over the most recent interaction")
+    check(PttChan.targetRoom(all, "!fam", "@alma:h") == "!alma",
+      "ptt target: a fixed CONTACT must resolve to that contact's room")
+    check(PttChan.targetRoom(all, "!fam", "!gone") == "!bob",
+      "ptt target: a fixed target that no longer exists must fall back")
+    val snap = snapOf(all)
+    check(PttChan.nameOf(snap, "!bob") == "Bob",
+      "ptt target: a DM target is named by its contact")
+    check(PttChan.nameOf(snap, "!fam") == "Kin",
+      "ptt target: the family target is named by the snapshot's family")
+    check(PttChan.nameOf(snap, "!gone") == "",
+      "ptt target: an unknown room has no name to show")
+
+  def famConv(room: String, at: Long): Conversation =
+    Conversation(room, FamilyConv(), false, Contact(User("", "")),
+      msgAt(room, at) :: Nil, 0, "")
+
+  def dmConv(room: String, user: String, name: String, at: Long): Conversation =
+    Conversation(room, DmConv(), true, Contact(User(user, name)),
+      msgAt(room, at) :: Nil, 0, "")
+
+  def msgAt(room: String, at: Long): VoiceMessage =
+    VoiceMessage("$e" + room, User("@x:h", "x"), "mxc://x", 1000L, at,
+      false, false, false)
+
+  def snapOf(cs: List[Conversation]): StateSnapshot =
+    StateSnapshot(Syncing(), true, User("@me:h", "Me"), Nil, cs, true,
+      Family("!fam", "Kin", Nil), true)
 
   def applyAllHandExpectation(): Unit =
     val got = Patches.applyAll(script(), fixture())

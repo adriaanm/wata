@@ -77,8 +77,10 @@ object Main:
     val user = pick(args, 1, "WATA_IOS_USER", "")
     val passIn = pick(args, 2, "WATA_IOS_PASS", "")
     var cfg = FbConfig.resolve(hs, user, passIn)
-    // prime the walkie-talkie toggle's cell (every config write re-emits it)
+    // prime the cells every config write re-emits: the walkie-talkie toggle,
+    // and the fixed PTT target ("" = follow the most recent interaction).
     val primed = FbConfig.loadNotifyMode()
+    val primedTarget = FbConfig.loadPttTarget()
     // the password that got us in is worth keeping only if it is the one
     // just supplied; a stored one is already where it belongs.
     if passIn != "" then FbConfig.savePassword(cfg.homeserver, cfg.username, passIn)
@@ -134,8 +136,14 @@ object Pump:
   /** the stage's root and scale, for the paint probe. */
   private val rootC: sgo.Atomic[Option[go.uikit.UIView]] = sgo.atomic(None)
   private val scaleC: sgo.Atomic[Int] = sgo.atomic(1)
-  /** which screen the pending paint probe reports on. */
-  private val probeScreenC: sgo.Atomic[String] = sgo.atomic("")
+  /** the screens whose paint probes are still queued, oldest first — a QUEUE
+   *  rather than a cell because two screen changes can both land before the
+   *  first probe's trampoline runs. On a slow launch boot and contacts do
+   *  exactly that, and a single cell then labelled the BOOT frame's probe
+   *  "contacts" and lost the boot line altogether: `paint contacts lit=8/202`,
+   *  with 202 the boot frame's own probe count, and ios-smoke failing with
+   *  MISSING for a paint that had happened (2026-08-19). */
+  private val probeQC: sgo.Atomic[List[String]] = sgo.atomic(Nil)
   /** the last screen name printed (one `screen` line per change). */
   private val screenC: sgo.Atomic[String] = sgo.atomic("")
 
@@ -412,13 +420,42 @@ object Pump:
       case _: VContacts     => "contacts"
       case _: VConversation => "conversation"
 
+  /** enqueue a probe for `name` and ask the main queue to run it. One probe
+   *  per queued name, in submission order, so the two cannot be confused. */
+  def queueProbe(name: String): Unit =
+    probeQC.update(l => appended(l, name))
+    go.iosui.onMain(probeCb)
+
+  def appended(l: List[String], s: String): List[String] = l match
+    case h :: t => h :: appended(t, s)
+    case Nil    => s :: Nil
+
+  def concat(a: List[String], b: List[String]): List[String] = a match
+    case h :: t => h :: concat(t, b)
+    case Nil    => b
+
+  /** the oldest queued screen name, or "" when the queue is empty (which the
+   *  caller reads as "whatever is on screen now").
+   *
+   *  Take-all then put-back-the-rest, because the dialect refuses CAS on a
+   *  boxed cell and `update`'s function must be pure — so there is no "swap
+   *  and tell me the head". One producer (the pump) and one consumer (the main
+   *  queue) make that safe: a name pushed during the gap lands in `l` and is
+   *  concatenated AFTER the older tail, so arrival order holds. */
+  def nextProbe(): String =
+    val taken = probeQC.getAndSet(Nil)
+    taken match
+      case h :: t =>
+        probeQC.update(l => concat(t, l))
+        h
+      case Nil => ""
+
   /** print `screen <name>` on change and queue a paint probe for it — the
    *  probe runs on the main queue AFTER the frame that changed it applied. */
   def noteScreen(name: String): Unit =
     if screenC.getAndSet(name) != name then
       println("screen " + name)
-      probeScreenC.set(name)
-      go.iosui.onMain(probeCb)
+      queueProbe(name)
 
   /** render the live stage offscreen and count non-black pixels over a
    *  coarse grid (stopping early — each probe is a full layer render). Every
@@ -438,7 +475,10 @@ object Pump:
           if c > 0 then lit += 1
           x += 12
         y += 8
-      println("paint " + probeScreenC.get() + " lit=" + lit + "/" + probes)
+      // the screen this probe was QUEUED for, not whatever is current now.
+      var name = nextProbe()
+      if name == "" then name = screenC.get()
+      println("paint " + name + " lit=" + lit + "/" + probes)
     case None => ()
 
   // ---- the two mailbox drains ------------------------------------------------
