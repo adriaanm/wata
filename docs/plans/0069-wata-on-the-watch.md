@@ -467,3 +467,38 @@ are all answered.
   purego over it; opus is cgo, a separate question.
 - **Stage 4 (hardware)** — needs the owner's Series 10 and a signing
   identity.
+
+## Input probe (2026-08-19): our own window hit-tests, and UIKit's recognizers attach
+
+`tools/watch-spike --only wkapp` now reports the input edges. On the
+Series 10 simulator, with the app's own scene-joined, level-raised window:
+
+```
+watchspike: input window userInteractionEnabled=1
+watchspike: input hitTest(104,124) -> UIView
+watchspike: input UITapGestureRecognizer class true
+watchspike: input gestureRecognizers=1
+watchspike: input crownSequencer true
+watchspike: input crown focused idle=0
+```
+
+So the window is interactive, `hitTest:withEvent:` resolves a point in the
+middle of the panel to the app's own container view rather than to
+WatchKit's hierarchy underneath, `UITapGestureRecognizer` exists and the
+view accepts one, and the Digital Crown's sequencer is reachable from the
+interface controller and takes focus.
+
+**What this does and does not settle.** It settles the half that could
+have killed the design: a window raised above WatchKit's is not excluded
+from hit-testing, and UIKit's recognizer machinery is present and binds.
+It does **not** prove delivery — nothing in the probe makes a touch
+happen, and the same care applies here as to the offscreen render probe
+that read back correct pixels through a black panel: a mechanism
+answering correctly is not the mechanism running. Delivery is settled by
+a tap, on the simulator's pointer or on the owner's wrist, and that is
+stage 4's business.
+
+On the strength of the hit-test the design proceeds on **UIKit input on
+the app's own view tree**, the same path wata-ios uses. The WatchKit
+fallback (`WKTapGestureRecognizer` and friends, which would pull a
+storyboard back in) stays documented as the retreat, not the plan.

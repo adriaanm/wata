@@ -288,6 +288,7 @@ func paint() {
 	fmt.Printf("watchspike: wkapp frame pushed %dx%d px\n", pw, ph)
 
 	keep = append(keep, w, vc, ivw, lbl, ui)
+	probeInput(w, cv, sb)
 	fmt.Println("watchspike: all checks passed")
 }
 
@@ -320,4 +321,78 @@ func nsStringGo(s objc.ID) string {
 		b = append(b, c)
 	}
 	return string(b)
+}
+
+// probeInput asks whether OUR window can receive input at all. The window
+// is app-built and raised above WatchKit's, which is not a shape Apple
+// documents, so hit-testing is the cheap half of the question: hitTest:
+// answers which view WOULD take a touch at a point, without needing one to
+// happen. It is not proof of delivery — only a real tap is — but a window
+// that does not even hit-test is one no gesture will ever reach.
+//
+// The other half is which recognizer to use. UIKit's UIGestureRecognizer
+// and WatchKit's WKTapGestureRecognizer both exist here; attaching UIKit's
+// keeps the whole input path in the app's own view tree, and WatchKit's
+// would pull the storyboard back in, so this reports whether UIKit's even
+// attaches.
+func probeInput(w, cv objc.ID, b cgRect) {
+	uie := uint64(w.Send(objc.RegisterName("isUserInteractionEnabled")))
+	fmt.Printf("watchspike: input window userInteractionEnabled=%d\n", uie)
+
+	mid := cgPoint{X: b.Size.Width / 2, Y: b.Size.Height / 2}
+	var hitTest func(objc.ID, objc.SEL, cgPoint, objc.ID) objc.ID
+	purego.RegisterFunc(&hitTest, objcMsgSend())
+	hit := hitTest(w, objc.RegisterName("hitTest:withEvent:"), mid, 0)
+	fmt.Printf("watchspike: input hitTest(%.0f,%.0f) -> %s\n",
+		mid.X, mid.Y, objcClassName(hit))
+
+	// Attach a UIKit tap recognizer to the container and report whether the
+	// view accepted it. A real tap is stage 4's business.
+	target := objc.ID(objc.GetClass("NSObject")).
+		Send(objc.RegisterName("alloc")).Send(objc.RegisterName("init"))
+	tapCls := objc.GetClass("UITapGestureRecognizer")
+	fmt.Printf("watchspike: input UITapGestureRecognizer class %v\n", tapCls != 0)
+	if tapCls == 0 {
+		return
+	}
+	tap := objc.ID(tapCls).Send(objc.RegisterName("alloc")).
+		Send(objc.RegisterName("initWithTarget:action:"), target,
+			objc.RegisterName("description"))
+	if tap == 0 {
+		fmt.Println("watchspike: input tap recognizer init NIL")
+		return
+	}
+	cv.Send(objc.RegisterName("addGestureRecognizer:"), tap)
+	n := uint64(cv.Send(objc.RegisterName("gestureRecognizers")).
+		Send(objc.RegisterName("count")))
+	fmt.Printf("watchspike: input gestureRecognizers=%d\n", n)
+
+	// The Digital Crown, the watch's one input the phone has no analogue
+	// for. The sequencer hangs off the interface controller, not the view.
+	if controllerSelf != 0 {
+		cs := controllerSelf.Send(objc.RegisterName("crownSequencer"))
+		fmt.Printf("watchspike: input crownSequencer %v\n", cs != 0)
+		if cs != 0 {
+			cs.Send(objc.RegisterName("focus"))
+			idle := uint64(cs.Send(objc.RegisterName("isIdle")))
+			fmt.Printf("watchspike: input crown focused idle=%d\n", idle)
+		}
+	}
+	keep = append(keep, target, tap)
+}
+
+// objcMsgSend is the raw send, needed because hitTest:withEvent: takes a
+// CGPoint BY VALUE and purego's generic Send cannot express a struct
+// argument.
+func objcMsgSend() uintptr {
+	h, err := purego.Dlopen("/usr/lib/libobjc.A.dylib",
+		purego.RTLD_GLOBAL|purego.RTLD_LAZY)
+	if err != nil {
+		panic("watchspike: dlopen libobjc: " + err.Error())
+	}
+	sym, err := purego.Dlsym(h, "objc_msgSend")
+	if err != nil {
+		panic("watchspike: dlsym objc_msgSend: " + err.Error())
+	}
+	return sym
 }
