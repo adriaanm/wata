@@ -321,13 +321,15 @@ def main(argv):
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", choices=list(STAGES))
+    # REPEATABLE: `--only build --only bundle` used to keep only the LAST
+    # one and run just that, so a build stage silently did not happen and the
+    # bundle wrapped whatever binary was already on disk — a stale app that
+    # installs and runs and is not the code you just wrote.
+    ap.add_argument("--only", choices=list(STAGES), action="append",
+                    help="run just these stages (default: all, in order)")
     args = ap.parse_args(argv)
-    if args.only:
-        STAGES[args.only]()
-        return 0
-    for stage in STAGES.values():
-        stage()
+    for name in (args.only or list(STAGES)):
+        STAGES[name]()
     return 0
 
 

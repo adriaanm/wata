@@ -246,13 +246,14 @@ def main(argv):
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", choices=list(STAGES))
+    # REPEATABLE, unlike ios-device.py's single --only: `--only build --only
+    # bundle` there silently keeps the last one and runs only that, which
+    # looks like a successful build of a binary that was never rebuilt.
+    ap.add_argument("--only", choices=list(STAGES), action="append",
+                    help="run just these stages (default: all, in order)")
     args = ap.parse_args(argv)
-    if args.only:
-        STAGES[args.only]()
-        return 0
-    for stage in STAGES.values():
-        stage()
+    for name in (args.only or list(STAGES)):
+        STAGES[name]()
     return 0
 
 
