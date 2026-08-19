@@ -81,6 +81,9 @@ func main() {
 		case "wkapp":
 			runWKApp()
 			return
+		case "net":
+			runNet()
+			return
 		}
 	}
 	fmt.Println("watchspike: go main entered")

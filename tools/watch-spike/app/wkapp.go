@@ -32,6 +32,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -209,8 +210,14 @@ func paint() {
 		}
 	}
 
+	route := "both"
+	if len(os.Args) > 2 {
+		route = os.Args[2]
+	}
+	fmt.Printf("watchspike: wkapp route=%s\n", route)
+
 	// Route A: paint into the window watchOS already put on the screen.
-	if existing != 0 {
+	if existing != 0 && (route == "adopt" || route == "both") {
 		ui := rasterImage(pw, ph)
 		ivw := objc.ID(objc.GetClass("UIImageView")).
 			Send(objc.RegisterName("alloc")).
@@ -222,6 +229,12 @@ func paint() {
 			Send(objc.RegisterName("count")))
 		fmt.Printf("watchspike: wkapp adopted existing window, subviews=%d\n", n)
 		keep = append(keep, existing, ivw, ui)
+	}
+
+	if route == "adopt" {
+		fmt.Println("watchspike: wkapp frame pushed (adopt only)")
+		fmt.Println("watchspike: all checks passed")
+		return
 	}
 
 	w := objc.ID(objc.GetClass("UIWindow")).Send(objc.RegisterName("alloc")).

@@ -120,3 +120,4 @@ tools/interp-spike/.sgo/
 .scala-build/
 tools/ios-device/
 tools/watch-spike/out/
+tools/watch-hello/out/

@@ -73,7 +73,19 @@ EXPECT_WKAPP = [
     r"watchspike: all checks passed",
 ]
 
-STAGES = ["build", "bundle", "run", "uiapp", "wkapp"]
+# The `net` leg: Go's own network stack on the watch — a dial and an HTTP
+# round trip against a throwaway loopback server, and a TLS handshake
+# against a real name (which also exercises DNS, the trust store and the
+# clock). Nothing here is Apple's, so nothing the UIKit legs proved covers it.
+EXPECT_NET = [
+    r"watchspike: net clock 20\d\d-",
+    r"watchspike: net dial 127\.0\.0\.1:\d+ ok",
+    r"watchspike: net http 200 \d+ bytes",
+    r"watchspike: net tls ok version=\w+ cipher=\w+",
+    r"watchspike: all checks passed",
+]
+
+STAGES = ["build", "bundle", "run", "uiapp", "wkapp", "net"]
 
 
 def stage_build():
@@ -149,7 +161,7 @@ def stage_wkapp():
     try:
         lines, elapsed, missing = watchrun.launch_expect_verdict(
             sc, udid, APP, BUNDLE_ID, EXPECT_WKAPP, timeout=120,
-            screenshot=OUT / "wkapp.png", args=("wkapp",))
+            screenshot=OUT / "wkapp.png", args=("wkapp",), settle=2.0)
         print(f"watchspike: wkapp launch-to-all-checks {elapsed:.2f}s")
         if missing:
             for m in missing:
@@ -158,6 +170,47 @@ def stage_wkapp():
         print(f"watchspike: wkapp PASS — WatchKit lifecycle over a Go-built "
               f"UIKit tree; screenshot at {OUT / 'wkapp.png'}")
     finally:
+        watchrun.shutdown(sc, udid)
+
+
+def stage_net():
+    """Go's network stack on the watch, against a throwaway local server."""
+    if not APP.exists():
+        sys.exit("watchspike: no .app — run the bundle stage")
+    import http.server
+    import socketserver
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"wata watch probe\n"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{port}/probe"
+    print(f"watchspike: net probe server at {url}")
+    sc = watchrun.simctl()
+    udid = watchrun.ensure_device(sc)
+    try:
+        lines, elapsed, missing = watchrun.launch_expect_verdict(
+            sc, udid, APP, BUNDLE_ID, EXPECT_NET, timeout=120,
+            args=("net", url))
+        print(f"watchspike: net launch-to-all-checks {elapsed:.2f}s")
+        if missing:
+            for m in missing:
+                print("watchspike: MISSING " + m, file=sys.stderr)
+            sys.exit(1)
+        print("watchspike: net PASS — sockets, HTTP and TLS all work on watchOS")
+    finally:
+        srv.shutdown()
         watchrun.shutdown(sc, udid)
 
 

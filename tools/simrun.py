@@ -169,7 +169,8 @@ def fire_on_match(on_match):
 
 def launch_and_expect(sc, udid, app_path, bundle_id, expect,
                       done_res=(r"all checks passed", r"FAIL"),
-                      timeout=90, screenshot=None, args=(), on_match=()):
+                      timeout=90, screenshot=None, args=(), on_match=(),
+                      settle=0.0):
     """Boot (if needed), install, launch with a console pty, pump the app's
     stdout until a done marker (or the watchdog timeout), screenshot if
     asked, terminate. Returns (lines, elapsed_seconds, missing_patterns) —
@@ -203,6 +204,16 @@ def launch_and_expect(sc, udid, app_path, bundle_id, expect,
     elapsed = time.time() - t0
 
     if screenshot is not None:
+        # A done marker can beat the COMPOSITOR: the app prints its last
+        # proof as soon as its own work is finished, which on a fast device
+        # is before the frame it just built has been drawn, so a screenshot
+        # taken right here catches a blank panel and reads as "nothing was
+        # displayed". `settle` waits that out. (Found on watchOS, where the
+        # whole run is ~0.6s; the offscreen render probe passed the entire
+        # time, which is exactly why it is not evidence of what is on
+        # screen.)
+        if settle:
+            time.sleep(settle)
         subprocess.run(sc + ["io", udid, "screenshot", str(screenshot)], check=True)
     subprocess.run(sc + ["terminate", udid, bundle_id],
                    capture_output=True, text=True)
@@ -216,7 +227,7 @@ def launch_and_expect(sc, udid, app_path, bundle_id, expect,
 def launch_expect_verdict(sc, udid, app_path, bundle_id, expect,
                           done_res=(r"all checks passed", r"FAIL"),
                           timeout=90, screenshot=None, args=(), attempts=2,
-                          on_match=()):
+                          on_match=(), settle=0.0):
     """launch_and_expect, retried while the done marker never arrives.
 
     `--console-pty` capture is lossy two ways: a cold-booted fresh runtime's
@@ -230,7 +241,7 @@ def launch_expect_verdict(sc, udid, app_path, bundle_id, expect,
         lines, elapsed, missing = launch_and_expect(
             sc, udid, app_path, bundle_id, expect, done_res=done_res,
             timeout=timeout, screenshot=screenshot, args=args,
-            on_match=on_match)
+            on_match=on_match, settle=settle)
         if attempt == attempts or \
                 any(re.search(m, l) for l in lines for m in done_res):
             return lines, elapsed, missing

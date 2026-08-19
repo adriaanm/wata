@@ -458,6 +458,16 @@ ios-spike *FLAGS:
 watch-spike *FLAGS:
     tools/watch-spike/spike.py {{FLAGS}}
 
+# the plan-0069 stage-1 product gate: the watch spike's proofs re-taken
+# through the product packages (go-pkgs/watchshell + go-pkgs/iosui, the
+# latter unchanged from the phone) — build, hand-bundle, run on the shared
+# Series 10 device, assert the printed proofs incl. the offscreen render
+# probe, and screenshot the real panel. Needs Xcode + a watchOS simulator
+# runtime; not in ci.
+#   just watch-hello --only run       # one stage
+watch-hello *FLAGS:
+    tools/watch-hello/hello.py {{FLAGS}}
+
 # the plan-0044 stage-2 gate: the spike's proofs re-taken through the product
 # packages (go-pkgs/iosshell + go-pkgs/iosui) — build, hand-bundle, run on the
 # shared simulator device, assert the printed proofs incl. the offscreen render
