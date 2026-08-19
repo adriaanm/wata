@@ -468,14 +468,6 @@ watch-spike *FLAGS:
 watch-hello *FLAGS:
     tools/watch-hello/hello.py {{FLAGS}}
 
-# the plan-0069 stage-2 gate: `wata-watch` on the watch simulator — sgo emits
-# the app, the emitted module cross-builds for the watch, and SGOLA's own
-# frame lands on the panel over the same generated UIKit bindings the phone
-# uses. Verdict = the app's printed lines (WatchKit owns the process exit).
-# Needs Xcode + a watchOS simulator runtime; not in ci.
-#   just watch-smoke --only run       # one stage
-watch-smoke *FLAGS:
-    tools/watch-smoke.py {{FLAGS}}
 
 # the plan-0044 stage-2 gate: the spike's proofs re-taken through the product
 # packages (go-pkgs/iosshell + go-pkgs/iosui) — build, hand-bundle, run on the
@@ -536,3 +528,10 @@ watch-interptest *FLAGS:
 #   just watch-device --only build    # one stage
 watch-device *FLAGS:
     tools/watch-device.py {{FLAGS}}
+
+# plan 0069's stage-2 gate: wata-watch on the watch simulator against a live
+# wata-server — login, sync, and bob's voice message ARRIVING mid-session
+# (ios-smoke's twin). The whole client, not a probe.
+# Needs Xcode + a watchOS simulator runtime; not in ci.
+watch-e2e *FLAGS:
+    tools/watch-e2e.py {{FLAGS}}

@@ -71,3 +71,21 @@ object watchshell:
   @go.name("ContainerBounds") def containerBounds(): uikit.CGRect = ???
   /** splice the stage's root into the window's container (main thread). */
   @go.name("AdoptRoot") def adoptRoot(v: uikit.UIView): Unit = ???
+
+  /** attach the watch's input to a view — crown, tap, swipe, long press.
+   *  The queue below then speaks ioskeys.scala's codes, so the shared
+   *  applets never learn that the watch has no keypad. */
+  @go.name("AddGestures") def addGestures(v: uikit.UIView): Unit = ???
+
+  /** pop `code*4 + phase`, or -1 — never blocks (iosshell's contract). */
+  @go.name("NextKey") def nextKey(): scala.Int = ???
+
+  /** tee stdout+stderr into a file, so an icon-tap launch's lines survive
+   *  to be pulled off the watch. Answers "" or the error. */
+  @go.name("TeeLog") def teeLog(path: String): String = ???
+
+  /** always "" today — the watch declares no URL scheme (see input.go). */
+  @go.name("TakeURL") def takeURL(): String = ???
+
+  /** logs and ignores: watchOS has no browser to open (see input.go). */
+  @go.name("OpenURL") def openURL(url: String): Unit = ???

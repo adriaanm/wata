@@ -88,8 +88,9 @@ var (
 	root      uikit.UIView
 	hasRoot   bool
 	insets    uiEdgeInsets
-	readyFn   uintptr
-	readyRun  bool
+	readyFn    uintptr
+	readyRun   bool
+	controller objc.ID // the live WKInterfaceController (the crown's owner)
 
 	wkApplicationMain func(argc int32, argv uintptr, delegate objc.ID) int32
 
@@ -153,7 +154,15 @@ func Start() {
 		// Activation, not launch, is when a screen exists. It fires again on
 		// every return to the app, so the build is idempotent.
 		{Cmd: objc.RegisterName("willActivate"),
-			Fn: func(self objc.ID, _ objc.SEL) { didActivate() }},
+			Fn: func(self objc.ID, _ objc.SEL) {
+				// Keep the instance: the Digital Crown's sequencer hangs off
+				// the interface controller, not off any view, so input.go has
+				// no other way to reach it.
+				mu.Lock()
+				controller = self
+				mu.Unlock()
+				didActivate()
+			}},
 	}
 	if _, err := objc.RegisterClass(controllerClass, wkController, nil, nil,
 		controllerMethods); err != nil {

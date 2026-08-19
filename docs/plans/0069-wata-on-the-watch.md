@@ -644,3 +644,76 @@ sync, send or receive, because `WATCH-CLIENT-CORE` is not done — that is
 the port of wata-ios's `caps`/`config`/screen bodies and the pump, plus a
 layout pass for the 208x248 panel. Everything under it is now proven:
 UIKit, the differ, the network stack, and audio including the microphone.
+
+## Stage 2 done (2026-08-19): the whole client runs on the watch
+
+`just watch-e2e` — ios-smoke's twin — boots `wata-watch` on the Series 10
+simulator against a live wata-server, and bob sends a voice message from a
+host-side wata-tui once the contact list has painted, so it arrives
+mid-session through sync rather than in the first snapshot:
+
+```
+screen boot / paint boot lit=8/202
+ready @alice:localhost
+screen contacts / paint contacts lit=8/34
+notify: noted "Bob" "sent a voice message to Family" badge=1
+watch-e2e: launch-to-verdict 1.90s
+```
+
+That is a real Matrix session — login, sync, arrival — in Sgola, on a
+platform Go does not target. The screenshot shows wata's actual contact
+list: the title, the NET indicator, `Family` selected and carrying its
+unread badge, `Bob`, and the footer legend.
+
+### What the port cost
+
+Almost nothing, which is the interesting part. `caps`, `config`,
+`netstatus`, `applets`, `input`, `iosstr`, `paint`, `stubs`, `syscall`,
+`httpc`, `ioskeys`, `audio`, `audiothread`, `enrol` and `irohnet` are
+wata-ios's files **unchanged**. `main.scala` is wata-ios's with
+`go.iosshell` renamed to `go.watchshell` and three iOS-only surfaces cut:
+
+- **APNs** — no `registerForPush`, no `pushStep`. The watch has no push
+  story yet.
+- **PushToTalk** — the framework is iOS-only. A press therefore talks to
+  the app's own audio thread directly, which is the *simpler* arc the
+  phone cannot use (plan 0066: a joined phone has no audio session of its
+  own). The watch is not missing a feature here; it is missing a problem.
+- **The configure link** — `watchshell.TakeURL` always answers `""` and
+  `OpenURL` logs and ignores, because watchOS has no browser to bounce
+  into. `Enrol` still reads the config enrollment LEFT, which is the half
+  that matters: the watch is enrolled from the companion app (owner ruling
+  2026-08-19), and its independent job is only sending and receiving.
+
+### Input: the watch's gestures, the phone's key codes
+
+`go-pkgs/watchshell/input.go` maps the crown to UP/DOWN, a tap to ENTER, a
+right swipe to BACK, and a **long press to PTT's press and release edges**
+— which is exactly hold-to-talk. They queue `code*4 + phase` on iosshell's
+contract, so the shared applets never learn that the watch has no keypad.
+UIKit's recognizers rather than WatchKit's, because WatchKit's attach to a
+storyboard's objects and there is no storyboard; that this can work at all
+is what the hit-test probe established.
+
+Delivery is still unproven (`WATCH-INPUT-DELIVERY`): nothing here has made
+a real touch happen.
+
+### `watch-smoke` is retired
+
+Its subject was the paint demo in `main.scala`, and that file became the
+client. `watch-e2e` proves everything it did and more — the client paints
+*and* logs in *and* receives — so keeping a gate whose only remaining role
+would be to re-assert a deleted demo is worse than deleting it.
+
+### WATCH-LAYOUT is the honest remaining gap
+
+wata's grid is 160x128, wider than tall; the watch's panel is 208x248,
+taller than wide. At the phone's scale of 2 the stage is 320x256 and the
+panel crops the footer's right-hand end — where `PTT talk` lives. The
+watch therefore runs at scale 1, where nothing is cropped and roughly half
+the panel's height goes unused, and the text is small for a wrist.
+
+Neither is right and the fix is not a scale factor: the watch wants a
+layout of its own, taller than wide, with rows readable at arm's length —
+the same ask `FB-BIG-CONTACT-ROWS` makes of the handset. Until then,
+showing everything small beats showing most of it big.

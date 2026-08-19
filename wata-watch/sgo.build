@@ -19,3 +19,14 @@ optreport
 godep github.com/adriaanm/wata/go-pkgs/watchshell go-pkgs/watchshell
 godep github.com/adriaanm/wata/go-pkgs/iosui go-pkgs/iosui
 godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt
+# The audio backend, unchanged from the phone: AudioToolbox + AVFAudio over
+# purego. Its session_ios.go is //go:build ios and the watch rides GOOS=ios,
+# so the AVAudioSession work comes along. Probed on the watch simulator
+# before this line was added — engine, playback, microphone and both codec
+# ends all work (plan 0069's stage 3 section).
+godep github.com/adriaanm/wata/go-pkgs/macaudio go-pkgs/macaudio
+# the timeout-carrying http.Client constructor — the net/http facade binds the
+# Client type, not its fields (RETIRE-HTTPC-SHIM retires this once the ruled
+# timeout members land upstream)
+godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc
+godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet
