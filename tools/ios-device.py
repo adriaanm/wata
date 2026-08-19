@@ -12,10 +12,15 @@ Stages (each runnable alone with --only):
   sign      embed the provisioning profile, codesign with entitlements
   install   devicectl install onto the attached iPhone
 
-The sign stage needs what only the owner can mint:
-  - WATA_TEAM_ID          the Apple Developer team (portal: Membership)
-  - a development profile for the bundle id (default net.wa-ta.ios) and the
-    target device, at tools/ios-device/WataIos.mobileprovision or $WATA_PROFILE
+The sign stage needs a development profile for the target device, which only
+the owner can mint. It is looked for at $WATA_PROFILE, then
+tools/ios-device/WataIos.mobileprovision, then the PTT hello's
+tools/bindgen/hello/WataHello.mobileprovision — the app rides that identity
+today (IOS-ON-DEVICE), and it is the only profile in the tree granting
+push-to-talk. Everything else is READ OFF the profile rather than configured:
+the team id and the bundle id both come from it, so the Info.plist, the
+entitlements and the signature cannot disagree. $WATA_TEAM_ID and
+$WATA_BUNDLE_ID still override, for a profile this script cannot decode.
 
 The install stage targets $WATA_DEVICE, or auto-picks when exactly one
 iPhone is attached (`xcrun devicectl list devices`).
@@ -52,9 +57,6 @@ EMIT = REPO / "wata-ios" / ".sgo" / "wata-ios"
 OUT = HERE / "ios-device" / "out"
 APP = OUT / "WataIos.app"
 BIN = "WataIos"
-BUNDLE_ID = os.environ.get("WATA_BUNDLE_ID", "net.wa-ta.ios")
-TEAM_ID = os.environ.get("WATA_TEAM_ID", "")
-
 
 PTT_ENT = "com.apple.developer.push-to-talk"
 APS_ENT = "aps-environment"
@@ -66,30 +68,85 @@ def run(cmd, **kw):
 
 
 def profile_path():
-    return pathlib.Path(os.environ.get(
-        "WATA_PROFILE", HERE / "ios-device" / "WataIos.mobileprovision"))
+    """$WATA_PROFILE, else the wata-ios profile, else the PTT hello's.
 
-
-def profile_grants():
-    """The entitlements the provisioning profile GRANTS, or {} when there is
-    no profile (or it cannot be decoded — the sign stage reports that itself).
-
-    A .mobileprovision is a CMS-signed plist; `security cms -D` unwraps it.
+    The fallback is not a shortcut: net.wa-ta.ios has never been minted, so the
+    app on the owner's phone rides net.wa-ta.hello's identity (IOS-ON-DEVICE),
+    and the hello profile is the only one in the tree that grants
+    push-to-talk. Falling back makes `just ios-device` work with no environment
+    at all until a proper profile exists — before this, the same install took
+    three env vars nobody could guess and failed three different ways
+    (unset team id, a bundle id disagreeing with the profile, an Info.plist
+    bundled before the profile was visible).
     """
+    if p := os.environ.get("WATA_PROFILE"):
+        return pathlib.Path(p)
+    own = HERE / "ios-device" / "WataIos.mobileprovision"
+    if own.exists():
+        return own
+    hello = HERE / "bindgen" / "hello" / "WataHello.mobileprovision"
+    if hello.exists():
+        return hello
+    return own  # the sign stage reports the absence with the portal steps
+
+
+def profile_plist():
+    """The whole decoded profile, or {}. `security cms -D` unwraps the CMS."""
     p = profile_path()
     if not p.exists():
         return {}
     r = subprocess.run(["security", "cms", "-D", "-i", str(p)],
                        capture_output=True)
     if r.returncode != 0 or not r.stdout:
-        print(f"note: could not decode {p} ({r.stderr.decode().strip()});"
-              " treating it as granting nothing extra")
         return {}
     try:
-        return plistlib.loads(r.stdout).get("Entitlements", {})
-    except Exception as e:  # a profile we cannot parse is one we cannot trust
-        print(f"note: could not parse {p}'s entitlements ({e})")
+        return plistlib.loads(r.stdout)
+    except Exception:
         return {}
+
+
+def profile_team():
+    """The team the profile was issued to. Read rather than configured: it is
+    stamped into the entitlements, and a WATA_TEAM_ID disagreeing with the
+    profile is a codesign failure whose message names neither."""
+    ids = profile_plist().get("TeamIdentifier") or []
+    return ids[0] if ids else ""
+
+
+def profile_bundle_id():
+    """The bundle id the profile is FOR (`<team>.<bundle id>`, minus the team).
+
+    Taking it from the profile is what keeps the Info.plist and the signature
+    talking about the same app: a bundle id that disagrees with the profile
+    installs as an unsigned app or not at all.
+    """
+    app_id = profile_plist().get("Entitlements", {}).get("application-identifier", "")
+    team = profile_team()
+    prefix = team + "."
+    return app_id[len(prefix):] if team and app_id.startswith(prefix) else ""
+
+
+def bundle_id():
+    """$WATA_BUNDLE_ID, else the id the profile is for, else the convention.
+
+    Read off the profile by default so the Info.plist and the signature cannot
+    disagree — the app currently rides net.wa-ta.hello (IOS-ON-DEVICE) while
+    net.wa-ta.ios is where it is going.
+    """
+    return (os.environ.get("WATA_BUNDLE_ID") or profile_bundle_id()
+            or "net.wa-ta.ios")
+
+
+def team_id():
+    """$WATA_TEAM_ID, else the team the profile was issued to."""
+    return os.environ.get("WATA_TEAM_ID") or profile_team()
+
+
+def profile_grants():
+    """The entitlements the provisioning profile GRANTS, or {} when there is
+    no profile (or it cannot be decoded — the sign stage reports that itself).
+    """
+    return profile_plist().get("Entitlements", {})
 
 
 def ptt_granted(grants):
@@ -114,7 +171,7 @@ def report_missing(grants):
         f"      work is push ({APS_ENT}) and the PushToTalk channel\n"
         f"      ({PTT_ENT} — and PTT needs both).\n"
         f"      To grant them: developer.apple.com/account → Identifiers →\n"
-        f"      {BUNDLE_ID} → enable Push Notifications and Push to Talk, then\n"
+        f"      {bundle_id()} → enable Push Notifications and Push to Talk, then\n"
         f"      regenerate the development profile and download it over\n"
         f"      {profile_path()}.\n"
         f"      Set WATA_IOS_REQUIRE_PTT=1 to make this a hard failure.\n")
@@ -146,7 +203,7 @@ def bundle():
         "CFBundleDevelopmentRegion": "en",
         "CFBundleDisplayName": "Wata",
         "CFBundleExecutable": BIN,
-        "CFBundleIdentifier": BUNDLE_ID,
+        "CFBundleIdentifier": bundle_id(),
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleName": BIN,
         "CFBundlePackageType": "APPL",
@@ -162,7 +219,7 @@ def bundle():
         # the wata:// scheme — the enroll page's configure link bounces back
         # into the app through it (plan 0062 stage 3).
         "CFBundleURLTypes": [
-            {"CFBundleURLName": BUNDLE_ID, "CFBundleURLSchemes": ["wata"]},
+            {"CFBundleURLName": bundle_id(), "CFBundleURLSchemes": ["wata"]},
         ],
         "UIDeviceFamily": [1],
         "UILaunchScreen": {},
@@ -183,7 +240,7 @@ def bundle():
 
 
 def sign():
-    if not TEAM_ID:
+    if not team_id():
         raise SystemExit(
             "WATA_TEAM_ID is not set; the entitlements stamp the team id.\n"
             "Find yours on developer.apple.com/account (Membership)."
@@ -192,7 +249,7 @@ def sign():
     if not profile.exists():
         raise SystemExit(
             f"no provisioning profile at {profile}.\n"
-            f"Portal: an iOS App Development profile for {BUNDLE_ID} and the\n"
+            f"Portal: an iOS App Development profile for {bundle_id()} and the\n"
             "target device; drop it there or point WATA_PROFILE at it."
         )
     shutil.copy(profile, APP / "embedded.mobileprovision")
@@ -201,8 +258,8 @@ def sign():
     # nothing useful, so the two push entitlements are added only when they
     # are there and their absence is reported with the portal step.
     ents = {
-        "application-identifier": f"{TEAM_ID}.{BUNDLE_ID}",
-        "com.apple.developer.team-identifier": TEAM_ID,
+        "application-identifier": f"{team_id()}.{bundle_id()}",
+        "com.apple.developer.team-identifier": team_id(),
         "get-task-allow": True,
     }
     grants = profile_grants()
