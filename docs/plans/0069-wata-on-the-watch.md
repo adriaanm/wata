@@ -600,3 +600,47 @@ behaviour and worth expecting rather than debugging.
 A stale alert from a previous run also blocks the NEXT launch at
 `awakeWithContext`, before `willActivate` — shut the device down between
 permission experiments.
+
+## The hardware path (2026-08-19): `just watch-device`
+
+`tools/watch-device.py` is `ios-device.py`'s twin — build, bundle, sign,
+install — and the first three stages are verified here. The build stage
+prints the platform it produced rather than trusting it:
+
+```
++ go build -ldflags=-w -o .../WataWatch .
+ platform WATCHOS
+    minos 26.0
+      sdk 26.2
+```
+
+That is a real watchOS **device** binary, arm64, so stage 0's result holds
+for the device sysroot and not only the simulator.
+
+**Two things are the owner's, and neither can be worked around here.**
+
+*The profile.* Provisioning profiles carry a `Platform` list, and the
+tree's only profile is `['iOS', 'xrOS', 'visionOS']` — an iOS profile
+cannot sign a watch app whatever its bundle id, and the failure would
+otherwise surface at install time as a message naming neither the platform
+nor the profile. So the sign stage checks `Platform` first and prints the
+portal steps: a new App ID for `net.wa-ta.watch`, the watch registered as a
+device, and a *watchOS App Development* profile for the two, dropped at
+`tools/watch-device/WataWatch.mobileprovision` (or `$WATA_WATCH_PROFILE`).
+
+*The watch itself.* It needs Developer Mode (Settings → Privacy & Security)
+and to be paired to Xcode before `xcrun devicectl list devices` will show
+it. The install stage says exactly that when it finds no watch.
+
+Both guards were exercised — the iOS profile is refused on its platform,
+and a missing watch prints the setup steps — so the first real run should
+fail only on things that are genuinely absent.
+
+### What will actually be on the wrist
+
+Honesty about scope: the installed app is the **prototype**, not the
+product. It paints a frame and passes the stage suite. It does not log in,
+sync, send or receive, because `WATCH-CLIENT-CORE` is not done — that is
+the port of wata-ios's `caps`/`config`/screen bodies and the pump, plus a
+layout pass for the 208x248 panel. Everything under it is now proven:
+UIKit, the differ, the network stack, and audio including the microphone.

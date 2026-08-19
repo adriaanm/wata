@@ -528,3 +528,11 @@ ios-push-smoke:
 #   just watch-interptest --only run  # one stage
 watch-interptest *FLAGS:
     tools/watch-interptest.py {{FLAGS}}
+
+# plan 0069's hardware leg: build, sign and install wata-watch on a real Apple
+# Watch (ios-device's twin). Needs a watchOS App Development profile — an iOS
+# profile cannot sign a watch app — and the watch in Developer Mode, paired to
+# Xcode. The sign stage prints the portal steps when either is missing.
+#   just watch-device --only build    # one stage
+watch-device *FLAGS:
+    tools/watch-device.py {{FLAGS}}
