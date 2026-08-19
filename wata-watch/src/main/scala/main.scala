@@ -190,6 +190,8 @@ object Pump:
     // key codes the phone's on-screen keypad queues (go-pkgs/watchshell's
     // input.go). Long press is hold-to-talk.
     go.watchshell.addGestures(root)
+    // the harness's finger (inert unless set) — see watchshell's ScriptKeys
+    go.watchshell.scriptKeys(go.sys.getenv("WATA_WATCH_SCRIPT_KEYS"))
     // NO PushToTalk framework here. It is an iOS framework; the watch has
     // no equivalent, so a press talks to the app's own audio thread directly
     // — which is the simpler arc the phone cannot use, not a missing feature.
@@ -494,8 +496,14 @@ object Pump:
 
   def onUiEvent(st: PumpSt, e: UiEvent): PumpSt = e match
     case _: EvSendComplete =>
+      // The SEND's assertable surface, in the spirit of the `notify:` line:
+      // the watch has no banner and the flash is a frame, so a harness (and
+      // a log pulled off a wrist) has nothing else to key on. Sending is
+      // half of what a walkie-talkie does and had no printed evidence at all.
+      println("send: complete")
       withWata(st, WataLogic.notifySend(st.wata, false))
     case _: EvSendFailed =>
+      println("send: failed")
       withWata(st, WataLogic.notifySend(st.wata, true))
     case pe: EvPlaybackError =>
       // a PTT episode's own playback failing must not be reported as played.

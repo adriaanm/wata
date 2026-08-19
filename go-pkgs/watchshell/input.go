@@ -43,7 +43,10 @@ package watchshell
 
 import (
 	"log"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/adriaanm/wata/go-pkgs/appleptt/uikit"
 	"github.com/ebitengine/purego"
@@ -324,4 +327,57 @@ func TakeURL() string { return "" }
 // worth seeing rather than hunting.
 func OpenURL(s string) {
 	log.Printf("watchshell: no browser on the watch, ignoring open %s", s)
+}
+
+// ScriptKeys is a HARNESS SEAM, not a product path: it replays a scripted
+// key sequence so a gate can hold the talk button without a finger. The
+// watch simulator has no way to synthesize a long press on a UIKit
+// recognizer — `simctl` can tap a coordinate but not hold one — so without
+// this the SEND half of a walkie-talkie is ungateable, and only the receive
+// half would ever be proven.
+//
+// Format, from $WATA_WATCH_SCRIPT_KEYS: comma-separated `code@atMs+holdMs`,
+// where code is the key number (7 = PTT) and holdMs may be omitted for a
+// tap. So `7@4000+1500` presses PTT four seconds in and releases it 1.5s
+// later — a hold-to-talk of the kind a wrist would make.
+//
+// It pushes onto the SAME queue the gestures use, so what the pump sees is
+// indistinguishable from a real press. That is the point and also the
+// limit: this proves the send arc above the recognizer, and proves nothing
+// about whether a real long press is delivered (WATCH-INPUT-DELIVERY).
+func ScriptKeys(spec string) {
+	if spec == "" {
+		return
+	}
+	for _, item := range strings.Split(spec, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		codeStr, rest, ok := strings.Cut(item, "@")
+		if !ok {
+			log.Printf("watchshell: bad key script %q, want code@atMs[+holdMs]", item)
+			continue
+		}
+		atStr, holdStr, hasHold := strings.Cut(rest, "+")
+		code, err1 := strconv.Atoi(strings.TrimSpace(codeStr))
+		at, err2 := strconv.Atoi(strings.TrimSpace(atStr))
+		hold := 0
+		var err3 error
+		if hasHold {
+			hold, err3 = strconv.Atoi(strings.TrimSpace(holdStr))
+		}
+		if err1 != nil || err2 != nil || err3 != nil {
+			log.Printf("watchshell: bad key script %q", item)
+			continue
+		}
+		go func(code, at, hold int) {
+			time.Sleep(time.Duration(at) * time.Millisecond)
+			log.Printf("watchshell: scripted key %d press", code)
+			PushKey(code, 1)
+			time.Sleep(time.Duration(hold) * time.Millisecond)
+			log.Printf("watchshell: scripted key %d release", code)
+			PushKey(code, 0)
+		}(code, at, hold)
+	}
 }

@@ -717,3 +717,30 @@ Neither is right and the fix is not a scale factor: the watch wants a
 layout of its own, taller than wide, with rows readable at arm's length —
 the same ask `FB-BIG-CONTACT-ROWS` makes of the handset. Until then,
 showing everything small beats showing most of it big.
+
+## Sending, too (2026-08-19) — and the server agrees
+
+`just watch-e2e` now proves both directions:
+
+```
+notify: noted "Bob" "sent a voice message to Family" badge=1
+send: complete
+watch-e2e: server-side check — family room holds 2 messages
+```
+
+The send needed two things. `EvSendComplete` had no printed surface at all,
+so sending — half of what a walkie-talkie does — had no evidence a harness
+or a log pulled off a wrist could key on; it now prints `send: complete`,
+in the spirit of the `notify:` line.
+
+And the talk button had to be held without a finger. The simulator can tap
+a coordinate but cannot synthesize a long press on a UIKit recognizer, so
+`watchshell.ScriptKeys` replays `code@atMs+holdMs` onto the same queue the
+gestures push to — the pump cannot tell the difference. That proves the send
+arc **above** the recognizer and nothing about whether a real long press is
+delivered, which stays `WATCH-INPUT-DELIVERY`.
+
+The last line is the one that matters most: `send: complete` is the app's
+word for it, so bob then snapshots the family room server-side and must find
+BOTH messages. A client that believes it sent and a server that has the
+message are different claims, and only the second one is worth anything.

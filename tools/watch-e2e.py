@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """`just watch-e2e` — plan 0069's stage-2 gate: wata-watch booted on the watch
-simulator against a live wata-server, logging in and RECEIVING.
+simulator against a live wata-server, logging in, RECEIVING and SENDING.
 
 tools/ios-smoke.py's twin, and deliberately the same shape: one fresh
 wata-server on a random localhost port (the simulator shares the host's
@@ -19,6 +19,16 @@ process exit, the interptest rule):
     ready @alice:localhost              the login round-trip succeeded
     screen contacts / paint contacts    the post-login applet painted
     notify: noted "…" … badge=<n>       bob's message arrived over sync
+    send: complete                      the watch RECORDED and SENT one of
+                                        its own, from a held talk button
+                                        (watchshell's ScriptKeys — the
+                                        simulator cannot synthesize a long
+                                        press on a UIKit recognizer)
+
+and then, server-side, bob snapshots the family room and must see BOTH
+messages. That last check is the one that cannot be faked by the client
+believing its own send: `send: complete` is the app's word for it, and the
+snapshot is the server's.
 
 What this proves beyond watch-smoke and watch-interptest: the WHOLE client
 runs on the watch. Not the stage, not the differ, not a probe — a real
@@ -70,8 +80,12 @@ EXPECT = [
     r"screen contacts",
     r"paint contacts lit=[1-9]",
     simrun.NOTED_RE,
+    r"send: complete",
 ]
-DONE_RES = (simrun.NOTED_RE, r"login failed", r"rejected", r"wata-watch: ")
+# The SEND is the terminator, not the arrival: it is scripted to happen after
+# the contact list paints, so it is the last thing to land.
+DONE_RES = (r"send: complete", r"send: failed", r"login failed", r"rejected",
+            r"wata-watch: ")
 
 
 def build_env():
@@ -125,6 +139,24 @@ def stop_server(proc, log):
     log.close()
 
 
+def family_msgs(tui_bin, env, base):
+    """bob snapshots the family conversation and answers its message count.
+    The server's word on what actually landed, as against the app's own
+    `send: complete` — a client that thinks it sent and a server that has
+    the message are different claims."""
+    senv = dict(env, WATA_TUI_HS=base, WATA_TUI_USER="bob",
+                WATA_TUI_PASS=PASSWORD)
+    r = subprocess.run([str(tui_bin)], input="snap\nquit\n", text=True,
+                       capture_output=True, env=senv, timeout=120)
+    for line in r.stdout.split("\n"):
+        # `conv 1 family - !room:host msgs=2 unplayed=1`
+        if line.startswith("conv 1 family") and "msgs=" in line:
+            for tok in line.split():
+                if tok.startswith("msgs="):
+                    return int(tok[len("msgs="):])
+    return -1
+
+
 def build_app(env):
     """sgo emits and native-builds, then the emitted module cross-builds for
     the watch simulator and is bundled — watch-interptest's two steps, with
@@ -157,6 +189,14 @@ def main():
     os.environ["SIMCTL_CHILD_WATA_IOS_USER"] = "alice"
     os.environ["SIMCTL_CHILD_WATA_IOS_PASS"] = PASSWORD
     os.environ["SIMCTL_CHILD_WATA_MAC_AUDIO"] = "fake"
+    # The SEND leg's finger: hold PTT (key 7) from t=6s for 1.5s, by which
+    # time the contact list has painted and the family row is selected. The
+    # simulator cannot synthesize a long press on a UIKit recognizer, so this
+    # rides watchshell's ScriptKeys onto the same queue the gestures use.
+    # It proves the send arc above the recognizer and nothing about whether a
+    # real long press is DELIVERED — that is WATCH-INPUT-DELIVERY, and only a
+    # wrist settles it.
+    os.environ["SIMCTL_CHILD_WATA_WATCH_SCRIPT_KEYS"] = "7@6000+1500"
 
     sent = {"ok": False, "at": None, "arrived": None}
     # The arrival line ENDS the run, and it lands before the sending tui has
@@ -194,9 +234,17 @@ def main():
             sys.exit(1)
         if not sent["ok"] or not fast:
             sys.exit(1)
+        n = family_msgs(tui_bin, env, BASE)
+        if n < 2:
+            print(f"watch-e2e: the family room holds {n} messages, expected "
+                  "2 (bob's and the watch's) — the watch printed `send: "
+                  "complete` but the server does not have it",
+                  file=sys.stderr)
+            sys.exit(1)
+        print(f"watch-e2e: server-side check — family room holds {n} messages")
         print("watch-e2e: PASS — wata-watch logged in, painted the contact "
-              "list and saw bob's voice message arrive over sync, on the "
-              "watch simulator")
+              "list, saw bob's voice message arrive over sync, and SENT one "
+              "of its own from a held talk button, on the watch simulator")
     finally:
         watchrun.shutdown(sc, udid)
         stop_server(proc, log)

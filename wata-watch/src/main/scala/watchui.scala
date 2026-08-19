@@ -89,3 +89,7 @@ object watchshell:
 
   /** logs and ignores: watchOS has no browser to open (see input.go). */
   @go.name("OpenURL") def openURL(url: String): Unit = ???
+
+  /** a HARNESS seam: replay `code@atMs+holdMs` keys so a gate can hold the
+   *  talk button without a finger (see input.go). Inert when unset. */
+  @go.name("ScriptKeys") def scriptKeys(spec: String): Unit = ???
