@@ -17,15 +17,21 @@ These were checked against the installed SDK and Apple's own material
 rather than assumed, because three of the four are recent enough that
 anything remembered about them is likely stale.
 
-**1. Go can reach only the newest watches, and only since watchOS 26.**
+**1. Go can reach only the newest watches — and watchOS 27 makes that
+moot.**
 watchOS ran on `arm64_32` — 64-bit instructions, 32-bit pointers — which
 Go has never supported and, on the evidence of the request to add it
 (golang/go#60180, closed frozen), will not soon. watchOS 26 moves Series
 9, Series 10 and Ultra 2 to **full `arm64`**; Series 8, SE 2 and the
 original Ultra stay `arm64_32` forever. So this is possible at all only
-because of a months-old platform change, and it is possible only for the
-arm64 watches. Every older watch is permanently out of reach — not a
-scheduling matter, an ISA one.
+because of a months-old platform change.
+
+And the fragmentation it implies **disappears if we require watchOS 27**,
+which drops the Series 8, SE 2 and original Ultra outright: every watch
+that runs watchOS 27 (Series 9, 10, 11, Ultra 2, Ultra 3, SE 3) is an S9-
+or S10-class device, i.e. arm64. So the ISA constraint is not a
+fragmentation problem to design around, it is a minimum-OS line: watchOS
+27, arm64 only, no `arm64_32` build ever.
 
 **2. There is no `GOOS=watchos`** (`go tool dist list` has `ios` and
 `darwin`, nothing else Apple). The hypothesis worth probing: Darwin is
@@ -60,12 +66,63 @@ one that decides the architecture.
   `pixels.scala`/`glyphs.scala` are already Sgola. The watch is a
   framebuffer with a nicer screen.
 
-**4. There is no PushToTalk on watchOS** — no `PushToTalk.framework` in
-the SDK. Everything plan 0065 tier 3 built (the system pill, the
-ephemeral channel token, the framework's audio-session handover, a push
-that wakes the app into live audio) simply does not exist here. A watch
-message arrives as a notification with a haptic; playback is a foreground
-act.
+**4. There is no PushToTalk on watchOS, and Apple is going the other
+way.** No `PushToTalk.framework` in the watchOS SDK, and the iOS 26.2
+SDK's own headers say why rather than leaving it to inference: *every*
+symbol in `PushToTalk.framework` carries
+`API_UNAVAILABLE(macos, macCatalyst, tvos, watchos)`. So everything plan
+0065 tier 3 built — the system pill, the ephemeral per-join channel
+token, the framework owning the audio session, a push that wakes the app
+into live audio — does not exist on the watch.
+
+Nor is it arriving as the replacement for what Apple is removing:
+**watchOS 27 deletes the built-in Walkie-Talkie app** (gone from the app
+list and Control Center in the June 2026 beta, unannounced, after eight
+releases without a meaningful update), and nothing in watchOS 27's
+developer material offers a push-to-talk API in its place — the new
+frameworks are Foundation Models, Vision and a menopause health API.
+9to5Mac's read is that this leaves "a gap that some third-party app will
+fill", which is a market observation and not an API.
+
+The cheap definitive check, when Xcode 27 is installed:
+`ls $(xcrun --sdk watchos --show-sdk-path)/System/Library/Frameworks |
+grep -i pushtotalk`. Until then, treat PTT-on-watch as absent.
+
+## The supported replacement: LiveCommunicationKit + a VoIP push
+
+Walkie-Talkie's removal does leave a sanctioned path, and it is better
+than the notification-and-tap fallback this sketch first assumed. Both
+halves were verified in the installed watchOS 26.2 SDK:
+
+- **`PKPushTypeVoIP` is available on watchOS 9.0+** (PushKit, and it is
+  ObjC with real headers — so reachable from Sgola through purego exactly
+  as our other bindings are). A standalone watch app can be woken by a
+  VoIP push.
+- **`LiveCommunicationKit.ConversationManager.reportNewIncomingConversation(uuid:update:)`
+  is available on watchOS 10.4+.** That is the CallKit-shaped contract:
+  report an incoming conversation, get system UI and a system-activated
+  audio session. Only the telephony parts of the framework are
+  `@available(watchOS, unavailable)` (`TelephonyConversationManager`,
+  `CellularService`, `ConversationHistoryManager`) — the conversation core
+  is not.
+
+So the arrival story can be: VoIP push wakes the app → report the
+conversation → the system gives us the audio session → the clip plays,
+with a press-to-reply in the app. That is much closer to the experience
+Apple is deleting than a banner would be.
+
+Two caveats, both real:
+- **LiveCommunicationKit is Swift-only** on watchOS — a `.swiftmodule`
+  with no headers, whose only ObjC exports are two mangled internal
+  classes. purego cannot reach it. This makes the Swift shell below
+  **load-bearing for two independent reasons**, not just the screen.
+- **It is built for conversations, not one-shot clips.** wata sends voice
+  *messages*; presenting each as an incoming call-like conversation is a
+  design and an App Review question, and Apple's answer for the
+  message-shaped case on iOS is the PushToTalk framework that the watch
+  does not have. So the notification-plus-haptic path stays the fallback,
+  and probing LiveCommunicationKit is a stage of its own rather than an
+  assumption baked into the architecture.
 
 ## The shape those constraints force
 
@@ -95,15 +152,16 @@ an event queue.
 
 - **Send**: press and hold the on-screen PTT target while the app is open;
   record, release, send. No system talk button exists to borrow.
-- **Receive**: an APNs alert with a haptic. Tap, the app opens, the
-  message plays. There is no live handover and no listening in the
-  background: `WKExtendedRuntimeSession` exists but its session types are
-  self-care, mindfulness, physical therapy and smart alarm, and Apple says
-  outright that using them for something else risks review rejection. So
-  the honest product is push-to-talk with a tap to hear, not a hot
-  channel.
+- **Receive**: two candidate paths, in preference order — a VoIP push
+  plus `reportNewIncomingConversation` (system UI, system-activated audio
+  session, closest to a walkie-talkie), or an APNs alert with a haptic
+  that the user taps to play. Neither gives background listening:
+  `WKExtendedRuntimeSession` exists but its session types are self-care,
+  mindfulness, physical therapy and smart alarm, and Apple says outright
+  that using them for something else risks review rejection.
 - **Server**: a standalone watch app has **its own APNs token at its own
-  topic** — `<bundle>.watchkitapp`, and sending to the bare bundle id
+  topic**  (and a VoIP push would be a third kind beside alert and
+  `pushtotalk`) — `<bundle>.watchkitapp`, and sending to the bare bundle id
   answers `DeviceTokenNotForTopic`. That is a third topic beside the app's
   and `.voip-ptt`, and after plan 0068 it is a one-line change in
   `ApnsPush.topicFor` plus a topic-kind field on the registration. The
@@ -135,6 +193,13 @@ only, which is why it goes first.
 **Stage 2 — the client core over the watch's own network.** Login, sync,
 one message received, headless: the `interptest` argv pattern wata-ios
 already uses, so the assertions are in-process and need no UI.
+
+**Stage 2b — the arrival experience.** Does a VoIP push reach a
+standalone watch app, and does `reportNewIncomingConversation` hand over
+an audio session for a *message*-shaped event? Needs Swift, a real watch
+and a real push, so it comes after stage 4 in practice even though it is
+the most product-relevant probe. Failure here is not fatal: the fallback
+is a notification with a haptic.
 
 **Stage 3 — audio.** `AVFAudio` is in the watchOS SDK, and `macaudio` is
 purego over AVFAudio/AudioToolbox, so the backend may port as-is. Opus
