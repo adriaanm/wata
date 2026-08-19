@@ -94,6 +94,14 @@ def bundle(app_path, binary, bundle_id, min_watchos=MIN_WATCHOS,
         "UIDeviceFamily": [4],
         "WKApplication": True,
         "WKWatchOnly": True,
+        # Touching the microphone WITHOUT this key is not an error the app can
+        # see or handle: the system aborts the process, and the crash report
+        # names neither the key nor the API — the main thread is sitting in its
+        # runloop and no frame points at audio. macaudio's AVAudioSession setup
+        # asks for record permission as it starts the engine, so the abort
+        # lands on SetupMixer, nowhere near an obvious mic call.
+        "NSMicrophoneUsageDescription":
+            "wata records voice messages to send to your family.",
     }
     if delegate_class is not None:
         # WatchKit reads the delegate under the EXTENSION key even for a

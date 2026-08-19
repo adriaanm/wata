@@ -546,3 +546,57 @@ the pump and wata-ios's `caps`/`config`/screen bodies, plus a layout pass:
 the watch's container is 208x248 against the phone's, and the screen
 bodies are written to wata-fb's 160x128 grid scaled up. Layout is the
 first thing the port will have to think about rather than copy.
+
+## Stage 3 probe (2026-08-19): audio works on watchOS, mic included
+
+Sending and receiving voice is the product, so the engine was the next
+thing worth trying to falsify. It does not falsify. `just watch-spike
+--only audio`:
+
+```
+watchspike: audio SetupMixer returned
+watchspike: audio playback frames=24960
+watchspike: audio capture frames=1920
+watchspike: audio encoder ok
+watchspike: audio decoder ok
+```
+
+That is `go-pkgs/macaudio` unmodified — AVFAudio and AudioToolbox over
+purego, written for the phone — starting its engine, playing a real tone
+through it, opening the microphone and reading a full period off it, and
+minting both codec ends. `session_ios.go` is `//go:build ios` and the
+watch rides `GOOS=ios`, so the watch gets the AVAudioSession path for
+free. Both audio modules also cross-build for the **device** sysroot,
+including `go-pkgs/audio`, which is cgo.
+
+A class walk (`AVAudioSession`, `AVAudioEngine`, `AVAudioPlayerNode`,
+`AVAudioFormat`, `AVAudioRecorder`, `AVAudioInputNode`) answers `true` for
+every one, and both `outputNode` and `inputNode` hand back a node. The walk
+is skippable (`WATCHSPIKE_AUDIO_WALK=0`) and was shown not to be
+load-bearing — a probe that primes the thing it measures proves nothing.
+
+### The microphone permission has three distinct behaviours, and two look like crashes
+
+This cost real time and is the durable part:
+
+1. **No `NSMicrophoneUsageDescription` in Info.plist** — the process takes
+   a `SIGABRT` the moment macaudio asks for record permission, which it
+   does inside `SetupMixer` as it starts the engine. The crash report names
+   neither the key nor audio: the main thread is sitting in its runloop and
+   no frame points anywhere near AVFAudio. It reads as "audio aborts on
+   watchOS", which is wrong.
+2. **Usage string present, no grant yet** — the system puts a real
+   permission alert on the watch, over the app's own window, and the app
+   BLOCKS until it is answered. Unattended that is indistinguishable from a
+   hang, and once the harness's watchdog terminates the app, indistinguishable
+   from (1). The screenshot is what separated them.
+3. **Granted** — everything above passes.
+
+So the harness pre-grants (`simctl privacy grant microphone <id>`) and the
+bundle always carries the usage string. On the wrist there is no
+pre-granting: the owner will get the alert on first press, which is correct
+behaviour and worth expecting rather than debugging.
+
+A stale alert from a previous run also blocks the NEXT launch at
+`awakeWithContext`, before `willActivate` — shut the device down between
+permission experiments.

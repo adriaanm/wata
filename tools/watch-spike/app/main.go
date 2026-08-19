@@ -72,6 +72,9 @@ var probeClasses = []string{
 	"WKExtendedRuntimeSession", "WKHapticType",
 }
 
+// set by the `audio` argv mode; read in wkapp's ready hop.
+var wantAudio bool
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -79,6 +82,12 @@ func main() {
 			runUIApp()
 			return
 		case "wkapp":
+			runWKApp()
+			return
+		case "audio":
+			// the wkapp shell, plus the audio probe once the UI is up:
+			// AVAudioSession wants a real running app, not a bare main.
+			wantAudio = true
 			runWKApp()
 			return
 		case "net":

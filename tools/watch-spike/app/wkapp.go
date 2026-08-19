@@ -289,6 +289,11 @@ func paint() {
 
 	keep = append(keep, w, vc, ivw, lbl, ui)
 	probeInput(w, cv, sb)
+	// The audio probe runs OFF the main thread and only when asked: it
+	// blocks on a mic read, and the app must stay responsive to print.
+	if wantAudio {
+		go probeAudio()
+	}
 	fmt.Println("watchspike: all checks passed")
 }
 

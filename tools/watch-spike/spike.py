@@ -17,6 +17,7 @@ Needs Xcode + a watchOS simulator runtime; not in ci.
 """
 
 import argparse
+import os
 import pathlib
 import sys
 import time
@@ -85,7 +86,7 @@ EXPECT_NET = [
     r"watchspike: all checks passed",
 ]
 
-STAGES = ["build", "bundle", "run", "uiapp", "wkapp", "net"]
+STAGES = ["build", "bundle", "run", "uiapp", "wkapp", "net", "audio"]
 
 
 def stage_build():
@@ -169,6 +170,40 @@ def stage_wkapp():
             sys.exit(1)
         print(f"watchspike: wkapp PASS — WatchKit lifecycle over a Go-built "
               f"UIKit tree; screenshot at {OUT / 'wkapp.png'}")
+    finally:
+        watchrun.shutdown(sc, udid)
+
+
+def stage_audio():
+    """go-pkgs/macaudio on watchOS: engine, playback, mic, codec (plan 0069
+    stage 3's falsifying probe — sending and receiving voice is the product,
+    so an engine that will not start on the watch is the thing to find out
+    first). Each leg reports on its own; a simulator mic may be absent while
+    playback is fine, which is an answer rather than a probe failure."""
+    if not APP.exists():
+        sys.exit("watchspike: no .app — run the bundle stage")
+    # simctl forwards SIMCTL_CHILD_* into the launched process's environment.
+    os.environ["SIMCTL_CHILD_WATCHSPIKE_AUDIO_WALK"] = os.environ.get(
+        "WATCHSPIKE_AUDIO_WALK", "1")
+    sc = watchrun.simctl()
+    udid = watchrun.ensure_device(sc)
+    # Pre-grant the microphone. Without a grant the FIRST mic use puts a
+    # system prompt on the watch and the app blocks on it until answered —
+    # which in an unattended run looks exactly like a hang, and after the
+    # watchdog terminates the app, exactly like a crash at SetupMixer.
+    # (With no NSMicrophoneUsageDescription at all it is a genuine SIGABRT
+    # instead, with a crash report that names neither the key nor audio.)
+    watchrun.run(sc + ["bootstatus", udid, "-b"])
+    watchrun.run(sc + ["privacy", udid, "grant", "microphone", BUNDLE_ID])
+    try:
+        lines, el, missing = watchrun.launch_and_expect(
+            sc, udid, APP, BUNDLE_ID, [r"watchspike: audio "],
+            done_res=(r"watchspike: audio all checks passed",
+                      r"watchspike: audio .*FAILED"),
+            timeout=120, args=["audio"])
+        for l in lines:
+            if "audio" in l:
+                print(l.rstrip())
     finally:
         watchrun.shutdown(sc, udid)
 
