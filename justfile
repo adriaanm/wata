@@ -447,6 +447,17 @@ audio-spike *FLAGS:
 ios-spike *FLAGS:
     tools/ios-spike/spike.py {{FLAGS}}
 
+# the watchOS architecture spike (plan 0069 stage 1): one pure-Go binary that
+# IS a standalone watch app — WatchKit lifecycle, a delegate and root
+# controller synthesized from Go, and a rasterized frame on the panel through
+# the scene's UIWindow. No Swift, no storyboard, no Xcode project. Stages:
+# build, bundle, run (what the objc runtime contains), uiapp (the NEGATIVE
+# result: watchOS refuses UIApplicationMain), wkapp (the working shell).
+# Needs Xcode + a watchOS simulator runtime; not in ci.
+#   just watch-spike --only wkapp     # one stage
+watch-spike *FLAGS:
+    tools/watch-spike/spike.py {{FLAGS}}
+
 # the plan-0044 stage-2 gate: the spike's proofs re-taken through the product
 # packages (go-pkgs/iosshell + go-pkgs/iosui) — build, hand-bundle, run on the
 # shared simulator device, assert the printed proofs incl. the offscreen render

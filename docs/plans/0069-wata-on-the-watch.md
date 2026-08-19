@@ -300,3 +300,109 @@ states about the 26.2 sdk. Re-run it the day Xcode 27 lands.
 component and simulator runtime, i.e. the disk headroom the 2026-08-09
 learnings entry describes (the iOS runtime wanted 25–30 GB free; ~5 GB
 free today). That is an owner decision, not a task to pick up.
+
+## Stage 1 result (2026-08-19): the sketch's constraint 3 is WRONG, and the architecture changes
+
+Owner rulings taken before this stage, both recorded here because the rest
+of the plan now rests on them: **target watchOS 26**, not 27 (no verified
+UX benefit has turned up in 27's SDK to justify the narrower install base),
+and **no Swift** — the tree stays single-language, and Swift comes back on
+the table only if a *material UX* wall is proven after every Sgola path is
+exhausted. This stage was that exhausting, and it did not find the wall; it
+found the opposite.
+
+Everything below is a line a run printed. The harness is
+`just watch-spike` (`tools/watch-spike/`, five stages), on a Series 10 46mm
+simulator, watchOS 26.2.
+
+### What is actually true about watchOS's UIKit
+
+The sketch's constraint 3 said the watch "has no runtime-constructible view
+hierarchy" and concluded "the stage cannot be a view tree." That was
+inferred from the headers — `UIView` is `API_UNAVAILABLE(watchos)` and
+`UIKit.tbd` exports no classes — and **the headers are not the runtime**.
+Asked directly, the objc runtime on watchOS 26.2 answers `true` for
+`UIWindow`, `UIView`, `UIViewController`, `UILabel`, `UIApplication`,
+`UIScreen`, `UIImageView`, `UIColor`, `UIFont`, `UIBezierPath`, `UIImage`,
+`UIGraphicsImageRenderer` and `CALayer` — 22 of the 23 names probed, the
+miss being `WKHapticType`, which is an enum and never was a class.
+
+They are not merely mapped, they work: `UIView` alloc/init returns an
+object, `-layer` answers, `addSubview:` lands (`subviews` count 1), and a
+raw RGBA buffer becomes a `UIImage` through
+`CGDataProviderCreateWithData` + `CGImageCreate`.
+
+### The three walls, and the way through each
+
+**`UIApplicationMain` is exported on watchOS and calling it HANGS.** The
+symbol resolves; the call never returns and the delegate's launch callback
+never fires (two runs, 120s watchdog each). A watch app is started by
+WatchKit's lifecycle, and that is not negotiable.
+
+**`WKApplicationMain` with a synthesized delegate aborts, twice, and
+watchOS names both causes in its own log** — which is the single most
+useful debugging fact from this stage:
+
+1. *"Info.plist key WKExtensionDelegateClassName has value
+   "…", but that class doesn't conform to the WKExtensionDelegate
+   protocol."* Implementing the methods is not enough; conformance is
+   checked by name. `objc.GetProtocol("WKExtensionDelegate")` resolves at
+   runtime and `objc.RegisterClass` takes protocols, so this is one
+   argument. watchOS then says *"Created WKExtensionDelegate of class
+   WataWatchSpikeWKDelegate"* — a Go-synthesized class accepted as the app
+   delegate.
+2. *"No interface description file Interface.plist … and extensionDelegate
+   didn't return a applicationRootInterfaceControllerClass."* The second
+   half is the way out: **a delegate that answers
+   `applicationRootInterfaceControllerClass` with a class needs no
+   `Interface.plist`, hence no storyboard, no ibtool, and none of the
+   WatchKit-storyboard deprecation.** A storyboard route was built first
+   and then deleted as strictly worse — for the record it does work
+   (`ibtool --target-device watch` compiles the file with a deprecation
+   *warning*, not an error), and a `WKInterfaceController` outlet is just
+   an ivar the nib loader fills by KVC, so even that path needs no Swift.
+
+**A UIWindow the app builds is never composited.** `makeKeyAndVisible` on
+a fresh window leaves `isKeyWindow` 0 and the panel **BLACK** — the
+screenshot is the proof, and without it the printed lines all read like
+success. On iOS 13+ the scene owns the display, and watchOS does run a real
+one: `connectedScenes` has 1, its class is `UIWindowScene`, and it already
+holds a `UIWindow`. Joining that scene (`setWindowScene:`) flips
+`isKeyWindow` to 1 and the frame appears.
+
+### What is on the screen
+
+`tools/watch-spike/out/wkapp.png`: a 416×496 raster (208×248 pt at scale 2,
+Series 10 46mm) painted red on the top half and blue on the bottom — the
+same row-orientation pin wata-ios uses — with a live `UILabel` over it. It
+was produced by a single Go binary with **no Swift, no storyboard, no
+Xcode project and no `WKInterface` object involved in showing it.**
+
+### The architecture this forces, replacing the sketch's
+
+The sketch proposed a Go c-archive under a SwiftUI shell, with a WatchKit
+raster as fallback. Neither is needed:
+
+- **the entry point** is `WKApplicationMain` from Go, with a delegate and
+  root interface controller synthesized through purego/objc — the same
+  mechanism every other wata Apple client already uses;
+- **the screen** is a UIKit view tree the app builds at runtime, joined to
+  the scene watchOS provides. So `wata-ios`'s retained stage is the
+  starting point, not wata-fb's framebuffer — the watch is a small iPhone
+  as far as the element table is concerned, and the raster path exists as
+  well if a body wants it;
+- **the root interface controller** is lifecycle scaffolding only; its
+  `willActivate` is the cue that a screen exists. Nothing is drawn through
+  it.
+
+Constraint 3 in the body of this plan should be read as superseded by this
+section. Constraints 1, 2 and 4 stand.
+
+### Still unknown
+
+The system time overlay ("12:41" in the screenshot) is drawn by watchOS
+above app content and cannot be removed — a UX fact to design the top of
+the screen around, not a defect. Untouched by this stage: input (the
+gesture recognizers and `WKCrownSequencer` are all present and
+undeprecated, but nothing has been wired), the client core over the
+watch's own network, audio, and anything on real hardware.
