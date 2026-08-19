@@ -167,23 +167,61 @@ one.
   `go-pkgs/macaudio`'s C shims where it has them, `go-pkgs/irohnet`
   (the Rust static library). A facade binds Go, not C; cgo modules are
   the Go side of a *different* FFI and stay Go by definition.
-- **Reflection and generics**: `objc.Send[T](id, sel, ...any)`,
-  `purego.RegisterFunc`/`RegisterLibFunc` — generic, variadic-`any`,
-  reflect-driven. No facade will ever express a generic Go function,
-  and none should: bindgen exists to emit the *typed* wrappers a facade
-  binds trivially. This is a division of labor, not a gap.
+- **Reflect-driven dispatch**: `objc.Send[T](id, sel, ...any)`,
+  `objc.ID.Send(sel, ...any)`, `purego.RegisterFunc`/`RegisterLibFunc`.
+  Go permanently, by a **sgola designer ruling (2026-08-19)** rather than
+  by any inability — and the difference matters, because this entry read
+  as the latter for months and was wrong on both grounds it gave.
+
+  The ruling: *even where a bind of the generic send is expressible,
+  sgola rules against binding the reflect-driven entry point from the
+  dialect.* Grounds are the curated-surface doctrine (M9 — the crossing
+  checker and the curation manifest are the product; types restrict,
+  values mean, local and loud): `Send[T](sel, ...any)` is untyped
+  dispatch whose type and marshaling claims are unverifiable at the
+  boundary, so every guarantee the facade tier exists to give is voided
+  at exactly the call sites that would use it, and a manifest entry for
+  it would be a signed blank check. bindgen emitting typed per-selector
+  wrappers — arity and types pinned per selector, curation meaningful —
+  is therefore **spec, not a workaround for a gap**.
+
+  What was wrong before, kept because reasoning stated as impossibility
+  is the failure worth remembering:
+  - "No fixed arity" was false since 2026-08-05: Go `...T` binds as a
+    Scala repeated param (`VARIADIC-FACADE-BIND`, ruled from this repo's
+    own inbox — the table above says so two sections up, and wata-tui's
+    facade uses it).
+  - "`...any` is unbindable" cited an ABSENCE as a prohibition. There is
+    no restriction row and no ruling on it; it has simply never been
+    exercised. Scala `Any` ↔ Go `any` is the emitter's standing boxed
+    carrier. The real caveat is marshaling, not binding: what purego's
+    reflect dispatch does with sgola's representations (Int is `int32` —
+    mind NSInteger widths; value-family structs mean nothing to ObjC) is
+    unverified, so it would be a verification ticket plus a curation
+    contract, never a compiler feature.
+  - "No concrete result type" is the half that lands, for a reason the
+    old text did not give: `Send[T]`'s `T` occurs only in the RESULT, so
+    Go cannot infer it and any bind must emit an explicit instantiation
+    (`objc.Send[bool](…)`). The facade language has no spelling for "this
+    member is Go generic F at T" — the generic members that exist
+    (`makeChan`, `makeSlice`, `cstring`, `callback`) are compiler
+    intrinsics with dedicated emitter legs, and the generated bind
+    surface is 100% monomorphic. Mintable in principle, deliberately
+    unminted.
 - **The Go runtime**: `go-pkgs/memprobe` (ReadMemStats), macshell's
   heap profiler, anything touching `runtime`/`unsafe` — the measurement
   and plumbing layer under the app, a few dozen lines each.
 
-**A curated-surface gap, not a compiler one.** `go-pkgs/httpc` exists to
-set a single struct field: `net/http.Client.Timeout`. The facade binds
-the `Client` type but not its fields, and an unbounded client is not an
-option here (one half-open connection wedged the device — plan 0022), so
-every wata client reaches its timeout through that shim. Filed as
-`HTTP-CLIENT-TIMEOUT-FIELD`; a ruling either way settles it, and "curated
-surfaces do not expose mutable struct fields" is a fine answer — it makes
-the shim principled rather than a to-do.
+**`go-pkgs/httpc` is on a retirement path.** It exists to set a single
+struct field: `net/http.Client.Timeout`. The facade binds the `Client`
+type but not its fields, and an unbounded client is not an option here
+(one half-open connection wedged the device — plan 0022), so every wata
+client reaches its timeout through that shim. Ruled upstream on
+2026-08-19 (`HTTP-CLIENT-TIMEOUT-FIELD`, queued): curated surfaces do
+**not** grow raw mutable-field access, and the closure is curated members
+on the bound `net/http` facade instead — a `newClient(timeout)` and/or
+`withTimeout`, i.e. exactly this shim's two functions, upstream. When
+that lands, the shim goes.
 
 **Unblocked — portable now.** Everything that receives control from C
 was one feature (`go.callback`) wearing four costumes; the feature
@@ -251,10 +289,14 @@ next facade over generated bindings:
   `go.Bytes`, and producers build one with `go.makeSlice[Byte]`, not
   `Array[Byte].toBytes`.
 
-The chrome (`macshell/login,menu,prefs`, 581 lines of raw `objc.Send`
-sites) is in none of these categories: raw messaging is not a compiler
-gap but an *allowlist* gap — every raw site exists because its class is
-not in bindgen's allowlist yet (the `macui` target, plan 0037).
+The chrome (`macshell/login,menu,prefs,devices`, 581 lines of raw
+`id.Send` sites) is in none of these categories: raw messaging here is not
+a compiler gap but an *allowlist* gap — every raw site exists because its
+class is not in bindgen's allowlist yet (`NSAlert`, `NSButton`,
+`NSSecureTextField`; the `macui` target, plan 0037). Generating those
+classes is the plan of record, endorsed upstream in the same 2026-08-19
+ruling: do not wait on a generic-send surface, because there will not be
+one.
 
 ## bindgen: Go today — what a Sgola emission would look like
 
