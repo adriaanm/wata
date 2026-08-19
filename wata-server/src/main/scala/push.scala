@@ -267,13 +267,13 @@ object PushCfg:
   def arm(key: String): Unit =
     val topic = go.sys.getenv("WATA_APNS_BUNDLE_ID")
     try
-      go.apns.configure(go.sys.getenv("WATA_APNS_TEAM_ID"), go.sys.getenv("WATA_APNS_KEY_ID"), topic, key)
+      ApnsPush.configure(go.sys.getenv("WATA_APNS_TEAM_ID"), go.sys.getenv("WATA_APNS_KEY_ID"), topic, key)
       println("Wata push notifications ON, APNs topic " + topic)
       ()
     catch case e: sgo.GoError => println("wata: APNs push disabled: " + e.message)
 
   /** is a pusher armed? False on every install without Apple credentials. */
-  def enabled: Boolean = go.apns.configured()
+  def enabled: Boolean = ApnsPush.configured()
 
   /** the host one registration's pushes go to: the explicit override if set,
    *  else Apple's sandbox or production host for the registration's own
@@ -281,7 +281,7 @@ object PushCfg:
    *  them). */
   def hostFor(env: String): String =
     val over = go.sys.getenv("WATA_APNS_HOST")
-    if over != "" then over else go.apns.hostFor(envOr(env))
+    if over != "" then over else ApnsPush.hostFor(envOr(env))
 
   def envOr(env: String): String =
     if env != "" then env else go.sys.getenv("WATA_APNS_ENV")
@@ -483,9 +483,8 @@ object Push:
   def pushOne(reg: PushReg, roomId: String, ev: Event, title: String, body: String): Unit =
     var status = 0
     try
-      val v = go.apns.push(PushCfg.hostFor(reg.env), reg.token, title, body, roomId, ev.eventId,
-                           go.Int.of(unplayedFor(reg.userId)))
-      status = v.toInt
+      status = ApnsPush.push(PushCfg.hostFor(reg.env), reg.token, title, body, roomId, ev.eventId,
+                             unplayedFor(reg.userId))
       ()
     catch case e: sgo.GoError => println("wata: push failed for " + reg.userId + ": " + e.message)
     if status == 410 then forget(reg) else ()
@@ -511,8 +510,7 @@ object Push:
   def pushChannelOne(reg: ChannelReg, roomId: String, ev: Event, speaker: String, text: String): Unit =
     var status = 0
     try
-      val v = go.apns.pushChannel(PushCfg.hostFor(reg.env), reg.token, speaker, roomId, ev.eventId)
-      status = v.toInt
+      status = ApnsPush.pushChannel(PushCfg.hostFor(reg.env), reg.token, speaker, roomId, ev.eventId)
       ()
     catch case e: sgo.GoError => println("wata: channel push failed for " + reg.userId + ": " + e.message)
     if status >= 400 && status < 500 then channelDead(reg, roomId, ev, speaker, text) else ()

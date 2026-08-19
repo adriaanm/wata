@@ -650,7 +650,8 @@ in-memory-only property across a restart.
 
 ## Push notifications (APNs)
 
-`push.scala` + `apns.scala` + `go-pkgs/apns` (plan 0065, tiers 2 and 3). A polling
+`push.scala` + `apnspush.scala` + `apns.scala` + `go-pkgs/apns` (plan 0065 tiers
+2 and 3; plan 0068 moved the protocol into Sgola). A polling
 client only hears a message while it is running; iOS suspends a backgrounded
 app and tears down its sockets, so reaching a phone in a pocket is APNs or
 nothing. The server half is a registration endpoint and a per-message
@@ -682,7 +683,7 @@ check is racy, and iOS suppresses a banner the foreground app consumes anyway.
 The fan-out runs on a spawned goroutine — a walkie-talkie send does not wait on
 Apple.
 
-The payload (`apns.AlertPayload`) is the sender's display name as the title,
+The payload (`ApnsPush.alertPayload`) is the sender's display name as the title,
 the message text (or `Voice message` for `m.audio`) as the body,
 `interruption-level: time-sensitive`, a badge count, and `room_id`/`event_id`
 as top-level custom keys so a tap can open the right conversation with no
@@ -711,8 +712,9 @@ and the topic is the bundle id plus **`.voip-ptt`** — a *different* topic from
 the one alerts go to, served by the same bundle. The body has no `aps`
 dictionary at all: it is `activeSpeaker` (the sender's display name, which the
 framework makes the woken app report back) plus the same `room_id`/`event_id`.
-`apns.PushChannel` sends it, and `Client`s are cached per (host, topic) so the
-two topics coexist under one set of credentials.
+`ApnsPush.pushChannel` sends it. One set of credentials serves both topics —
+the topic is a per-request header, and the provider token says nothing about
+it.
 
 **A device holding both tokens is pushed once, the PushToTalk way.** Both
 tokens answer "a message arrived", at different levels — the channel push
@@ -766,19 +768,40 @@ than made fatal. The host is chosen per REGISTRATION rather than server-wide,
 because a development build's token is valid against the sandbox only and an
 App Store build's against production only.
 
-**The Go module and its facade.** APNs token auth needs an ES256 JWT and an
-HTTP/2 POST, neither expressible in the dialect, so `go-pkgs/apns` is plain Go
-(no external dependency: `crypto/ecdsa` signs, `net/http` negotiates HTTP/2 on
-its own). Its `Client`/`Config`/`Payload` shapes do not cross the frontier —
-`go.apns` (`apns.scala`) binds five flat calls, `Configure` / `Configured` /
-`HostFor` / `Push` / `PushChannel`, over strings and ints, with the credentials as
-package-level state armed once at boot (the shape `go.irohnet` uses for this
-process's live listener). `Push` answers the HTTP status; a rejection is a
-status, not a throw, and APNs' own `reason` is printed rather than swallowed.
+**The pusher is Sgola; Go holds the key.** `apnspush.scala` is the provider
+client: the ES256 JWT (header `{alg,kid}`, claims `{iss,iat}`, base64url
+segments), the mint-and-cache window, the request — `POST <host>/3/device/<token>`
+with `authorization`, `apns-topic`, `apns-push-type`, `apns-priority: 10` and
+`apns-expiration: 0` — and the verdict. `push`/`pushChannel` answer the HTTP
+status: a rejection is a status, not a throw, and APNs' own `reason` is printed
+rather than swallowed. A throw means no verdict was reached at all (unarmed,
+dial failure). HTTP/2 needs no expressing: `net/http` negotiates it over TLS on
+the client.
 
-**Gates.** `go-pkgs/apns`'s own Go tests (`just apns-tests`) cover the JWT and
-the wire shape against an HTTP/2 fake, plus the facade's key parsing, badge
-handling and 410 mapping. `tools/wata-push-smoke.py` (`just push-smoke`, in
+The provider token is cached beside the credentials in one `sgo.Mutex` cell and
+re-minted after 45 minutes — Apple rejects a token refreshed younger than 20
+minutes and one older than 60, so that sits inside both bounds. Arming replaces
+the cached token, since it carries the old key's `kid`. The signing happens
+outside the lock (a throwing facade call cannot run inside `withLock`), so a
+race at the expiry mints twice and the last store wins; both tokens are valid.
+
+`go-pkgs/apns` is what is left in Go, and it decides nothing: `LoadKey` parses
+the operator's `.p8` (PEM-wrapped PKCS#8 EC) and `SignES256` returns the raw
+R||S signature — 32 bytes each for P-256, never the ASN.1 DER a generic
+`crypto.Signer` hands back, which is the classic bug here. The key is
+package-level state armed once at boot, the shape `go.irohnet` uses for this
+process's live listener; a Sgola caller has no way to hold an
+`*ecdsa.PrivateKey`. `go.apns` (`apns.scala`) binds those three calls, and
+`go.b64url` beside them binds `encoding/base64.RawURLEncoding` for the JWT
+segments.
+
+**Gates.** `SelfCheck` (`just smoke`) prints the pusher's decisions as pure
+values, diffed byte-for-byte: both hosts, both topics, the JWT's decoded header
+and claims, the refresh window at its three boundaries, all three alert payload
+shapes, the PushToTalk payload, and the reason extraction. `go-pkgs/apns`'s Go
+tests (`just apns-tests`) cover what stayed Go — a signature that verifies
+against the public key, its fixed 64-byte R||S width, a fresh nonce per call,
+and a failed `LoadKey` not disarming a working key. `tools/wata-push-smoke.py` (`just push-smoke`, in
 `just ci`) drives the whole path against a local fake Apple and a throwaway
 ES256 key — no developer account, no phone, no portal: registration and its
 auth, one push per message to the right device, the sender's own device
@@ -1533,7 +1556,8 @@ is a human step outside this gate (the sudo prompt is its confirmation);
 - **`bindings.scala`** — `Bindings` (the journaled nodeId→user map an approval writes and a revocation unbinds), `Nicknames` (the journaled nodeId→label map, plan 0060), and `DeviceLogin` (`POST /_wata/v1/device-login`: the trusted-header check, then a fresh session for the bound account, minted with the proven node id on the row).
 - **`devicecmd.scala`** — `DeviceCmd`: the device-command mailbox (queue / poll / report / read-report), the admin gate on the admin half, the two-credential device auth, and its own waiter list for the poll's long-poll.
 - **`push.scala`** — `PushRegs` (the journaled per-(user, device) APNs registrations, also keyed by token), `PushCfg` (the operator's `WATA_APNS_*` credentials, armed at boot or absent), `ChannelRegs` (the PushToTalk channel's ephemeral per-device token, replaced on every join and deleted on leave), and `Push` (the four registration routes, the per-message fan-out over both kinds of token, the badge count, the 410-deletes-the-registration rule, and the channel push's 4xx fallback to the alert).
-- **`apns.scala`** — `go.apns`: the app-owned facade for `go-pkgs/apns`, four flat calls over strings and ints (`Configure`/`Configured`/`HostFor`/`Push`); none of the Go package's struct shapes cross the frontier.
+- **`apns.scala`** — `go.apns`: the app-owned facade for `go-pkgs/apns` (`LoadKey`/`Loaded`/`SignES256`, the signing key and nothing else), plus `go.b64url` for `encoding/base64.RawURLEncoding`.
+- **`apnspush.scala`** — the APNs provider client in Sgola: the JWT and its refresh window, the payloads, the request, and the verdict a status code carries.
 - **`persist.scala`** — `Journal`: the JSONL op log, its own mutex, boot replay, per-op-kind (de)serialization, and the old-journal media migration.
 - **`mediafiles.scala`** — `MediaFiles`: the file-backed blob store (`<dataDir>/media/<mediaId>`): dir resolution from `$WATA_DATA`/`$WATA_LOG`, write/load/exists/delete.
 - **`osfile.scala`** — `go.osfile`/`go.fsx`: the app-owned `os` facade (`WriteFile`/`MkdirAll`/`Remove` for the blob store, `Rename` for the accounts file's atomic write, `Stat` for the sizes the status panel reports) plus `io/fs.FileInfo`; perms passed as literals, errors dropped except `Stat`'s.

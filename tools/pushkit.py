@@ -11,12 +11,15 @@ provider JWT verifies as one, build wata-server through `sgo`, boot it with
 smoke keeps only its own assertions.
 
 Real APNs is HTTP/2-over-TLS and `FakeAPNs` is plaintext HTTP/1.1, which Go's
-net/http speaks to an `http://` host without being asked. What these gates
-test is the SERVER's behavior — who gets pushed, with what, and what happens
-to a registration when Apple rejects it. The wire shape (HTTP/2, the JWT's
-own claims) is gated by `go-pkgs/apns`'s Go tests instead.
+net/http speaks to an `http://` host without being asked. HTTP/2 negotiation is
+therefore not what these gates test; everything else about a push is. Each
+recorded push carries its decoded provider token (`jwt_header`, `jwt_claims`),
+because the JWT is built by the server itself (wata-server's apnspush.scala) —
+only the signature is signed in Go, and go-pkgs/apns's own test verifies that
+against the public key.
 """
 
+import base64
 import json
 import os
 import subprocess
@@ -53,6 +56,11 @@ class Checks:
         print(f"{self.name}: PASS")
 
 
+def _b64url(seg):
+    """decode one base64url JWT segment (which carries no padding)."""
+    return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+
 class Push:
     """one push the fake received, as the server sent it."""
 
@@ -62,6 +70,45 @@ class Push:
         self.auth = headers.get("authorization", "")
         self.topic = headers.get("apns-topic", "")
         self.push_type = headers.get("apns-push-type", "")
+        self.priority = headers.get("apns-priority", "")
+        self.expiration = headers.get("apns-expiration", "")
+        self.jwt_header, self.jwt_claims, self.jwt_sig = self._jwt()
+
+    def _jwt(self):
+        """the provider token's three segments: header, claims, raw signature.
+
+        Anything unparseable comes back as empty dicts / b"" rather than
+        raising, so an assertion names what was wrong instead of the harness
+        dying on it.
+        """
+        if not self.auth.startswith("bearer "):
+            return {}, {}, b""
+        parts = self.auth[len("bearer "):].split(".")
+        if len(parts) != 3:
+            return {}, {}, b""
+        try:
+            return (json.loads(_b64url(parts[0])), json.loads(_b64url(parts[1])),
+                    _b64url(parts[2]))
+        except (ValueError, TypeError):
+            return {}, {}, b""
+
+    def jwt_ok(self, checks, team_id, key_id, label=""):
+        """assert the provider token is the one Apple would accept: ES256, the
+        operator's key id, their team as the issuer, an `iat` that is a
+        plausible now, and a raw R||S signature (64 bytes for P-256 — DER would
+        be 70-72 with a leading 0x30)."""
+        where = (" " + label) if label else ""
+        checks(self.jwt_header.get("alg") == "ES256",
+               f"the provider token is ES256{where} (got {self.jwt_header.get('alg')})")
+        checks(self.jwt_header.get("kid") == key_id,
+               f"its kid is the operator's key id{where} (got {self.jwt_header.get('kid')})")
+        checks(self.jwt_claims.get("iss") == team_id,
+               f"its iss is the operator's team{where} (got {self.jwt_claims.get('iss')})")
+        iat = self.jwt_claims.get("iat")
+        checks(isinstance(iat, int) and abs(iat - int(time.time())) < 300,
+               f"its iat is a fresh unix second{where} (got {iat})")
+        checks(len(self.jwt_sig) == 64,
+               f"its signature is raw R||S, not DER{where} (got {len(self.jwt_sig)} bytes)")
 
     @property
     def aps(self):

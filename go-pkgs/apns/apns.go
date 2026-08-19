@@ -1,261 +1,111 @@
-// Package apns sends push notifications through Apple's HTTP/2 provider API.
+// Package apns holds the one part of APNs token auth that cannot be written
+// in the dialect: the operator's ES256 signing key.
 //
-// It exists because APNs token auth needs an ES256 JWT and an HTTP/2 POST,
-// neither expressible in the dialect — so this is plain Go behind the same
-// kind of thin facade go-pkgs/irohnet and go-pkgs/audio already use. It needs
-// no external dependency: crypto/ecdsa signs the JWT and Go's net/http
-// negotiates HTTP/2 over TLS on its own.
+// Everything else about a push — the JOSE header and claims, when to mint a
+// fresh provider token, the per-push-type header set, the POST, and what a
+// status code means — is ordinary logic and lives in wata-server
+// (apnspush.scala). This package is the technology boundary alone: read a
+// `.p8` Auth Key (PEM-wrapped PKCS#8 EC) and sign a JWT signing input with
+// it. It decides nothing.
 //
-// The host is a Config field, not a compile-time constant, so a local fake
-// APNs server can stand in for Apple in tests: everything here — the JWT,
-// the request shape, the 410-means-forget-this-token rule — is verifiable
-// without a real key, a phone, or the developer portal.
+// The split follows the tree's own division of labour — the password hasher
+// writes PBKDF2 in Sgola over bound `crypto/hmac` primitives — and it is what
+// makes the pusher's decisions reachable by the server's own checks rather
+// than only by Go tests.
 package apns
 
 import (
-	"bytes"
-	"context"
 	"crypto/ecdsa"
-	"encoding/json"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
-	"io"
-	"net/http"
-	"strconv"
+	"os"
 	"sync"
-	"time"
 )
 
-// Well-known APNs hosts. A test passes its own httptest server URL instead.
-const (
-	ProductionHost = "https://api.push.apple.com"
-	SandboxHost    = "https://api.sandbox.push.apple.com"
+// p256FieldBytes is the width of an ECDSA P-256 R or S value in bytes.
+const p256FieldBytes = 32
+
+// The armed key. It is package-level state rather than a value threaded
+// through every call, the same shape irohnet uses for "this process's live
+// listener": one operator key per process, read at boot, and a Sgola caller
+// has no way to hold an *ecdsa.PrivateKey anyway.
+var (
+	mu  sync.Mutex
+	key *ecdsa.PrivateKey
 )
 
-// tokenRefreshAfter bounds how long a minted JWT is reused. Apple rejects a
-// refreshed token that is younger than 20 minutes and a token that is older
-// than 60 minutes (InvalidProviderToken); 45 minutes sits comfortably inside
-// that window on both sides.
-const tokenRefreshAfter = 45 * time.Minute
-
-// Config configures a Client. TeamID, KeyID and PrivateKey come from the
-// Apple developer portal's APNs Auth Key (a .p8 file — parse it with
-// ParsePrivateKey). Topic is the apns-topic header, normally the app's
-// bundle id. Host selects which server to talk to; use ProductionHost or
-// SandboxHost, or a test server's URL.
-type Config struct {
-	TeamID     string
-	KeyID      string
-	Topic      string
-	PrivateKey *ecdsa.PrivateKey
-	Host       string
-
-	// HTTPClient is used for the POST. If nil, http.DefaultClient is used;
-	// net/http negotiates HTTP/2 over TLS on its own, so no extra setup is
-	// needed to talk to a real APNs host. A test pointed at a plaintext
-	// httptest server must supply one configured for h2c, or run the fake
-	// server over TLS.
-	HTTPClient *http.Client
-
-	// Clock returns the current time. If nil, time.Now is used. Overriding
-	// it is how a test drives JWT refresh without sleeping.
-	Clock func() time.Time
-}
-
-// Client sends pushes for one Config, caching and refreshing its JWT as
-// needed. It is safe for concurrent use.
-type Client struct {
-	cfg Config
-
-	mu       sync.Mutex
-	token    string
-	mintedAt time.Time
-}
-
-// New returns a Client for cfg. It does not itself contact APNs.
-func New(cfg Config) (*Client, error) {
-	if cfg.TeamID == "" || cfg.KeyID == "" || cfg.Topic == "" {
-		return nil, fmt.Errorf("apns: Config needs TeamID, KeyID and Topic")
+// LoadKey reads the APNs Auth Key at path (a .p8 file) and arms the package
+// for SignES256. Calling it again replaces the key, so a re-read picks up a
+// rotated one. An error leaves the previous key untouched — a bad path must
+// not disarm a working pusher.
+func LoadKey(path string) error {
+	p8, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("apns: read key %s: %w", path, err)
 	}
-	if cfg.PrivateKey == nil {
-		return nil, fmt.Errorf("apns: Config needs a PrivateKey")
+	k, err := parsePrivateKey(p8)
+	if err != nil {
+		return err
 	}
-	if cfg.Host == "" {
-		return nil, fmt.Errorf("apns: Config needs a Host")
-	}
-	return &Client{cfg: cfg}, nil
+	mu.Lock()
+	defer mu.Unlock()
+	key = k
+	return nil
 }
 
-func (c *Client) now() time.Time {
-	if c.cfg.Clock != nil {
-		return c.cfg.Clock()
-	}
-	return time.Now()
+// Loaded reports whether a key is armed. With no APNs key the server does
+// nothing at all — no pushes, no errors — so this is the gate the send path
+// reads.
+func Loaded() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return key != nil
 }
 
-func (c *Client) httpClient() *http.Client {
-	if c.cfg.HTTPClient != nil {
-		return c.cfg.HTTPClient
-	}
-	return http.DefaultClient
-}
-
-// bearerToken returns the cached JWT, minting a fresh one if none exists yet
-// or the cached one has passed tokenRefreshAfter.
-func (c *Client) bearerToken() (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	now := c.now()
-	if c.token == "" || now.Sub(c.mintedAt) >= tokenRefreshAfter {
-		tok, err := mintToken(c.cfg.TeamID, c.cfg.KeyID, c.cfg.PrivateKey, now)
-		if err != nil {
-			return "", fmt.Errorf("apns: mint token: %w", err)
-		}
-		c.token = tok
-		c.mintedAt = now
-	}
-	return c.token, nil
-}
-
-// PushType selects the apns-push-type header. Alert is the tier-2 case: a
-// visible, time-sensitive notification. PushToTalk is tier 3's: the
-// PushToTalk framework wakes the app into live audio and never shows a
-// banner, and APNs rejects it unless the topic carries the PTTTopicSuffix.
-type PushType string
-
-const (
-	PushTypeAlert      PushType = "alert"
-	PushTypePushToTalk PushType = "pushtotalk"
-)
-
-// PTTTopicSuffix is what a PushToTalk push's apns-topic adds to the app's
-// bundle id. It is a DIFFERENT topic from the app's own — the same bundle
-// serves both, and sending a pushtotalk push to the bare bundle id is
-// rejected.
-const PTTTopicSuffix = ".voip-ptt"
-
-// SendOptions overrides the per-request headers. The zero value sends an
-// alert push at normal priority that APNs may hold and coalesce, expiring
-// immediately if the device is unreachable.
-type SendOptions struct {
-	PushType   PushType      // default PushTypeAlert
-	Priority   int           // default 10 (send immediately); Apple also accepts 5 and 1
-	Expiration time.Duration // default 0 (do not store for later delivery)
-
-	// Topic overrides the Client's apns-topic for this one request. Empty
-	// means the Config's Topic. A PushToTalk push needs it: its topic is the
-	// bundle id plus PTTTopicSuffix, while the same Client's alert pushes go
-	// to the bare bundle id.
-	Topic string
-}
-
-func (o SendOptions) pushType() PushType {
-	if o.PushType == "" {
-		return PushTypeAlert
-	}
-	return o.PushType
-}
-
-func (o SendOptions) topic(dflt string) string {
-	if o.Topic == "" {
-		return dflt
-	}
-	return o.Topic
-}
-
-func (o SendOptions) priority() int {
-	if o.Priority == 0 {
-		return 10
-	}
-	return o.Priority
-}
-
-// Result is what APNs said about one push. A non-200 StatusCode is not
-// itself an error — Send returns an error only for a failure that never got
-// a verdict from APNs (dial failure, malformed payload, and so on).
-type Result struct {
-	StatusCode int
-	ApnsID     string // the apns-id response header, when present
-
-	// Gone is true on 410: APNs is telling us the device token is dead. The
-	// caller's whole job in that case is to delete the registration — never
-	// retry, never keep sending to it.
-	Gone bool
-
-	// Reason is APNs' own JSON "reason" field, present on non-200 responses.
-	// It is never swallowed; a caller logging a failed push should log this.
-	Reason string
-}
-
-// OK reports whether APNs accepted the push (HTTP 200).
-func (r *Result) OK() bool {
-	return r.StatusCode == http.StatusOK
-}
-
-// Send POSTs payload to deviceToken. The request path, method and headers
-// follow Apple's HTTP/2 provider API exactly, so a local fake server can
-// assert them byte for byte.
+// SignES256 returns the JWS signature for a JWT signing input
+// ("<b64url header>.<b64url claims>"), base64url-encoded without padding —
+// the third segment of the provider token, ready to be appended.
 //
-// payload is any JSON-marshalable body: Payload for an alert, PTTPayload for
-// a PushToTalk push, whose shapes have nothing in common (a PTT push carries
-// no aps dictionary at all).
-func (c *Client) Send(ctx context.Context, deviceToken string, payload any, opts SendOptions) (*Result, error) {
-	tok, err := c.bearerToken()
+// The signature MUST be the raw R||S concatenation (32 bytes each for P-256),
+// not the ASN.1 DER encoding crypto.Signer.Sign would hand back — that is the
+// classic mistake here, so this calls ecdsa.Sign directly and pads R and S
+// itself rather than going through a Sign() that returns DER.
+func SignES256(signingInput string) (string, error) {
+	mu.Lock()
+	k := key
+	mu.Unlock()
+	if k == nil {
+		return "", fmt.Errorf("apns: no key loaded")
+	}
+	digest := sha256.Sum256([]byte(signingInput))
+	r, s, err := ecdsa.Sign(rand.Reader, k, digest[:])
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("apns: sign: %w", err)
 	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("apns: marshal payload: %w", err)
-	}
-
-	url := c.cfg.Host + "/3/device/" + deviceToken
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("apns: build request: %w", err)
-	}
-	req.Header.Set("authorization", "bearer "+tok)
-	req.Header.Set("apns-topic", opts.topic(c.cfg.Topic))
-	req.Header.Set("apns-push-type", string(opts.pushType()))
-	req.Header.Set("apns-priority", strconv.Itoa(opts.priority()))
-	req.Header.Set("apns-expiration", strconv.FormatInt(expirationHeader(opts.Expiration, c.now()), 10))
-
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("apns: send: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("apns: read response: %w", err)
-	}
-
-	result := &Result{
-		StatusCode: resp.StatusCode,
-		ApnsID:     resp.Header.Get("apns-id"),
-	}
-	if resp.StatusCode == http.StatusGone {
-		result.Gone = true
-	}
-	if resp.StatusCode != http.StatusOK && len(respBody) > 0 {
-		var reason struct {
-			Reason string `json:"reason"`
-		}
-		if err := json.Unmarshal(respBody, &reason); err == nil {
-			result.Reason = reason.Reason
-		}
-	}
-	return result, nil
+	sig := make([]byte, 2*p256FieldBytes)
+	r.FillBytes(sig[:p256FieldBytes])
+	s.FillBytes(sig[p256FieldBytes:])
+	return base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// expirationHeader turns a duration into the apns-expiration header value: a
-// Unix timestamp after which APNs should stop trying, or 0 to mean "do not
-// store this notification, attempt delivery once."
-func expirationHeader(d time.Duration, now time.Time) int64 {
-	if d <= 0 {
-		return 0
+// parsePrivateKey parses the contents of an APNs Auth Key .p8 file — a PEM
+// block wrapping a PKCS#8 EC private key.
+func parsePrivateKey(p8PEM []byte) (*ecdsa.PrivateKey, error) {
+	block, _ := pem.Decode(p8PEM)
+	if block == nil {
+		return nil, fmt.Errorf("apns: no PEM block found")
 	}
-	return now.Add(d).Unix()
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("apns: parse PKCS8 key: %w", err)
+	}
+	ecKey, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("apns: key is %T, not an ECDSA private key", parsed)
+	}
+	return ecKey, nil
 }

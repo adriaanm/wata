@@ -324,6 +324,7 @@ object SelfCheck:
     pwhashDemo()
     familyDemo()
     groupDemo()
+    apnsDemo()
 
   def printProfile(userId: String): Unit = Store.getProfile(userId) match
     case s: Some[Profile] => println("profile " + Json.write(Router.profileJson(s.value)))
@@ -600,3 +601,40 @@ object SelfCheck:
     var xs: List[String] = Nil
     xs = s :: xs
     xs
+
+  /** The APNs pusher's DECISIONS (apnspush.scala), which used to be Go and are
+   *  now checkable without a key, a phone or a network: the provider token's
+   *  claims, the refresh window, the two topics, and the payloads Apple sees.
+   *  The token's signature is the one part still signed in Go, and its own test
+   *  covers it (go-pkgs/apns). */
+  def apnsDemo(): Unit =
+    println("apns-host-sandbox " + ApnsPush.hostFor("sandbox"))
+    println("apns-host-default " + ApnsPush.hostFor(""))
+    println("apns-topic-alert " + ApnsPush.topicFor("com.example.wata", false))
+    println("apns-topic-ptt " + ApnsPush.topicFor("com.example.wata", true))
+    println("apns-unarmed " + boolStr(!ApnsPush.configured()))
+    println("apns-jwt-segments " + jwtSegments("TEAMID123", "KEYID456", 1000L))
+    // the refresh window: a fresh mint serves, one second short of the window
+    // still serves, the window itself re-mints, and an empty cache always does.
+    println("apns-token-fresh " + boolStr(!ApnsPush.stale("tok", 1000L, 1000L)))
+    println("apns-token-inside " + boolStr(!ApnsPush.stale("tok", 1000L, 1000L + ApnsPush.RefreshAfterSecs - 1L)))
+    println("apns-token-expired " + boolStr(ApnsPush.stale("tok", 1000L, 1000L + ApnsPush.RefreshAfterSecs)))
+    println("apns-token-empty " + boolStr(ApnsPush.stale("", 1000L, 1000L)))
+    println("apns-alert " + Json.write(ApnsPush.alertPayload("Bob", "hi", "!r:localhost", "$e", 3)))
+    println("apns-alert-nobadge " + Json.write(ApnsPush.alertPayload("Bob", "hi", "!r:localhost", "$e", -1)))
+    println("apns-alert-zero-badge " + Json.write(ApnsPush.alertPayload("Bob", "", "", "", 0)))
+    println("apns-ptt " + Json.write(ApnsPush.channelPayload("Bob", "!r:localhost", "$e")))
+    println("apns-reason " + ApnsPush.reasonOf("{\"reason\":\"BadDeviceToken\"}"))
+    println("apns-reason-empty " + boolStr(ApnsPush.reasonOf("") == ""))
+
+  /** the provider token's first two segments, decoded back — base64url in, JSON
+   *  out, so what Apple would read is what this prints. */
+  def jwtSegments(teamId: String, keyId: String, iat: scala.Long): String =
+    val input = ApnsPush.signingInputFor(teamId, keyId, iat)
+    val cut = input.indexOf(".")
+    unb64(input.substring(0, cut)) + " " + unb64(input.substring(cut + 1, input.length))
+
+  def unb64(seg: String): String =
+    try go.string(go.b64url.RawURLEncoding.decodeString(seg))
+    catch case e: sgo.GoError => "undecodable"
+

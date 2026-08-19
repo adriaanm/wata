@@ -1,208 +1,81 @@
 package apns
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
-	"io"
+	"encoding/pem"
 	"math/big"
-	"net/http"
-	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 )
 
-const p256FieldBytesTest = 32 // mirrors jwt.go's p256FieldBytes; test stays independent of it on purpose
+const p256FieldBytesTest = 32 // mirrors apns.go's p256FieldBytes; the test stays independent of it on purpose
 
-func testKey(t *testing.T) *ecdsa.PrivateKey {
+// writeKeyFile mints a P-256 key and writes it as a .p8 file — a PEM block
+// wrapping PKCS#8, exactly the shape Apple's developer portal hands out.
+func writeKeyFile(t *testing.T) (string, *ecdsa.PublicKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	return key
-}
-
-// capturedRequest is what the fake server saw, copied out before the body
-// is consumed so the test can inspect it after the handler returns.
-type capturedRequest struct {
-	method     string
-	path       string
-	proto      int
-	authHeader string
-	topic      string
-	pushType   string
-	priority   string
-	expiration string
-	body       []byte
-}
-
-// fakeAPNs stands in for Apple: it records every request it sees and
-// answers according to respond, keyed by device token.
-type fakeAPNs struct {
-	srv     *httptest.Server
-	pubKey  *ecdsa.PublicKey
-	reqs    atomic.Int64
-	last    atomic.Value // capturedRequest
-	respond func(deviceToken string) (status int, body string)
-}
-
-func newFakeAPNs(t *testing.T, key *ecdsa.PrivateKey, respond func(string) (int, string)) *fakeAPNs {
-	t.Helper()
-	f := &fakeAPNs{pubKey: &key.PublicKey, respond: respond}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/3/device/", func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		cap := capturedRequest{
-			method:     r.Method,
-			path:       r.URL.Path,
-			proto:      r.ProtoMajor,
-			authHeader: r.Header.Get("authorization"),
-			topic:      r.Header.Get("apns-topic"),
-			pushType:   r.Header.Get("apns-push-type"),
-			priority:   r.Header.Get("apns-priority"),
-			expiration: r.Header.Get("apns-expiration"),
-			body:       body,
-		}
-		f.last.Store(cap)
-		f.reqs.Add(1)
-
-		deviceToken := strings.TrimPrefix(r.URL.Path, "/3/device/")
-		status, respBody := f.respond(deviceToken)
-		w.Header().Set("apns-id", "test-apns-id")
-		w.WriteHeader(status)
-		if respBody != "" {
-			_, _ = w.Write([]byte(respBody))
-		}
-	})
-	srv := httptest.NewUnstartedServer(mux)
-	srv.EnableHTTP2 = true
-	srv.StartTLS()
-	f.srv = srv
-	return f
-}
-
-func (f *fakeAPNs) close() { f.srv.Close() }
-
-func (f *fakeAPNs) lastRequest(t *testing.T) capturedRequest {
-	t.Helper()
-	v := f.last.Load()
-	if v == nil {
-		t.Fatalf("no request captured yet")
-	}
-	return v.(capturedRequest)
-}
-
-func newClient(t *testing.T, f *fakeAPNs, key *ecdsa.PrivateKey, clock func() time.Time) *Client {
-	t.Helper()
-	c, err := New(Config{
-		TeamID:     "TEAMID123",
-		KeyID:      "KEYID456",
-		Topic:      "com.example.wata",
-		PrivateKey: key,
-		Host:       f.srv.URL,
-		HTTPClient: f.srv.Client(),
-		Clock:      clock,
-	})
+	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("marshal pkcs8: %v", err)
 	}
-	return c
+	path := filepath.Join(t.TempDir(), "AuthKey_TEST.p8")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	return path, &key.PublicKey
 }
 
-func decodeJWT(t *testing.T, authHeader string) (hdr jwtHeader, claims jwtClaims, sigRaw []byte, signingInput string) {
-	t.Helper()
-	const prefix = "bearer "
-	if !strings.HasPrefix(authHeader, prefix) {
-		t.Fatalf("authorization header %q missing %q prefix", authHeader, prefix)
+// disarm returns the package to its unloaded state, so one test's key cannot
+// arm another's.
+func disarm() {
+	mu.Lock()
+	key = nil
+	mu.Unlock()
+}
+
+// TestSignES256IsRawFixedWidth is the test for the classic bug: an ECDSA JWT
+// signature must be R||S, 32 bytes each for P-256 (64 bytes total) — NOT the
+// ASN.1 DER that ecdsa.PrivateKey.Sign (the crypto.Signer method) produces,
+// which is variable-length and typically 70-72 bytes with a leading 0x30
+// SEQUENCE tag. It also verifies the signature against the public key, which
+// is the whole reason this stayed in Go.
+func TestSignES256IsRawFixedWidth(t *testing.T) {
+	disarm()
+	defer disarm()
+	path, pub := writeKeyFile(t)
+	if err := LoadKey(path); err != nil {
+		t.Fatalf("LoadKey: %v", err)
 	}
-	tok := strings.TrimPrefix(authHeader, prefix)
-	parts := strings.Split(tok, ".")
-	if len(parts) != 3 {
-		t.Fatalf("JWT %q does not have 3 parts", tok)
+	if !Loaded() {
+		t.Fatalf("Loaded() is false after a successful LoadKey")
 	}
-	hdrJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+
+	signingInput := "eyJhbGciOiJFUzI1NiIsImtpZCI6IktFWUlEIn0.eyJpc3MiOiJURUFNIiwiaWF0IjoxMDAwfQ"
+	segment, err := SignES256(signingInput)
 	if err != nil {
-		t.Fatalf("decode header: %v", err)
+		t.Fatalf("SignES256: %v", err)
 	}
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		t.Fatalf("decode claims: %v", err)
+	if strings.ContainsAny(segment, "+/=") {
+		t.Errorf("signature segment %q is not base64url without padding", segment)
 	}
-	sigRaw, err = base64.RawURLEncoding.DecodeString(parts[2])
+	sig, err := base64.RawURLEncoding.DecodeString(segment)
 	if err != nil {
 		t.Fatalf("decode signature: %v", err)
 	}
-	if err := json.Unmarshal(hdrJSON, &hdr); err != nil {
-		t.Fatalf("unmarshal header: %v", err)
-	}
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		t.Fatalf("unmarshal claims: %v", err)
-	}
-	signingInput = parts[0] + "." + parts[1]
-	return
-}
 
-// TestJWTHeaderAndClaims asserts the header and claims decode to what APNs
-// requires, and iat reflects the injected clock (not wall time).
-func TestJWTHeaderAndClaims(t *testing.T) {
-	key := testKey(t)
-	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
-	f := newFakeAPNs(t, key, func(string) (int, string) { return 200, "" })
-	defer f.close()
-	c := newClient(t, f, key, func() time.Time { return now })
-
-	res, err := c.Send(context.Background(), "devicetoken1", AlertPayload("t", "b", "room1", "event1", nil), SendOptions{})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if !res.OK() {
-		t.Fatalf("expected OK, got status %d reason %q", res.StatusCode, res.Reason)
-	}
-
-	req := f.lastRequest(t)
-	hdr, claims, _, _ := decodeJWT(t, req.authHeader)
-	if hdr.Alg != "ES256" {
-		t.Errorf("alg = %q, want ES256", hdr.Alg)
-	}
-	if hdr.Kid != "KEYID456" {
-		t.Errorf("kid = %q, want KEYID456", hdr.Kid)
-	}
-	if claims.Iss != "TEAMID123" {
-		t.Errorf("iss = %q, want TEAMID123", claims.Iss)
-	}
-	if claims.Iat != now.Unix() {
-		t.Errorf("iat = %d, want %d", claims.Iat, now.Unix())
-	}
-}
-
-// TestJWTSignatureIsRawFixedWidth is the test for the classic bug: an
-// ECDSA JWT signature must be R||S, 32 bytes each for P-256 (64 bytes
-// total) — NOT the ASN.1 DER ecdsa.PrivateKey.Sign (the crypto.Signer
-// method) would produce, which is variable-length and typically 70-72
-// bytes with a leading 0x30 SEQUENCE tag.
-func TestJWTSignatureIsRawFixedWidth(t *testing.T) {
-	key := testKey(t)
-	f := newFakeAPNs(t, key, func(string) (int, string) { return 200, "" })
-	defer f.close()
-	c := newClient(t, f, key, func() time.Time { return time.Unix(1000, 0) })
-
-	if _, err := c.Send(context.Background(), "devicetoken1", AlertPayload("t", "b", "r", "e", nil), SendOptions{}); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-
-	req := f.lastRequest(t)
-	_, _, sig, signingInput := decodeJWT(t, req.authHeader)
-
-	wantLen := 2 * p256FieldBytesTest
-	if len(sig) != wantLen {
-		t.Fatalf("signature is %d bytes, want exactly %d (R||S fixed-width, not ASN.1 DER)", len(sig), wantLen)
+	if want := 2 * p256FieldBytesTest; len(sig) != want {
+		t.Fatalf("signature is %d bytes, want exactly %d (R||S fixed-width, not ASN.1 DER)", len(sig), want)
 	}
 	if sig[0] == 0x30 {
 		t.Errorf("signature's first byte is 0x30 (an ASN.1 DER SEQUENCE tag) — looks like DER, not raw R||S")
@@ -211,223 +84,81 @@ func TestJWTSignatureIsRawFixedWidth(t *testing.T) {
 	r := new(big.Int).SetBytes(sig[:p256FieldBytesTest])
 	s := new(big.Int).SetBytes(sig[p256FieldBytesTest:])
 	digest := sha256.Sum256([]byte(signingInput))
-	if !ecdsa.Verify(&key.PublicKey, digest[:], r, s) {
+	if !ecdsa.Verify(pub, digest[:], r, s) {
 		t.Fatalf("signature does not verify against the signing input under the test public key")
 	}
 }
 
-// TestRequestShape asserts the method, path and all five headers Apple's
-// provider API requires.
-func TestRequestShape(t *testing.T) {
-	key := testKey(t)
-	f := newFakeAPNs(t, key, func(string) (int, string) { return 200, "" })
-	defer f.close()
-	c := newClient(t, f, key, func() time.Time { return time.Unix(2000, 0) })
-
-	if _, err := c.Send(context.Background(), "abc123devicetoken", AlertPayload("Bob", "hi", "room9", "event9", nil), SendOptions{}); err != nil {
-		t.Fatalf("Send: %v", err)
+// TestSignES256VariesPerCall guards against a cached or deterministic
+// signature: ECDSA is randomized, and two signatures over the same input
+// must differ while both verifying.
+func TestSignES256VariesPerCall(t *testing.T) {
+	disarm()
+	defer disarm()
+	path, _ := writeKeyFile(t)
+	if err := LoadKey(path); err != nil {
+		t.Fatalf("LoadKey: %v", err)
 	}
-
-	req := f.lastRequest(t)
-	if req.method != http.MethodPost {
-		t.Errorf("method = %q, want POST", req.method)
+	a, err := SignES256("a.b")
+	if err != nil {
+		t.Fatalf("SignES256: %v", err)
 	}
-	if req.path != "/3/device/abc123devicetoken" {
-		t.Errorf("path = %q, want /3/device/abc123devicetoken", req.path)
+	b, err := SignES256("a.b")
+	if err != nil {
+		t.Fatalf("SignES256: %v", err)
 	}
-	if req.proto != 2 {
-		t.Errorf("ProtoMajor = %d, want 2 (HTTP/2) — the fake server did not negotiate h2", req.proto)
-	}
-	if !strings.HasPrefix(req.authHeader, "bearer ") {
-		t.Errorf("authorization = %q, want a bearer token", req.authHeader)
-	}
-	if req.topic != "com.example.wata" {
-		t.Errorf("apns-topic = %q, want com.example.wata", req.topic)
-	}
-	if req.pushType != "alert" {
-		t.Errorf("apns-push-type = %q, want alert", req.pushType)
-	}
-	if req.priority != "10" {
-		t.Errorf("apns-priority = %q, want 10", req.priority)
-	}
-	if req.expiration != "0" {
-		t.Errorf("apns-expiration = %q, want 0", req.expiration)
-	}
-
-	var payload Payload
-	if err := json.Unmarshal(req.body, &payload); err != nil {
-		t.Fatalf("unmarshal request body: %v", err)
-	}
-	if payload.Aps.Alert.Title != "Bob" || payload.Aps.Alert.Body != "hi" {
-		t.Errorf("alert = %+v, want title Bob body hi", payload.Aps.Alert)
-	}
-	if payload.RoomID != "room9" || payload.EventID != "event9" {
-		t.Errorf("room/event = %q/%q, want room9/event9", payload.RoomID, payload.EventID)
-	}
-	if payload.Aps.InterruptionLevel != "time-sensitive" {
-		t.Errorf("interruption-level = %q, want time-sensitive", payload.Aps.InterruptionLevel)
+	if a == b {
+		t.Errorf("two signatures over the same input are identical — the nonce is not fresh")
 	}
 }
 
-// TestTokenCaching: two sends inside the refresh window reuse one JWT; a
-// send past the window mints a new one. Driven entirely by the injectable
-// clock — no sleeping.
-func TestTokenCaching(t *testing.T) {
-	key := testKey(t)
-	f := newFakeAPNs(t, key, func(string) (int, string) { return 200, "" })
-	defer f.close()
-
-	base := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
-	now := base
-	c := newClient(t, f, key, func() time.Time { return now })
-
-	send := func() string {
-		if _, err := c.Send(context.Background(), "tok", AlertPayload("t", "b", "r", "e", nil), SendOptions{}); err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-		return f.lastRequest(t).authHeader
+// TestSignWithoutKeyFails: the send path must get an error rather than a
+// token signed with nothing.
+func TestSignWithoutKeyFails(t *testing.T) {
+	disarm()
+	defer disarm()
+	if Loaded() {
+		t.Fatalf("Loaded() is true with no key")
 	}
-
-	first := send()
-
-	now = base.Add(10 * time.Minute)
-	second := send()
-	if second != first {
-		t.Errorf("send at +10m minted a new token; want the cached one reused (window is 45m)")
-	}
-
-	now = base.Add(46 * time.Minute)
-	third := send()
-	if third == first {
-		t.Errorf("send at +46m reused the old token; want a fresh one minted past the refresh window")
-	}
-
-	_, claims, _, _ := decodeJWT(t, third)
-	if claims.Iat != now.Unix() {
-		t.Errorf("refreshed token iat = %d, want %d", claims.Iat, now.Unix())
+	if _, err := SignES256("a.b"); err == nil {
+		t.Fatalf("SignES256 succeeded with no key loaded")
 	}
 }
 
-// TestOutcomes: 200 -> OK, 410 -> Gone (the "forget this token" outcome),
-// and a 400 with a reason body -> that reason surfaced.
-func TestOutcomes(t *testing.T) {
-	key := testKey(t)
-	f := newFakeAPNs(t, key, func(deviceToken string) (int, string) {
-		switch deviceToken {
-		case "dead-token":
-			return http.StatusGone, `{"reason":"Unregistered"}`
-		case "bad-token":
-			return http.StatusBadRequest, `{"reason":"BadDeviceToken"}`
-		default:
-			return http.StatusOK, ""
-		}
-	})
-	defer f.close()
-	c := newClient(t, f, key, func() time.Time { return time.Unix(3000, 0) })
-
-	okRes, err := c.Send(context.Background(), "live-token", AlertPayload("t", "b", "r", "e", nil), SendOptions{})
-	if err != nil {
-		t.Fatalf("Send (ok): %v", err)
-	}
-	if !okRes.OK() || okRes.Gone {
-		t.Errorf("live-token: OK()=%v Gone=%v, want OK true, Gone false", okRes.OK(), okRes.Gone)
+// TestLoadKeyRejectsBadInput, and leaves a working key armed: a bad path or a
+// file that is not a PKCS#8 EC key must not disarm a pusher that was working.
+func TestLoadKeyRejectsBadInput(t *testing.T) {
+	disarm()
+	defer disarm()
+	good, _ := writeKeyFile(t)
+	if err := LoadKey(good); err != nil {
+		t.Fatalf("LoadKey: %v", err)
 	}
 
-	goneRes, err := c.Send(context.Background(), "dead-token", AlertPayload("t", "b", "r", "e", nil), SendOptions{})
-	if err != nil {
-		t.Fatalf("Send (gone): %v", err)
-	}
-	if !goneRes.Gone {
-		t.Errorf("dead-token: Gone = false, want true (the caller's signal to delete the registration)")
-	}
-	if goneRes.OK() {
-		t.Errorf("dead-token: OK() = true, want false")
-	}
-	if goneRes.Reason != "Unregistered" {
-		t.Errorf("dead-token: Reason = %q, want Unregistered", goneRes.Reason)
+	if err := LoadKey(filepath.Join(t.TempDir(), "nope.p8")); err == nil {
+		t.Errorf("LoadKey accepted a missing file")
 	}
 
-	badRes, err := c.Send(context.Background(), "bad-token", AlertPayload("t", "b", "r", "e", nil), SendOptions{})
-	if err != nil {
-		t.Fatalf("Send (bad): %v", err)
+	junk := filepath.Join(t.TempDir(), "junk.p8")
+	if err := os.WriteFile(junk, []byte("not a pem block"), 0o600); err != nil {
+		t.Fatalf("write junk: %v", err)
 	}
-	if badRes.Gone {
-		t.Errorf("bad-token: Gone = true, want false (400, not 410)")
-	}
-	if badRes.Reason != "BadDeviceToken" {
-		t.Errorf("bad-token: Reason = %q, want BadDeviceToken (never swallow APNs' own reason)", badRes.Reason)
-	}
-}
-
-// TestAlertPayloadOmitsEmptyBadge asserts the payload struct is honest
-// about which fields are optional: a nil badge must not appear in the JSON
-// at all (vs. serializing as 0, which means something different to APNs —
-// "set the badge to zero").
-func TestAlertPayloadOmitsEmptyBadge(t *testing.T) {
-	p := AlertPayload("t", "b", "room", "event", nil)
-	out, err := json.Marshal(p)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(out), "badge") {
-		t.Errorf("payload with nil badge contains a badge key: %s", out)
+	if err := LoadKey(junk); err == nil {
+		t.Errorf("LoadKey accepted a file with no PEM block")
 	}
 
-	badge := 3
-	p2 := AlertPayload("t", "b", "room", "event", &badge)
-	out2, err := json.Marshal(p2)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+	rsaish := filepath.Join(t.TempDir(), "empty.p8")
+	if err := os.WriteFile(rsaish, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{1, 2, 3}}), 0o600); err != nil {
+		t.Fatalf("write rsaish: %v", err)
 	}
-	if !strings.Contains(string(out2), `"badge":3`) {
-		t.Errorf("payload with badge=3 missing badge key: %s", out2)
-	}
-}
-
-// TestPushToTalkRequestShape asserts what makes a PushToTalk push different
-// from an alert on the wire: the push type, the topic override, and a body
-// with no aps dictionary in it at all.
-func TestPushToTalkRequestShape(t *testing.T) {
-	key := testKey(t)
-	f := newFakeAPNs(t, key, func(string) (int, string) { return 200, "" })
-	defer f.close()
-	c := newClient(t, f, key, func() time.Time { return time.Unix(2000, 0) })
-
-	opts := SendOptions{PushType: PushTypePushToTalk, Topic: "com.example.wata" + PTTTopicSuffix}
-	if _, err := c.Send(context.Background(), "ephemeral1", ChannelPayload("Bob", "room9", "event9"), opts); err != nil {
-		t.Fatalf("Send: %v", err)
+	if err := LoadKey(rsaish); err == nil {
+		t.Errorf("LoadKey accepted a PEM block that is not a PKCS#8 key")
 	}
 
-	req := f.lastRequest(t)
-	if req.pushType != "pushtotalk" {
-		t.Errorf("apns-push-type = %q, want pushtotalk", req.pushType)
+	if !Loaded() {
+		t.Errorf("a failed LoadKey disarmed the previously loaded key")
 	}
-	if req.topic != "com.example.wata.voip-ptt" {
-		t.Errorf("apns-topic = %q, want the .voip-ptt topic, not the bare bundle id", req.topic)
-	}
-	if req.path != "/3/device/ephemeral1" {
-		t.Errorf("path = %q", req.path)
-	}
-	if strings.Contains(string(req.body), "aps") {
-		t.Errorf("a pushtotalk body carries an aps dictionary: %s", req.body)
-	}
-	var payload PTTPayload
-	if err := json.Unmarshal(req.body, &payload); err != nil {
-		t.Fatalf("unmarshal request body: %v", err)
-	}
-	if payload.ActiveSpeaker != "Bob" {
-		t.Errorf("activeSpeaker = %q, want Bob", payload.ActiveSpeaker)
-	}
-	if payload.RoomID != "room9" || payload.EventID != "event9" {
-		t.Errorf("room/event = %q/%q", payload.RoomID, payload.EventID)
-	}
-
-	// The same Client still sends alerts to the bare bundle id: the topic is a
-	// per-request override, not a mutation.
-	if _, err := c.Send(context.Background(), "stable1", AlertPayload("Bob", "hi", "r", "e", nil), SendOptions{}); err != nil {
-		t.Fatalf("Send (alert): %v", err)
-	}
-	if got := f.lastRequest(t).topic; got != "com.example.wata" {
-		t.Errorf("apns-topic after a PTT push = %q, want the bare bundle id", got)
+	if _, err := SignES256("a.b"); err != nil {
+		t.Errorf("signing broke after a failed LoadKey: %v", err)
 	}
 }

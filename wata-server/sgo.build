@@ -10,6 +10,7 @@ godep github.com/adriaanm/wata/go-pkgs/irohnet go-pkgs/irohnet
 # The admin page as a go:embed'ed asset (plan 0021): a plain Go package whose
 # index.html sits next to it, since go:embed cannot reach outside its dir.
 godep github.com/adriaanm/wata/wata-server/adminui wata-server/adminui
-# The APNs pusher (plan 0065): plain Go — an ES256 JWT and an HTTP/2 POST,
-# neither expressible in the dialect. No external dependency, no build tag.
+# The APNs signing key (plan 0068): plain Go for the one thing the dialect
+# cannot do — parse the operator's PKCS#8 .p8 and sign with it. The pusher
+# itself (the JWT, the headers, the POST, the verdict) is apnspush.scala.
 godep github.com/adriaanm/wata/go-pkgs/apns go-pkgs/apns

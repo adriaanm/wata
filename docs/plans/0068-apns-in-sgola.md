@@ -1,6 +1,6 @@
 # 0068 — the APNs pusher moves into Sgola, minus the key handling
 
-Status: proposed
+Status: done
 
 `[APNS-TO-SGOLA]`
 
@@ -109,3 +109,33 @@ look closely at:
   rest genuinely boundary-bound (cgo, reflection-driven `objc.Send`, the
   platform entry points that OWN the process); `docs/design/sgola-ffi.md`
   records that verdict.
+
+## What it turned out to be
+
+Carried out as written. Three things worth keeping:
+
+- **A compiler wall on the obvious spelling.** `JObj(List(("alg", …), ("kid",
+  …)))` — a varargs `List` of TUPLE literals — compiles clean and then fails
+  the go-build stage: the slice is emitted as `[]*Tuple2` with value-literal
+  elements, into a parameter typed `[]Tuple2`. Consing (`a :: b :: Nil`) is
+  unaffected, and a probe with a case-class element (`List(JStr("a"),
+  JStr("b"))`) builds, so it is specific to tuples as the varargs element type.
+  Filed as `LIST-APPLY-TUPLE-ELEM-PTR`, with the key in the workaround's
+  comment.
+- **`withLock` cannot hold a throwing call**, so `bearer` reads the cache under
+  the lock, signs outside it, and stores under it again. A race at the expiry
+  mints twice; both tokens are valid and the last store wins, which is cheaper
+  than the alternative of not using the lock at all.
+- **The audit's one other finding got a ticket rather than a port**:
+  `go-pkgs/httpc` exists to set `net/http.Client.Timeout`, a struct field the
+  curated facade does not expose (`HTTP-CLIENT-TIMEOUT-FIELD`). Either a bound
+  field or a ruling that curated surfaces never expose one closes it; the shim
+  is 17 lines and load-bearing either way.
+
+The Go package went from 441 lines across four files to 108 in one, and its
+test file from 433 lines of request-shape assertions to 160 about the
+signature. What those assertions covered did not go away: the JWT's claims and
+the header set are now asserted by the fake Apple both smokes already ran
+(`Push.jwt_ok` in `tools/pushkit.py` decodes the provider token and checks
+`alg`/`kid`/`iss`/`iat` and the 64-byte R||S width), and the payloads, the
+refresh window and the topics are printed by `SelfCheck`.

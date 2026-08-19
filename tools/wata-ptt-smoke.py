@@ -110,7 +110,8 @@ def run(tmp):
             checks(p.aps == {}, f"a pushtotalk push carries no aps dictionary (got {p.payload})")
             checks(p.key("room_id") == room and p.key("event_id") == ev,
                    "the room and event ids ride the payload")
-            checks(p.auth.startswith("bearer "), "the request carries a provider JWT")
+            checks(p.priority == "10", f"apns-priority is 10 (got {p.priority})")
+            p.jwt_ok(checks, "TEAMID456", "KEYID123")
 
         # -- leave kills the token -------------------------------------------------
         st, j = srv.req("POST", "/_wata/v1/push/channel/leave", {}, token=bob)

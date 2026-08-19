@@ -2,53 +2,45 @@ package go
 
 import language.experimental.saferExceptions
 
-/** `go.apns` — the APP-OWNED facade for the APNs pusher package
- *  `github.com/adriaanm/wata/go-pkgs/apns` (plan 0065 tier 2). Same mechanism
- *  as `go.irohnet`: a `@go.bind` object, bodies `???`, the package rides the
- *  emitted app module as a plain Go dependency (a `godep` line in sgo.build).
+/** `go.apns` — the APP-OWNED facade for `github.com/adriaanm/wata/go-pkgs/apns`,
+ *  which is now the operator's ES256 signing key and nothing else. Same
+ *  mechanism as `go.irohnet`: a `@go.bind` object, bodies `???`, the package
+ *  rides the emitted app module as a plain Go dependency (a `godep` line in
+ *  sgo.build).
  *
- *  The pusher exists in Go because APNs token auth needs an ES256 JWT and an
- *  HTTP/2 POST, neither expressible in the dialect. What crosses this frontier
- *  is deliberately smaller than what the Go package offers: no Config struct,
- *  no `*ecdsa.PrivateKey`, no Payload, no Result — three calls over flat
- *  strings and ints (go-pkgs/apns/facade.go states the same contract from the
- *  Go side). The credentials are package-level state over there, armed once at
- *  boot, exactly as irohnet's live listener is.
+ *  What is Go here is the technology boundary alone — parse a PEM-wrapped
+ *  PKCS#8 EC key, and sign with it. Everything a push consists of (the JWT's
+ *  header and claims, the refresh window, the headers, the POST, and what a
+ *  status means) is dialect code in apnspush.scala.
+ *
+ *  The key is package-level state over there, armed once at boot, exactly as
+ *  irohnet's live listener is: one operator key per process, and a Sgola caller
+ *  has no way to hold an `*ecdsa.PrivateKey` anyway.
  */
 @go.bind("github.com/adriaanm/wata/go-pkgs/apns")
 object apns:
-  /** `apns.Configure(teamID, keyID, topic, keyPath)` — read the operator's
-   *  `.p8` Auth Key and arm the pusher. Throws when the file is missing or is
-   *  not a PKCS#8 EC key; the caller reports and stays disarmed. */
-  @go.name("Configure") def configure(teamID: String, keyID: String, topic: String, keyPath: String): Unit throws sgo.GoError = ???
+  /** `apns.LoadKey(path)` — read the operator's `.p8` Auth Key and arm the
+   *  signer. Throws when the file is missing or is not a PKCS#8 EC key,
+   *  leaving any previously loaded key armed. */
+  @go.name("LoadKey") def loadKey(path: String): Unit throws sgo.GoError = ???
 
-  /** `apns.Configured()` — did `configure` succeed? False is the ordinary
-   *  state of a self-hosted install with no Apple account, and the send path
-   *  must then do nothing at all. */
-  @go.name("Configured") def configured(): Boolean = ???
+  /** `apns.Loaded()` — is a key armed? False is the ordinary state of a
+   *  self-hosted install with no Apple account. */
+  @go.name("Loaded") def loaded(): Boolean = ???
 
-  /** `apns.HostFor(env)` — the APNs host for a registration's environment
-   *  ("sandbox" for a development build's token, production otherwise). A
-   *  token minted against one environment is rejected by the other, so the
-   *  environment belongs to the REGISTRATION rather than to the server. */
-  @go.name("HostFor") def hostFor(env: String): String = ???
+  /** `apns.SignES256(signingInput)` — the JWS signature for a provider token's
+   *  `<header>.<claims>`, base64url without padding: the third segment, ready
+   *  to append. Raw R||S (64 bytes for P-256), never ASN.1 DER — the classic
+   *  mistake, and the reason this is a Go primitive with a Go test rather than
+   *  a call to a generic signer. Throws when no key is armed. */
+  @go.name("SignES256") def signES256(signingInput: String): String throws sgo.GoError = ???
 
-  /** `apns.Push(host, token, title, body, roomId, eventId, badge)` — one
-   *  time-sensitive alert; answers the HTTP status APNs gave (410 = the token
-   *  is dead, delete its registration). A rejection is a STATUS, not a throw;
-   *  a throw means no verdict was reached at all (unconfigured, dial failure).
-   *  `badge` below 0 leaves the app's badge count alone. */
-  @go.name("Push") def push(host: String, deviceToken: String, title: String, body: String,
-                            roomId: String, eventId: String, badge: go.Int): go.Int throws sgo.GoError = ???
-
-  /** `apns.PushChannel(host, token, speaker, roomId, eventId)` — one
-   *  PushToTalk push to an EPHEMERAL channel token (plan 0065 tier 3). Same
-   *  answer discipline as `push`: the HTTP status, a throw only when no
-   *  verdict was reached. It differs from `push` in everything Apple looks at
-   *  — `apns-push-type: pushtotalk`, the topic is the bundle id plus
-   *  `.voip-ptt`, and the payload names the ACTIVE SPEAKER rather than a
-   *  banner, since the system hands this push to the PushToTalk framework
-   *  instead of presenting it. A 4xx (410 Gone, or 400 BadDeviceToken for a
-   *  channel the phone has left) means the token is dead. */
-  @go.name("PushChannel") def pushChannel(host: String, deviceToken: String, speaker: String,
-                                          roomId: String, eventId: String): go.Int throws sgo.GoError = ???
+/** `go.b64url` — `encoding/base64`'s RAW URL alphabet (no padding), which is
+ *  what a JWT segment is. The core facade binds only `URLEncoding` (padded)
+ *  and `go.b64std` (gocrypto.scala) the standard alphabet the stored password
+ *  hash uses; a third object binds the same Go package under its own name for
+ *  the same reason those two do — `package go` can hold only one
+ *  `object encoding`. */
+@go.bind("encoding/base64")
+object b64url:
+  @go.name("RawURLEncoding") val RawURLEncoding: go.encoding.base64.Encoding = ???

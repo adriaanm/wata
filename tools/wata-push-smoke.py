@@ -98,7 +98,9 @@ def run(tmp):
             checks(p.aps.get("badge") == 1, f"the badge counts bob's unplayed messages (got {p.aps.get('badge')})")
             checks(p.key("room_id") == room and p.key("event_id") == ev,
                    "the room and event ids ride the payload")
-            checks(p.auth.startswith("bearer "), "the request carries a provider JWT")
+            checks(p.priority == "10", f"apns-priority is 10 (got {p.priority})")
+            checks(p.expiration == "0", f"apns-expiration is 0 — deliver once, do not store (got {p.expiration})")
+            p.jwt_ok(checks, "TEAMID456", "KEYID123")
 
         # -- the sender's own device is excluded, its other sessions are not -----
         alice2 = srv.login("alice")

@@ -143,7 +143,26 @@ settled, only the landing is pending.
 
 Three categories, in decreasing permanence.
 
+A sweep over every hand-written Go package in the tree (2026-08-19, plan
+0068) found exactly one that was Go by history rather than by any of
+these reasons: `go-pkgs/apns` carried the whole APNs protocol — the JWT,
+the header set, the POST, and what a status code means — behind a header
+sentence claiming an HTTP/2 POST was inexpressible. It is not: the bound
+`net/http` facade issues arbitrary requests with arbitrary headers, and
+Go negotiates HTTP/2 over TLS on the client itself, so the protocol
+version is a property of the client the caller already holds. The pusher
+now lives in `wata-server/src/main/scala/apnspush.scala` and Go keeps the
+key alone. The test for whether something belongs here is worth stating
+plainly, because that sentence passed review for a while: *name the Go
+API that has no facade spelling*. "This protocol is complicated" is not
+one.
+
 **Technology boundaries — Go stays, and should.**
+- **Signing with an operator key**: `go-pkgs/apns` — read a PEM-wrapped
+  PKCS#8 EC key and produce a raw R||S ES256 signature. `crypto/ecdsa`
+  over an opaque `*ecdsa.PrivateKey` a Sgola caller cannot hold, and the
+  R||S-not-DER detail wants a Go test that verifies against the public
+  key. Everything else about a push is dialect code.
 - **cgo**: `go-pkgs/audio` (opus + tinyalsa, the handset's audio),
   `go-pkgs/macaudio`'s C shims where it has them, `go-pkgs/irohnet`
   (the Rust static library). A facade binds Go, not C; cgo modules are
@@ -156,6 +175,15 @@ Three categories, in decreasing permanence.
 - **The Go runtime**: `go-pkgs/memprobe` (ReadMemStats), macshell's
   heap profiler, anything touching `runtime`/`unsafe` — the measurement
   and plumbing layer under the app, a few dozen lines each.
+
+**A curated-surface gap, not a compiler one.** `go-pkgs/httpc` exists to
+set a single struct field: `net/http.Client.Timeout`. The facade binds
+the `Client` type but not its fields, and an unbounded client is not an
+option here (one half-open connection wedged the device — plan 0022), so
+every wata client reaches its timeout through that shim. Filed as
+`HTTP-CLIENT-TIMEOUT-FIELD`; a ruling either way settles it, and "curated
+surfaces do not expose mutable struct fields" is a fine answer — it makes
+the shim principled rather than a to-do.
 
 **Unblocked — portable now.** Everything that receives control from C
 was one feature (`go.callback`) wearing four costumes; the feature

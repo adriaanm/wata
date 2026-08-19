@@ -8,7 +8,7 @@ two client legs are gated SEPARATELY, and it is worth being precise about
 which one this run proves:
 
   * the PRESENTATION leg (what this run judges): a realistic wata payload —
-    the exact shape `go-pkgs/apns`'s AlertPayload builds, alert +
+    the exact shape `ApnsPush.alertPayload` builds, alert +
     time-sensitive + badge + the room and event ids — is pushed to the running
     app, and the app must print `push: present room=… event=…`. That is the
     shell's UNUserNotificationCenter delegate seeing it, reading wata's own
@@ -54,8 +54,8 @@ BASE = f"http://127.0.0.1:{PORT}"
 ROOM = "!family:localhost"
 EVENT = "$pushsmoke1"
 
-# what wata-server sends: apns.AlertPayload's aps dictionary plus wata's two
-# top-level keys. Keep this in step with go-pkgs/apns/payload.go — the point
+# what wata-server sends: ApnsPush.alertPayload's aps dictionary plus wata's two
+# top-level keys. Keep this in step with wata-server's apnspush.scala — the point
 # of the gate is that the CLIENT understands what the SERVER emits.
 PAYLOAD = {
     "aps": {

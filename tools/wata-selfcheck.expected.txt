@@ -61,3 +61,19 @@ group-joined join join
 group-idempotent true
 group-distinct true
 group-not-family true
+apns-host-sandbox https://api.sandbox.push.apple.com
+apns-host-default https://api.push.apple.com
+apns-topic-alert com.example.wata
+apns-topic-ptt com.example.wata.voip-ptt
+apns-unarmed true
+apns-jwt-segments {"alg":"ES256","kid":"KEYID456"} {"iss":"TEAMID123","iat":1000}
+apns-token-fresh true
+apns-token-inside true
+apns-token-expired true
+apns-token-empty true
+apns-alert {"aps":{"alert":{"title":"Bob","body":"hi"},"sound":"default","badge":3,"interruption-level":"time-sensitive"},"room_id":"!r:localhost","event_id":"$e"}
+apns-alert-nobadge {"aps":{"alert":{"title":"Bob","body":"hi"},"sound":"default","interruption-level":"time-sensitive"},"room_id":"!r:localhost","event_id":"$e"}
+apns-alert-zero-badge {"aps":{"alert":{"title":"Bob"},"sound":"default","badge":0,"interruption-level":"time-sensitive"}}
+apns-ptt {"activeSpeaker":"Bob","room_id":"!r:localhost","event_id":"$e"}
+apns-reason BadDeviceToken
+apns-reason-empty true
