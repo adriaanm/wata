@@ -2,7 +2,9 @@
 
 Status: proposed — **a sketch, not a commitment.** What it contains is the
 constraint analysis and a first probe whose failure would end the idea
-cheaply. Nothing here is scheduled.
+cheaply. Nothing here is scheduled. **Stage 0 passed** (result at the
+bottom): a Go c-archive does link into a watchOS binary, so the idea is
+not dead on arrival — but nothing beyond stage 0 is scheduled either.
 
 `[WATCH-GO-LINK-PROBE]`
 
@@ -223,8 +225,78 @@ sign against a profile with the watch app's identity, install.
 ## What would kill this
 
 Named up front, so nobody has to discover them at stage 3: stage 0
-failing both ways; App Review objecting to an app that is not a SwiftUI
+failing both ways (**it did not — see below**); App Review objecting to an app that is not a SwiftUI
 lifecycle app (the raster-in-an-Image shape is unusual, though it is
 ordinary SwiftUI from the outside); the disk, for anything needing a
 simulator; and battery, which no amount of design fixes if a watch cannot
 hold a sync loop.
+
+## Stage 0 result (2026-08-19): **pass, and cleanly**
+
+Ran on Xcode 26.2 (watchOS 26.2 sdk, no watchOS platform component and no
+simulator runtime installed) with go1.26.5. The whole hypothesis in
+constraint 2 held, and the fallback workarounds were never needed.
+
+**What was run.** `tools/iosenv.py` grew `watchos` and `watchsimulator`
+entries (`-mwatchos-version-min` / `-mwatchos-simulator-version-min`, min
+`26.0`) — that is the entire change on our side, as predicted. Against
+each sysroot, `go build -buildmode=c-archive` of a two-line package with
+one `//export`ed function, `GOOS=ios GOARCH=arm64 CGO_ENABLED=1`. Then
+`vtool -show-build` over the extracted archive members, a direct `clang`
+link of a C `main`, and finally an `xcodebuild` build of a throwaway
+SwiftUI watch app (generated with `xcodegen`) linking the archive through
+a bridging header.
+
+**What the platform stamp said.** Every member of both archives — not
+just the clang-compiled cgo objects but `go.o`, the object the Go linker
+itself emits — reads:
+
+```
+ platform WATCHOS            minos 26.0   sdk 26.2     (watchos sysroot)
+ platform WATCHOSSIMULATOR   minos 26.0   sdk 26.2     (watchsimulator sysroot)
+```
+
+That is the hypothesis confirmed at its root: because a cgo build links
+externally, `go.o` goes through clang too, and clang honours
+`-mwatchos-version-min`. Go never gets a say in the platform byte.
+
+**Which workaround was needed: none.** `ld` raised no platform objection
+at any point, so neither `vtool -set-build-version watchos` nor an
+explicit `-platform_version watchos` was tried in anger. The only link
+failure was undefined `_CFBundle*` / `_CFRelease` / `_CFStringGetCString`
+from `runtime/cgo`'s iOS `init_working_dir` — real iOS-shaped runtime
+code riding in on `GOOS=ios`, and it resolves with `-framework
+CoreFoundation`, which watchOS has.
+
+**The end product.** `xcodebuild -sdk watchos26.2` and `-sdk
+watchsimulator26.2` both built `WataWatch.app` green, unsigned. The
+device-sdk binary is `Mach-O 64-bit executable arm64`, `platform
+WATCHOS minos 26.0`, and carries both `_wata_probe` and ~3.3k Go runtime
+symbols. A SwiftUI `@main struct: App` calling a Go function on the watch
+compiles, links and is a well-formed watchOS executable.
+
+**Two tooling facts worth carrying into stage 1**, both in
+`~/g/bq268/apple-dev-tooling.md` in full: the watchOS sdk is on disk but
+the *platform component* is not, so `xcodebuild -scheme` refuses with
+"Found no destinations … watchOS 26.2 is not installed" while
+`xcodebuild -target … -sdk <sdk>` builds fine — an SDK-only gate must use
+`-target`. And `vtool -show` rejects an `.a` outright ("file is not
+mach-o"); `ar x` first.
+
+**Verdict.** The gate is passed: the ISA and toolchain question that
+would have ended this plan is answered yes, for both device and
+simulator, with no hacks. Two things are still unknown and neither was in
+stage 0's scope — whether the resulting app *runs* (nothing was executed;
+no runtime is installed, and a simulator binary run on the host aborts
+with `DYLD_ROOT_PATH not set`, which only proves the stamp), and whether
+cgo with a real C dependency (opus, stage 3) survives the same treatment.
+
+**The PushToTalk re-check is still pending.** Xcode here is 26.2, not 27,
+so `ls $(xcrun --sdk watchos --show-sdk-path)/System/Library/Frameworks |
+grep -i pushtotalk` finding nothing says only what the plan already
+states about the 26.2 sdk. Re-run it the day Xcode 27 lands.
+
+**What stage 1 needs that it does not have**: a watchOS platform
+component and simulator runtime, i.e. the disk headroom the 2026-08-09
+learnings entry describes (the iOS runtime wanted 25–30 GB free; ~5 GB
+free today). That is an owner decision, not a task to pick up.
