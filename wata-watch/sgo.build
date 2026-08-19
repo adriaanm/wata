@@ -1,0 +1,21 @@
+# sgo.build (schema: see the sgola tree's core/sgo.build). wata-watch is an
+# APP over core + json + wataclient + wataui: the standalone Apple Watch
+# client (plan 0069). Its architecture is wata-ios's — a retained UIKit
+# stage over the generated bindings — because watchOS's objc runtime has a
+# working UIKit even though its headers mark UIView & co
+# API_UNAVAILABLE(watchos). What differs is the ENTRY POINT: a watch app is
+# started by WatchKit, so go-pkgs/watchshell owns WKApplicationMain and the
+# scene-joined window in place of iosshell's UIApplicationMain.
+mode app
+emitname wata-watch
+binname wata-watch
+gomod watawatch
+optreport
+# The WatchKit shell (plan 0069) and the glue under the stage. iosui is
+# REUSED UNCHANGED from the phone — it is libdispatch, libobjc and
+# CoreGraphics, none of which is iOS-specific. Both ride appleptt (the
+# generated uikit bindings), which needs its OWN godep line: a `replace` in
+# a dependency's go.mod is ignored once the emitted app is the main module.
+godep github.com/adriaanm/wata/go-pkgs/watchshell go-pkgs/watchshell
+godep github.com/adriaanm/wata/go-pkgs/iosui go-pkgs/iosui
+godep github.com/adriaanm/wata/go-pkgs/appleptt go-pkgs/appleptt

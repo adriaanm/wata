@@ -406,3 +406,64 @@ the screen around, not a defect. Untouched by this stage: input (the
 gesture recognizers and `WKCrownSequencer` are all present and
 undeprecated, but nothing has been wired), the client core over the
 watch's own network, audio, and anything on real hardware.
+
+## Stage 2 progress (2026-08-19): Sgola runs on the watch
+
+Three things landed, each with a gate that re-takes it (`just watch-spike`,
+`just watch-hello`, `just watch-smoke`).
+
+**`go-pkgs/watchshell`** is iosshell's twin: WKApplicationMain, a
+synthesized `WKExtensionDelegate` answering
+`applicationRootInterfaceControllerClass` (so no storyboard ships), and a
+window joined to watchOS's scene *and raised above WatchKit's own* — both
+are needed, and a bisect (`watch-spike --only wkapp`, argv `adopt|own`)
+showed adopting the existing scene window works equally well.
+`go-pkgs/iosui` is reused **unchanged**: it is libdispatch, libobjc and
+CoreGraphics, and nothing in it was ever iOS-specific.
+
+**`wata-watch`** is a real sgo module — `mode app` over core + json +
+wataclient + wataui, `godep`ing watchshell/iosui/appleptt — whose
+`main.scala` builds a UIView tree through the same generated UIKit facade
+wata-ios uses and paints it. `just watch-smoke` runs it on a Series 10
+simulator and asserts `watch: ready 208x248`, `painted 3 views`,
+`probe ff0000`. The screenshot shows it. That is Sgola, compiled to Go,
+driving UIKit on a platform whose headers deny those classes exist there.
+
+**Go's network stack is fine on watchOS** — TCP, HTTP and TLS 1.3 against
+a real name, with a sane clock (`watch-spike --only net`). So the client
+core has nothing to prove below the socket.
+
+### Two measurement lessons, both of which produced false results first
+
+- **An offscreen render probe is not evidence that anything is on screen.**
+  `RenderViewRGBA` read back correct pixels through every black-panel
+  configuration tried. Only a screenshot settles visibility.
+- **A done marker can beat the compositor.** The whole run is ~0.6s, so a
+  screenshot taken the instant the app printed its last proof caught an
+  undrawn panel and read as total failure. `simrun.launch_and_expect` grew
+  a `settle` (0.0 default; the watch harnesses pass 2.0). This is the same
+  shape as the top-level learnings log's "a done marker can race its own
+  stimulus", reached from the other direction.
+
+### What stage 2 still owes
+
+The client core itself — login, sync, one message received — is NOT done.
+`wata-watch` links wataclient but does not yet run a session: that needs
+the wata-ios bodies ported (`caps`, `config`, the screen bodies, the pump)
+and is the same shape of work plan 0044 stage 4 was for the phone, not a
+probe. Nothing found so far suggests it is blocked; the platform questions
+are all answered.
+
+### Sizing the rest, now that the unknowns are gone
+
+- **Stage 2 (client core + the screen bodies)** — a port of wata-ios's
+  sources, mechanical but not small.
+- **Input** — untouched. `WKCrownSequencer` and the tap/long-press/swipe/pan
+  gesture recognizers are all present and carry no deprecation, and
+  long-press is exactly hold-to-talk. Whether a UIKit responder on our own
+  window sees touches at all on watchOS is unprobed and should be the next
+  cheap falsifying check.
+- **Stage 3 (audio)** — `AVFAudio` is in the watch SDK and `macaudio` is
+  purego over it; opus is cgo, a separate question.
+- **Stage 4 (hardware)** — needs the owner's Series 10 and a signing
+  identity.

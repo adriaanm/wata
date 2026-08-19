@@ -1,0 +1,6 @@
+# In-link libraries above the implicit prelude (core). Same chain as wata-ios:
+# json then wataclient, then wataui, whose differ will drive the retained
+# UIKit backend on the watch exactly as it does on the phone.
+json
+wataclient
+wataui
