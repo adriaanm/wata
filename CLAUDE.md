@@ -103,10 +103,12 @@ serve the compiler's own gate does not belong here.
 | `wata-tui/`        | app — the terminal client and admin REPL (host-side, no device layer)    |
 | `wata-mac/`        | app — the macOS client: wata-fb's bodies on the retained AppKit backend  |
 | `wata-ios/`        | app — the iOS client (plan 0044, simulator-first): the retained UIKit stage |
+| `wata-watch/`      | app — the standalone Apple Watch client: wata-ios's client under WatchKit |
 | `wataclient/`      | library — the portable Matrix client core, linked by `wata-fb`            |
 | `wataui/`          | library — the declarative view algebra and differ, backend-free           |
 | `go-pkgs/audio/`   | plain Go cgo module — opus + tinyalsa, `wata-fb`'s device audio           |
 | `go-pkgs/nativeui/`| plain Go — the retained AppKit backend for wataui (plan 0032)             |
+| `go-pkgs/watchshell/`| plain Go — WatchKit's entry point, the watch's window and its input     |
 | `tools/`           | build, test, and deploy scripts                                          |
 | `docs/`            | design and plan docs (index below)                                       |
 
@@ -268,6 +270,7 @@ justfile just gives it a name.
 | [docs/design/wata-tui.md](docs/design/wata-tui.md) | terminal client: the command REPL, the admin surface, its smoke |
 | [docs/design/wata-mac.md](docs/design/wata-mac.md) | macOS client: the retained AppKit backend, the shared bodies, its smoke |
 | [docs/design/wata-ios.md](docs/design/wata-ios.md) | iOS client: what UIKit changes vs wata-mac, the simulator gates |
+| [docs/design/wata-watch.md](docs/design/wata-watch.md) | watch client: how Go reaches watchOS, WatchKit's entry point, the gestures, audio |
 | [docs/design/bindgen.md](docs/design/bindgen.md) | Apple bindings: the generator, the allowlist, refusals, how they are verified |
 | [docs/design/sgola-ffi.md](docs/design/sgola-ffi.md) | the FFI frontier: what Sgola reaches today, what is queued, what stays Go and why |
 | [justfile](justfile) | every repeatable operation, one recipe each (`just` to list) |
