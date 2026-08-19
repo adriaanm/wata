@@ -8,6 +8,14 @@ import av "github.com/adriaanm/wata/go-pkgs/appleptt/avfaudio"
 // there is nothing to activate. The iOS twin is session_ios.go.
 func sessionActivate() error { return nil }
 
+// Without an AVAudioSession there is no PushToTalk and nothing to negotiate:
+// the app owns its audio, so the policy is the unjoined one and playback needs
+// no episode. Stated through policyFor rather than as a literal, so the two
+// platforms cannot drift apart on what "the app owns it" means.
+func policyNow() sessionPolicy { return policyFor(false, false) }
+
+func beginPlaybackSession() (func(), error) { return func() {}, nil }
+
 // On macOS the HAL vends the input device's format whether or not the engine
 // has ever touched its input node, so there is nothing to prepare.
 func prepareInput(e av.AVAudioEngine) {}

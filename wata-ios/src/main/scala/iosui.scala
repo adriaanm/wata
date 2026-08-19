@@ -124,6 +124,12 @@ object iosshell:
   @go.name("PTTTransmit") def pttTransmit(on: Boolean): Unit = ???
   /** is a channel joined right now? */
   @go.name("PTTJoined") def pttJoined(): Boolean = ???
+  /** tell the system UI whether wata's own service is reachable — "ready",
+   *  "connecting" or "unavailable". The framework's default is `ready`, which
+   *  stops being true the moment a sync drops, so the pump feeds this from the
+   *  same state it prints as `net:`. Affects only what the user sees on the
+   *  pill and the lock screen. */
+  @go.name("PTTServiceStatus") def pttServiceStatus(state: String): Unit = ???
   /** the oldest thing the framework told the app, or "" — printed as `ptt: …`;
    *  `talk on <system|app>`, `talk off` and `left` are also decisions. */
   @go.name("TakePTTEvent") def takePttEvent(): String = ???

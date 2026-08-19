@@ -70,16 +70,18 @@ pump with the mac-only seams swapped.
   one iOS-only piece is its `session_ios.go`: AVAudioSession set to
   PlayAndRecord (DefaultToSpeaker — walkie-talkie audio belongs on the
   speaker — plus AllowBluetooth) and activated before the engine is
-  built, with the record-permission ask fired there so the system
-  prompt lands at audio-thread start, not mid-PTT-press; and its
+  built, WHEN the app is allowed to (see the session rules under
+  PushToTalk below: a joined app is not, and does neither); the
+  record-permission ask is fired unconditionally, so the system prompt
+  lands at audio-thread start rather than mid-PTT-press — gated on the
+  category, as it first was, a launch that found a channel already
+  joined never asked at all; and its
   `prepareInput`, which touches the engine's input node before the
   first start — on iOS the IO unit is configured lazily, and an engine
   started input-node-less runs output-only, the input node reporting a
   0 Hz format on every capture open (found on hardware; macOS's HAL
   vends the format regardless, so the mac never saw it). A denied mic
-  still surfaces as MIC FAILED per command, never a wedge. Foreground
-  only: the PushToTalk framework (background transmit) is a follow-up
-  plan.
+  still surfaces as MIC FAILED per command, never a wedge.
 - **Push notifications are the out-of-app inbound path** (plan 0065
   tier 2). iOS suspends a backgrounded app and tears down its
   sockets, so the sync loop is a FOREGROUND mechanism by
@@ -116,19 +118,42 @@ pump with the mac-only seams swapped.
   The ephemeral token goes to `/_wata/v1/push/channel/join` and is
   kept in a table apart from the stable alert token, since it dies
   with the join.
-  **The audio-session handoff** is the subtle part: `macaudio`'s
-  `session_ios.go` carries an owner flag flipped SYNCHRONOUSLY from
-  the activate/deactivate delegate callbacks, never through the pump
-  — a 33 ms frame is too late for a yield that must be true the
-  instant the framework says so. While the framework owns the
-  session, `sessionActivate` sets nothing: no `setCategory:`, no
-  `setActive:` — those two calls ARE the incompatibility plan 0008
-  records, and the session handed over is already configured. The
-  engine is started if stopped, because a transmission that woke the
-  app finds none running. On deactivate our own category is restored
-  so playback after a transmission works. Both directions are
-  best-effort and log-only: an unreclaimable session must never wedge
-  the app.
+  **A JOINED APP HAS NO AUDIO SESSION OF ITS OWN** (plan 0066), and
+  that is the fact everything else here follows from. Not "not
+  during an episode" — never: iOS refuses the app's `setActive:` with
+  `'ent?'` (missing entitlement) AND refuses the engine's own start,
+  which implicitly activates, with `'ent?'` at launch and `'what'`
+  (`kAudioUnitErr_CannotDoInCurrentContext`) between episodes. Apple
+  states the rule ("the activation of your audio session MUST be
+  triggered by the PushToTalk system, NOT your app") and DTS explains
+  why a pre-join build looked fine: `setActive:` works for a
+  foreground app because a foreground app owns the audio system, and
+  fails in the background — where a walkie-talkie lives.
+  So `sessionpolicy.go` decides, from two facts (joined? episode
+  live?), what may be touched: unjoined the app owns everything;
+  joined-and-idle it touches NOTHING and has no running engine, which
+  is a normal state rather than a defect to report; mid-episode the
+  engine runs on the session the framework handed over and no
+  category or activation is set on top of it. The ownership flag is
+  flipped SYNCHRONOUSLY from the activate/deactivate callbacks, never
+  through the pump — a 33 ms frame is too late for a yield that must
+  be true the instant the framework says so.
+  **Every sound is therefore an episode**, including one the user
+  asked for. A transmission's recording begins on the handover that
+  follows `requestBeginTransmitting`. PLAYBACK — a tapped message, or
+  one the arrival policy auto-plays — asks for an episode the same
+  way an incoming push does: `macaudio.PlayMessage` calls
+  `beginPlaybackSession`, which raises the speaker through the hook
+  `iosshell` registers (`setActiveRemoteParticipant`, named after the
+  channel), waits for the handover, plays, and lowers it. Nothing
+  above macaudio knows: the audio thread, the applets and wataclient
+  ask for a sound and get one. A live episode is JOINED rather than
+  reopened, and is not the caller's to end — lowering the speaker
+  under a draining burst would cut off the message in the air.
+  Both directions are best-effort and log-only: a session that cannot
+  be reclaimed must never wedge the app. `PTTServiceStatus` feeds the
+  system UI the session's own connection state, so the pill stops
+  claiming a healthy channel while the app knows the sync is down.
   Transmit is ONE path — while joined, the on-screen PTT button goes
   through the framework rather than the applet, and recording starts
   on a derived event (both `didBeginTransmitting` and

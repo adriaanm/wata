@@ -115,6 +115,8 @@ object PttChan:
   /** the last `pttJoined()` reading — what routes the on-screen button
    *  without a facade call per key event. */
   private val routingC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  /** the service state the system UI was last told, "" before the first. */
+  private val serviceC: sgo.Atomic[String] = sgo.atomic("")
 
   /** the messages the pushes named, in arrival order, with the deadlines that
    *  decide when one is no longer worth playing live and when the burst has
@@ -170,6 +172,7 @@ object PttChan:
       nextAtC.set(0L)
     postStep(h.client, nowMs)
     joinStep(ctx, nowMs)
+    serviceStep(ctx)
     playStep(h, st, ctx, nowMs)
 
   /** one line from the shell's queue. Only three of them are decisions; the
@@ -210,6 +213,27 @@ object PttChan:
       joinAtC.set(nowMs + JOIN_RETRY_MS)
       val why = go.iosshell.pttJoin(channelName(ctx), ctx.snap.family.id)
       if why != "" then println("ptt: not joining: " + why)
+
+  /** keep the system UI's view of our service honest, one call per change. The
+   *  framework's default is `ready` and it never stops being that on its own,
+   *  so a phone whose sync is erroring would show a healthy channel and a talk
+   *  button that goes nowhere. Only what the user SEES depends on this; the
+   *  audio path does not. */
+  def serviceStep(ctx: FrameCtx): Unit =
+    if routingC.get() then
+      val state = serviceState(ctx.connection)
+      if state != serviceC.get() then
+        serviceC.set(state)
+        go.iosshell.pttServiceStatus(state)
+
+  /** the session's connection state as the three words the framework has.
+   *  `connected` and `syncing` are both a working service; anything else means
+   *  a press right now would not reach anyone. */
+  def serviceState(c: ConnectionState): String = c match
+    case _: Connected    => "ready"
+    case _: Syncing      => "ready"
+    case _: Connecting   => "connecting"
+    case _               => "unavailable"
 
   /** what the system UI calls this channel. */
   def channelName(ctx: FrameCtx): String =

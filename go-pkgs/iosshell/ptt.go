@@ -207,6 +207,13 @@ func PTTStart() {
 }
 
 func pttStart() {
+	// macaudio cannot reach the channel manager (this package imports it, not
+	// the other way round), so it asks for the episode a joined app needs
+	// before it can make any sound through these hooks. Registered before the
+	// framework is even loaded: a nil hook is a diagnosable refusal, and there
+	// is no window in which one is missing for a manager that exists.
+	macaudio.PTTBeginEpisode = pttBeginPlaybackEpisode
+	macaudio.PTTEndEpisode = PTTSpeakerStopped
 	if _, err := purego.Dlopen(
 		"/System/Library/Frameworks/PushToTalk.framework/PushToTalk",
 		purego.RTLD_GLOBAL|purego.RTLD_LAZY); err != nil {
@@ -288,6 +295,16 @@ func pttStart() {
 			pttMu.Unlock()
 			if talking {
 				pttNote("talk off")
+			} else {
+				// The transmission never became a press: the framework accepted
+				// it but the session handover had not arrived by the time the
+				// user let go. A brief tap on the system talk button that
+				// LAUNCHES the app does this — the launch outlasts the press —
+				// and it recorded nothing. Said plainly here because the
+				// alternative is a log with a begin, an end, and no explanation
+				// between them (device logs 2026-08-19, twice).
+				pttNote("nothing was recorded: the transmission ended before the " +
+					"audio session was handed over")
 			}
 			// The transmission is over as far as the framework is concerned,
 			// so its hand-back is now owed; macaudio stops waiting for it
@@ -426,6 +443,71 @@ func errText(err error) string {
 	return err.Error()
 }
 
+// pttBeginPlaybackEpisode opens an episode so the APP can play something —
+// a message the user tapped, or one the arrival policy auto-plays. A joined app
+// has no audio session of its own (plan 0066), and Apple's sanctioned way to
+// ask for one outside a transmission is to report an active remote participant:
+// the framework then activates a session, hands it over, and puts the speaker on
+// the system UI. That is honest here — a wata message IS a remote participant
+// talking — and it is the same episode machinery an incoming push opens, so
+// PTTSpeakerStopped ends it and the burst rules apply unchanged.
+//
+// Three answers, because "who ends this episode" has three cases:
+//   - a positive id: this call opened the episode, and whoever asked for it
+//     ends it when the sound is over;
+//   - -1: an episode was ALREADY live (a push-woken burst, a transmission).
+//     Play on it and do not end it — it belongs to the pump, which ends it when
+//     the whole burst has drained;
+//   - 0: no manager, no channel, or no join. Nothing can play, and macaudio
+//     says so rather than playing silently into a session it does not have.
+//
+// The participant is named after the CHANNEL rather than the message's sender:
+// this is called from the audio thread, which knows a PCM buffer and nothing
+// else. Naming the actual speaker is the target work queued as PTT-CHANNEL-TARGET.
+func pttBeginPlaybackEpisode(reason string) int {
+	m, why := pttCurrent()
+	if why != "" {
+		pttNote("no episode for %s: %s", reason, why)
+		return 0
+	}
+	pttMu.Lock()
+	if !pttJoined {
+		pttMu.Unlock()
+		return 0
+	}
+	// A live episode is joined rather than replaced, exactly as a second push
+	// joins the burst already playing: same speaker, same session, nothing to
+	// raise. Crucially it is not ours to END either — lowering the speaker under
+	// a draining burst would cut off the message in the air.
+	if pttEpisodeLive {
+		pttMu.Unlock()
+		return -1
+	}
+	pttEpisodeLive = true
+	pttEpisodeSeq++
+	pttEpisodeGen = pttActivations
+	ep := pttEpisodeSeq
+	name := pttName
+	pttMu.Unlock()
+	if name == "" {
+		name = "wata" // -initWithName: rejects an empty name
+	}
+	inPTTPool(func() {
+		u, ok := pttUUIDObj()
+		if !ok {
+			return
+		}
+		p := pt.GetPTParticipantClass().Alloc().InitWithNameImage(name, pt.UIImage{})
+		m.SetActiveRemoteParticipantForChannelUUIDCompletionHandler(p, u, func(err error) {
+			if err != nil {
+				pttNote("raising the speaker for %s failed: %s", reason, errText(err))
+			}
+		})
+	})
+	pttNote("speaker up #%d for %s", ep, reason)
+	return int(ep)
+}
+
 // pttMaybeTalkOn queues the `talk on` the pump turns into a PTT press, once
 // the framework has both begun transmitting AND handed over an activated
 // session — recording before that has no session to record on.
@@ -521,6 +603,42 @@ func PTTTransmit(on bool) {
 			m.StopTransmittingWithChannelUUID(u)
 		}
 	})
+}
+
+// PTTServiceStatus tells the system UI whether wata's own service is reachable,
+// so the pill and the lock screen stop claiming a healthy channel while the app
+// knows its connection is down. `ready`, `connecting`, `unavailable` — the pump
+// feeds it from the same session state it prints as `net:`, one call per change
+// (the framework's default is `ready`, which is a lie the moment a sync drops).
+//
+// Nothing about audio depends on this: it is what the user sees when they raise
+// the phone and wonder whether a press would go anywhere.
+func PTTServiceStatus(state string) {
+	var st pt.PTServiceStatus
+	switch state {
+	case "ready":
+		st = pt.PTServiceStatusReady
+	case "connecting":
+		st = pt.PTServiceStatusConnecting
+	default:
+		st = pt.PTServiceStatusUnavailable
+	}
+	m, why := pttCurrent()
+	if why != "" {
+		return
+	}
+	inPTTPool(func() {
+		u, ok := pttUUIDObj()
+		if !ok {
+			return
+		}
+		m.SetServiceStatusForChannelUUIDCompletionHandler(st, u, func(err error) {
+			if err != nil {
+				pttNote("service status %s failed: %s", state, errText(err))
+			}
+		})
+	})
+	pttNote("service %s", state)
 }
 
 // PTTJoined reports whether a channel is joined right now — what decides

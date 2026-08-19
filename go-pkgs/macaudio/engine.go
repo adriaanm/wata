@@ -160,6 +160,27 @@ func SetupMixer() {
 	})
 }
 
+// running answers whether the engine's IO is going. A joined PushToTalk app
+// between episodes is deliberately NOT running (sessionpolicy.go).
+func (e *engine) running() bool {
+	var on bool
+	inPool(func() { on = e.eng.Running() })
+	return on
+}
+
+// startIO starts the engine's IO on whatever session is current. Only called
+// where the policy allows it; on iOS a start implicitly activates the session,
+// which a joined app may not do.
+func (e *engine) startIO() error {
+	var err error
+	inPool(func() {
+		if ok, startErr := e.eng.StartAndReturnError(); !ok {
+			err = fmt.Errorf("macaudio: AVAudioEngine start: %w", startErr)
+		}
+	})
+	return err
+}
+
 // ensureEngine builds the engine if a previous attempt left none. iOS only in
 // practice: a launch whose session activation was refused because a PushToTalk
 // channel was already restored used to end here permanently, with every later
@@ -228,23 +249,37 @@ func startEngine() error {
 		// iOS only (no-op on macOS): the input node must exist before the
 		// first start or the IO unit comes up output-only. See session_ios.go.
 		prepareInput(e)
-		ok, startErr := e.StartAndReturnError()
-		if !ok {
-			err = fmt.Errorf("macaudio: AVAudioEngine start: %w", startErr)
-			return
-		}
 		eng = &engine{eng: e, player: player, mixer: mixer, fmt48: f48}
 	})
-	if err == nil {
-		// The success side of the story. Until this line existed the log only
-		// ever mentioned the engine when it FAILED, so "audio is available"
-		// was never a thing the device log said.
-		log.Printf("macaudio: the audio engine is running")
+	if err != nil {
+		return err
 	}
-	return err
+	// STARTING is a separate question from BUILDING, and only on iOS: the graph
+	// above is session-independent, but a start implicitly activates the audio
+	// session, which a joined PushToTalk app may not do (sessionpolicy.go). So a
+	// joined-and-idle launch ends here with a built engine and no IO, and the
+	// framework's next handover starts it. That is a state worth reporting, not
+	// a failure — reported as a failure it read as a broken microphone for a day
+	// (plan 0066).
+	if !policyNow().startEngine {
+		log.Printf("macaudio: the engine is built and waiting — a PushToTalk channel " +
+			"is joined, so the framework starts the audio, not the app")
+		return nil
+	}
+	if err := eng.startIO(); err != nil {
+		return err
+	}
+	// The success side of the story. Until this line existed the log only ever
+	// mentioned the engine when it FAILED, so "audio is available" was never a
+	// thing the device log said.
+	log.Printf("macaudio: the audio engine is running")
+	return nil
 }
 
-// audioEngine is the guard every hardware entry point goes through.
+// audioEngine is the guard every hardware entry point goes through. It answers
+// an engine whose IO is RUNNING, or why not: a built engine that is parked
+// (joined PushToTalk, no episode) cannot play or record, and the caller must be
+// told which of the two it is looking at.
 func audioEngine() (*engine, error) {
 	if !setupDone {
 		return nil, errors.New("macaudio: SetupMixer has not run (the audio thread calls it once at start)")
@@ -257,7 +292,20 @@ func audioEngine() (*engine, error) {
 	e, err := eng, setupErr
 	engMu.Unlock()
 	if e != nil {
-		return e, nil
+		if e.running() {
+			return e, nil
+		}
+		// A start is worth trying whenever the policy allows one: the handover
+		// that made it legal may have arrived while this call was in flight.
+		if policyNow().startEngine {
+			if startErr := e.startIO(); startErr != nil {
+				return nil, startErr
+			}
+			return e, nil
+		}
+		return nil, errors.New("macaudio: a PushToTalk channel is joined and no " +
+			"episode is live, so the engine is stopped — the framework hands the " +
+			"audio session over, and only then can anything play or record")
 	}
 	if err != nil {
 		return nil, err
@@ -320,6 +368,16 @@ func PlayMessage(pcm []byte, vol int) (int, error) {
 	if fakeMode {
 		return fakePlay(frames)
 	}
+	// iOS with a joined PushToTalk channel: the app has no audio session of its
+	// own, so making a sound means asking the framework for an episode and
+	// playing on the session it hands over (plan 0066). A no-op everywhere else,
+	// including mid-episode — a push-woken message is already inside one, and
+	// that episode belongs to whoever opened it.
+	endSession, err := beginPlaybackSession()
+	if err != nil {
+		return 0, err
+	}
+	defer endSession()
 	e, err := audioEngine()
 	if err != nil {
 		return 0, err
