@@ -519,3 +519,12 @@ ios-enroll-smoke:
 ios-push-smoke:
     tools/ios-push-smoke.py
 
+
+# the plan-0069 stage gate: `wata-watch interptest` on the watch simulator —
+# the SAME suite ios-interptest runs (interptest.scala copied over, one PTT
+# case dropped), so a green run says the retained stage, wataui's differ and
+# the render probes behave on watchOS exactly as on iOS.
+# Needs Xcode + a watchOS simulator runtime; not in ci.
+#   just watch-interptest --only run  # one stage
+watch-interptest *FLAGS:
+    tools/watch-interptest.py {{FLAGS}}

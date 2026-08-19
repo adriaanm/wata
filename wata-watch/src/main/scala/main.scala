@@ -32,10 +32,29 @@ object Main:
   /** the trampolines, minted ONCE at module init (the registration
    *  contract) — the shell invokes them on the main thread. */
   val readyCb: go.Uintptr = go.callback(() => Main.onReady())
+  val interptestCb: go.Uintptr = go.callback(() => Main.runInterptest())
 
   def main(args: Array[String]): Unit =
     go.watchshell.start()
-    go.watchshell.runApp(readyCb) // never returns
+    if args.length > 0 && args(0) == "interptest" then
+      go.watchshell.runApp(interptestCb) // never returns
+    else go.watchshell.runApp(readyCb) // never returns
+
+  /** `wata-watch interptest` — the retained stage's suite (interptest.scala,
+   *  wata-ios's verbatim), run inside the ready hop on the main thread.
+   *  The verdict is a printed line: WatchKit owns the process's exit. */
+  def runInterptest(): Unit =
+    // PRUNE-DANGLING-MODULE-INIT: `IosStage.drainPending` is reached ONLY by
+    // the `go.callback` literal in IosStage's module init, and the pruner
+    // drops the def while keeping the anonfun that calls it — the emitted Go
+    // then fails to build on an undefined IosStage_drainPending. Reaching
+    // `submit` roots it. wata-ios needs no such line because its pump is a
+    // real caller of submit; the watch has no pump yet. Fixed upstream at
+    // sgola ee4d782d, so this comes out with the repin
+    // (REPIN-PRUNE-DANGLING-MODULE-INIT), together with wata-ios's comment.
+    IosStage.submit(Nil)
+    val failures = InterpTest.run()
+    ()
 
   /** runs on the main thread once watchshell's window is on the scene. */
   def onReady(): Unit =

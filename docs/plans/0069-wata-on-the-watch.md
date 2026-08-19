@@ -502,3 +502,47 @@ On the strength of the hit-test the design proceeds on **UIKit input on
 the app's own view tree**, the same path wata-ios uses. The WatchKit
 fallback (`WKTapGestureRecognizer` and friends, which would pull a
 storyboard back in) stays documented as the retreat, not the plan.
+
+## The stage suite runs on the watch (2026-08-19): `just watch-interptest`
+
+wata-ios's `interptest.scala` now runs on watchOS, and passes:
+
+```
+interptest: PASS
+watch-interptest: launch-to-verdict 0.72s
+```
+
+It is the phone's suite, copied with one case dropped — plan 0067's PTT
+target rule, which belongs to `ptt.scala`, the phone's PushToTalk binding,
+and is pure list logic the phone already gates. Everything else is
+verbatim: the retained invariant (after a mount and after a patch script
+the NATIVE hierarchy mirrors the tree `Patches.applyAll` produces), in-place
+mutation vs replacement, paint order on inserts, the offscreen render
+probes, and the pure pixel and glyph tables.
+
+That makes the architectural claim concrete rather than plausible. The
+watch client is not "like" wata-ios; it runs wata-ios's stage
+(`iosstage.scala`), display tables (`display.scala`), glyphs and pixels
+unchanged, over the same generated UIKit bindings, on a platform whose
+headers say those classes are not there.
+
+**One compiler workaround was needed**, and it is an already-fixed bug:
+`IosStage.drainPending` is reached only by a `go.callback` literal in
+IosStage's module init, and the pruner drops the def while keeping the
+anonfun that calls it — the emitted Go then fails to build on an undefined
+`IosStage_drainPending`. wata-ios does not hit this because its pump is a
+real caller of `submit`; the watch has no pump yet. A no-op
+`IosStage.submit(Nil)` in `runInterptest` roots it, commented with the key.
+Fixed upstream at sgola `ee4d782d`, so it comes out with
+`REPIN-PRUNE-DANGLING-MODULE-INIT` — which is exactly the evidence that
+ticket wanted: the defect reproduces in a second consumer, in a module
+that never had the phone's accidental root.
+
+### What stage 2 still owes
+
+A real session. `wata-watch` links wataclient, paints, and passes the
+stage suite, but does not log in, sync, or receive a message. That needs
+the pump and wata-ios's `caps`/`config`/screen bodies, plus a layout pass:
+the watch's container is 208x248 against the phone's, and the screen
+bodies are written to wata-fb's 160x128 grid scaled up. Layout is the
+first thing the port will have to think about rather than copy.
