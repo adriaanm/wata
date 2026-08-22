@@ -115,6 +115,8 @@ tools/phone-spike/out/
 # the PushToTalk hello's build products and the owner's provisioning profile
 tools/bindgen/hello/out/
 tools/bindgen/hello/*.mobileprovision
+# the watch profile's conventional home (watch-device.py's profile_path)
+tools/watch-device/*.mobileprovision
 tools/objc-spike/.sgo/
 tools/interp-spike/.sgo/
 .scala-build/

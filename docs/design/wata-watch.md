@@ -420,16 +420,26 @@ the box's left edge where a centred one leaves it empty.
 
 ## Hardware
 
-`just watch-device` build and bundle are verified; sign and install need
-two things only the owner can provide, and both are checked with the
-portal/setup steps printed rather than a codesign message that names
-neither:
+`just watch-device` is verified end to end: built, signed, installed and
+launched on the owner's Series 10 (watchOS 26.6, 2026-08-22). Two facts
+from that first run correct earlier predictions, and the script's checks
+now encode them:
 
-1. **A watchOS App Development profile.** Profiles carry a `Platform` list
-   and an iOS profile cannot sign a watch app, whatever its bundle id.
-2. **The watch in Developer Mode, paired to Xcode**, so it appears in
-   `xcrun devicectl list devices`.
+1. **The profile needs the watch's UDID, not a watchOS platform entry.**
+   The portal has no watchOS profile type; an *iOS App Development*
+   profile with the watch ticked in its device list installs and launches,
+   its `Platform` list still reading iOS/xrOS/visionOS. installd checks
+   the provisioned UDID, not the platform — and under a development
+   signature it did not object to the bundle id (`net.wa-ta.watch`)
+   differing from the profile's App ID (`net.wa-ta.hello`). The install
+   stage checks the UDID itself and prints the portal steps on a miss.
+2. **The watch is introduced to CoreDevice by its iPhone, over USB.**
+   Plug the phone in with Xcode's Devices window open, accept the trust
+   prompt on the watch, enable Developer Mode there (it reboots) — after
+   that the watch is a first-class `devicectl` target over the wifi
+   tunnel and everything is scripted. No CLI initiates the introduction;
+   `devicectl manage pair` only pairs devices already discovered.
 
-Nothing has run on a real watch yet. The open hardware questions are
-whether a real long press is delivered (`WATCH-INPUT-DELIVERY`) and the
-real-audio round trip (`WATCH-AUDIO`).
+The open hardware questions are whether a real long press is delivered
+(`WATCH-INPUT-DELIVERY`) and the real-audio round trip (`WATCH-AUDIO`) —
+both now testable on a wrist.

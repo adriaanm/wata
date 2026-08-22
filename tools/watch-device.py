@@ -19,16 +19,24 @@ Darwin target. watchOS 26 is the first release running full arm64 (Series
 the first version Go can reach at all. Everything older is arm64_32 and out
 of reach forever. See tools/iosenv.py's MIN_WATCHOS.
 
-THE PROFILE IS THE PART ONLY THE OWNER CAN DO, and the iOS profile does not
-work: profiles carry a Platform list, and the tree's WataHello.mobileprovision
-is ['iOS', 'xrOS', 'visionOS'] — no watchOS. The sign stage checks this and
-prints the portal steps rather than failing on a codesign message that names
-neither the platform nor the profile. Set WATA_WATCH_PROFILE to point at one.
+THE PROFILE IS THE PART ONLY THE OWNER CAN DO, and what it must carry is
+the WATCH'S UDID, not a watchOS platform entry: the portal has no watchOS
+profile type, and an *iOS App Development* profile with the watch ticked in
+its device list installs AND launches (verified on watchOS 26.6, Series 10
+— its Platform list still read ['iOS', 'xrOS', 'visionOS']). The install
+stage checks the UDID and prints the portal steps rather than failing on a
+devicectl message that names neither. Set WATA_WATCH_PROFILE to point at
+one, or drop it at the conventional home profile_path() names.
 
 THE WATCH MUST ALSO BE SET UP FOR DEVELOPMENT, which is likewise the owner's:
-Developer Mode on the watch (Settings -> Privacy & Security -> Developer
-Mode), then paired to Xcode. `xcrun devicectl list devices` is the check —
-the watch appears there or this script has nothing to install onto.
+the watch is introduced to CoreDevice by its paired iPhone over USB (plug
+the phone in with Xcode's Devices window open, accept the trust prompt on
+the watch — no CLI initiates this introduction; `devicectl manage pair`
+only pairs devices already discovered), then Developer Mode on the watch
+(Settings -> Privacy & Security -> Developer Mode; it reboots). After that
+the watch is a first-class devicectl target over the wifi tunnel.
+`xcrun devicectl list devices` is the check — the watch appears there or
+this script has nothing to install onto.
 
 THE MICROPHONE PROMPT IS EXPECTED, NOT A BUG. On the first press the system
 asks for permission, showing the NSMicrophoneUsageDescription below; the app
@@ -69,8 +77,9 @@ def profile_path():
     """$WATA_WATCH_PROFILE, else the watch profile's conventional home.
 
     Deliberately NOT falling back to the iOS profiles the way ios-device.py
-    does: a profile without watchOS in its Platform list cannot sign this app,
-    so falling back would only trade a clear message for a confusing one.
+    does: a profile only works here if the watch's UDID is in its device
+    list, and the tree's iOS profiles may predate the watch's registration —
+    falling back would trade a clear message for a confusing one.
     """
     if p := os.environ.get("WATA_WATCH_PROFILE"):
         return pathlib.Path(p)
@@ -115,16 +124,19 @@ def team_id():
 
 def portal_steps(why):
     """The exact thing to do at developer.apple.com. Printed instead of a
-    codesign error, because none of codesign's messages name the platform."""
+    raw codesign/devicectl error, because neither names the profile."""
     return (
         f"{why}\n\n"
         f"  What to mint (developer.apple.com/account):\n"
-        f"    1. Identifiers -> new App ID for {bundle_id()}.\n"
-        f"    2. Devices -> add the watch (Xcode registers it once the watch\n"
-        f"       is paired and in Developer Mode).\n"
-        f"    3. Profiles -> new *watchOS App Development* profile for that\n"
-        f"       App ID and that watch. The platform matters: an iOS profile\n"
-        f"       cannot sign a watch app, whatever its bundle id.\n"
+        f"    1. Identifiers -> an App ID for {bundle_id()} (an existing one\n"
+        f"       is fine; a dev signature tolerates a bundle-id mismatch).\n"
+        f"    2. Devices -> register the watch's UDID (the 00008xxx one from\n"
+        f"       `xcrun devicectl device info details --device <watch>`).\n"
+        f"    3. Profiles -> there is NO watchOS profile type; edit or create\n"
+        f"       an *iOS App Development* profile for that App ID and tick\n"
+        f"       the watch in its device list. Its Platform list will not\n"
+        f"       say watchOS — that is fine: installd checks the provisioned\n"
+        f"       UDID, not the platform (verified watchOS 26.6).\n"
         f"    4. Download it to {profile_path()}\n"
         f"       (or point WATA_WATCH_PROFILE at it).\n")
 
@@ -181,13 +193,11 @@ def sign():
     if not profile.exists():
         raise SystemExit(portal_steps(
             f"no provisioning profile at {profile}."))
-    plat = profile_plist().get("Platform") or []
-    if "watchOS" not in plat:
+    if not profile_plist().get("ProvisionedDevices"):
         raise SystemExit(portal_steps(
-            f"{profile.name} is for {plat or 'an unknown platform'}, "
-            f"not watchOS.\n  A profile's Platform list is checked at install "
-            f"time, so this would\n  fail on the watch even though codesign "
-            f"succeeds here."))
+            f"{profile.name} provisions no devices; the watch's UDID must "
+            f"be in its\n  device list — that, not the Platform list, is "
+            f"what installd checks."))
     if not team_id():
         raise SystemExit(
             "no team id: set WATA_TEAM_ID, or use a profile this script can "
@@ -234,9 +244,30 @@ def pick_device():
     return d["identifier"]
 
 
+def device_udid(identifier):
+    """The hardware UDID (00008xxx-…) — what the portal and the profile's
+    ProvisionedDevices use, not the CoreDevice UUID devicectl addresses."""
+    with tempfile.NamedTemporaryFile(suffix=".json") as tf:
+        subprocess.run(["xcrun", "devicectl", "device", "info", "details",
+                        "--device", identifier, "--json-output", tf.name],
+                       check=True, capture_output=True)
+        info = json.load(open(tf.name)).get("result", {})
+    return info.get("hardwareProperties", {}).get("udid", "")
+
+
 def install():
+    dev = pick_device()
+    # installd's real gate (observed watchOS 26.6): the watch's UDID must be
+    # provisioned; the profile's Platform list is not consulted, and a
+    # watch-free profile fails only here, with a message naming nothing.
+    provisioned = profile_plist().get("ProvisionedDevices") or []
+    udid = device_udid(dev)
+    if provisioned and udid and udid not in provisioned:
+        raise SystemExit(portal_steps(
+            f"the watch ({udid}) is not in {profile_path().name}'s device "
+            f"list."))
     run(["xcrun", "devicectl", "device", "install", "app",
-         "--device", pick_device(), APP])
+         "--device", dev, APP])
 
 
 STAGES = {"build": build, "bundle": bundle, "sign": sign, "install": install}
