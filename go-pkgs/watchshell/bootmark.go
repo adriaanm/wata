@@ -5,13 +5,17 @@
 // launch that HANGS leaves no crash report worth reading — the 0x8BADF00D
 // watchdog record came back with an unwindable main thread — so the app
 // writes its own progress: one line per launch stage, timestamped and
-// fsynced, appended to $HOME/boot.log. Whichever stage is missing from the
-// pulled file is where launch stopped. A few tiny writes per launch; it
-// stays on permanently.
+// fsynced, appended to the container's boot.log — $HOME when writable, else
+// $TMPDIR (a real watch's container root is not writable, so the file lands
+// in tmp/ there). Whichever stage is missing from the pulled file is where
+// launch stopped. A few tiny writes per launch; it stays on permanently.
 
 //go:build darwin
 
 package watchshell
+
+// void wata_boot_mark_go_alive(void);
+import "C"
 
 import (
 	"fmt"
@@ -27,16 +31,31 @@ var (
 	bootFirst = true
 )
 
-// bootDir is the container root: $HOME when launchd provides it, else
-// derived from $TMPDIR (always <container>/tmp for an app process).
-func bootDir() string {
+// A mark from package init: it runs after the Go runtime is fully up but
+// before main, so its presence or absence splits "runtime never came up"
+// from "runtime up, stuck before or inside main".
+func init() { BootMark("goinit") }
+
+// openBoot opens the trace file, trying the same directories the dyld
+// constructor tries, in the same order — on a real watch the container
+// root ($HOME) is NOT writable and the file lands in $TMPDIR, so writing
+// only $HOME/boot.log would silently drop every Go-side mark.
+func openBoot() *os.File {
+	var dirs []string
 	if h := os.Getenv("HOME"); h != "" {
-		return h
+		dirs = append(dirs, h)
 	}
 	if t := os.Getenv("TMPDIR"); t != "" {
-		return filepath.Dir(filepath.Clean(t))
+		dirs = append(dirs, filepath.Dir(filepath.Clean(t)), t)
 	}
-	return ""
+	for _, dir := range dirs {
+		f, err := os.OpenFile(filepath.Join(dir, "boot.log"),
+			os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+		if err == nil {
+			return f
+		}
+	}
+	return nil
 }
 
 // BootMark appends one fsynced line to <container>/boot.log. The first
@@ -50,15 +69,11 @@ func BootMark(stage string) {
 	if os.Getenv("WATA_BOOT_ABORT") == stage {
 		defer syscall.Kill(syscall.Getpid(), syscall.SIGABRT)
 	}
-	dir := bootDir()
-	if dir == "" {
-		return
-	}
+	C.wata_boot_mark_go_alive()
 	bootMu.Lock()
 	defer bootMu.Unlock()
-	f, err := os.OpenFile(dir+"/boot.log",
-		os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
-	if err != nil {
+	f := openBoot()
+	if f == nil {
 		return
 	}
 	if bootFirst {
