@@ -173,7 +173,7 @@ object InterpTest:
 
   def buildFromScratchMirrors(): Unit =
     val v = fixturePlusQr()
-    val root = IosStage.create(4, false)
+    val root = IosStage.create(Metrics.uniform(4), false)
     IosStage.setTree(v)
     mounted(root, "build") match
       case m: Some[go.uikit.UIView] => assertMirrors("root", m.value, v, 4)
@@ -181,7 +181,7 @@ object InterpTest:
     mirrorEq(v, "build")
 
   def patchSequenceMirrorsApplyAll(): Unit =
-    val root = IosStage.create(4, false)
+    val root = IosStage.create(Metrics.uniform(4), false)
     IosStage.setTree(fixture())
     IosStage.applyScript(script())
     val want = Patches.applyAll(script(), fixture())
@@ -191,7 +191,7 @@ object InterpTest:
     mirrorEq(want, "patch")
 
   def psetSameKindMutatesInPlace(): Unit =
-    val root = IosStage.create(2, false)
+    val root = IosStage.create(Metrics.uniform(2), false)
     IosStage.setTree(VGroup(Keyed("", VText(0, 0, "one", 0xffff)) :: Nil))
     mounted(root, "mutate") match
       case m: Some[go.uikit.UIView] =>
@@ -204,7 +204,7 @@ object InterpTest:
       case None => ()
 
   def psetKindChangeReplaces(): Unit =
-    val root = IosStage.create(2, false)
+    val root = IosStage.create(Metrics.uniform(2), false)
     IosStage.setTree(VGroup(
       Keyed("a", VText(0, 0, "gone", 0xffff)) ::
       Keyed("b", VRect(0, 100, 10, 10, 0x001f)) :: Nil))
@@ -217,7 +217,7 @@ object InterpTest:
       case None                     => ()
 
   def rootPSetReplacesWholeTree(): Unit =
-    val root = IosStage.create(2, false)
+    val root = IosStage.create(Metrics.uniform(2), false)
     IosStage.setTree(fixture())
     val flat = VText(0, 0, "ALL", 0x07ff)
     IosStage.applyScript(PSet(Nil, flat) :: Nil)
@@ -227,7 +227,7 @@ object InterpTest:
     mirrorEq(flat, "rootpset")
 
   def insertOrderIsPaintOrder(): Unit =
-    val root = IosStage.create(2, false)
+    val root = IosStage.create(Metrics.uniform(2), false)
     IosStage.setTree(VGroup(Keyed("b", VText(0, 2, "b", 0xffff)) :: Nil))
     // insert before, after, and in the middle; the subview walk pins that
     // native order tracks child order.
@@ -264,7 +264,7 @@ object InterpTest:
 
   def offscreenRenderProbes(): Unit =
     val scale = 4
-    val root = IosStage.create(scale, false)
+    val root = IosStage.create(Metrics.uniform(scale), false)
     IosStage.setTree(VGroup(
       Keyed("bg", VRect(0, 0, 160, 128, 0x0000)) ::      // black stage
       Keyed("red", VRect(8, 8, 40, 24, 0xf800)) ::       // top-left red

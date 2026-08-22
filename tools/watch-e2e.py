@@ -12,6 +12,9 @@ arrives MID-SESSION, through sync, rather than in the first snapshot.
 The assertion surface is the app's own printed lines (WatchKit owns the
 process exit, the interptest rule):
 
+    metrics: wrist 208x248pt … grid=…  the stage was sized from the panel
+                                        the device reported, and the grid
+                                        and type derived from it
     screen boot / paint boot lit=<n>    the boot screen painted BEFORE the
                                         session connects, counted by the
                                         offscreen render probe on the live
@@ -74,6 +77,11 @@ BASE = f"http://127.0.0.1:{PORT}"
 # NO ^/$ anchors: launch_and_expect searches the JOINED output without
 # MULTILINE, and console-pty lines can carry a stray \r.
 EXPECT = [
+    # the stage was built from a panel the device REPORTED, not from a
+    # constant: a wrist, a non-zero size in points, and a grid derived from
+    # it (plan 0071 step 2). A regression to a fixed 160x128 stage cannot
+    # print this line.
+    r"metrics: wrist [1-9][0-9.]*x[1-9][0-9.]*pt .* grid=[1-9][0-9]*x[1-9]",
     r"screen boot",
     r"paint boot lit=[1-9]",
     r"ready @alice:localhost",

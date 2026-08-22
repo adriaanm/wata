@@ -1,7 +1,7 @@
 import language.experimental.saferExceptions
 
-/** The retained interpreter: a wataui view tree as a live UIView tree, at an
- *  integer scale of the 160x128 stage — wata-mac's interp.scala (plans
+/** The retained interpreter: a wataui view tree as a live UIView tree, on
+ *  THIS DEVICE's panel — wata-mac's interp.scala (plans
  *  0032/0038) transliterated onto UIKit (plan 0044 stage 3): `wataui`'s
  *  `View` and `Patch` consumed DIRECTLY, over facades on the generated uikit
  *  bindings (`uikit.scala`) plus `go.iosui`'s Go glue for what a facade
@@ -22,18 +22,23 @@ import language.experimental.saferExceptions
  *              draws later subviews over earlier — the same rule the algebra
  *              has)
  *
- *  Geometry: coordinates are wataui's semantic positions. VText addresses the
- *  26x15 character grid of the fb font (6x8 cells, text rows starting 1px
- *  down — display.scala's Font.drawText); everything else addresses stage
- *  pixels. Both scale by the integer scale. UIKit's y axis points DOWN — the
- *  stage's own convention — so unlike AppKit there is NO flip: a semantic
- *  rect scales straight into a frame. Group containers all span the full
- *  stage, which keeps child coordinates stage-absolute.
+ *  Geometry: coordinates are wataui's semantic positions. VText addresses a
+ *  character grid (6x8 cells, text rows starting 1px down —
+ *  display.scala's Font.drawText); everything else addresses that grid's
+ *  pixels. **The grid's size on the panel is the METRICS'** (metrics.scala,
+ *  plan 0071 step 2), so the two axes scale independently — a wrist's cell
+ *  is 8.0 x 16.5 points where the handset's is 6 x 8 — and the stage is the
+ *  screen's shape rather than a multiple of the handset's. UIKit's y axis
+ *  points DOWN, the stage's own convention, so unlike AppKit there is NO
+ *  flip: a semantic rect scales straight into a frame. Group containers all
+ *  span the full stage, which keeps child coordinates stage-absolute.
  *
+ *  Type is by ROLE (`TypeRoles`), resolved against the metrics: the header
+ *  row, the list rows and the footer legend get different point sizes.
  *  Retention: the mac stage retains its factory-made NSFont across pools
- *  (nativeui.retainFont); iOS has no retain glue, so the stage stores the
- *  POINT SIZE and mints the font inside each label call — the label retains
- *  the font it is handed, and nothing autoreleased outlives its pool.
+ *  (nativeui.retainFont); iOS has no retain glue, so the font is minted
+ *  inside each label call — the label retains the font it is handed, and
+ *  nothing autoreleased outlives its pool.
  *
  *  Threading: every function that touches the native tree must run on the
  *  UIKit thread. Under the interptest that is the main thread inside
@@ -54,30 +59,27 @@ import language.experimental.saferExceptions
  *  authoritative tree is the mirror. */
 case class IosNode(view: View, native: go.uikit.UIView, kids: List[IosNode])
 
-/** the whole retained state: geometry scale, the container view, the label
- *  font's point size (see the retention note above), the mounted tree and
- *  the plain mirror (`Patches.applyAll` semantics — the invariant
- *  `wata-ios interptest` holds against the real hierarchy). */
-case class IosStageSt(scale: Int, root: go.uikit.UIView, fontPts: Double,
+/** the whole retained state: the surface's metrics (which carry the geometry
+ *  the semantic space maps through — plan 0071 step 2, metrics.scala), the
+ *  container view, the mounted tree and the plain mirror (`Patches.applyAll`
+ *  semantics — the invariant `wata-ios interptest` holds against the real
+ *  hierarchy).
+ *
+ *  The font is not in here any more: there is no single point size on this
+ *  stage. A label's size comes from its ROLE resolved against these metrics
+ *  (`TypeRoles`), which is why a list of names reads louder than the legend
+ *  under it. */
+case class IosStageSt(m: StageMetrics, root: go.uikit.UIView,
   top: Option[IosNode], mirror: Option[View])
 
 object IosStage:
-  // The stage the view algebra addresses: the device panel's geometry
-  // (display.scala's Display/Font constants).
-  val StageW = 160
-  val StageH = 128
-  val GlyphW = 6 // 5px glyph + 1px spacing
-  val GlyphH = 8
+  /** the SEMANTIC space the bodies address: the fb glyph cell, 6x8, one cell
+   *  per character, everything else in that cell's pixels. The metrics say
+   *  how big a cell is on this panel, so these two are a change of units and
+   *  never a size. */
+  val GlyphW = Metrics.FB_GLYPH_W
+  val GlyphH = Metrics.FB_GLYPH_H
   val TextTopPad = 1 // text row 0 starts at y=1, below the 1px status line
-
-  /** monospaced font points per unit of scale. The fb glyph cell is 6x8; no
-   *  vector font matches both, and the row pitch is what must hold, so the
-   *  size keeps the line height inside the 8px cell (SF Mono's ascent+descent
-   *  is ~1.16em). The advance (~0.6em) is then narrower than the 6px cell —
-   *  columns still line up, because every VText is framed from its own grid
-   *  cell; only intra-string width shrinks. The semantic oracle for
-   *  appearance stays the fb goldens. */
-  val cellFontPts = 6.8
 
   private val stC: sgo.Atomic[Option[IosStageSt]] = sgo.atomic(None)
   /** windowed = publish to the main queue; headless = apply inline. */
@@ -94,14 +96,13 @@ object IosStage:
    *  it reaches the stage through the module cells. */
   val applyCb: go.Uintptr = go.callback(() => IosStage.drainPending())
 
-  /** create the scaled stage container (scale*160 x scale*128) — UIKit
-   *  thread only; bracket in a pool. Answers the root view for
-   *  `iosshell.adoptRoot`. */
-  def create(scale0: Int, windowed: Boolean): go.uikit.UIView =
-    val scale = if scale0 < 1 then 1 else scale0
-    val root = go.uikit.getUIViewClass().alloc().initWithFrame(stageRect(scale))
+  /** create the stage container for these metrics — the panel's grid, at the
+   *  panel's own size. UIKit thread only; bracket in a pool. Answers the root
+   *  view for `watchshell.adoptRoot`. */
+  def create(m: StageMetrics, windowed: Boolean): go.uikit.UIView =
+    val root = go.uikit.getUIViewClass().alloc().initWithFrame(stageRect(m))
     windowedC.set(windowed)
-    stC.set(Some(IosStageSt(scale, root, cellFontPts * scale.toDouble, None, None)))
+    stC.set(Some(IosStageSt(m, root, None, None)))
     root
 
   /** the plain view tree the native tree currently shows — the "retained
@@ -161,7 +162,7 @@ object IosStage:
         case None             => ()
       val top = build(s, v)
       s.root.addSubview(top.native)
-      stC.set(Some(IosStageSt(s.scale, s.root, s.fontPts, Some(top), Some(v))))
+      stC.set(Some(IosStageSt(s.m, s.root, Some(top), Some(v))))
     case None => ()
 
   /** mutate the native tree by the differ's script, in script order — the
@@ -189,7 +190,7 @@ object IosStage:
           // mirror semantics: only a root PSet can mount into nothing
           case q: PSet => if lenInts(q.path) == 0 then Some(q.view) else None
           case _       => None
-      stC.set(Some(IosStageSt(s.scale, s.root, s.fontPts, top, mirror)))
+      stC.set(Some(IosStageSt(s.m, s.root, top, mirror)))
     case None => ()
 
   /** swap `fresh` into `old`'s slot in `parent` — UIKit has no
@@ -296,7 +297,7 @@ object IosStage:
 
   def build(s: IosStageSt, v: View): IosNode = v match
     case x: VGroup =>
-      val native = go.uikit.getUIViewClass().alloc().initWithFrame(stageRect(s.scale))
+      val native = go.uikit.getUIViewClass().alloc().initWithFrame(groupRect(s.m))
       var kids: List[IosNode] = Nil
       var cur = x.children
       var going = true
@@ -310,10 +311,10 @@ object IosStage:
           case Nil => going = false
       IosNode(v, native, ListOps.reverse(kids))
     case x: VText =>
-      IosNode(v, label(s, x.text, textFrame(s, x), x.color), Nil)
+      IosNode(v, label(s, x.text, textFrame(s, x), x.color, textPts(s, x.row)), Nil)
     case x: VGlyph =>
       IosNode(v, label(s, IosGlyphs.glyphString(x.glyph),
-        frame(s, x.x, x.y, GlyphW, GlyphH), x.color), Nil)
+        frame(s, x.x, x.y, GlyphW, GlyphH), x.color, glyphPts(s, x.y)), Nil)
     case x: VRect =>
       // -init may return a different object than -alloc did; always adopt
       // the returned id. The VRect element: a plain UIView, background-filled.
@@ -333,14 +334,16 @@ object IosStage:
   def mutate(s: IosStageSt, n: IosNode, v: View): Option[IosNode] = n.view match
     case old: VText => v match
       case x: VText =>
-        relabel(s, n.native, x.text, textFrame(s, x), x.color, old.text, old.color)
+        relabel(s, n.native, x.text, textFrame(s, x), x.color, old.text, old.color,
+          textPts(s, x.row), textPts(s, old.row))
         Some(IosNode(v, n.native, n.kids))
       case _ => None
     case old: VGlyph => v match
       case x: VGlyph =>
         relabel(s, n.native, IosGlyphs.glyphString(x.glyph),
           frame(s, x.x, x.y, GlyphW, GlyphH), x.color,
-          IosGlyphs.glyphString(old.glyph), old.color)
+          IosGlyphs.glyphString(old.glyph), old.color,
+          glyphPts(s, x.y), glyphPts(s, old.y))
         Some(IosNode(v, n.native, n.kids))
       case _ => None
     case old: VRect => v match
@@ -358,27 +361,61 @@ object IosStage:
     case _ => None
 
   def relabel(s: IosStageSt, native: go.uikit.UIView, text: String,
-    fr: go.uikit.CGRect, c: Int, oldText: String, oldColor: Int): Unit =
+    fr: go.uikit.CGRect, c: Int, oldText: String, oldColor: Int,
+    pts: Double, oldPts: Double): Unit =
     if text != oldText then go.iosui.asLabel(native).setText(text)
     if c != oldColor then go.iosui.asLabel(native).setTextColor(color(c))
+    // a label that moved between roles (a line that was content and is now
+    // the footer legend) has to be re-fonted, or it keeps the size of the
+    // row it used to be on
+    if pts != oldPts then setLabelFont(native, pts)
     native.setFrame(fr)
 
   // ---- elements -------------------------------------------------------------
 
-  def label(s: IosStageSt, text: String, fr: go.uikit.CGRect, c: Int): go.uikit.UIView =
+  def label(s: IosStageSt, text: String, fr: go.uikit.CGRect, c: Int,
+      pts: Double): go.uikit.UIView =
     val v = go.iosui.allocLabelAsView().initWithFrame(fr)
     val lbl = go.iosui.asLabel(v)
     lbl.setText(text)
-    // minted per label, retained by the label (the retention note above)
-    lbl.setFont(go.uikit.getUIFontClass()
-      .monospacedSystemFontOfSizeWeight(s.fontPts, 0.0 /* regular */))
+    setLabelFont(v, pts)
     lbl.setTextColor(color(c))
     v
 
+  /** the font is minted here and retained by the label (the retention note
+   *  above): iOS has no retain glue, so nothing autoreleased may be stored. */
+  def setLabelFont(v: go.uikit.UIView, pts: Double): Unit =
+    go.iosui.asLabel(v).setFont(go.uikit.getUIFontClass()
+      .monospacedSystemFontOfSizeWeight(pts, 0.0 /* regular */))
+
+  /** the point size a piece of text gets: its ROLE, resolved against this
+   *  surface's metrics (metrics.scala's TypeRoles). Not one global size —
+   *  the whole reason a wrist could not read this stage. */
+  def textPts(s: IosStageSt, row: Int): Double =
+    TypeRoles.points(TypeRoles.forRow(row, s.m), s.m)
+
+  /** a glyph addresses PIXELS, so its role comes from the row its y lands
+   *  in — the inverse of textFrame's `1 + row * 8`. */
+  def glyphPts(s: IosStageSt, y: Int): Double =
+    textPts(s, (y - TextTopPad) / GlyphH)
+
+  /** the image's pixels, pre-scaled by a WHOLE factor big enough to cover
+   *  the frame on both axes (nearest-neighbour, so a QR code's modules stay
+   *  square); the image view's scale-to-fill then takes it the fractional
+   *  rest of the way. The panel's two axes no longer share one integer
+   *  scale, and a QR code that is a hair interpolated beats one that is
+   *  resampled down. */
   def image(s: IosStageSt, x: VImage): go.uikit.UIImage =
+    val n = imageScale(s.m)
     val rgba = IosPixels.scaleRGBANearest(
-      IosPixels.expandRGB565(x.pixels, x.w, x.h), x.w, x.h, s.scale)
-    go.iosui.imageFromRGBA(rgba, x.w * s.scale, x.h * s.scale)
+      IosPixels.expandRGB565(x.pixels, x.w, x.h), x.w, x.h, n)
+    go.iosui.imageFromRGBA(rgba, x.w * n, x.h * n)
+
+  def imageScale(m: StageMetrics): Int =
+    val bigger = if sx(m) > sy(m) then sx(m) else sy(m)
+    var n = bigger.toInt
+    if bigger > n.toDouble then n += 1
+    if n < 1 then 1 else n
 
   def color(c: Int): go.uikit.UIColor =
     go.uikit.getUIColorClass().colorWithRedGreenBlueAlpha(
@@ -386,17 +423,41 @@ object IosStage:
 
   // ---- geometry -------------------------------------------------------------
 
-  def stageRect(scale: Int): go.uikit.CGRect =
-    go.uikit.CGRect(go.uikit.CGPoint(0.0, 0.0), go.uikit.CGSize(
-      (StageW * scale).toDouble, (StageH * scale).toDouble))
+  /** the stage's own rect inside the shell's container: the full panel width,
+   *  starting below the system band (the metrics' `originY`) and running to
+   *  the bottom. Its size is the GRID's, which is the panel's height rounded
+   *  down to whole rows — the leftover is a fraction of a row, not the half
+   *  panel the fixed 160x128 stage used to leave black. */
+  def stageRect(m: StageMetrics): go.uikit.CGRect =
+    go.uikit.CGRect(go.uikit.CGPoint(0.0, m.originY), gridSize(m))
 
-  /** map a semantic stage rect (origin top-left, pixels) to a scaled UIKit
-   *  frame — same origin corner, so no flip (the one geometry difference
-   *  from the mac stage). */
+  /** a GROUP container's rect: the same size, at the stage's own origin.
+   *  Only the root carries `originY` — a subview's frame is relative to its
+   *  parent, so a group repeating it would push its children down the panel
+   *  once per level of nesting (which is exactly what it did, the first run
+   *  after the stage stopped starting at the top). */
+  def groupRect(m: StageMetrics): go.uikit.CGRect =
+    go.uikit.CGRect(go.uikit.CGPoint(0.0, 0.0), gridSize(m))
+
+  def gridSize(m: StageMetrics): go.uikit.CGSize =
+    go.uikit.CGSize(m.cols.toDouble * m.cellW, m.rows.toDouble * m.cellH)
+
+  /** map a semantic rect (the fb glyph cell's pixel space, origin top-left)
+   *  onto the panel. The two axes scale INDEPENDENTLY — a cell is `cellW` x
+   *  `cellH` points and a wrist's cell is taller than it is wide relative to
+   *  the fb's 6x8 — so this is where "the stage's shape is the screen's"
+   *  actually happens. UIKit's y axis points DOWN, the stage's own
+   *  convention, so there is no flip (the one geometry difference from the
+   *  mac stage). */
+  def sx(m: StageMetrics): scala.Double = m.cellW / GlyphW.toDouble
+  def sy(m: StageMetrics): scala.Double = m.cellH / GlyphH.toDouble
+
   def frame(s: IosStageSt, x: Int, y: Int, w: Int, h: Int): go.uikit.CGRect =
+    val fx = sx(s.m)
+    val fy = sy(s.m)
     go.uikit.CGRect(
-      go.uikit.CGPoint((x * s.scale).toDouble, (y * s.scale).toDouble),
-      go.uikit.CGSize((w * s.scale).toDouble, (h * s.scale).toDouble))
+      go.uikit.CGPoint(x.toDouble * fx, y.toDouble * fy),
+      go.uikit.CGSize(w.toDouble * fx, h.toDouble * fy))
 
   /** the grid cell run a VText occupies: x = col*6, y = 1 + row*8
    *  (display.scala's Font.drawText), one 6x8 cell per BYTE of text. */

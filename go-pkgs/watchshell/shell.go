@@ -278,6 +278,33 @@ func SafeArea() (top, left, bottom, right float64) {
 	return insets.Top, insets.Left, insets.Bottom, insets.Right
 }
 
+// SafeAreaTop / SafeAreaBottom are SafeArea's two edges as scalars, for a
+// caller that cannot take four returns: a Sgola facade binds one value per
+// call, and the stage's metrics (plan 0071 step 2) want the insets. The
+// top one is the band watchOS draws the time overlay in — content under it
+// is unreadable, whatever the app paints there.
+func SafeAreaTop() float64 {
+	mu.Lock()
+	defer mu.Unlock()
+	return insets.Top
+}
+
+func SafeAreaBottom() float64 {
+	mu.Lock()
+	defer mu.Unlock()
+	return insets.Bottom
+}
+
+// ScreenScale is the panel's points-to-pixels factor (2.0 on every watch
+// so far). Nothing in the layout divides by it — a point is the unit
+// everything above the surface uses — but the metrics carry it because it
+// is what says how much detail a frame may hold.
+func ScreenScale() float64 {
+	pool := iosui.PoolPush()
+	defer iosui.PoolPop(pool)
+	return uikit.GetUIScreenClass().MainScreen().Scale()
+}
+
 // currentScene answers the UIWindowScene watchOS runs, or 0. There is
 // exactly one; `anyObject` on the connectedScenes set is the whole search.
 func currentScene() objc.ID {

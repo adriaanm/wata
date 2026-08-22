@@ -1,6 +1,9 @@
 # 0071 — the surface boundary: one domain UI, replaceable shells
 
-status: accepted (step 1 landed 2026-08-22)
+status: accepted (step 1 landed 2026-08-22; step 2's METRICS half landed
+2026-08-22 — the watch's stage, grid and type roles now come from the panel
+it is on. The motion integrator is step 2's remainder and is still open,
+so `Intents.steps` still rounds a magnitude to whole rows.)
 
 ## Why this exists
 
@@ -156,6 +159,18 @@ Each step is useful alone, and the order is chosen so the risky part comes last.
 2. **Metrics, and the integrator.** Bodies read size, scale and type roles
    instead of `Display` constants, and scroll position becomes simulated rather
    than indexed. Unblocks plan 0070's layouts and its motion on both devices.
+
+   Landed as two, and they turned out to be independent: the metrics half is
+   a property of the SURFACE (what is this panel, how big is a row, how big
+   is type) and the integrator is a property of the DOMAIN (where is the
+   list, how fast is it moving). Doing the metrics alone is a complete
+   change — the watch stopped being a cropped handset — and the integrator
+   can land against any layout. One correction to what this section
+   predicted: type roles cannot be a property of the text yet, because a
+   `VText` has nowhere to carry one until step 3 adds sized text to the
+   element vocabulary. The watch resolves a role from the grid ROW instead
+   (header / list / footer, which is what every body here is), through one
+   function that goes away when an element can name its own role.
 3. **The renderer on Apple.** CoreGraphics + CoreText behind the existing element
    vocabulary, producing a `CGImage` per frame. This is the step that drops
    `UIView`.

@@ -82,7 +82,9 @@ case class WataState(
 
 object WataLogic:
   val FONT_ROWS_HEADER = 2 // header grid rows before the list (bitmap layout)
-  val FOOTER_ROW = Font.ROWS - 1
+  /** the footer legend's row. A `def`, not a val: on the watch the grid is
+   *  the panel's (metrics.scala), which is not known at module-init time. */
+  def FOOTER_ROW: scala.Int = Font.ROWS - 1
 
   def initial(): WataState =
     WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, false, 0.0,

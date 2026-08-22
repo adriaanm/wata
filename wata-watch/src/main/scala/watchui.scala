@@ -69,6 +69,14 @@ object watchshell:
   /** the root container's bounds (points) — valid once `ready` has run.
    *  Spans the whole panel, not the safe area. */
   @go.name("ContainerBounds") def containerBounds(): uikit.CGRect = ???
+  /** the panel's points-to-pixels factor (`UIScreen.scale`). */
+  @go.name("ScreenScale") def screenScale(): scala.Double = ???
+  /** the system's own bands, in points. The TOP one holds watchOS's time
+   *  overlay, drawn above app content: the stage starts below it. Two calls
+   *  rather than one because a facade binds one value per call and
+   *  `SafeArea`'s four returns cannot cross. */
+  @go.name("SafeAreaTop") def safeAreaTop(): scala.Double = ???
+  @go.name("SafeAreaBottom") def safeAreaBottom(): scala.Double = ???
   /** splice the stage's root into the window's container (main thread). */
   @go.name("AdoptRoot") def adoptRoot(v: uikit.UIView): Unit = ???
 

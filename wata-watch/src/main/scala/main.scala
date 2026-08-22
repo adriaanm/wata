@@ -27,6 +27,12 @@ import language.experimental.saferExceptions
  *
  *  THE ASSERTABLE LINES (tools/ios-smoke.py's surface — launchd owns the
  *  process exit, so printed lines are the verdict, the interptest rule):
+ *    metrics: <kind> <w>x<h>pt @<scale> …  — the surface this stage was
+ *                                           built for, printed once: the
+ *                                           panel, its system bands, the
+ *                                           grid derived from them and the
+ *                                           type roles' point sizes
+ *                                           (metrics.scala)
  *    ready <userId> / login failed        — the connect wait's outcome
  *    screen boot|contacts|conversation    — the top-level screen changed
  *    paint <screen> lit=<n>               — an offscreen render of the live
@@ -133,9 +139,8 @@ object Pump:
   /** the config the ready trampoline picks up (the callback literal captures
    *  nothing — module cells are its reach, IosStage's applyCb idiom). */
   private val cfgC: sgo.Atomic[Option[ClientConfig]] = sgo.atomic(None)
-  /** the stage's root and scale, for the paint probe. */
+  /** the stage's root, for the paint probe (its geometry is the metrics'). */
   private val rootC: sgo.Atomic[Option[go.uikit.UIView]] = sgo.atomic(None)
-  private val scaleC: sgo.Atomic[Int] = sgo.atomic(1)
   /** the screens whose paint probes are still queued, oldest first — a QUEUE
    *  rather than a cell because two screen changes can both land before the
    *  first probe's trampoline runs. On a slow launch boot and contacts do
@@ -157,33 +162,44 @@ object Pump:
     PumpSt(WataLogic.initial(), None, 0.0, clock.nowUnixMillis(), false, Nil, Nil,
       Notify.initial())
 
-  /** The stage's pixel scale. 1 on the watch, where the phone uses 2.
+  /** THIS device's metrics — the panel's own bounds, its scale and its
+   *  system bands, asked of the surface at launch (plan 0071 step 2).
+   *  Nothing here is a size: 208x248 is what a Series 10 answers and a
+   *  different watch answers something else, with no edit.
    *
-   *  wata's grid is 160x128 — WIDER than tall. The watch's panel is 208x248
-   *  — TALLER than wide. So at scale 2 the stage is 320x256 and the panel
-   *  crops it: the footer legend loses its right-hand end, which is where
-   *  "PTT talk" lives. At scale 1 nothing is cropped and about half the
-   *  panel's height goes unused.
-   *
-   *  Neither is right, and the fix is not a scale factor: the watch wants a
-   *  layout of its own, taller than it is wide, with bigger rows (a wrist is
-   *  read at arm's length — the same ask FB-BIG-CONTACT-ROWS makes of the
-   *  handset). That is WATCH-LAYOUT. Until then, showing everything small
-   *  beats showing most of it big. */
-  def scale(): scala.Int =
-    var out = IosStr.num(go.sys.getenv("WATA_WATCH_SCALE"), 1)
-    if out < 1 then out = 1
-    out
+   *  The stage used to be wata's 160x128 grid at an integer multiple, which
+   *  is the handset's panel on a wrist: at scale 2 the footer legend fell
+   *  off the right-hand edge, at scale 1 half the panel was black and the
+   *  type was 6.8 points. `metrics.scala` has the derivation. */
+  def metrics(): StageMetrics =
+    val b = go.watchshell.containerBounds()
+    Metrics.grid(b.size.width, b.size.height, go.watchshell.screenScale(),
+      go.watchshell.safeAreaTop(), go.watchshell.safeAreaBottom(),
+      Metrics.WRIST)
+
+  /** the metrics, as one line in the same trace as everything else — a
+   *  layout that is derived has to be readable, or the next surprise is
+   *  unattributable. */
+  def metricsLine(m: StageMetrics): String =
+    "metrics: " + Metrics.kindName(m.kind) + " " + Intents.fmt(m.wPt) + "x" +
+      Intents.fmt(m.hPt) + "pt @" + Intents.fmt(m.screenScale) +
+      " inset=" + Intents.fmt(m.insetTop) + "/" + Intents.fmt(m.insetBottom) +
+      " grid=" + m.cols + "x" + m.rows +
+      " cell=" + Intents.fmt(m.cellW) + "x" + Intents.fmt(m.cellH) +
+      " type=" + Intents.fmt(TypeRoles.points(TypeRoles.NAME, m)) + "/" +
+      Intents.fmt(TypeRoles.points(TypeRoles.STATUS, m)) + "/" +
+      Intents.fmt(TypeRoles.points(TypeRoles.CAPTION, m))
 
   def connectMs(): Long = IosStr.num(go.sys.getenv("WATA_IOS_CONNECT_MS"), 30000).toLong
 
   // ---- the ready hop (main thread, inside UIApplicationMain) ----------------
 
   def onReady(): Unit =
-    val sc = scale()
-    scaleC.set(sc)
+    val m = metrics()
+    Metrics.set(m)
+    println(metricsLine(m))
     val pool = go.iosui.poolPush()
-    val root = IosStage.create(sc, true)
+    val root = IosStage.create(m, true)
     go.iosui.poolPop(pool)
     go.watchshell.adoptRoot(root)
     // The watch's input: crown, tap, swipe, long press — reported as INTENTS
@@ -463,14 +479,22 @@ object Pump:
    *  painted nothing where a tree was submitted. */
   def runProbe(): Unit = rootC.get() match
     case r: Some[go.uikit.UIView] =>
-      val sc = scaleC.get()
+      // the probe walks the SEMANTIC pixel space (the grid's), which the
+      // metrics map onto the panel — the two axes independently, so the
+      // centre of a semantic pixel is not `x * scale + scale/2` any more.
+      val m = Metrics.cur()
+      val fx = IosStage.sx(m)
+      val fy = IosStage.sy(m)
+      val w = Display.W
+      val h = Display.H
       var lit = 0
       var probes = 0
       var y = 4
-      while y < 128 && lit < 8 do
+      while y < h && lit < 8 do
         var x = 2
-        while x < 160 && lit < 8 do
-          val c = go.iosui.renderPixel(r.value, x * sc + sc / 2, y * sc + sc / 2)
+        while x < w && lit < 8 do
+          val c = go.iosui.renderPixel(r.value,
+            (x.toDouble * fx + fx / 2.0).toInt, (y.toDouble * fy + fy / 2.0).toInt)
           probes += 1
           if c > 0 then lit += 1
           x += 12

@@ -13,8 +13,9 @@ linked into a watchOS arm64 binary. No Swift, no storyboard, no Xcode
 project.
 
 Its architecture is **wata-ios's**, and that is not a family resemblance:
-eighteen of its Scala files are byte-identical to wata-ios's. What differs
-is the entry point, the input, and three surfaces the watch does not have.
+fifteen of its Scala files are byte-identical to wata-ios's. What differs
+is the entry point, the input, the LAYOUT (the stage is this panel's, not
+the handset's — below), and three surfaces the watch does not have.
 
 ## Why Go reaches watchOS at all
 
@@ -41,9 +42,10 @@ them and they work — probed class by class before anything was built on
 them (22 of 23), and then proven by running wata-ios's entire stage test
 suite on the watch (`just watch-interptest`).
 
-So the client is the retained UIKit stage: `iosstage.scala`,
-`display.scala`, `glyphs.scala`, `pixels.scala` and `interptest.scala` are
-wata-ios's files, and `go-pkgs/iosui` is reused unchanged — it is
+So the client is the retained UIKit stage: `glyphs.scala` and
+`pixels.scala` are wata-ios's files unchanged, `iosstage.scala`,
+`display.scala` and `interptest.scala` are wata-ios's with the geometry
+made the panel's (below), and `go-pkgs/iosui` is reused as-is — it is
 libdispatch, libobjc and CoreGraphics, none of which is iOS-specific.
 
 ## The entry point: `go-pkgs/watchshell`
@@ -152,16 +154,65 @@ separates them. Every bundle here carries the usage string; harnesses
 pre-grant with `simctl privacy grant microphone`. On a wrist nobody
 pre-grants: the alert on first press is expected.
 
-## Layout is the open gap
+## Layout: the stage is the screen's, not the handset's
 
-wata's grid is 160x128, wider than tall. The watch panel is 208x248,
-taller than wide. At the phone's scale of 2 the stage is 320x256 and the
-panel crops the footer's right-hand end — where `PTT talk` lives — so the
-watch runs at **scale 1** (`WATA_WATCH_SCALE`), where nothing is cropped
-and about half the panel's height is unused.
+The stage used to be wata's 160x128 grid at an integer scale, which is the
+handset's panel worn on a wrist: at scale 2 the footer legend fell off the
+right-hand edge (`PTT talk` with it), at scale 1 half the panel was black
+and the type was 6.8 points. **Nothing in this client is a size any more**
+(plan 0071 step 2): `metrics.scala` asks the surface what it is, and every
+number is derived from the answer.
 
-Neither is right, and the fix is not a scale factor: the watch wants a
-layout of its own, with rows readable at arm's length. `[WATCH-LAYOUT]`
+```
+metrics: wrist 208.00x248.00pt @2.00 inset=53.00/36.00 grid=26x12
+         cell=8.00x16.00 type=12.50/10.75/10.25
+```
+
+That line is printed once at launch, and it is the whole layout. What it
+says, and where each number comes from:
+
+- **The panel** is `UIScreen`'s, through `watchshell.ContainerBounds` —
+  208x248 points is an OBSERVATION. A different watch is a different
+  observation and no edit.
+- **The columns come from the LINE, not the panel.** wata's screens are
+  written to 26 columns; that is a property of the text, so the cell width
+  is the panel divided by it. A wider cell (bigger type) would truncate
+  every footer legend, which is the cropping this removed. Plan 0070's
+  rolodex changes the line, and this with it.
+- **The rows come from the panel**: a row is two cell-widths tall — more
+  air than the fb's 6x8 cell, which is what a short line read at arm's
+  length wants — so the usable height divided by that is how many there
+  are. Twelve here, where the handset has fifteen.
+- **Usable height excludes the TOP safe inset** (53 points on a Series 10):
+  watchOS draws its time overlay in that band, over the app, and a status
+  row underneath it is unreadable. The bottom inset is deliberately NOT
+  excluded — it is a cosmetic corner margin, and the footer sitting in it
+  costs a descender where excluding it would cost a whole row.
+- **Type is by ROLE** — name / caption / status — resolved against the
+  metrics, never one global point size. Each role takes a share of the
+  largest size the cell can hold, so the names read louder than the legend
+  under them.
+
+`IosStage` maps the semantic space (still the fb's 6x8 glyph cell, which is
+what the bodies address) onto that grid with **the two axes scaling
+independently**: a wrist's cell is 8.0 x 16.0 points. Two consequences
+worth knowing before touching it:
+
+- **Only the ROOT view carries the top inset.** Group containers span the
+  grid at origin zero — a subview's frame is relative to its parent, so a
+  group repeating the inset pushes its children down the panel once per
+  level of nesting. That is what the first run after this change did: the
+  title landed 3 x 53 points down, and every screen looked empty.
+- **A label whose text is exactly as wide as its frame TRUNCATES.** The
+  frame is one grid cell per character, so sizing the font by the nominal
+  0.6em advance renders `Family` as `Fami…` and `Bob` as `B…`. The measured
+  advance on watchOS 26 is 0.616em and `TypeRoles.ADVANCE_EM` is 0.64, a
+  margin on top of it.
+
+The bodies are still wata-fb's grid-shaped screens; they read the grid
+through `Display`/`Font`, which on this client answer from the metrics
+rather than from constants (`display.scala`, the watch's own copy). Plan
+0070's rolodex is what replaces the screens themselves.
 
 ## Gates
 

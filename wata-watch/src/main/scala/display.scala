@@ -1,4 +1,9 @@
-/** The RGB565 draw layer: framebuffer primitives and a 5x8 bitmap font (no
+/** THE WATCH'S COPY. Geometry is NOT fixed here (it is on the handset): the
+ *  panel is whatever the device reported at launch, so `Display` and `Font`
+ *  answer from `Metrics` (metrics.scala, plan 0071 step 2) rather than from
+ *  constants. Everything else is wata-fb's file unchanged.
+ *
+ *  The RGB565 draw layer: framebuffer primitives and a 5x8 bitmap font (no
  *  vector/TrueType font support). Device-layer app code (wata-fb).
  *
  *  The pixel buffer is a `go.Bytes` (RGB565 LITTLE-ENDIAN, W*H*2 bytes) so the
@@ -9,11 +14,13 @@
  *  landmine, so draw ops are `object` functions over a passed buffer, in
  *  keeping with the rest of this codebase's object-oriented-free style.
  *
- *  Geometry is FIXED at 160x128; there is no ioctl geometry discovery. */
+ *  Geometry is the METRICS' — the pixel space the grid sits in, in fb glyph
+ *  cells (`Metrics.pixW`/`pixH`), so a full-width rule is exactly as wide as
+ *  the panel's grid on any device. */
 object Display:
-  val W: scala.Int = 160
-  val H: scala.Int = 128
-  val BYTES: scala.Int = W * H * 2   // 40960 — one RGB565 frame
+  def W: scala.Int = Metrics.pixW(Metrics.cur())
+  def H: scala.Int = Metrics.pixH(Metrics.cur())
+  def BYTES: scala.Int = W * H * 2   // one RGB565 frame
 
 /** RGB565 colors — the ST7735S hardware format. Named values are
  *  precomputed literals (rgb() is kept for dynamic use). */
@@ -91,8 +98,8 @@ object Font:
   val GLYPH_W: scala.Int = 6        // 5px glyph + 1px spacing
   val GLYPH_H: scala.Int = 8
   val GLYPH_DATA_W: scala.Int = 5
-  val COLS: scala.Int = Display.W / GLYPH_W          // 26
-  val ROWS: scala.Int = (Display.H - 1) / GLYPH_H    // 15 (1px status line)
+  def COLS: scala.Int = Metrics.cur().cols
+  def ROWS: scala.Int = Metrics.cur().rows
 
   // custom glyph codes
   val ICON_CHECK: scala.Int = 0x80
