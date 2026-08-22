@@ -1,6 +1,6 @@
 # 0071 — the surface boundary: one domain UI, replaceable shells
 
-status: proposed
+status: accepted (step 1 landed 2026-08-22)
 
 ## Why this exists
 
@@ -73,7 +73,10 @@ device, and it is small.
 **Intents, not key codes.** A shell reports what the person did in wata's terms:
 `Navigate`, `Choose`, `Back`, `TalkDown`, `TalkUp`, plus lifecycle (`Wake`,
 `Sleep`) and a raw escape hatch for the device-specific applets (the handset's
-diag and exit menus). The crown, the arrow keys and a swipe all become
+diag and exit menus). **`Raw` carries a phase**, because the applets that
+motivate it read press and release edges; the watch's port left it phaseless
+since nothing there emits one, and that must be fixed before the handset's shell
+is ported rather than discovered by it. The crown, the arrow keys and a swipe all become
 `Navigate`; a long press and a hardware PTT button both become `TalkDown`. The
 applets stop containing the sentence "the watch has no keypad".
 
@@ -85,6 +88,12 @@ applets stop containing the sentence "the watch has no keypad".
   express a flick. A crown reports angular velocity, a held key reports its
   repeat ramp, a drag reports its speed at release; each device says how hard it
   was pushed and the physics lives once, above the boundary.
+  Two conventions, settled when step 1 landed rather than left to each shell:
+  **positive is toward the end of the list** (down, right), and the **unit is
+  items** - 1.0 is one card or one row, the only unit a crown, a key and a thumb
+  can all express, and it converts straight into plan 0070's constants (cards
+  per second).
+
 - *Axis*, because the horizontal one is **reserved and unused**. Nothing moves
   sideways today and nothing should until there is a reason, but keeping it free
   is nearly free now and structural later — so the integrator runs per axis
@@ -176,6 +185,11 @@ Each step is useful alone, and the order is chosen so the risky part comes last.
 - **The Go client stops owning `main`.** Under `-buildmode=c-archive` the
   runtime starts at load and `main()` never runs, so today's startup arc has to
   move into an exported entry point the shell calls.
+- **A swipe cannot report how hard it was.** `UISwipeGestureRecognizer` says
+  that a flick happened and nothing more; only `UIPanGestureRecognizer` has
+  `velocityInView:`. So the watch's swipe magnitude is a constant until the
+  shell moves to a pan recognizer, and plan 0070's "a drag reports its speed at
+  release" is true of the crown and a future pan, not of today's swipe.
 - **No `CADisplayLink` on watchOS** (`API_UNAVAILABLE(watchos)`), so animation
   cadence comes from a timer. The settle-and-zoom timing is ours to schedule.
 - **The retained AppKit/UIKit backends** (plan 0032) become redundant on the

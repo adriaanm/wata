@@ -1,6 +1,6 @@
 # 0070 — the rolodex: one design language for the handset and the watch
 
-status: proposed
+status: accepted
 
 ## The problem
 
@@ -92,7 +92,8 @@ detent below a threshold speed, and a stiffer spring at each end gives and
 bounces back — which is how a kid learns the list has an end without being told.
 Two quick presses are twice the shove, so acceleration falls out for free; a drag
 takes a few pixels of stiction to break loose and rubber-bands past the last
-card while held. Starting constants, tuned in the mockups and to be re-tuned on
+card while held - on a device whose gestures report a speed, which on the watch
+means the crown or a pan recognizer, never a swipe (plan 0071). Starting constants, tuned in the mockups and to be re-tuned on
 hardware: 7 cards/s per detent, a 140 ms friction time constant, detent
 stiffness 180, wall stiffness 340, and the 450 ms settle before the stack closes.
 
