@@ -1230,7 +1230,9 @@ case class EchoErr() extends EchoState
  *  policies for one idea.
  *
  *  `battery` is -1 where sysfs has no battery node (every dev host), which is
- *  how the Device Info line knows to leave the percentage out; the text fields
+ *  how the Device Info line knows to leave the percentage out, and `chg` (the
+ *  charger verb + pack voltage, `Diag.chargeStat` — plan 0072) is "" there
+ *  for the same reason; the text fields
  *  answer `Diag.UNAVAILABLE` in the same situation. `enrol` is whether this
  *  handset has an identity to enroll — decided from the environment, so
  *  constant for a run, and the one field seeded at construction, because the
@@ -1242,6 +1244,7 @@ case class DiagSnap(
   cellAddr: String,
   wifi: String,
   battery: scala.Int,
+  chg: String,
   uptime: String,
   mem: String,
   enrol: Boolean
@@ -1396,14 +1399,15 @@ object SettingsLogic:
    *  (`diagLeft` starts at 0). `enrol` is the exception: it decides how many
    *  rows the menu has, and an input event can reach the menu before an update
    *  does, so it is read here. */
-  def noDiag(): DiagSnap = DiagSnap("", "", "", "", -1, "", "", Enrol.configured())
+  def noDiag(): DiagSnap = DiagSnap("", "", "", "", -1, "", "", "", Enrol.configured())
 
-  /** all eight diagnostics, read together. Off-device every one of them answers
+  /** all nine diagnostics, read together. Off-device every one of them answers
    *  a constant ("n/a", -1, ""), which is what keeps the frames the goldens pin
    *  independent of when a refresh lands. */
   def readDiag(): DiagSnap =
     DiagSnap(Diag.wlanIp(), Diag.cellData(), Diag.cellAddr(), Diag.wifiState(),
-      Led.readBatteryPercent(), Diag.uptime(), Diag.memAvail(), Enrol.configured())
+      Led.readBatteryPercent(), Diag.chargeStat(), Diag.uptime(), Diag.memAvail(),
+      Enrol.configured())
 
   def getScreenTimeout(s: SettingsState): scala.Int = timeoutSecs(s.screenTimeoutIdx)
   def getBrightness(s: SettingsState): scala.Int = s.brightness
@@ -1738,8 +1742,8 @@ object SettingsLogic:
   def detailView(s: SettingsState): View =
     val i = cur(s)
     if i == ENROLL then twoLines("OK shows the QR code", "a parent scans to add")
-    else if i == INFO then lines(batteryLine(s), Color.midGray,
-      "Mem:" + s.diag.mem + " wata-fb", Color.midGray)
+    else if i == INFO then lines(infoLine1(s), Color.midGray,
+      infoLine2(s), Color.midGray)
     else if i == ECHO then twoLines("Records 2s, plays", "back thru speaker")
     else if i == DISCONNECT then twoLines(connectDetail(s), "")
     else if i == SCREEN_OFF then twoLines("</> timeout", "Any key wakes")
@@ -1791,10 +1795,25 @@ object SettingsLogic:
     else if i == REBOOT_BL then "reboot to BL"
     else "reboot to EDL"
 
-  /** Device Info's first line: battery + uptime. sysfs has no battery node
-   *  off-device, and `readBatteryPercent` says so with -1 rather than by
-   *  failing — the battery part is simply left out then, and uptime answers
-   *  "n/a". */
+  /** Device Info's two lines. On the device the first pairs the percentage
+   *  with the charge stat ("Bat:78% chg 4.19V" — plan 0072; both do not fit
+   *  a 26-column row next to uptime, so uptime joins memory on the second
+   *  line). Off-device there is no battery node and no charge stat, so the
+   *  host layout stands and the goldens stay machine-independent. */
+  def infoLine1(s: SettingsState): String =
+    if s.diag.chg != "" && s.diag.battery >= 0 then
+      "Bat:" + s.diag.battery + "% " + s.diag.chg
+    else batteryLine(s)
+
+  def infoLine2(s: SettingsState): String =
+    if s.diag.chg != "" && s.diag.battery >= 0 then
+      "Up:" + s.diag.uptime + " Mem:" + s.diag.mem
+    else "Mem:" + s.diag.mem + " wata-fb"
+
+  /** Device Info's host-layout first line: battery + uptime. sysfs has no
+   *  battery node off-device, and `readBatteryPercent` says so with -1 rather
+   *  than by failing — the battery part is simply left out then, and uptime
+   *  answers "n/a". */
   def batteryLine(s: SettingsState): String =
     var line = "Up:" + s.diag.uptime
     if s.diag.battery >= 0 then line = "Bat:" + s.diag.battery + "% " + line
@@ -2224,6 +2243,14 @@ object KidSettingsLogic:
     if s.diag.battery >= 0 then out = "" + s.diag.battery + "%"
     out
 
+  /** the charge stat (charger verb + pack voltage — plan 0072) appended to
+   *  the battery row's help line on the device; "" (no suffix) off-device,
+   *  so the goldens keep their frames. */
+  def chgSuffix(s: KidSettingsState): String =
+    var out = ""
+    if s.diag.chg != "" then out = " " + s.diag.chg
+    out
+
   /** the notify row's value IS the persisted spelling (play/chime/quiet). */
   def notifyLabel(s: KidSettingsState): String = s.notifyMode
 
@@ -2262,7 +2289,7 @@ object KidSettingsLogic:
       SettingsLogic.twoLines("</> adjust backlight", "now: " + s.brightness + "/40")
     else if s.selected == DATA then dataHelp(s)
     else if s.selected == BATTERY then
-      SettingsLogic.twoLines("charge left", "now: " + batteryValue(s))
+      SettingsLogic.twoLines("charge left", "now: " + batteryValue(s) + chgSuffix(s))
     else
       SettingsLogic.twoLines("OK opens dev settings", "red comes back")
 

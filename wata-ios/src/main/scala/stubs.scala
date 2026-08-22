@@ -44,6 +44,7 @@ object Diag:
   def cellData(): String = UNAVAILABLE
   def cellAddr(): String = ""
   def wifiState(): String = UNAVAILABLE
+  def chargeStat(): String = ""
   def uptime(): String = UNAVAILABLE
   def memAvail(): String = UNAVAILABLE
   def startNetTest(): Unit = ()

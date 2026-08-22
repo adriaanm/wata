@@ -405,7 +405,7 @@ about what "Data: off" means:
 
 | row | what it shows / does | source, as system-menu reads it |
 |---|---|---|
-| Device Info | battery %, uptime, free memory | `Led.readBatteryPercent` (the battery sysfs node), `/proc/uptime` first field, `/proc/meminfo`'s `MemAvailable` — both parsed in `Diag`, not shelled out to awk |
+| Device Info | battery % + charge stat (charger verb + pack voltage, e.g. `Bat:78% chg 4.19V` — `usb` marks VBUS present with the charger idle), uptime, free memory | `Led.readBatteryPercent` (the battery sysfs node), `Diag.chargeStat` (`battery/status`, `usb/online`, `voltage_now` in microvolts rendered by integer centivolts — plan 0072), `/proc/uptime` first field, `/proc/meminfo`'s `MemAvailable` — parsed in `Diag`, not shelled out to awk |
 | IP | wlan0's IPv4 address | `net.InterfaceByName("wlan0")` (system-menu's `ip -4 addr show wlan0`) |
 | Cell data | ppp0 link state + signal strength, e.g. `up -85dBm` | the ppp0 sysfs node, plus `qmicli -p -d msmipc://0 --nas-get-signal-strength` parsed the way `modem_info` parses it (`-128` = no measurement, shown `--`). The ppp0 ADDRESS has no room next to the signal, so it moves to the row's detail line |
 | Net test | OK runs four probes, verdicts in the detail block | `ping -c2 -W3` against the auto-detected default gateway (`ip route show dev wlan0`, then ppp0), `1.1.1.1` and `8.8.8.8`, plus the `nslookup google.com` DNS probe judged by system-menu's own test (an `Address` line, no `NXDOMAIN`) |
@@ -430,8 +430,9 @@ no golden of a plain-TCP device.
 screen is a `wataui` body (plan 0024), and a body reads its arguments and
 nothing else — so nothing on the render path may touch a sysfs node, the
 modem, the interface table or the environment. `SettingsLogic.refreshDiag`
-reads all eight (`readDiag` -> `DiagSnap`: the wlan0 address, the ppp0 link
-and signal, the ppp0 address, the wifi state, the battery percentage,
+reads all nine (`readDiag` -> `DiagSnap`: the wlan0 address, the ppp0 link
+and signal, the ppp0 address, the wifi state, the battery percentage, the
+charge stat (charger verb + pack voltage, `Diag.chargeStat` — plan 0072),
 uptime, free memory, and whether this handset has an identity to enroll)
 every `DIAG_REFRESH` frames — ~5s, system-menu's own refresh cadence —
 and the applet's state carries the answers. One record because they share
@@ -1878,7 +1879,7 @@ information in the equivalent place, not the same number.
 | network disconnect (stop sync + actions, restart to reconnect) | yes | yes | same |
 | brightness / screen-timeout survive a restart | no | yes | wata-fb only — the same config store the session lives in |
 | battery percent in the Info detail | yes | yes | same, `Led.readBatteryPercent`; absent hardware reads -1 and the line is left out |
-| battery / uptime / free memory in the Info detail | battery only | yes | uptime and `MemAvailable` read straight out of `/proc` (system-menu shells out to awk for the same number); `n/a` off-device |
+| battery / charge stat / uptime / free memory in the Info detail | battery only | yes | uptime and `MemAvailable` read straight out of `/proc` (system-menu shells out to awk for the same number); `n/a` off-device |
 | wlan0 IP + cellular-data info rows (link + signal dBm) | no (system-menu) | yes | absorbed from system-menu (plan 0003 phase 5): `Diag.wlanIp`/`cellData` mirror its sources — `ip -4 addr show <iface>`, the ppp0 sysfs node, and `qmicli --nas-get-signal-strength` — re-read every ~5s; off-device both rows answer `n/a` |
 | net test: ping gateway / 1.1.1.1 / 8.8.8.8 + DNS probe | no (system-menu) | yes | same four probes, same command lines, verdicts in the row's detail block; synchronous (a frozen frame loop for a few seconds, as in system-menu); off-device it runs nothing and says `n/a` |
 | wifi ON/OFF, cellular data | no (system-menu) | yes | the kid data row's watchdog policy (plans 0054/0057): `rc-service wifi start`/`stop` plus `cell-data auto`/`force`/`off`; pick-then-confirm, never auto-retried — a failure is reported on the row and OK is the deliberate retry |

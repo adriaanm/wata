@@ -190,6 +190,45 @@ object Diag:
     catch case e: sgo.GoError => out = ""
     out
 
+  // ---- charge stat: charger status + pack voltage ---------------------------------
+
+  /** the charge stat the settings screens pair with the battery percentage
+   *  (plan 0072): a three-letter verb plus the pack voltage — "chg 4.19V"
+   *  while the charger runs, "bat 3.82V" on battery, and "usb 3.82V" when
+   *  VBUS is present but the charger is idle: the docked-but-not-charging
+   *  failure mode (FB-CHARGE-ANOMALY-GLYPH queues its status-bar glyph).
+   *  "" where there is no voltage to read (every dev host), which is how
+   *  the rows know to leave the stat out. */
+  def chargeStat(): String =
+    var out = ""
+    if onDevice() then
+      out = chargeText(readText("/sys/class/power_supply/battery/status"),
+        readText("/sys/class/power_supply/usb/online"),
+        readText("/sys/class/power_supply/battery/voltage_now"))
+    out
+
+  /** status + usb-online + voltage_now (microvolts) -> the stat text.
+   *  "Discharging" and "Not charging" both contain lowercase "charging", so
+   *  the charger verb keys on the capital-C prefix; "Full" counts as the
+   *  charger doing its job. */
+  def chargeText(status: String, usb: String, volt: String): String =
+    val uv = intPrefix(volt)
+    var out = ""
+    if uv > 0 then
+      var verb = "bat"
+      if status.startsWith("Charging") || status.startsWith("Full") then verb = "chg"
+      else if intPrefix(usb) == 1 then verb = "usb"
+      out = verb + " " + voltText(uv)
+    out
+
+  /** microvolts as "4.19V": centivolts by integer division, no floats, the
+   *  fraction zero-padded to two digits. */
+  def voltText(uv: scala.Int): String =
+    val cv = uv / 10000
+    var frac = "" + (cv % 100)
+    if frac.length < 2 then frac = "0" + frac
+    "" + (cv / 100) + "." + frac + "V"
+
   // ---- net test ------------------------------------------------------------------
 
   // the running test's answer, handed from the goroutine that runs it to the
