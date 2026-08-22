@@ -161,7 +161,16 @@ func Start() {
 				mu.Lock()
 				controller = self
 				mu.Unlock()
+				// The lifecycle half of the intent set (plan 0071): a
+				// wrist dropping and rising is something the person did,
+				// and the app should be able to react to it without
+				// learning WatchKit's callback names.
+				pushSimple(IntentWake)
 				didActivate()
+			}},
+		{Cmd: objc.RegisterName("didDeactivate"),
+			Fn: func(self objc.ID, _ objc.SEL) {
+				pushSimple(IntentSleep)
 			}},
 	}
 	if _, err := objc.RegisterClass(controllerClass, wkController, nil, nil,

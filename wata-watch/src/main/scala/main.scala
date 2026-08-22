@@ -186,12 +186,12 @@ object Pump:
     val root = IosStage.create(sc, true)
     go.iosui.poolPop(pool)
     go.watchshell.adoptRoot(root)
-    // The watch's input: crown, tap, swipe, long press, mapped onto the same
-    // key codes the phone's on-screen keypad queues (go-pkgs/watchshell's
-    // input.go). Long press is hold-to-talk.
+    // The watch's input: crown, tap, swipe, long press — reported as INTENTS
+    // in wata's own terms (go-pkgs/watchshell's input.go, plan 0071). Long
+    // press is hold-to-talk.
     go.watchshell.addGestures(root)
-    // the harness's finger (inert unless set) — see watchshell's ScriptKeys
-    go.watchshell.scriptKeys(go.sys.getenv("WATA_WATCH_SCRIPT_KEYS"))
+    // the harness's finger (inert unless set) — see watchshell's ScriptIntents
+    go.watchshell.scriptIntents(go.sys.getenv("WATA_WATCH_SCRIPT_INTENTS"))
     // NO PushToTalk framework here. It is an iOS framework; the watch has
     // no equivalent, so a press talks to the app's own audio thread directly
     // — which is the simpler arc the phone cannot use, not a missing feature.
@@ -369,7 +369,7 @@ object Pump:
     if NetStatus.takePipeArrival() then Runtime.retryNow(h.client)
     val ctx = FrameCtx(snap, conn, net, h.client, h.client.audioCmds, evts,
       st.unsent, st.undelivered, st.quitArm > 0.0)
-    st = applyKeys(st, ctx)
+    st = applyIntents(st, ctx)
     st = drainAudio(st, ctx)
     st = notifyStep(h, st, snap)
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
@@ -604,43 +604,76 @@ object Pump:
 
   // ---- input ----------------------------------------------------------------
 
-  /** drain the keypad into the applet — and run the two-step quit edge as
-   *  the device loop does, though on iOS the confirmed edge only ends the
-   *  session loop (an app does not self-terminate). The queue carries
-   *  IosKeys codes: the buttons are the model, no translation table.
+  /** drain the shell's INTENTS into the applet — and run the two-step quit
+   *  edge as the device loop does, though on the watch the confirmed edge
+   *  only ends the session loop (an app does not self-terminate).
    *
-   *  ONE key is not applied directly: while a PushToTalk channel is joined
-   *  the PTT button REQUESTS a transmission instead (ptt.scala), and the
-   *  recording starts when the framework says the transmission is live and
-   *  the audio session is activated. Same path as the system talk button,
-   *  and the system UI cannot fall out of step with what is recording. */
-  def applyKeys(st0: PumpSt, ctx: FrameCtx): PumpSt =
+   *  The queue speaks what the person DID (plan 0071's intents.scala), not
+   *  which key a handset would have under their thumb. The applets still
+   *  take `KeyEvent`s — they are wata-fb's files, and moving them off keys is
+   *  the metrics/bodies step, not this one — so this function is the whole
+   *  translation, in one place, in the domain rather than in the platform.
+   *
+   *  NAVIGATE is where the two vocabularies really differ: it carries a
+   *  signed magnitude in cards, and until the integrator lands (plan 0071
+   *  step 2, plan 0070's physics) the pump rounds it to whole rows and
+   *  repeats the arrow that many times. The magnitude is LOGGED rather than
+   *  silently discarded, so a crown nudge and a swipe flick can be seen to
+   *  differ at the seam before anything can act on the difference. */
+  def applyIntents(st0: PumpSt, ctx: FrameCtx): PumpSt =
     var st = st0
     var going = true
     while going do
-      val packed = go.watchshell.nextKey()
-      if packed < 0 then going = false
-      else
-        val k = packed / 4
-        if k != IosKeys.NONE && k <= IosKeys.PTT then
-          val ks = stateOf(packed % 4)
-          st = applyKey(st, KeyEvent(keyOf(k), ks), ctx)
+      val kind = go.watchshell.nextIntent()
+      if kind < 0 then going = false
+      else st = applyIntent(st, kind, ctx)
     st
 
-  def keyOf(code: scala.Int): Key =
-    if code == IosKeys.UP then KUp()
-    else if code == IosKeys.DOWN then KDown()
-    else if code == IosKeys.LEFT then KLeft()
-    else if code == IosKeys.RIGHT then KRight()
-    else if code == IosKeys.ENTER then KEnter()
-    else if code == IosKeys.BACK then KBack()
-    else if code == IosKeys.PTT then KPtt()
-    else KUnknown()
+  def applyIntent(st0: PumpSt, kind: scala.Int, ctx: FrameCtx): PumpSt =
+    if kind == Intents.NAVIGATE then navigate(st0, go.watchshell.intentAxis(),
+      go.watchshell.intentAmount(), ctx)
+    else if kind == Intents.CHOOSE then tap(st0, KEnter(), ctx)
+    else if kind == Intents.BACK then tap(st0, KBack(), ctx)
+    else if kind == Intents.TALK_DOWN then applyKey(st0, KeyEvent(KPtt(), Pressed()), ctx)
+    else if kind == Intents.TALK_UP then applyKey(st0, KeyEvent(KPtt(), Released()), ctx)
+    else if kind == Intents.RAW then tap(st0, rawKey(go.watchshell.intentCode()), ctx)
+    else
+      // WAKE / SLEEP: the wrist rose or dropped. Nothing acts on them yet —
+      // the screen is WatchKit's to blank — but they are logged so the
+      // lifecycle is visible in the same trace as everything else.
+      if kind == Intents.WAKE || kind == Intents.SLEEP then
+        println("input: " + Intents.name(kind))
+      st0
 
-  def stateOf(phase: scala.Int): KeyState =
-    if phase == 1 then Pressed()
-    else if phase == 2 then Repeat()
-    else Released()
+  /** one Navigate: log what was contributed, then move that many rows.
+   *  Horizontal is RESERVED (plan 0070/0071) — reported, never acted on, and
+   *  logged when something starts producing it so the silence is not
+   *  mistaken for a dropped gesture. */
+  def navigate(st0: PumpSt, axis: scala.Int, amount: scala.Double, ctx: FrameCtx): PumpSt =
+    val n = Intents.steps(amount)
+    println("input: navigate axis=" + Intents.axisName(axis) + " amount=" +
+      Intents.fmt(amount) + " steps=" + n)
+    if axis != Intents.AXIS_V then st0
+    else
+      val key = if n < 0 then KUp() else KDown()
+      val count = if n < 0 then -n else n
+      var st = st0
+      var i = 0
+      while i < count do
+        st = tap(st, key, ctx)
+        i += 1
+      st
+
+  /** a press and its release — a tap, a click, a swipe: the gestures with no
+   *  meaningful edges of their own. Only talk has real ones. */
+  def tap(st0: PumpSt, key: Key, ctx: FrameCtx): PumpSt =
+    val down = applyKey(st0, KeyEvent(key, Pressed()), ctx)
+    applyKey(down, KeyEvent(key, Released()), ctx)
+
+  /** RAW's device-specific code, in the handset's numbering (input.scala's
+   *  `Key`). Nothing on the watch emits one; the hatch exists for the
+   *  handset's diag and exit menus, which have no wata-level meaning. */
+  def rawKey(code: scala.Int): Key = Evdev.mapKey(code)
 
   def applyKey(st: PumpSt, ev: KeyEvent, ctx: FrameCtx): PumpSt =
     val edge = isQuitEdge(st.wata, ev)

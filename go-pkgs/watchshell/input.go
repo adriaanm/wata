@@ -1,22 +1,41 @@
-// The watch's input, on the SAME contract as the phone's touch keypad
-// (go-pkgs/iosshell/keypad.go, ioskeys.scala's IosKeys): a queue of
-// `code*4 + phase` with code 1..7 (UP DOWN LEFT RIGHT ENTER BACK PTT) and
-// phase 0 release / 1 press. The applets already speak those keys, so the
-// watch's very different gestures arrive as the model the shared logic
-// expects and nothing above this file knows the difference.
+// The watch's input, in WATA's vocabulary rather than the handset's.
 //
-// The phone draws seven buttons because a phone has no keys. A watch has no
-// room for seven buttons and does have real input, so the mapping is the
-// watch's own:
+// This file used to queue `code*4 + phase` in the BQ268's key codes, because
+// the shared applets speak those — so a wrist gesture had to be translated
+// into an arrow key on a walkie-talkie that is not present. That is plan
+// 0071's "the platform reaches too far up", and at the wrong device's
+// vocabulary. What crosses the seam now is an INTENT: what the person did,
+// in terms the domain owns.
 //
-//	Digital Crown rotate   UP / DOWN   the watch's signature control; a list
-//	                                   scrolls under the thumb, and it is the
-//	                                   one input that needs no screen space
-//	tap                    ENTER       open what is selected
-//	swipe right            BACK        the platform's own back idiom
-//	long press             PTT         press and release edges, which is
-//	                                   exactly hold-to-talk
-//	swipe up / down        UP / DOWN   for a wrist that would rather swipe
+//	Digital Crown rotate   Navigate(vertical, ±detents)   the watch's signature
+//	                       control; the one input that needs no screen space
+//	swipe up / down        Navigate(vertical, ∓flick)     a wrist that would
+//	                       rather swipe than turn
+//	tap                    Choose
+//	swipe right            Back                           the platform's idiom
+//	long press             TalkDown / TalkUp              hold-to-talk
+//	activate / deactivate  Wake / Sleep                   WatchKit's lifecycle
+//
+// NAVIGATE CARRIES A SIGNED MAGNITUDE, not a direction, and that is the
+// point of the shape rather than a decoration. Plan 0070's scrolling is
+// physical — impulse, friction, detent spring, end spring — so a shell that
+// can only say "down was pressed" cannot express a flick. Each device says
+// how hard it was pushed and the physics lives once, above the boundary.
+// Positive is toward the END of a list (down / right); negative is back
+// toward its start. Units are DETENTS: 1.0 is one card, which is what a
+// single crown click is worth.
+//
+// The integrator that turns those magnitudes into motion is plan 0071's step
+// 2 and does not exist yet, so the app side rounds a magnitude to whole
+// steps. The magnitude is still carried and still logged, so a nudge and a
+// flick are already distinguishable at the seam — retrofitting it later into
+// a settled interface is the expensive version.
+//
+// THE HORIZONTAL AXIS IS RESERVED AND UNUSED. Nothing here emits it and
+// nothing above consumes it. It exists so the integrator runs per axis and
+// layout positions items from an (x, y) offset, which makes a later per-card
+// action strip a body change rather than a re-architecture. Do not spend a
+// gesture on it without a reason.
 //
 // WHY UIKit's recognizers AND NOT WatchKit's. Both exist here. WatchKit's
 // WKTapGestureRecognizer & co. attach to a storyboard's objects, and the
@@ -27,11 +46,11 @@
 // window hit-tests to the app's container, not to WatchKit's hierarchy
 // underneath.
 //
-// THE CROWN IS NOT A KEY, and turning it into one is a choice. Rotation
-// arrives as a continuous rotationalDelta, so this accumulates and emits one
-// UP/DOWN per detentPerKey of travel. Too small and a flick scrolls a list
-// off its end; too large and the crown feels dead. The value below is a
-// starting point to be tuned on a wrist, not a measured constant.
+// THE CROWN IS CONTINUOUS. Rotation arrives as a rotationalDelta, so this
+// accumulates and reports one Navigate per BATCH of whole detents crossed —
+// magnitude = the detents, so a steady turn of three clicks is one
+// Navigate(±3) rather than three of ±1, and a nudge is ±1. detentPerCard is
+// a starting point to be tuned on a wrist, not a measured constant.
 //
 // Retention: the recognizers are retained by the view they attach to; the
 // target and the crown delegate are owned (+alloc) and kept in package
@@ -53,21 +72,33 @@ import (
 	"github.com/ebitengine/purego/objc"
 )
 
-// the key codes — the Sgola contract, identical to iosshell's.
+// The intent kinds — the Sgola contract (watchui.scala's `go.watchshell`,
+// decoded by intents.scala's `Intents`). Keep the two in step.
 const (
-	KeyNone  = 0
-	KeyUp    = 1
-	KeyDown  = 2
-	KeyLeft  = 3
-	KeyRight = 4
-	KeyEnter = 5
-	KeyBack  = 6
-	KeyPtt   = 7
+	IntentNone     = 0
+	IntentNavigate = 1
+	IntentChoose   = 2
+	IntentBack     = 3
+	IntentTalkDown = 4
+	IntentTalkUp   = 5
+	IntentWake     = 6
+	IntentSleep    = 7
+	// IntentRaw is the escape hatch for anything a device needs that wata's
+	// vocabulary does not name — the handset's diag and exit menus are the
+	// motivating case. Its Code is that device's own key code; nothing on the
+	// watch emits one today.
+	IntentRaw = 8
+)
+
+// Navigate's axes. Vertical is the only one any gesture produces.
+const (
+	AxisVertical   = 0
+	AxisHorizontal = 1
 )
 
 // UIGestureRecognizerState (UIGestureRecognizer.h): a long press reports
 // Began when the finger has been down long enough and Ended/Cancelled when it
-// lifts. Those two are the PTT edges.
+// lifts. Those two are the talk edges.
 const (
 	gestureBegan     = 1
 	gestureEnded     = 3
@@ -83,17 +114,34 @@ const (
 	swipeDown  = 1 << 3
 )
 
-// How much crown travel makes one arrow key. Tune on hardware.
-const detentPerKey = 0.35
+// How much crown travel is worth one card. Tune on hardware.
+const detentPerCard = 0.35
+
+// What a swipe is worth. A UISwipeGestureRecognizer reports THAT a flick
+// happened and never how fast — it has no velocity, unlike a pan — so a
+// swipe's magnitude is a constant until this moves to a pan recognizer and
+// reads `velocityInView:` at release. Three cards is "harder than a nudge",
+// which is the distinction the magnitude exists to carry.
+const swipeFlick = 3.0
 
 const (
 	inputTargetClass = "WataWatchInputTarget"
 	crownDelegClass  = "WataWatchCrownDelegate"
 )
 
+// intent is one thing the person did. Axis and Amount mean something only
+// for Navigate; Code only for Raw.
+type intent struct {
+	Kind   int
+	Axis   int
+	Amount float64
+	Code   int
+}
+
 var (
-	keyMu    sync.Mutex
-	keyQueue []int
+	keyMu       sync.Mutex
+	intentQueue []intent
+	current     intent // the last one NextIntent popped (see its comment)
 
 	inputTarget objc.ID // owned; recognizers do not retain their target
 	crownDeleg  objc.ID // owned; the sequencer does not retain its delegate
@@ -131,32 +179,46 @@ var (
 	msgSend     uintptr
 )
 
-// PushKey queues one key edge (phase 0 release / 1 press). The gestures' own
-// path, and a harness's injection seam.
-func PushKey(code, phase int) {
+// PushIntent queues one intent. The gestures' own path, and a harness's
+// injection seam.
+func PushIntent(kind, axis int, amount float64, code int) {
 	keyMu.Lock()
-	keyQueue = append(keyQueue, code*4+phase)
+	intentQueue = append(intentQueue, intent{Kind: kind, Axis: axis, Amount: amount, Code: code})
 	keyMu.Unlock()
 }
 
-// NextKey pops the oldest queued `code*4 + phase`, or -1 — never blocks.
-func NextKey() int {
+func pushNavigate(axis int, amount float64) { PushIntent(IntentNavigate, axis, amount, 0) }
+func pushSimple(kind int)                   { PushIntent(kind, AxisVertical, 0, 0) }
+
+// NextIntent pops the oldest intent and answers its KIND, or -1 when the
+// queue is empty — never blocks. The rest of the record is then readable
+// through IntentAxis / IntentAmount / IntentCode until the next pop.
+//
+// It is split that way because the Sgola seam passes scalars, not structs,
+// and a Navigate has to carry a float64 magnitude that must not be rounded
+// or packed on the way across (the whole point of plan 0071's intents). The
+// contract that makes it safe is ONE consumer: the frame pump drains this
+// queue and nothing else calls it.
+func NextIntent() int {
 	keyMu.Lock()
 	defer keyMu.Unlock()
-	if len(keyQueue) == 0 {
+	if len(intentQueue) == 0 {
+		current = intent{}
 		return -1
 	}
-	k := keyQueue[0]
-	keyQueue = keyQueue[1:]
-	return k
+	current = intentQueue[0]
+	intentQueue = intentQueue[1:]
+	return current.Kind
 }
 
-// tap and swipe are one-shot: they fire once, so a press/release pair is
-// synthesized. Only the long press has real edges.
-func pressAndRelease(code int) {
-	PushKey(code, 1)
-	PushKey(code, 0)
-}
+// IntentAxis is the popped Navigate's axis (AxisVertical / AxisHorizontal).
+func IntentAxis() int { keyMu.Lock(); defer keyMu.Unlock(); return current.Axis }
+
+// IntentAmount is the popped Navigate's signed magnitude, in cards.
+func IntentAmount() float64 { keyMu.Lock(); defer keyMu.Unlock(); return current.Amount }
+
+// IntentCode is the popped Raw's device-specific code.
+func IntentCode() int { keyMu.Lock(); defer keyMu.Unlock(); return current.Code }
 
 func inputTargetID() objc.ID {
 	if inputTarget != 0 {
@@ -166,19 +228,22 @@ func inputTargetID() objc.ID {
 		nil, nil, []objc.MethodDef{
 			{Cmd: objc.RegisterName("wataTap:"),
 				Fn: func(self objc.ID, _ objc.SEL, g objc.ID) {
-					pressAndRelease(KeyEnter)
+					pushSimple(IntentChoose)
 				}},
 			{Cmd: objc.RegisterName("wataBack:"),
 				Fn: func(self objc.ID, _ objc.SEL, g objc.ID) {
-					pressAndRelease(KeyBack)
+					pushSimple(IntentBack)
 				}},
+			// A swipe UP moves toward the START of the list, so its magnitude
+			// is negative — the sign is the direction, and the size is how
+			// hard it was pushed.
 			{Cmd: objc.RegisterName("wataUp:"),
 				Fn: func(self objc.ID, _ objc.SEL, g objc.ID) {
-					pressAndRelease(KeyUp)
+					pushNavigate(AxisVertical, -swipeFlick)
 				}},
 			{Cmd: objc.RegisterName("wataDown:"),
 				Fn: func(self objc.ID, _ objc.SEL, g objc.ID) {
-					pressAndRelease(KeyDown)
+					pushNavigate(AxisVertical, swipeFlick)
 				}},
 			// Hold-to-talk. A long press is the ONLY gesture here with
 			// meaningful edges, and the whole send path hangs off them.
@@ -186,9 +251,9 @@ func inputTargetID() objc.ID {
 				Fn: func(self objc.ID, _ objc.SEL, g objc.ID) {
 					switch int(g.Send(selState)) {
 					case gestureBegan:
-						PushKey(KeyPtt, 1)
+						pushSimple(IntentTalkDown)
 					case gestureEnded, gestureCancelled, gestureFailed:
-						PushKey(KeyPtt, 0)
+						pushSimple(IntentTalkUp)
 					}
 				}},
 		})
@@ -240,7 +305,7 @@ func AddGestures(v uikit.UIView) {
 	startCrown()
 }
 
-// startCrown focuses the Digital Crown and turns its rotation into arrows.
+// startCrown focuses the Digital Crown and turns its rotation into Navigate.
 // The sequencer belongs to the interface controller, which is why shell.go
 // keeps the instance.
 func startCrown() {
@@ -277,29 +342,28 @@ func startCrown() {
 	seq.Send(objc.RegisterName("focus"))
 }
 
-// crownRotated accumulates continuous rotation into discrete arrow keys.
-// Crossing the threshold consumes exactly one key's worth rather than
-// resetting, so a steady turn emits an even stream instead of dropping the
-// remainder of every detent.
+// crownRotated accumulates continuous rotation into whole cards and reports
+// them as ONE Navigate carrying how many. Crossing the threshold consumes
+// exactly that many detents rather than resetting, so a steady turn keeps
+// its remainder instead of dropping it.
+//
+// Crown up (a positive rotationalDelta) scrolls toward the TOP of a list,
+// which is a NEGATIVE amount under the "positive is toward the end" rule.
 func crownRotated(delta float64) {
 	keyMu.Lock()
 	crownAccum += delta
-	var ups, downs int
-	for crownAccum >= detentPerKey {
-		crownAccum -= detentPerKey
-		ups++
+	cards := 0
+	for crownAccum >= detentPerCard {
+		crownAccum -= detentPerCard
+		cards++
 	}
-	for crownAccum <= -detentPerKey {
-		crownAccum += detentPerKey
-		downs++
+	for crownAccum <= -detentPerCard {
+		crownAccum += detentPerCard
+		cards--
 	}
 	keyMu.Unlock()
-	// Crown up is scrolling toward the TOP of a list, which is UP.
-	for i := 0; i < ups; i++ {
-		pressAndRelease(KeyUp)
-	}
-	for i := 0; i < downs; i++ {
-		pressAndRelease(KeyDown)
+	if cards != 0 {
+		pushNavigate(AxisVertical, -float64(cards))
 	}
 }
 
@@ -329,23 +393,33 @@ func OpenURL(s string) {
 	log.Printf("watchshell: no browser on the watch, ignoring open %s", s)
 }
 
-// ScriptKeys is a HARNESS SEAM, not a product path: it replays a scripted
-// key sequence so a gate can hold the talk button without a finger. The
+// ScriptIntents is a HARNESS SEAM, not a product path: it replays a scripted
+// gesture sequence so a gate can hold the talk button without a finger. The
 // watch simulator has no way to synthesize a long press on a UIKit
 // recognizer — `simctl` can tap a coordinate but not hold one — so without
 // this the SEND half of a walkie-talkie is ungateable, and only the receive
 // half would ever be proven.
 //
-// Format, from $WATA_WATCH_SCRIPT_KEYS: comma-separated `code@atMs+holdMs`,
-// where code is the key number (7 = PTT) and holdMs may be omitted for a
-// tap. So `7@4000+1500` presses PTT four seconds in and releases it 1.5s
-// later — a hold-to-talk of the kind a wrist would make.
+// Format, from $WATA_WATCH_SCRIPT_INTENTS: comma-separated
+// `what@atMs[+holdMs]`, where `what` names an intent —
+//
+//	talk        TalkDown at atMs, TalkUp holdMs later (the hold-to-talk one)
+//	choose      Choose
+//	back        Back
+//	up / down   Navigate(vertical, ∓1) — one card, a nudge
+//	up:2.5      the same with an explicit magnitude, for a flick
+//	wake/sleep  the lifecycle pair
+//	raw:N       Raw(N)
+//
+// So `talk@6000+1500` presses the talk button six seconds in and releases it
+// 1.5s later — a hold of the kind a wrist would make. `holdMs` means
+// anything only for `talk`; every other intent is a single edge.
 //
 // It pushes onto the SAME queue the gestures use, so what the pump sees is
-// indistinguishable from a real press. That is the point and also the
+// indistinguishable from a real gesture. That is the point and also the
 // limit: this proves the send arc above the recognizer, and proves nothing
 // about whether a real long press is delivered (WATCH-INPUT-DELIVERY).
-func ScriptKeys(spec string) {
+func ScriptIntents(spec string) {
 	if spec == "" {
 		return
 	}
@@ -354,30 +428,71 @@ func ScriptKeys(spec string) {
 		if item == "" {
 			continue
 		}
-		codeStr, rest, ok := strings.Cut(item, "@")
+		whatStr, rest, ok := strings.Cut(item, "@")
 		if !ok {
-			log.Printf("watchshell: bad key script %q, want code@atMs[+holdMs]", item)
+			log.Printf("watchshell: bad intent script %q, want what@atMs[+holdMs]", item)
 			continue
 		}
 		atStr, holdStr, hasHold := strings.Cut(rest, "+")
-		code, err1 := strconv.Atoi(strings.TrimSpace(codeStr))
-		at, err2 := strconv.Atoi(strings.TrimSpace(atStr))
+		at, err1 := strconv.Atoi(strings.TrimSpace(atStr))
 		hold := 0
-		var err3 error
+		var err2 error
 		if hasHold {
-			hold, err3 = strconv.Atoi(strings.TrimSpace(holdStr))
+			hold, err2 = strconv.Atoi(strings.TrimSpace(holdStr))
 		}
-		if err1 != nil || err2 != nil || err3 != nil {
-			log.Printf("watchshell: bad key script %q", item)
+		what := strings.TrimSpace(whatStr)
+		kind, axis, amount, code, ok := parseScriptWhat(what)
+		if err1 != nil || err2 != nil || !ok {
+			log.Printf("watchshell: bad intent script %q", item)
 			continue
 		}
-		go func(code, at, hold int) {
+		go func(what string, kind, axis int, amount float64, code, at, hold int) {
 			time.Sleep(time.Duration(at) * time.Millisecond)
-			log.Printf("watchshell: scripted key %d press", code)
-			PushKey(code, 1)
-			time.Sleep(time.Duration(hold) * time.Millisecond)
-			log.Printf("watchshell: scripted key %d release", code)
-			PushKey(code, 0)
-		}(code, at, hold)
+			log.Printf("watchshell: scripted intent %s", what)
+			PushIntent(kind, axis, amount, code)
+			if kind == IntentTalkDown {
+				time.Sleep(time.Duration(hold) * time.Millisecond)
+				log.Printf("watchshell: scripted intent talk release")
+				PushIntent(IntentTalkUp, AxisVertical, 0, 0)
+			}
+		}(what, kind, axis, amount, code, at, hold)
 	}
+}
+
+// parseScriptWhat decodes one script token's intent name, with the optional
+// `:arg` that gives a Navigate its magnitude or a Raw its code.
+func parseScriptWhat(what string) (kind, axis int, amount float64, code int, ok bool) {
+	name, arg, hasArg := strings.Cut(what, ":")
+	switch name {
+	case "talk":
+		return IntentTalkDown, AxisVertical, 0, 0, true
+	case "choose":
+		return IntentChoose, AxisVertical, 0, 0, true
+	case "back":
+		return IntentBack, AxisVertical, 0, 0, true
+	case "wake":
+		return IntentWake, AxisVertical, 0, 0, true
+	case "sleep":
+		return IntentSleep, AxisVertical, 0, 0, true
+	case "up", "down":
+		mag := 1.0
+		if hasArg {
+			v, err := strconv.ParseFloat(arg, 64)
+			if err != nil {
+				return 0, 0, 0, 0, false
+			}
+			mag = v
+		}
+		if name == "up" {
+			mag = -mag
+		}
+		return IntentNavigate, AxisVertical, mag, 0, true
+	case "raw":
+		n, err := strconv.Atoi(arg)
+		if !hasArg || err != nil {
+			return 0, 0, 0, 0, false
+		}
+		return IntentRaw, AxisVertical, 0, n, true
+	}
+	return 0, 0, 0, 0, false
 }

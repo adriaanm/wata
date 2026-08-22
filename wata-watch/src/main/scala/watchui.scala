@@ -73,12 +73,23 @@ object watchshell:
   @go.name("AdoptRoot") def adoptRoot(v: uikit.UIView): Unit = ???
 
   /** attach the watch's input to a view — crown, tap, swipe, long press.
-   *  The queue below then speaks ioskeys.scala's codes, so the shared
-   *  applets never learn that the watch has no keypad. */
+   *  The queue below speaks INTENTS (plan 0071): what the person did, in
+   *  wata's terms, so neither side has to know about the handset's keypad. */
   @go.name("AddGestures") def addGestures(v: uikit.UIView): Unit = ???
 
-  /** pop `code*4 + phase`, or -1 — never blocks (iosshell's contract). */
-  @go.name("NextKey") def nextKey(): scala.Int = ???
+  /** pop the oldest intent and answer its KIND (Intents.*), or -1 — never
+   *  blocks. The rest of the record is read through the three accessors
+   *  below, which is how a Navigate's float64 magnitude crosses a seam that
+   *  passes scalars without being rounded or packed on the way. Safe because
+   *  there is exactly ONE consumer: the frame pump. */
+  @go.name("NextIntent") def nextIntent(): scala.Int = ???
+  /** the popped Navigate's axis (Intents.AXIS_V / AXIS_H). */
+  @go.name("IntentAxis") def intentAxis(): scala.Int = ???
+  /** the popped Navigate's signed magnitude, in cards: positive toward the
+   *  END of a list, 1.0 = one crown detent. */
+  @go.name("IntentAmount") def intentAmount(): scala.Double = ???
+  /** the popped Raw's device-specific code. */
+  @go.name("IntentCode") def intentCode(): scala.Int = ???
 
   /** tee stdout+stderr into a file, so an icon-tap launch's lines survive
    *  to be pulled off the watch. Answers "" or the error. */
@@ -90,6 +101,6 @@ object watchshell:
   /** logs and ignores: watchOS has no browser to open (see input.go). */
   @go.name("OpenURL") def openURL(url: String): Unit = ???
 
-  /** a HARNESS seam: replay `code@atMs+holdMs` keys so a gate can hold the
-   *  talk button without a finger (see input.go). Inert when unset. */
-  @go.name("ScriptKeys") def scriptKeys(spec: String): Unit = ???
+  /** a HARNESS seam: replay `what@atMs[+holdMs]` intents so a gate can hold
+   *  the talk button without a finger (see input.go). Inert when unset. */
+  @go.name("ScriptIntents") def scriptIntents(spec: String): Unit = ???

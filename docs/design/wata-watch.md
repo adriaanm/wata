@@ -13,7 +13,7 @@ linked into a watchOS arm64 binary. No Swift, no storyboard, no Xcode
 project.
 
 Its architecture is **wata-ios's**, and that is not a family resemblance:
-fifteen of its Scala files are wata-ios's, copied unchanged. What differs
+eighteen of its Scala files are byte-identical to wata-ios's. What differs
 is the entry point, the input, and three surfaces the watch does not have.
 
 ## Why Go reaches watchOS at all
@@ -66,18 +66,41 @@ a launch callback. The shell therefore owns:
 The inversion above it is iosshell's exactly: `start()` → `runApp(ready)`,
 and everything the app builds happens inside `ready`.
 
-## Input: the watch's gestures, the phone's key codes
+## Input: intents, not key codes
 
-`go-pkgs/watchshell/input.go` queues `code*4 + phase` on iosshell's
-contract, so the shared applets never learn the watch has no keypad:
+`go-pkgs/watchshell/input.go` queues **intents** — what the person did, in
+wata's terms (plan 0071's first step). It used to queue the BQ268's
+`code*4 + phase` key codes, which meant a wrist gesture had to be described
+as an arrow key on a walkie-talkie that is not present:
 
-| gesture | key |
+| gesture | intent |
 |---|---|
-| Digital Crown rotate | UP / DOWN |
-| tap | ENTER |
-| swipe right | BACK |
-| **long press** | **PTT press and release edges** — hold-to-talk |
-| swipe up / down | UP / DOWN |
+| Digital Crown rotate | `Navigate(vertical, ±detents)` |
+| swipe up / down | `Navigate(vertical, ∓3)` — a flick is harder than a nudge |
+| tap | `Choose` |
+| swipe right | `Back` |
+| **long press** | **`TalkDown` / `TalkUp`** — hold-to-talk |
+| `willActivate` / `didDeactivate` | `Wake` / `Sleep` |
+| — | `Raw(code)`, the escape hatch; nothing on the watch emits one |
+
+**`Navigate` carries an axis and a signed magnitude, not a direction.**
+Magnitude, because plan 0070's scrolling is physical and a shell that can
+only say "down was pressed" cannot express a flick; the units are cards, and
+1.0 is one crown detent. Positive is toward the END of a list. The
+horizontal axis is **reserved and unused** — plumbed so the integrator runs
+per axis, with no gesture spent on it.
+
+The integrator itself is plan 0071's step 2 and does not exist yet, so
+`Intents.steps` (intents.scala) rounds a magnitude to whole rows and the
+pump repeats the arrow that many times — the felt behaviour of a crown
+detent is unchanged. The magnitude is **logged, not discarded**:
+`input: navigate axis=v amount=3.00 steps=3`.
+
+The seam passes scalars, so `NextIntent` pops a record and answers its
+KIND, and `IntentAxis` / `IntentAmount` / `IntentCode` read the rest of the
+one it popped. That is safe because there is exactly one consumer — the
+frame pump — and it is what keeps a float64 magnitude from being rounded or
+packed on the way across.
 
 UIKit's recognizers, not WatchKit's: WatchKit's attach to a storyboard's
 objects and there is no storyboard. That this can work rests on the app's
@@ -85,13 +108,20 @@ own raised window being hit-testable, which was probed — `hitTest:` at the
 centre of the panel resolves to the app's container, not to WatchKit's
 hierarchy underneath.
 
-The crown is continuous, so rotation accumulates and emits one arrow per
-`detentPerKey` of travel. That constant is a starting point, not a measured
-value; it wants tuning on a wrist.
+The crown is continuous, so rotation accumulates and reports one `Navigate`
+per batch of whole detents crossed, carrying how many. `detentPerCard` is a
+starting point, not a measured value; it wants tuning on a wrist. A
+`UISwipeGestureRecognizer` reports THAT a flick happened and never how fast
+— it has no velocity, unlike a pan — so a swipe's magnitude is the constant
+`swipeFlick` until this moves to a pan recognizer reading `velocityInView:`
+at release.
 
-`ScriptKeys` replays `code@atMs+holdMs` onto the same queue — a harness
-seam, because the simulator can tap a coordinate but cannot synthesize a
-long press, which would otherwise leave the whole send half ungateable.
+`ScriptIntents` replays `what@atMs[+holdMs]` onto the same queue
+(`$WATA_WATCH_SCRIPT_INTENTS`, e.g. `talk@6000+1500`, `down:3@5300`) — a
+harness seam, because the simulator can tap a coordinate but cannot
+synthesize a long press, which would otherwise leave the whole send half
+ungateable. `holdMs` means something only for `talk`; every other intent is
+a single edge.
 
 ## What the watch does NOT have
 

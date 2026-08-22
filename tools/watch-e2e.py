@@ -21,7 +21,7 @@ process exit, the interptest rule):
     notify: noted "…" … badge=<n>       bob's message arrived over sync
     send: complete                      the watch RECORDED and SENT one of
                                         its own, from a held talk button
-                                        (watchshell's ScriptKeys — the
+                                        (watchshell's ScriptIntents — the
                                         simulator cannot synthesize a long
                                         press on a UIKit recognizer)
 
@@ -189,14 +189,22 @@ def main():
     os.environ["SIMCTL_CHILD_WATA_IOS_USER"] = "alice"
     os.environ["SIMCTL_CHILD_WATA_IOS_PASS"] = PASSWORD
     os.environ["SIMCTL_CHILD_WATA_MAC_AUDIO"] = "fake"
-    # The SEND leg's finger: hold PTT (key 7) from t=6s for 1.5s, by which
+    # The SEND leg's finger: hold the talk button from t=6s for 1.5s, by which
     # time the contact list has painted and the family row is selected. The
     # simulator cannot synthesize a long press on a UIKit recognizer, so this
-    # rides watchshell's ScriptKeys onto the same queue the gestures use.
+    # rides watchshell's ScriptIntents onto the same queue the gestures use.
     # It proves the send arc above the recognizer and nothing about whether a
     # real long press is DELIVERED — that is WATCH-INPUT-DELIVERY, and only a
     # wrist settles it.
-    os.environ["SIMCTL_CHILD_WATA_WATCH_SCRIPT_KEYS"] = "7@6000+1500"
+    # $WATCH_E2E_INTENTS overrides the script — a way to drive the OTHER
+    # intents (`down@5000,down:3@5300,talk@6000+1500` shows a nudge and a
+    # flick reaching the app with different magnitudes) without editing this
+    # file. It is a DEBUG seam, not a second gate: navigating moves the
+    # selection off the family row, so the talk hold then sends somewhere
+    # else and the server-side family check fails the run — which is the
+    # check working, not a defect.
+    os.environ["SIMCTL_CHILD_WATA_WATCH_SCRIPT_INTENTS"] = (
+        os.environ.get("WATCH_E2E_INTENTS") or "talk@6000+1500")
 
     sent = {"ok": False, "at": None, "arrived": None}
     # The arrival line ENDS the run, and it lands before the sending tui has
