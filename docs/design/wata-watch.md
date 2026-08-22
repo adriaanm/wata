@@ -440,6 +440,29 @@ now encode them:
    tunnel and everything is scripted. No CLI initiates the introduction;
    `devicectl manage pair` only pairs devices already discovered.
 
+Running on the device surfaced two facts the simulator structurally could
+not, both fixed in `go-pkgs/watchshell`:
+
+- **A real watch refuses the Go runtime's signal setup.** watchOS's
+  libsystem_c aborts any process calling `sigaction()` for a fatal signal
+  ("sigaction on fatal signals is not supported"), and Go installs exactly
+  those at startup — so an unmodified Go watch app dies before main, with
+  `devicectl` misreporting "exit code 0" and printing nothing. The fix is
+  `sigaction_watchos.c` (`WATCH-SIGACTION-FATAL`): the app defines
+  `sigaction` itself, reports success for the fatal set without installing
+  anything, and passes the rest (SIGURG drives Go's preemption) to the
+  real one. Device-only (`!TARGET_OS_SIMULATOR`); the cost is that a
+  fault Go would panic on is a hard crash on the wrist. The diagnosis
+  route, since console output and exit codes are both unreliable there:
+  `devicectl device copy from --domain-type systemCrashLogs`.
+- **A watch container has no `Documents/`** (an iPhone's does), so TeeLog
+  lost the whole sandbox log to ENOENT; it now creates the parent.
+
 The open hardware questions are whether a real long press is delivered
-(`WATCH-INPUT-DELIVERY`) and the real-audio round trip (`WATCH-AUDIO`) —
-both now testable on a wrist.
+(`WATCH-INPUT-DELIVERY`), the real-audio round trip (`WATCH-AUDIO`), and
+the first paint: with the signal fix in, the process runs and stays up,
+but the first look showed the launch spinner, not the stage
+(`WATCH-DEVICE-FIRST-PAINT` — read `Documents/wata.log` for the
+`metrics:`/`paint` lines before theorizing; the compositing route is the
+prime suspect, and it is exactly the part the shell's own header warns
+is silent).

@@ -18,6 +18,7 @@ package watchshell
 
 import (
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 )
@@ -36,6 +37,13 @@ var (
 // success, else the error text; on failure the fds are left usable (at
 // worst one stream is already teed).
 func TeeLog(path string) string {
+	// A watch container starts without Documents/ (an iPhone's has it) —
+	// create the parent rather than losing the whole log to ENOENT.
+	if dir := filepath.Dir(path); dir != "." && dir != "/" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err.Error()
+		}
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err.Error()
