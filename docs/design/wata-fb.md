@@ -528,6 +528,33 @@ republishes `Syncing` on every snapshot, so writing the live cell would
 not survive a frame — and `netpipe` forces the pipe. Both are inert in
 every real run (`Ui.resetCells` clears them per session).
 
+#### The charge-anomaly mark
+
+Beside the connectivity element the header carries one more mark, drawn
+only when it has something alarming to say (plan 0073): the plug glyph
+(`ICON_PLUG`, 0x91) plus an `X`, black on a red field — inverse video,
+which nothing else in the header uses — in a FIXED two-cell slot left
+of the reconnect-dots slot, so neither the dots' blink nor the pipe
+mark's width reflows it. It means *plugged but NOT charging*: a failed
+cradle contact discharges the handset invisibly (VBUS present, charger
+FSM idle — the rootfs telemetry spec is bq268-alpine
+`docs/planning/charging-telemetry.md`), and the mark makes that visible
+at cradle time rather than as a dead handset the next morning.
+
+`ChargeStatus` (netstatus.scala, shaped like `NetStatus` and polled
+once a frame by `Ui.frameStep`) re-reads
+`/sys/class/power_supply/usb/online` and `battery/status` every ~5s
+(`Diag.chargeAnomaly`; false off-device, so no golden but the forced
+one ever shows the mark) and arms only after the anomaly holds
+`DEBOUNCE_FRAMES` (~3 minutes of frames — frames, not wall time,
+because the device's clock STEPS when NTP lands): a BC1.2
+renegotiation or a dock-time bounce never flashes it. One clean read
+clears it at once — recovery is good news. Percentage is never
+consulted: the boot-time BMS percentage is inflated when booted on a
+charger. The `charge bad|ok|auto` directive forces the READ only (the
+debounce runs for real — the charge-anomaly scenario's point), and the
+`chargebad` probe reports the armed flag.
+
 ### Outbox marks and the playback mark
 
 Two row marks say what the client is doing with the user's own audio

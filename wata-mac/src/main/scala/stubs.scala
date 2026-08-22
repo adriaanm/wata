@@ -58,6 +58,10 @@ object Diag:
   def cellAddr(): String = ""
   def wifiState(): String = UNAVAILABLE
   def chargeStat(): String = ""
+  /** the charge-anomaly instant reading (plan 0073) — `ChargeStatus` rides
+   *  in via the symlinked netstatus.scala and needs the read; false is the
+   *  shared code's own off-device answer, so the mark never arms here. */
+  def chargeAnomaly(): Boolean = false
   def uptime(): String = UNAVAILABLE
   def memAvail(): String = UNAVAILABLE
   def startNetTest(): Unit = ()

@@ -306,6 +306,7 @@ object Ui:
     bannerC.set(None)
     lastLedC.set(None)
     NetStatus.reset()
+    ChargeStatus.reset()
     Enrol.reset()
     Diag.resetNetTest()
 
@@ -346,6 +347,10 @@ object Ui:
     // countdown and the reconnecting blink, so it belongs here, once a frame.
     val conn = connV
     val net = NetStatus.poll(conn)
+    // the charge-anomaly poll (plan 0073): same shape, its own cadence —
+    // advances the sysfs read countdown and the debounce streak the header
+    // mark (`WataLogic.chargeAlertView`) renders.
+    ChargeStatus.poll()
     // one log line per change of (pipe, connection, clock) — a boot's whole
     // connectivity story, against a transport that logs a dial failure once
     // per distinct reason and then looks silent (plan 0035).

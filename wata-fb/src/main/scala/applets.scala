@@ -1032,7 +1032,25 @@ object WataLogic:
       else VText(col, 0, text, fg)
     var kids: List[Keyed] = Nil
     if dots != "" then kids = Keyed("dots", VText(col - 2, 0, dots, fg)) :: Nil
+    if ChargeStatus.active() then kids = Keyed("chg", chargeAlertView(col)) :: kids
     VGroup(Keyed("mark", mark) :: kids)
+
+  /** the CHARGE-ANOMALY mark (plan 0073): the plug glyph plus an `X`, black
+   *  on a red field — plugged but NOT charging, sustained (`ChargeStatus`
+   *  owns the 3-minute debounce; this only renders its verdict). Inverse
+   *  video because nothing else in the header is: a failed cradle contact
+   *  must not read as one more colored status mark. FIXED two-cell slot left
+   *  of the reconnect-dots slot (with a one-cell gap), so neither the dots'
+   *  blink nor the pipe mark's width can reflow it. Off-device the flag
+   *  never arms (`Diag.chargeAnomaly` is false on every host), so this view
+   *  appears in no golden except the scenario that forces it. */
+  def chargeAlertView(col: scala.Int): View =
+    val c0 = col - 5
+    val x = c0 * Font.GLYPH_W
+    Views.group(
+      VRect(x, 1, 2 * Font.GLYPH_W, Font.GLYPH_H, Color.red) ::
+        (VGlyph(x, 1, Font.ICON_PLUG, Color.black) ::
+          (VText(c0 + 1, 0, "X", Color.black) :: Nil)))
 
   // ---- string / snapshot helpers --------------------------------------------
   def connectingMsg(c: ConnectionState): String = c match

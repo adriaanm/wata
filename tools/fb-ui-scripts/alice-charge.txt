@@ -1,0 +1,52 @@
+# charge-anomaly (plan 0073): the header's plugged-but-not-charging mark and
+# the 3-minute debounce that holds it back.
+#
+# The READ is forced with the `charge` directive — off-device the sysfs pair
+# does not exist, so `Diag.chargeAnomaly` honestly answers false and the mark
+# could never appear on a host. The debounce is NOT forced: the directive sits
+# upstream of it on purpose, so this scenario is the debounce's oracle — a
+# read that goes bad must hold ~5400 frames (~3 simulated minutes) before the
+# mark arms, and one clean read must clear it.
+#
+# The window is burned with `idle` in chunks under the screensaver's 60s
+# threshold, with a key the contact list ignores (up, clamped at the top row)
+# between them — the alice-kid-settings pattern.
+
+wait syncing 1 900
+wait convs 1 900
+advance 30
+
+# the clean header: NET mark alone, no charge mark.
+checkpoint charge-normal
+
+# every read from here on says plugged-but-idle. The streak starts counting
+# on this directive's own frame.
+charge bad
+
+# ~4509 frames of sustained anomaly: still inside the debounce window, so the
+# mark must NOT be up — the flash a dock-time bounce would otherwise cause.
+idle 900
+tap up
+idle 900
+tap up
+idle 900
+tap up
+idle 900
+tap up
+idle 900
+expect chargebad 0
+checkpoint charge-debounce
+
+# ...and past 5400 frames it arms: the plug + X on the red field, in the
+# fixed slot left of the connectivity mark.
+tap up
+idle 900
+expect chargebad 1
+advance 5
+checkpoint charge-alert
+
+# one clean read clears it immediately — recovery is not debounced: the
+# charger resuming is good news and can show at once.
+charge ok
+expect chargebad 0
+checkpoint charge-cleared

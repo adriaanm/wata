@@ -221,6 +221,27 @@ object Diag:
       out = verb + " " + voltText(uv)
     out
 
+  /** the charge-anomaly INSTANT reading (plan 0073): VBUS present while the
+   *  charger is idle — the docked-but-not-charging failure mode. This is the
+   *  raw pair; `ChargeStatus` (netstatus.scala) owns the 3-minute debounce
+   *  that turns it into the header mark. False on every host (`onDevice()`),
+   *  which is what keeps off-device rendering — and the goldens — unchanged.
+   *  Percentage is deliberately never consulted: the boot-time BMS percentage
+   *  is inflated when the device boots on a charger. */
+  def chargeAnomaly(): Boolean =
+    var out = false
+    if onDevice() then
+      out = anomalyPair(readText("/sys/class/power_supply/battery/status"),
+        readText("/sys/class/power_supply/usb/online"))
+    out
+
+  /** usb-online 1 + a status that is neither Charging nor Full. An EMPTY
+   *  status does not alarm — an unreadable node is no evidence the charger
+   *  is idle. Same capital-C prefix keying as `chargeText`. */
+  def anomalyPair(status: String, usb: String): Boolean =
+    intPrefix(usb) == 1 && status != "" &&
+      !(status.startsWith("Charging") || status.startsWith("Full"))
+
   /** microvolts as "4.19V": centivolts by integer division, no floats, the
    *  fraction zero-padded to two digits. */
   def voltText(uv: scala.Int): String =

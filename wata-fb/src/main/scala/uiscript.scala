@@ -96,6 +96,11 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              0056): guarded radio commands answer ""
  *                              without running anything — the off-device
  *                              way into the kid data row's applying state
+ *    charge <bad|ok|auto>      force the charge-anomaly READ (plan 0073) —
+ *                              the debounce still runs, which is the point:
+ *                              the scenario pins the mark staying OFF for
+ *                              the whole 3-minute window. `auto` hands the
+ *                              read back to sysfs (false on every host)
  *    sendas <user>             send one voice message into the FAMILY room
  *                              as <user>, out of band (a direct login +
  *                              upload + send with the phase's password, like
@@ -129,8 +134,9 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  active applet index — 3 while the developer panel is open), kidrow (the
  *  kid panel's selected row, 4 = the hidden development row), kidtarget
  *  (the data row's pending tri-state target, shifted non-negative for the
- *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell), and kidapply
- *  (the applying wait's frame count, same shift: 0 = not applying). */
+ *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell), kidapply
+ *  (the applying wait's frame count, same shift: 0 = not applying), and
+ *  chargebad (plan 0073: 1 while the debounced charge-anomaly mark is up). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -287,6 +293,8 @@ object UiScript:
       err = notifyModeDirective(nth(ts, 1))
     else if cmd == "fakeradios" then
       err = fakeRadiosDirective(nth(ts, 1))
+    else if cmd == "charge" then
+      err = chargeDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "caplevel" then
       err = capLevelDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "sendas" then
@@ -485,6 +493,21 @@ object UiScript:
     else err = "fakeradios wants on|off"
     err
 
+  /** force the charge-anomaly READ (plan 0073), then advance one frame so the
+   *  forced verdict is what the next poll counts. Deliberately upstream of
+   *  the debounce — the mark must still take DEBOUNCE_FRAMES of `bad` to
+   *  arm, which is exactly what the charge-anomaly scenario pins. `auto`
+   *  hands the read back to sysfs (false on every host). */
+  def chargeDirective(name: String, c: MatrixClient, clock: Clock,
+                      evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
+    var err = ""
+    if name == "bad" then ChargeStatus.forceRead(1)
+    else if name == "ok" then ChargeStatus.forceRead(0)
+    else if name == "auto" then ChargeStatus.forceRead(-1)
+    else err = "charge wants bad|ok|auto"
+    if err == "" then step(c, clock, evts, dev, px)
+    err
+
   /** post one capture-level tick through the REAL audio-event mailbox — the
    *  same channel the frame loop drains — then advance one frame so the
    *  drained level is what the next checkpoint draws. SimAudio's recording is
@@ -664,6 +687,10 @@ object UiScript:
     // (0 = not applying) — how a script proves the spinner state was entered
     // (or left) without counting pixels.
     else if name == "kidapply" then Shell.kidState(Ui.shellState).applyFrames + 1
+    // the charge-anomaly mark's debounced flag (plan 0073) — what the
+    // `charge` directive's forced reads feed. 0 for the whole debounce
+    // window is the assertion that matters.
+    else if name == "chargebad" then boolProbe(ChargeStatus.active())
     else -1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run

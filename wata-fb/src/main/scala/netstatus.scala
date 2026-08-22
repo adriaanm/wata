@@ -378,3 +378,67 @@ object NetStatus:
       case _: NetLive         => Color.green
       case _: NetReconnecting => Color.yellow
       case _: NetDown         => Color.red
+
+/** The CHARGE-ANOMALY state (plan 0073): plugged but NOT charging, sustained
+ *  — a failed cradle contact discharges the handset invisibly (VBUS present,
+ *  charger FSM idle), and it must be seen at cradle time, not as a dead
+ *  handset the next morning. Shaped like `NetStatus`: polled once per frame
+ *  by `Ui.frameStep`, the sysfs pair re-read on the diagnostics cadence, and
+ *  the header mark (`WataLogic.netView`) drawn from the computed flag.
+ *
+ *  DEBOUNCED IN FRAMES, not wall time: the mark arms only after the anomaly
+ *  has held ~3 minutes of frames, so a BC1.2 renegotiation or a brief bounce
+ *  as the handset is docked never flashes it. Frames are the codebase's
+ *  timer idiom and the honest one here — the device's wall clock STEPS (1970
+ *  to now when NTP lands), which would count as three minutes on its own.
+ *
+ *  Off-device `Diag.chargeAnomaly()` is false on every read, so the flag can
+ *  never arm and rendering is unchanged — except under the uitest `charge`
+ *  directive, which forces the READ (the debounce still runs; the scenario's
+ *  whole point is to see it hold the mark back). */
+object ChargeStatus:
+  /** frames between sysfs re-reads (~5s at 30fps, the diagnostics cadence). */
+  val READ_FRAMES = 150
+  /** frames the anomaly must hold before the mark shows (~3min at 30fps). */
+  val DEBOUNCE_FRAMES = 5400
+
+  private val leftC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  // the last read's verdict, and how many frames it has been anomalous
+  // (0 the frame after any clean read).
+  private val badC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  private val runC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  // the scripted driver's read override: -1 = read sysfs (every real run),
+  // 0 = every read clean, 1 = every read anomalous.
+  private val forcedC: sgo.Atomic[scala.Int] = sgo.atomic(-1)
+
+  /** a fresh session: re-read next frame, nothing armed. */
+  def reset(): Unit =
+    leftC.set(0)
+    badC.set(false)
+    runC.set(0)
+    forcedC.set(-1)
+
+  /** the uitest-only read override; zeroing the countdown makes the next
+   *  frame read it, so a directive's effect is one frame away, like
+   *  `forcePipe`'s. */
+  def forceRead(tag: scala.Int): Unit =
+    forcedC.set(tag)
+    leftC.set(0)
+
+  /** ONE frame's poll — advances the read countdown and the anomaly streak.
+   *  Called exactly once per frame by `Ui.frameStep`. */
+  def poll(): Boolean =
+    val left = leftC.get()
+    if left > 0 then leftC.set(left - 1)
+    else
+      badC.set(readBad())
+      leftC.set(READ_FRAMES - 1)
+    if badC.get() then runC.set(runC.get() + 1) else runC.set(0)
+    active()
+
+  /** the debounced flag the header mark draws. */
+  def active(): Boolean = runC.get() >= DEBOUNCE_FRAMES
+
+  def readBad(): Boolean =
+    val f = forcedC.get()
+    if f >= 0 then f == 1 else Diag.chargeAnomaly()

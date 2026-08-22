@@ -182,6 +182,17 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0073: the plugged-but-not-charging header mark and its
+        # 3-minute debounce. The `charge` directive forces the sysfs READ
+        # only — the debounce runs for real, which is what the scenario
+        # pins: no mark ~900 frames short of the 5400-frame threshold, the
+        # mark past it, cleared by one clean read.
+        "name": "charge-anomaly",
+        "phases": [
+            ("alice", "alice-charge.txt"),
+        ],
+    },
+    {
         "name": "settings-walk",
         "phases": [
             ("alice", "alice-settings.txt"),
