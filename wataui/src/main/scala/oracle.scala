@@ -40,6 +40,23 @@ object DiffOracle:
         b.append(x.w); b.append(','); b.append(x.h); b.append(",bytes=")
         b.append(x.pixels.length); b.append(",sum="); b.append(byteSum(x.pixels))
         b.append(')')
+      case x: VLabel =>
+        b.append("label(")
+        b.append(x.x); b.append(','); b.append(x.y); b.append(',')
+        b.append(x.w); b.append(','); b.append(x.h)
+        b.append(",\""); b.append(x.text); b.append("\",")
+        b.append(TypeRole.show(x.role)); b.append(',')
+        b.append(TypeWeight.show(x.weight)); b.append(',')
+        b.append(TextAlign.show(x.align)); b.append(',')
+        b.append(x.color); b.append(",a="); b.append(x.alpha)
+        b.append(')')
+      case x: VFill =>
+        b.append("fill(")
+        b.append(x.x); b.append(','); b.append(x.y); b.append(',')
+        b.append(x.w); b.append(','); b.append(x.h); b.append(",r=")
+        b.append(x.radius); b.append(','); b.append(x.color)
+        b.append(",a="); b.append(x.alpha)
+        b.append(')')
       case x: VGroup =>
         b.append("group[")
         b.append(showChildren(x.children))
@@ -145,6 +162,38 @@ object DiffOracle:
       i += 1
     b.result()
 
+  /** `Alpha.over` as a table: white over black at each end and in the middle,
+   *  a black scrim at the design's 50-80%, and the clamps. Printed in hex so a
+   *  channel that lost a bit is visible rather than arithmetic. */
+  def alphaTable(): String =
+    val b = new StringBuilder
+    b.append("alpha over(dst,src,a):\n")
+    b.append(alphaLine(0x0000, 0xffff, 0))
+    b.append(alphaLine(0x0000, 0xffff, 128))
+    b.append(alphaLine(0x0000, 0xffff, 255))
+    b.append(alphaLine(0x07e0, 0x0000, 128)) // a half-black scrim over green
+    b.append(alphaLine(0x001f, 0x0000, 204)) // 80% black over blue
+    b.append(alphaLine(0xf800, 0x001f, 64))
+    b.append(alphaLine(0x1234, 0x4321, -5))  // clamped to CLEAR: dst survives
+    b.append(alphaLine(0x1234, 0x4321, 999)) // clamped to OPAQUE: src wins
+    b.toString
+
+  def alphaLine(dst: Int, src: Int, a: Int): String =
+    val b = new StringBuilder
+    b.append("  "); b.append(hex4(dst)); b.append(' '); b.append(hex4(src))
+    b.append(' '); b.append(a); b.append(" -> ")
+    b.append(hex4(Alpha.over(dst, src, a))); b.append('\n')
+    b.toString
+
+  def hex4(v: Int): String =
+    val b = new StringBuilder
+    b.append(hexDigit((v >> 12) & 0xf)); b.append(hexDigit((v >> 8) & 0xf))
+    b.append(hexDigit((v >> 4) & 0xf)); b.append(hexDigit(v & 0xf))
+    b.toString
+
+  def hexDigit(d: Int): Char =
+    if d < 10 then ('0'.toInt + d).toChar else ('a'.toInt + (d - 10)).toChar
+
   def report(): String =
     val b = new StringBuilder
 
@@ -225,6 +274,41 @@ object DiffOracle:
     // contents is a change.
     b.append(scenario("image-same", VImage(0, 0, 2, 2, bytesOf(8, 7)), VImage(0, 0, 2, 2, bytesOf(8, 7))))
     b.append(scenario("image-bytes", VImage(0, 0, 2, 2, bytesOf(8, 7)), VImage(0, 0, 2, 2, bytesOf(8, 9))))
+
+    // THE ROLODEX VOCABULARY (plan 0070): pixel-placed text at a role, a
+    // rounded rect, and alpha. A label patches at leaf granularity like every
+    // other leaf, and EVERY field is compared — a role change, an alignment
+    // change and an alpha change are each a change, because each one changes
+    // what is drawn.
+    val cardA = VGroup(
+      Keyed("card", VFill(8, 8, 144, 64, 12, 0x001f, 255)) ::
+      Keyed("name", VLabel(8, 20, 144, 24, "Ada", TypeRole.DISPLAY,
+        TypeWeight.BOLD, TextAlign.CENTER, 0xffff, 255)) ::
+      Keyed("sub", VLabel(8, 46, 144, 12, "2 unheard", TypeRole.CAPTION,
+        TypeWeight.REGULAR, TextAlign.CENTER, 0xffff, 255)) ::
+      Keyed("scrim", VFill(0, 0, 160, 16, 0, 0x0000, 160)) :: Nil)
+    val cardB = VGroup(
+      Keyed("card", VFill(8, 8, 144, 64, 4, 0x001f, 255)) ::   // the stack opens
+      Keyed("name", VLabel(8, 20, 144, 24, "Ada", TypeRole.NAME,
+        TypeWeight.BOLD, TextAlign.LEADING, 0xffff, 255)) ::   // role + align
+      Keyed("sub", VLabel(8, 46, 144, 12, "2 unheard", TypeRole.CAPTION,
+        TypeWeight.REGULAR, TextAlign.CENTER, 0xffff, 255)) ::
+      Keyed("scrim", VFill(0, 0, 160, 16, 0, 0x0000, 96)) :: Nil) // the scrim thins
+    b.append(scenario("rolodex-card", cardA, cardB))
+    b.append(scenario("label-same",
+      VLabel(0, 0, 40, 12, "x", 0, 0, 0, 7, 255), VLabel(0, 0, 40, 12, "x", 0, 0, 0, 7, 255)))
+    b.append(scenario("label-weight",
+      VLabel(0, 0, 40, 12, "x", 1, TypeWeight.REGULAR, 0, 7, 255),
+      VLabel(0, 0, 40, 12, "x", 1, TypeWeight.BOLD, 0, 7, 255)))
+    b.append(scenario("fill-radius", VFill(0, 0, 8, 8, 0, 3, 255), VFill(0, 0, 8, 8, 4, 3, 255)))
+    // a VFill is NOT a VRect: same geometry, different constructor, so the
+    // subtree is replaced rather than compared.
+    b.append(scenario("fill-vs-rect", VRect(0, 0, 8, 8, 3), VFill(0, 0, 8, 8, 0, 3, 255)))
+
+    // what alpha MEANS, pinned as a table: src over dst in RGB565. Every
+    // backend composites to these numbers — the framebuffer per pixel, a
+    // toolkit through its compositor.
+    b.append(alphaTable())
 
     // a screen-shaped case: the boot screen's two states.
     val bootA = VGroup(

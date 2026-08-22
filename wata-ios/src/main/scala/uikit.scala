@@ -74,6 +74,11 @@ object uikit:
     override def toString: String = go.native
     @go.name("MonospacedSystemFontOfSizeWeight")
     def monospacedSystemFontOfSizeWeight(fontSize: scala.Double, weight: scala.Double): UIFont = ???
+    /** the PROPORTIONAL system face, for a `VLabel`: grid text is monospaced
+     *  because its columns must line up with the cells a body counted, but a
+     *  name on a card is read rather than tabulated. */
+    @go.name("SystemFontOfSizeWeight")
+    def systemFontOfSizeWeight(fontSize: scala.Double, weight: scala.Double): UIFont = ???
 
   @go.name("GetUIFontClass") def getUIFontClass(): UIFontClass = ???
 

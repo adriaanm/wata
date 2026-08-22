@@ -186,9 +186,13 @@ object Pump:
       " inset=" + Intents.fmt(m.insetTop) + "/" + Intents.fmt(m.insetBottom) +
       " grid=" + m.cols + "x" + m.rows +
       " cell=" + Intents.fmt(m.cellW) + "x" + Intents.fmt(m.cellH) +
-      " type=" + Intents.fmt(TypeRoles.points(TypeRoles.NAME, m)) + "/" +
-      Intents.fmt(TypeRoles.points(TypeRoles.STATUS, m)) + "/" +
-      Intents.fmt(TypeRoles.points(TypeRoles.CAPTION, m))
+      " type=" + Intents.fmt(TypeRoles.points(TypeRole.NAME, m)) + "/" +
+      Intents.fmt(TypeRoles.points(TypeRole.STATUS, m)) + "/" +
+      Intents.fmt(TypeRoles.points(TypeRole.CAPTION, m)) +
+      // the pixel-placed roles too (a VLabel's, unclamped by any box): the
+      // display name is the one number plan 0070's rolodex is judged on
+      " label=" + Intents.fmt(TypeRoles.labelPoints(TypeRole.DISPLAY, m, 1.0e9)) + "/" +
+      Intents.fmt(TypeRoles.labelPoints(TypeRole.NAME, m, 1.0e9))
 
   def connectMs(): Long = IosStr.num(go.sys.getenv("WATA_IOS_CONNECT_MS"), 30000).toLong
 

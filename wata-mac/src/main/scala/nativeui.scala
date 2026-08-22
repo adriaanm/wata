@@ -30,6 +30,11 @@ object nativeui:
   @go.name("SetLabelText") def setLabelText(v: appkit.NSView, s: String): Unit = ???
   @go.name("SetLabelColor") def setLabelColor(v: appkit.NSView, c: appkit.NSColor): Unit = ???
   @go.name("LabelText") def labelText(v: appkit.NSView): String = ???
+  /** `NSControl.alignment` — where a VLabel's text sits in its box. The
+   *  property is refused (no Go mapping for `NSTextAlignment`), and the value
+   *  is AppKit's enum: left 0, RIGHT 1, CENTER 2 (NOT UIKit's ordering) —
+   *  `MacType.alignment` maps it. */
+  @go.name("SetLabelAlignment") def setLabelAlignment(v: appkit.NSView, a: scala.Int): Unit = ???
   /** retain a factory-made font the stage keeps across pools. */
   @go.name("RetainFont") def retainFont(f: appkit.NSFont): Unit = ???
 

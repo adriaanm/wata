@@ -45,12 +45,16 @@ import language.experimental.saferExceptions
  *  ## Type
  *
  *  Type comes from ROLES resolved against the metrics, never from a global
- *  point size. Three today — name, caption, status — which is the vocabulary
- *  the plan names and enough to make a list of names read louder than the
- *  legend under it. The role of a given piece of text is decided by
- *  `TypeRoles.forRow`, because the element vocabulary cannot carry a role
- *  yet (sized text is plan 0071's step 3); when it can, that function is the
- *  one line that changes. */
+ *  point size. The roles are `wataui`'s (`TypeRole.DISPLAY` / `NAME` /
+ *  `CAPTION` / `STATUS`) — the vocabulary a `VLabel` names for itself.
+ *
+ *  Two resolutions, because there are two kinds of text on this stage and
+ *  they are sized by different things. GRID text (`VText`) is a run of
+ *  character cells, so `points` sizes it to the CELL and the row it sits on
+ *  says which role it is (`forRow`). PIXEL-placed text (`VLabel`) carries its
+ *  own role and its own box, so `labelPoints` sizes it against the PANEL —
+ *  which is what makes a display name full-bleed rather than cell-sized —
+ *  clamped to the box it was given. */
 case class StageMetrics(
   // the panel, in points — what the device said, never a literal
   wPt: scala.Double,
@@ -144,10 +148,6 @@ object Metrics:
  *  of it because the names are what a wrist is read for; CAPTION and STATUS
  *  step down so the legend and the header do not compete with the content. */
 object TypeRoles:
-  val NAME = 0    // list rows: contacts, messages — the content
-  val CAPTION = 1 // the footer legend
-  val STATUS = 2  // the header: title, connectivity, counts
-
   /** the monospaced system font's advance per em — MEASURED at 0.616 on
    *  watchOS 26 rather than the nominal 0.6, and taken a little wider still
    *  because a label whose text is exactly as wide as its frame TRUNCATES:
@@ -164,22 +164,59 @@ object TypeRoles:
     val byH = m.cellH / LINE_EM
     if byW < byH then byW else byH
 
+  /** the point size GRID text (a `VText`) gets: a share of what the cell can
+   *  hold. `TypeRole.DISPLAY` is not a grid size — a full-bleed name does not
+   *  fit a character cell — so it resolves to the cell cap here and gets its
+   *  real size through `labelPoints`, which is the element that can carry it. */
   def points(role: scala.Int, m: StageMetrics): scala.Double =
     val cap = capPts(m)
-    if role == CAPTION then cap * 0.82
-    else if role == STATUS then cap * 0.86
+    if role == TypeRole.CAPTION then cap * 0.82
+    else if role == TypeRole.STATUS then cap * 0.86
     else cap
 
-  def name(role: scala.Int): String =
-    if role == CAPTION then "caption" else if role == STATUS then "status" else "name"
+  /** the point size PIXEL-PLACED text (a `VLabel`) gets.
+   *
+   *  Sized against the PANEL's short side rather than a character cell: a
+   *  `VLabel` is not on the grid, and plan 0070's display name is as large as
+   *  the panel allows. The fractions are of that side, so every watch size
+   *  gets the same design at its own scale — the plan's "208x248 is a device
+   *  this design runs on, never a number in it".
+   *
+   *  Then CLAMPED to the box the element was given (`boxHPts`, the box's
+   *  height in points): a label must never overflow its own box, and a body
+   *  that asks for a display name in a 12-point strip gets the biggest thing
+   *  that fits rather than a name drawn over its neighbours. */
+  def labelPoints(role: scala.Int, m: StageMetrics, boxHPts: scala.Double): scala.Double =
+    val short = if m.wPt < m.hPt then m.wPt else m.hPt
+    val byRole =
+      if role == TypeRole.DISPLAY then short * 0.22
+      else if role == TypeRole.NAME then short * 0.105
+      else if role == TypeRole.CAPTION then short * 0.075
+      else short * 0.058
+    val byBox = boxHPts / LINE_EM
+    if byBox < byRole then byBox else byRole
 
-  /** which role a grid row carries. The element vocabulary has no place for
-   *  a role yet (plan 0071 step 3 adds sized text), so the ROW says it: the
-   *  header rows above the list are status, the last row is the footer
-   *  legend, and everything between is content. Every body here is
-   *  header/list/footer, so this is exact rather than a guess — and it is
-   *  the single line that goes away when a `VText` can name its own role. */
+  /** the system font's weight axis: regular 0.0, medium 0.23, bold 0.4 —
+   *  `UIFont.systemFontOfSize:weight:`'s own numbers. */
+  def weight(w: scala.Int): scala.Double =
+    if w == TypeWeight.MEDIUM then 0.23
+    else if w == TypeWeight.BOLD then 0.4
+    else 0.0
+
+  /** UIKit's NSTextAlignment: left 0, CENTER 1, right 2. AppKit orders the
+   *  same enum differently (left 0, right 1, center 2), which is why each
+   *  stage maps `TextAlign` itself rather than passing it through. */
+  def alignment(a: scala.Int): scala.Int =
+    if a == TextAlign.CENTER then 1 else if a == TextAlign.TRAILING then 2 else 0
+
+  /** which role a GRID row carries. `VText` is a run of character cells and
+   *  has nowhere to carry a role — that is what `VLabel` is for — so on this
+   *  stage the ROW says it: the header rows above the list are status, the
+   *  last row is the footer legend, and everything between is content. Every
+   *  grid-shaped body here is header/list/footer, so this is exact rather
+   *  than a guess. It goes away with the last grid body, not with the
+   *  vocabulary. */
   def forRow(row: scala.Int, m: StageMetrics): scala.Int =
-    if row <= 0 then STATUS
-    else if row >= m.rows - 1 then CAPTION
-    else NAME
+    if row <= 0 then TypeRole.STATUS
+    else if row >= m.rows - 1 then TypeRole.CAPTION
+    else TypeRole.NAME

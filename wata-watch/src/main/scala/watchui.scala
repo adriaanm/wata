@@ -26,6 +26,15 @@ object iosui:
   @go.name("AsLabel") def asLabel(v: uikit.UIView): uikit.UILabel = ???
   @go.name("AsImageView") def asImageView(v: uikit.UIView): uikit.UIImageView = ???
 
+  // ---- the two properties bindgen refuses -----------------------------------
+  /** `UILabel.textAlignment` — where a VLabel's text sits in its box. The
+   *  property is refused (no Go mapping for `NSTextAlignment`), and the value
+   *  is UIKit's enum: left 0, CENTER 1, right 2 (NOT AppKit's ordering). */
+  @go.name("SetLabelAlignment") def setLabelAlignment(v: uikit.UIView, a: scala.Int): Unit = ???
+  /** a VFill's corner radius. It lives on `CALayer`, which is not on the
+   *  bindgen allowlist, so it is reached through the layer in Go. */
+  @go.name("SetCornerRadius") def setCornerRadius(v: uikit.UIView, r: scala.Double): Unit = ???
+
   // ---- the raw-pointer crossing the bindings refuse -------------------------
   /** a UIImage over a CGImage holding a COPY of rgba (w*h*4, meshed RGBA,
    *  opaque, row 0 = top). */

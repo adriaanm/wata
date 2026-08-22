@@ -114,8 +114,9 @@ gate. The palette is small (≈8) and constrained: every hue must carry black te
 and no two may be confusable as a blur going past. The family thread keeps cyan.
 
 **Real type everywhere.** UIKit clients already build a `UILabel` per text node
-with the system font; what they lack is an element carrying its own point size
-and box instead of a character-grid cell. The handset has no text engine at all,
+with the system font; what they lack is an element carrying its own type ROLE
+and box instead of a character-grid cell. (An element carrying a point size was
+this plan's first wording and is wrong — see the vocabulary below.) The handset has no text engine at all,
 and its 5×8 bitmap cannot be scaled into a 40 px name — eight times up is a wall
 of squares. It gets **baked strikes**: a chosen face rasterised at the handful of
 sizes the design uses, shipped in the binary. No runtime rasteriser, no
@@ -125,10 +126,21 @@ stays the fallback if the layout starts wanting sizes we did not anticipate.
 
 **The shared layer owes a vocabulary, not a layout.** The applets are already
 per-client files; what must be shared is the element set every backend can
-honour well. Three additions: text placed in pixels with its own size and weight;
-rectangles with a corner radius; colours with alpha. Anything a device cannot do
-well — shadows, gradients — stays out of the vocabulary rather than degrading
-quietly on the device that matters most.
+honour well. Three additions: text placed in pixels carrying a type ROLE and a
+weight, aligned within a box; rectangles with a corner radius; colours with
+alpha. Anything a device cannot do well — shadows, gradients — stays out of the
+vocabulary rather than degrading quietly on the device that matters most.
+
+**Landed** (2026-08-22), as `VLabel`, `VFill` and `Alpha` in `wataui`, drawn on
+all four backends and proved on the watch by
+`watch-interptest`'s `rolodexVocabularyDraws`. One ruling was settled in the
+doing and it overrides this plan's looser earlier wording: the element carries a
+**role** (`display` / `name` / `caption` / `status`) and never a point size. A
+size in an element forecloses Dynamic Type — which "what commercial means"
+below already asks for — and forces every body to know the panel; a role keeps
+that in the renderer's metrics, which is the one place that knows. The
+handset's arm honours the box, the alignment and the alpha, and cannot honour
+the role until the baked strikes ship; that is stated in the arm.
 
 ## What commercial means for the layout
 

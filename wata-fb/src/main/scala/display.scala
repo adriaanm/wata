@@ -74,6 +74,51 @@ object Draw:
           dx = dx + 1
       dy = dy + 1
 
+  /** the RGB565 pixel at (x, y), or -1 off the panel — what a blend reads. */
+  def getPixel(px: go.Bytes, x: scala.Int, y: scala.Int): scala.Int =
+    var out = -1
+    if x >= 0 && y >= 0 && x < Display.W && y < Display.H then
+      val idx = (y * Display.W + x) * 2
+      out = (px(idx).toInt & 0xff) | ((px(idx + 1).toInt & 0xff) << 8)
+    out
+
+  /** `color` at coverage `alpha` (0..255) over what is already there —
+   *  wataui's `Alpha.over`, per pixel. Opaque takes the plain store, so the
+   *  common case costs nothing. */
+  def blendPixel(px: go.Bytes, x: scala.Int, y: scala.Int, color: scala.Int,
+      alpha: scala.Int): Unit =
+    if alpha >= 255 then setPixel(px, x, y, color)
+    else if alpha > 0 then
+      val under = getPixel(px, x, y)
+      if under >= 0 then setPixel(px, x, y, Alpha.over(under, color, alpha))
+
+  /** a filled rectangle with a corner radius and an alpha — wataui's `VFill`.
+   *  A pixel inside a corner's square is kept only when it is inside that
+   *  corner's arc, and the radius is clamped to half the shorter side, so an
+   *  over-large radius is a stadium rather than a defect. */
+  def fillRoundRect(px: go.Bytes, x: scala.Int, y: scala.Int, w: scala.Int,
+      h: scala.Int, radius: scala.Int, color: scala.Int, alpha: scala.Int): Unit =
+    if w > 0 && h > 0 && alpha > 0 then
+      val half = (if w < h then w else h) / 2
+      var r = if radius < 0 then 0 else radius
+      if r > half then r = half
+      val rr = r * r
+      var dy = 0
+      while dy < h do
+        var dx = 0
+        while dx < w do
+          var inside = true
+          if r > 0 then
+            val cx = if dx < r then r else if dx >= w - r then w - r - 1 else -1
+            val cy = if dy < r then r else if dy >= h - r then h - r - 1 else -1
+            if cx >= 0 && cy >= 0 then
+              val ex = dx - cx
+              val ey = dy - cy
+              inside = ex * ex + ey * ey <= rr
+          if inside then blendPixel(px, x + dx, y + dy, color, alpha)
+          dx = dx + 1
+        dy = dy + 1
+
   def hline(px: go.Bytes, x: scala.Int, y: scala.Int, w: scala.Int, color: scala.Int): Unit =
     fillRect(px, x, y, w, 1, color)
 
@@ -403,6 +448,21 @@ object Font:
         col = col + 1
       // spacing column: background only
       if hasBg then Draw.setPixel(px, px0 + GLYPH_DATA_W, py0 + row, bg)
+      row = row + 1
+
+  /** one glyph, blended at `alpha` — `drawChar`'s translucent twin. Only the
+   *  LIT pixels blend: a glyph carries no background to composite. */
+  def drawCharAlpha(px: go.Bytes, code: scala.Int, px0: scala.Int, py0: scala.Int,
+      fg: scala.Int, alpha: scala.Int): Unit =
+    val base = (code & 0xff) * 8
+    var row = 0
+    while row < GLYPH_H do
+      val bits = glyphs(base + row)
+      var col = 0
+      while col < GLYPH_DATA_W do
+        if ((bits >> (7 - col)) & 1) == 1 then
+          Draw.blendPixel(px, px0 + col, py0 + row, fg, alpha)
+        col = col + 1
       row = row + 1
 
   /** draw an ASCII string at char grid (col, row); row 0 starts at y=1 (below

@@ -326,6 +326,17 @@ object IosStage:
       // never interpolate: the pixels arrive pre-scaled to the frame's size
       go.iosui.asImageView(native).setImage(image(s, x))
       IosNode(v, native, Nil)
+    case x: VFill =>
+      // the rolodex fill: VRect's plain UIView plus the two properties this
+      // element exists for — the radius through the layer (glue), the alpha
+      // in the colour. The layer draws the background, so the radius clips it
+      // with no masksToBounds.
+      val native = go.uikit.getUIViewClass().alloc().initWithFrame(frame(s, x.x, x.y, x.w, x.h))
+      native.setBackgroundColor(colorA(x.color, x.alpha))
+      go.iosui.setCornerRadius(native, radiusPts(s, x))
+      IosNode(v, native, Nil)
+    case x: VLabel =>
+      IosNode(v, roleLabel(s, x), Nil)
 
   /** update one native view's properties in place when the new view has the
    *  same constructor — the PSet fast path. Groups always answer None: a
@@ -355,6 +366,33 @@ object IosStage:
     case old: VImage => v match
       case x: VImage =>
         go.iosui.asImageView(n.native).setImage(image(s, x))
+        n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
+        Some(IosNode(v, n.native, n.kids))
+      case _ => None
+    case old: VFill => v match
+      case x: VFill =>
+        if x.color != old.color || x.alpha != old.alpha then
+          n.native.setBackgroundColor(colorA(x.color, x.alpha))
+        // the radius is in SEMANTIC pixels and clamped to the box, so a
+        // resize can change it with the radius field untouched
+        if x.radius != old.radius || x.w != old.w || x.h != old.h then
+          go.iosui.setCornerRadius(n.native, radiusPts(s, x))
+        n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
+        Some(IosNode(v, n.native, n.kids))
+      case _ => None
+    case old: VLabel => v match
+      case x: VLabel =>
+        val lbl = go.iosui.asLabel(n.native)
+        if x.text != old.text then lbl.setText(x.text)
+        if x.color != old.color || x.alpha != old.alpha then
+          lbl.setTextColor(colorA(x.color, x.alpha))
+        // a label that changed ROLE, WEIGHT or box HEIGHT has to be
+        // re-fonted: the size is the role resolved against the metrics and
+        // then clamped to the box, so all three move it
+        if x.role != old.role || x.weight != old.weight || x.h != old.h then
+          setRoleFont(n.native, labelPts(s, x), x.weight)
+        if x.align != old.align then
+          go.iosui.setLabelAlignment(n.native, TypeRoles.alignment(x.align))
         n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
         Some(IosNode(v, n.native, n.kids))
       case _ => None
@@ -388,6 +426,48 @@ object IosStage:
     go.iosui.asLabel(v).setFont(go.uikit.getUIFontClass()
       .monospacedSystemFontOfSizeWeight(pts, 0.0 /* regular */))
 
+  /** a `VLabel`: pixel-placed text at a ROLE, aligned inside its box.
+   *
+   *  The frame IS the box and UIKit does the alignment — a body that had to
+   *  measure a native font to centre a name would be doing the renderer's job
+   *  with the renderer's numbers missing, which is the whole reason the
+   *  element carries a box and an alignment instead of an x.
+   *
+   *  A `VLabel` is NOT monospaced: grid text is (its columns have to line up
+   *  with the cells the body counted), but a name on a card is read, not
+   *  tabulated, and the proportional face is both wider-set and better-fitted
+   *  at display sizes. */
+  def roleLabel(s: IosStageSt, x: VLabel): go.uikit.UIView =
+    val v = go.iosui.allocLabelAsView().initWithFrame(frame(s, x.x, x.y, x.w, x.h))
+    val lbl = go.iosui.asLabel(v)
+    lbl.setText(x.text)
+    setRoleFont(v, labelPts(s, x), x.weight)
+    lbl.setTextColor(colorA(x.color, x.alpha))
+    go.iosui.setLabelAlignment(v, TypeRoles.alignment(x.align))
+    v
+
+  def setRoleFont(v: go.uikit.UIView, pts: Double, weight: Int): Unit =
+    go.iosui.asLabel(v).setFont(go.uikit.getUIFontClass()
+      .systemFontOfSizeWeight(pts, TypeRoles.weight(weight)))
+
+  /** the point size a `VLabel` gets: its ROLE resolved against this panel,
+   *  clamped to the box it was given (metrics.scala's `labelPoints`). The box
+   *  is semantic pixels, so it converts through the stage's y scale first. */
+  def labelPts(s: IosStageSt, x: VLabel): Double =
+    TypeRoles.labelPoints(x.role, s.m, x.h.toDouble * sy(s.m))
+
+  /** a `VFill`'s corner radius in points: semantic pixels through the stage's
+   *  scale, clamped to half the shorter side (wataui's `VFill` contract), so
+   *  an over-large radius is a stadium rather than a defect. The two axes
+   *  scale independently here, so the radius takes the SMALLER factor — a
+   *  radius that rounded further horizontally than vertically would read as an
+   *  oval corner. */
+  def radiusPts(s: IosStageSt, x: VFill): Double =
+    val half = (if x.w < x.h then x.w else x.h) / 2
+    val r = if x.radius < 0 then 0 else if x.radius > half then half else x.radius
+    val f = if sx(s.m) < sy(s.m) then sx(s.m) else sy(s.m)
+    r.toDouble * f
+
   /** the point size a piece of text gets: its ROLE, resolved against this
    *  surface's metrics (metrics.scala's TypeRoles). Not one global size —
    *  the whole reason a wrist could not read this stage. */
@@ -417,9 +497,12 @@ object IosStage:
     if bigger > n.toDouble then n += 1
     if n < 1 then 1 else n
 
-  def color(c: Int): go.uikit.UIColor =
+  def color(c: Int): go.uikit.UIColor = colorA(c, Alpha.OPAQUE)
+
+  /** the same colour at a coverage: `Alpha`'s 0..255 as UIKit's fraction. */
+  def colorA(c: Int, alpha: Int): go.uikit.UIColor =
     go.uikit.getUIColorClass().colorWithRedGreenBlueAlpha(
-      IosPixels.red(c), IosPixels.green(c), IosPixels.blue(c), 1.0)
+      IosPixels.red(c), IosPixels.green(c), IosPixels.blue(c), Alpha.fraction(alpha))
 
   // ---- geometry -------------------------------------------------------------
 

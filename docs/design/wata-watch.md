@@ -165,7 +165,7 @@ number is derived from the answer.
 
 ```
 metrics: wrist 208.00x248.00pt @2.00 inset=53.00/36.00 grid=26x12
-         cell=8.00x16.00 type=12.50/10.75/10.25
+         cell=8.00x16.00 type=12.50/10.75/10.25 label=45.76/21.84
 ```
 
 That line is printed once at launch, and it is the whole layout. What it
@@ -188,10 +188,34 @@ says, and where each number comes from:
   row underneath it is unreadable. The bottom inset is deliberately NOT
   excluded — it is a cosmetic corner margin, and the footer sitting in it
   costs a descender where excluding it would cost a whole row.
-- **Type is by ROLE** — name / caption / status — resolved against the
-  metrics, never one global point size. Each role takes a share of the
-  largest size the cell can hold, so the names read louder than the legend
-  under them.
+- **Type is by ROLE** — `wataui`'s `TypeRole.DISPLAY` / `NAME` / `CAPTION` /
+  `STATUS` — resolved against the metrics, never one global point size.
+  There are **two resolutions**, because there are two kinds of text and
+  they are sized by different things:
+  - `TypeRoles.points` sizes GRID text (`VText`), which is a run of
+    character cells: each role takes a share of the largest size the cell
+    can hold, so the names read louder than the legend under them. A
+    `VText` has nowhere to carry a role, so the ROW says which it is
+    (`forRow`: row 0 is status, the last row the footer legend, the rest
+    content). Every grid-shaped body here is header/list/footer, so that is
+    exact rather than a guess — and it goes away with the last grid body,
+    not with the element vocabulary.
+  - `TypeRoles.labelPoints` sizes PIXEL-PLACED text (`VLabel`), which
+    carries its own role: a fraction of the panel's SHORT side, so plan
+    0070's display name is full-bleed rather than cell-sized, then clamped
+    to the box the element was given so a label can never overflow itself.
+    That is the `label=` pair in the metrics line — 45.8pt for a display
+    name on a Series 10, 21.8pt for a name.
+
+The stage draws the three rolodex elements for real: `VFill` is `VRect`'s
+plain `UIView` plus a corner radius (through the layer — `cornerRadius` is
+`CALayer`'s and bindgen does not allow that class, so `iosui.SetCornerRadius`
+is the one glue call) and an alpha in the colour; `VLabel` is a `UILabel`
+framed to its box at the role's size, with `textAlignment` doing the
+centring (also glue: `NSTextAlignment` has no Go mapping). A `VLabel` takes
+the PROPORTIONAL system face — grid text is monospaced because its columns
+must line up with cells a body counted, but a name on a card is read, not
+tabulated.
 
 `IosStage` maps the semantic space (still the fb's 6x8 glyph cell, which is
 what the bodies address) onto that grid with **the two axes scaling
@@ -220,7 +244,7 @@ rather than from constants (`display.scala`, the watch's own copy). Plan
 |---|---|
 | `just watch-spike` | the platform probes: classes, lifecycle, window, input reachability, network, audio |
 | `just watch-hello` | `watchshell` + `iosui` drive UIKit on watchOS, through the product packages |
-| `just watch-interptest` | wata-ios's whole stage suite passes on watchOS |
+| `just watch-interptest` | wata-ios's whole stage suite passes on watchOS, plus the rolodex vocabulary drawn and read back as pixels |
 | `just watch-e2e` | the whole client: login, sync, an arrival, and a SEND the server confirms |
 | `just watch-device` | build, sign, install on real hardware |
 
@@ -229,6 +253,16 @@ None is in `ci` — they need Xcode and a watchOS simulator runtime
 
 `watch-e2e` ends by having bob snapshot the family room server-side and
 find both messages, because `send: complete` is only the app's word for it.
+
+`watch-interptest`'s `rolodexVocabularyDraws` is where plan 0070's element
+set stops being a declaration: it mounts a rounded card, a `display`-role
+name centred in it, a caption under that and a translucent black band over
+its top, then reads the rendered pixels back. Each probe discriminates one
+claim, and each was **seen to fail** with the claim inverted before its
+green twin was believed — square corners put half-black-over-blue where the
+arc cuts the card away (0,0,0 vs 0,0,128), an opaque band reads 0,0,255
+where a 50% one reads 0,0,127, and a leading-aligned name puts ink against
+the box's left edge where a centred one leaves it empty.
 
 ## Hardware
 

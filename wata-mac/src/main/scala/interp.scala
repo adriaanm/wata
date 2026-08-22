@@ -16,6 +16,10 @@ import language.experimental.saferExceptions
  *    VImage -> NSImageView over RGB565->RGBA widening + nearest-neighbour
  *              pre-scaling (pixels.scala), handed across as raw RGBA bytes
  *              into one NSBitmapImageRep (glue) — AppKit never interpolates
+ *    VFill  -> the same NSBox, plus cornerRadius (a bound double) and alpha
+ *              in the fill colour
+ *    VLabel -> NSTextField label at the ROLE's point size (MacType) and the
+ *              box's alignment (glue: bindgen refuses NSTextAlignment)
  *    VGroup -> a plain container NSView; subview order IS paint order (AppKit
  *              draws later subviews over earlier — the same rule the algebra
  *              has)
@@ -329,6 +333,20 @@ object MacStage:
       iv.setImageScaling(go.appkit.nsImageScaleAxesIndependently)
       iv.setImage(image(s, x))
       MacNode(v, native, Nil)
+    case x: VFill =>
+      // the rolodex fill: the same NSBox as VRect, plus the two properties
+      // this element exists for. NSBox has `cornerRadius` as a plain double
+      // (bound), and alpha rides in the fill colour.
+      val native = go.nativeui.allocBoxAsView().initWithFrame(frame(s, x.x, x.y, x.w, x.h))
+      val box = go.nativeui.asBox(native)
+      box.setBoxType(go.appkit.nsBoxCustom)
+      box.setTitlePosition(go.appkit.nsNoTitle)
+      box.setBorderWidth(0.0)
+      box.setCornerRadius(radiusPts(s, x))
+      box.setFillColor(colorA(x.color, x.alpha))
+      MacNode(v, native, Nil)
+    case x: VLabel =>
+      MacNode(v, roleLabel(s, x), Nil)
 
   /** update one native view's properties in place when the new view has the
    *  same constructor — the PSet fast path. Groups always answer None: a
@@ -359,6 +377,29 @@ object MacStage:
         n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
         Some(MacNode(v, n.native, n.kids))
       case _ => None
+    case old: VFill => v match
+      case x: VFill =>
+        val box = go.nativeui.asBox(n.native)
+        if x.color != old.color || x.alpha != old.alpha then
+          box.setFillColor(colorA(x.color, x.alpha))
+        if x.radius != old.radius then box.setCornerRadius(radiusPts(s, x))
+        n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
+        Some(MacNode(v, n.native, n.kids))
+      case _ => None
+    case old: VLabel => v match
+      case x: VLabel =>
+        if x.text != old.text then go.nativeui.setLabelText(n.native, x.text)
+        if x.color != old.color || x.alpha != old.alpha then
+          go.nativeui.setLabelColor(n.native, colorA(x.color, x.alpha))
+        // a label that changed ROLE or WEIGHT has to be re-fonted, or it keeps
+        // the size of the thing it used to be
+        if x.role != old.role || x.weight != old.weight then
+          go.nativeui.setLabelFont(n.native, roleFont(s, x.role, x.weight))
+        if x.align != old.align then
+          go.nativeui.setLabelAlignment(n.native, MacType.alignment(x.align))
+        n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
+        Some(MacNode(v, n.native, n.kids))
+      case _ => None
     case _ => None
 
   def relabel(s: MacStageSt, native: go.appkit.NSView, text: String,
@@ -376,14 +417,44 @@ object MacStage:
     v.setFrame(fr)
     v
 
+  /** a `VLabel`: pixel-placed text at a ROLE, in its box. AppKit does the
+   *  alignment (`NSTextField.alignment`, reached through the glue — bindgen
+   *  refuses `NSTextAlignment`), so the frame IS the box and the text finds
+   *  its own edge inside it. */
+  def roleLabel(s: MacStageSt, x: VLabel): go.appkit.NSView =
+    val v = go.nativeui.newLabel(x.text)
+    go.nativeui.setLabelFont(v, roleFont(s, x.role, x.weight))
+    go.nativeui.setLabelColor(v, colorA(x.color, x.alpha))
+    go.nativeui.setLabelAlignment(v, MacType.alignment(x.align))
+    v.setFrame(frame(s, x.x, x.y, x.w, x.h))
+    v
+
+  /** the font a role resolves to. Minted per label rather than cached: the
+   *  label retains the font it is handed, and this stage has no single point
+   *  size to keep beside `s.font` (which stays the grid's). */
+  def roleFont(s: MacStageSt, role: Int, weight: Int): go.appkit.NSFont =
+    go.appkit.getNSFontClass().monospacedSystemFontOfSizeWeight(
+      MacType.points(role, s.scale), MacType.weight(weight))
+
+  /** the corner radius in points: the same integer scale every other length
+   *  takes, clamped to half the shorter side so an over-large radius is a
+   *  stadium rather than a defect (wataui's `VFill` contract). */
+  def radiusPts(s: MacStageSt, x: VFill): Double =
+    val half = (if x.w < x.h then x.w else x.h) / 2
+    val r = if x.radius < 0 then 0 else if x.radius > half then half else x.radius
+    (r * s.scale).toDouble
+
   def image(s: MacStageSt, x: VImage): go.appkit.NSImage =
     val rgba = MacPixels.scaleRGBANearest(
       MacPixels.expandRGB565(x.pixels, x.w, x.h), x.w, x.h, s.scale)
     go.nativeui.imageFromRGBA(rgba, x.w * s.scale, x.h * s.scale)
 
-  def color(c: Int): go.appkit.NSColor =
+  def color(c: Int): go.appkit.NSColor = colorA(c, Alpha.OPAQUE)
+
+  /** the same colour at a coverage: `Alpha`'s 0..255 as AppKit's fraction. */
+  def colorA(c: Int, alpha: Int): go.appkit.NSColor =
     go.appkit.getNSColorClass().colorWithSRGBRedGreenBlueAlpha(
-      MacPixels.red(c), MacPixels.green(c), MacPixels.blue(c), 1.0)
+      MacPixels.red(c), MacPixels.green(c), MacPixels.blue(c), Alpha.fraction(alpha))
 
   // ---- geometry -------------------------------------------------------------
 
@@ -494,3 +565,33 @@ object MacStage:
           cur = t
         case Nil => going = false
     n
+
+/** what wataui's TYPE ROLES resolve to on this stage.
+ *
+ *  The mac client is a development surface, so its stage is still an integer
+ *  scale of the handset's 160x128 panel rather than a `StageMetrics` read off
+ *  the window (plan 0071 step 2 has only reached the watch). The roles are
+ *  therefore multiples of the grid's own cell font: a DISPLAY name is the
+ *  rolodex card's full bleed, NAME a row title, CAPTION the line under it, and
+ *  STATUS the small print. When this stage grows metrics, these fractions move
+ *  there and this object goes away — the BODIES never change, which is the
+ *  whole reason the element names a role and not a size. */
+object MacType:
+  def points(role: Int, scale: Int): Double =
+    val cell = MacStage.cellFontPts * scale.toDouble
+    if role == TypeRole.DISPLAY then cell * 3.2
+    else if role == TypeRole.NAME then cell * 1.6
+    else if role == TypeRole.CAPTION then cell * 1.1
+    else cell
+
+  /** NSFontWeight is a double: regular 0.0, medium 0.23, bold 0.4. */
+  def weight(w: Int): Double =
+    if w == TypeWeight.MEDIUM then 0.23
+    else if w == TypeWeight.BOLD then 0.4
+    else 0.0
+
+  /** AppKit's NSTextAlignment — left 0, RIGHT 1, CENTER 2. Not UIKit's
+   *  ordering (left 0, center 1, right 2), which is why each stage maps its
+   *  own rather than passing wataui's constant through. */
+  def alignment(a: Int): Int =
+    if a == TextAlign.CENTER then 2 else if a == TextAlign.TRAILING then 1 else 0

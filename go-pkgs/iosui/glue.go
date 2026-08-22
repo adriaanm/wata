@@ -39,6 +39,8 @@ var (
 	selRenderInContext = objc.RegisterName("renderInContext:")
 	selInitWithCGImage = objc.RegisterName("initWithCGImage:")
 	selDesc            = objc.RegisterName("description")
+	selSetTextAlign    = objc.RegisterName("setTextAlignment:")
+	selSetCornerRadius = objc.RegisterName("setCornerRadius:")
 )
 
 // ---- autorelease pools + the main-queue seam --------------------------------
@@ -101,6 +103,26 @@ func AllocImageViewAsView() uikit.UIView {
 func AsLabel(v uikit.UIView) uikit.UILabel { return uikit.UILabel{ID: v.ID} }
 
 func AsImageView(v uikit.UIView) uikit.UIImageView { return uikit.UIImageView{ID: v.ID} }
+
+// SetLabelAlignment writes `UILabel.textAlignment` — where the text sits in
+// the label's own frame, which is what wataui's VLabel box + TextAlign mean.
+// Here rather than in a facade because bindgen refuses the property (`no Go
+// mapping for 'NSTextAlignment'`, uikit/REFUSALS.md). The value is UIKit's
+// enum, which the caller maps (IosType.alignment): left 0, CENTER 1, right 2 —
+// deliberately NOT AppKit's ordering.
+func SetLabelAlignment(v uikit.UIView, a int) {
+	v.ID.Send(selSetTextAlign, a)
+}
+
+// SetCornerRadius rounds a view's corners — wataui's VFill. `cornerRadius`
+// lives on CALayer, which is NOT on the bindgen allowlist (and CALayer's own
+// properties speak CGColorRef, which is refused), so the one property this
+// element needs is reached through the layer the same way RenderViewRGBA
+// already reaches it. The background colour is drawn BY the layer, so the
+// radius clips it with no masksToBounds and no clipping of subviews.
+func SetCornerRadius(v uikit.UIView, r float64) {
+	v.ID.Send(selLayer).Send(selSetCornerRadius, r)
+}
 
 // WindowAsView adopts a UIWindow as the UIView it also is (UIWindow is a
 // UIView subclass) — the shell's container splice needs the view facet.

@@ -166,11 +166,16 @@ Each step is useful alone, and the order is chosen so the risky part comes last.
    list, how fast is it moving). Doing the metrics alone is a complete
    change — the watch stopped being a cropped handset — and the integrator
    can land against any layout. One correction to what this section
-   predicted: type roles cannot be a property of the text yet, because a
-   `VText` has nowhere to carry one until step 3 adds sized text to the
-   element vocabulary. The watch resolves a role from the grid ROW instead
-   (header / list / footer, which is what every body here is), through one
-   function that goes away when an element can name its own role.
+   predicted: type roles cannot be a property of GRID text, because a
+   `VText` is a run of character cells and has nowhere to carry one. The
+   watch resolves a role from the grid ROW instead (header / list / footer,
+   which is what every body here is).
+
+   Plan 0070's element vocabulary landed after this (2026-08-22): a
+   `VLabel` names its own role, so pixel-placed text no longer needs the
+   row. `TypeRoles.forRow` stays for the grid-shaped bodies that are still
+   here and goes away with the last of them — it is how `VText` gets a
+   role, not a stand-in for a missing one.
 3. **The renderer on Apple.** CoreGraphics + CoreText behind the existing element
    vocabulary, producing a `CGImage` per frame. This is the step that drops
    `UIView`.

@@ -21,7 +21,32 @@ object FbPaint:
     case x: VGlyph => Font.drawChar(px, x.glyph, x.x, x.y, x.color, false, 0)
     case x: VRect  => Draw.fillRect(px, x.x, x.y, x.w, x.h, x.color)
     case x: VImage => blit(px, x)
+    case x: VFill  => Draw.fillRoundRect(px, x.x, x.y, x.w, x.h, x.radius, x.color, x.alpha)
+    case x: VLabel => drawLabel(px, x)
     case x: VGroup => drawChildren(px, x.children)
+
+  /** a `VLabel` on the framebuffer: the 5x8 strike, placed in the box.
+   *
+   *  The handset has ONE strike, so a ROLE cannot pick a size here yet — plan
+   *  0070's answer is baked strikes at the handful of sizes the design uses,
+   *  and until they ship (FB-BIG-CONTACT-ROWS is the queue item that
+   *  wants them first) every role draws at 6x8 and every weight is regular.
+   *  What this arm does honour is what it can: the box and the alignment (the
+   *  text is placed in PIXELS, free of the character grid) and the alpha,
+   *  blended per lit pixel. A text run wider than its box overflows to the
+   *  right rather than being clipped or ellipsized — the same thing
+   *  `Font.drawText` does at the panel's edge. */
+  def drawLabel(px: go.Bytes, l: VLabel): Unit =
+    val bs = go.bytes(l.text)
+    val tw = bs.length * Font.GLYPH_W
+    var x0 = l.x
+    if l.align == TextAlign.CENTER then x0 = l.x + (l.w - tw) / 2
+    else if l.align == TextAlign.TRAILING then x0 = l.x + l.w - tw
+    val y0 = l.y + (l.h - Font.GLYPH_H) / 2
+    var i = 0
+    while i < bs.length do
+      Font.drawCharAlpha(px, bs(i).toInt & 0xff, x0 + i * Font.GLYPH_W, y0, l.color, l.alpha)
+      i = i + 1
 
   /** children paint in list order, so a later one draws over an earlier one. */
   def drawChildren(px: go.Bytes, xs: List[Keyed]): Unit =

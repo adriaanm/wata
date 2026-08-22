@@ -117,6 +117,10 @@ object appkit:
     @go.name("SetTitlePosition") def setTitlePosition(v: NSTitlePosition): Unit = ???
     @go.name("SetBorderWidth") def setBorderWidth(v: scala.Double): Unit = ???
     @go.name("SetFillColor") def setFillColor(v: NSColor): Unit = ???
+    /** the VFill element's corner radius. NSBox states it as a plain double
+     *  (AppKit's own property for a custom box), so unlike UIKit — where the
+     *  radius lives on CALayer and needs glue — this binds directly. */
+    @go.name("SetCornerRadius") def setCornerRadius(v: scala.Double): Unit = ???
 
   /** Go `appkit.NSImageView` — the VImage element's class, reached via
    *  `go.nativeui.asImageView`. */

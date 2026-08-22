@@ -16,7 +16,8 @@
  *  cases.
  *
  *  Colors are RGB565 ints, the format the device panel takes; a backend on
- *  another display expands them.
+ *  another display expands them. A color may carry an ALPHA (0..255) — the
+ *  elements that take one say so; `Alpha.over` is what it means.
  */
 sealed trait View derives CanEqual
 
@@ -41,6 +42,38 @@ case class VRect(x: Int, y: Int, w: Int, h: Int, color: Int) extends View
  *  buffer; a backend on another display re-expands the pairs. */
 case class VImage(x: Int, y: Int, w: Int, h: Int, pixels: Bytes) extends View
 
+/** TEXT PLACED IN PIXELS, at a type ROLE — plan 0070's rolodex cannot be
+ *  drawn with `VText`, which is a run of cells on a character grid.
+ *
+ *  It carries a ROLE and not a point size, and that is the load-bearing
+ *  choice. A size in an element would foreclose Dynamic Type (the system's
+ *  preferred size is the renderer's to read, per device, per user) and force
+ *  every body to know which panel it is on. A role — `TypeRole.DISPLAY`, the
+ *  rolodex's full-bleed name; `NAME`, a card or row title; `CAPTION`, the
+ *  secondary line; `STATUS`, the small print — keeps that knowledge in ONE
+ *  place, the renderer's metrics.
+ *
+ *  `(x, y, w, h)` is the BOX the text is aligned within, not the text's own
+ *  extent: a name optically centred in a card is the whole point of the
+ *  design, and a body that had to measure a native font to centre it would be
+ *  doing the renderer's job with the renderer's numbers missing. `weight` is
+ *  `TypeWeight.*`; `alpha` is 0..255, `Alpha.OPAQUE` for ordinary text. */
+case class VLabel(x: Int, y: Int, w: Int, h: Int, text: String,
+  role: Int, weight: Int, align: Int, color: Int, alpha: Int) extends View
+
+/** a filled rectangle with a CORNER RADIUS and an ALPHA — `VRect` with the two
+ *  properties the design's depth is made of. The cards are rounded when the
+ *  stack is open, and half the depth is black at 50-80% over a hue.
+ *
+ *  `radius` is in the same pixel space as `w`/`h` and is clamped to half the
+ *  shorter side (so a radius past that is a stadium, never a defect);
+ *  `radius == 0` is a plain rectangle and `alpha == Alpha.OPAQUE` a plain
+ *  fill, which is exactly `VRect` — kept as a separate constructor because
+ *  every body written to `VRect` (and every golden it produces) stays as it
+ *  is. */
+case class VFill(x: Int, y: Int, w: Int, h: Int, radius: Int, color: Int,
+  alpha: Int) extends View
+
 /** an ordered composite. Children paint in list order, so a later child draws
  *  over an earlier one — the same rule the immediate-mode painter always had. */
 case class VGroup(children: List[Keyed]) extends View
@@ -51,6 +84,79 @@ case class VGroup(children: List[Keyed]) extends View
  *  rewriting every row after it. `""` means "no identity" — match me by
  *  position. */
 case class Keyed(key: String, view: View) derives CanEqual
+
+/** THE TYPE ROLES — what a piece of text IS, which is all a body knows and all
+ *  a renderer needs to pick a size.
+ *
+ *  Four, and the set is chosen from what plan 0070's screens actually say:
+ *  DISPLAY is the one full-bleed name a rolodex card shows and nothing else
+ *  ever is; NAME titles a card or a row; CAPTION is the secondary line under
+ *  it; STATUS is the small print (the header, the legend, a count). A renderer
+ *  resolves each against its metrics — on Apple against the system's preferred
+ *  size, which is what Dynamic Type and VoiceOver need; on the handset against
+ *  the baked strikes it ships. */
+object TypeRole:
+  val DISPLAY = 0
+  val NAME = 1
+  val CAPTION = 2
+  val STATUS = 3
+
+  def show(r: Int): String =
+    if r == DISPLAY then "display"
+    else if r == CAPTION then "caption"
+    else if r == STATUS then "status"
+    else "name"
+
+/** the weights the vocabulary admits. Three, because a renderer with one
+ *  strike per size can honour at most a couple and a design that needs five is
+ *  a design the handset cannot draw. */
+object TypeWeight:
+  val REGULAR = 0
+  val MEDIUM = 1
+  val BOLD = 2
+
+  def show(w: Int): String =
+    if w == MEDIUM then "medium" else if w == BOLD then "bold" else "regular"
+
+/** where the text sits in its box. LEADING/TRAILING rather than left/right:
+ *  the box is the unit, and the renderer decides which edge that is. */
+object TextAlign:
+  val LEADING = 0
+  val CENTER = 1
+  val TRAILING = 2
+
+  def show(a: Int): String =
+    if a == CENTER then "center" else if a == TRAILING then "trailing" else "leading"
+
+/** ALPHA — a colour's coverage, 0 (invisible) to 255 (opaque).
+ *
+ *  Kept as an int rather than a fraction so two views compare exactly (the
+ *  differ's field comparison is the whole reason) and so a framebuffer's blend
+ *  is integer arithmetic. `over` is what alpha MEANS in this algebra: source
+ *  over destination in RGB565, which every backend must agree on — the
+ *  framebuffer does it per pixel, a toolkit hands the same numbers to a
+ *  compositor. */
+object Alpha:
+  val OPAQUE = 255
+  val CLEAR = 0
+
+  def clamp(a: Int): Int = if a < 0 then 0 else if a > 255 then 255 else a
+
+  /** 0.0 .. 1.0, for a toolkit whose colours take a fraction. */
+  def fraction(a: Int): Double = clamp(a).toDouble / 255.0
+
+  /** `src` at coverage `a` composited over `dst`, both RGB565. */
+  def over(dst: Int, src: Int, a0: Int): Int =
+    val a = clamp(a0)
+    var out = dst
+    if a >= 255 then out = src
+    else if a > 0 then
+      val ia = 255 - a
+      val r = (((src >> 11) & 0x1f) * a + ((dst >> 11) & 0x1f) * ia) / 255
+      val g = (((src >> 5) & 0x3f) * a + ((dst >> 5) & 0x3f) * ia) / 255
+      val bl = ((src & 0x1f) * a + (dst & 0x1f) * ia) / 255
+      out = (r << 11) | (g << 5) | bl
+    out
 
 /** the view-level list helpers the algebra needs. Keyed-specific rather than
  *  generic on purpose: these are the only lists in the module, and the
@@ -165,6 +271,17 @@ object Views:
       case x: VImage => b match
         case y: VImage =>
           out = x.x == y.x && x.y == y.y && x.w == y.w && x.h == y.h && eqBytes(x.pixels, y.pixels)
+        case _ => out = false
+      case x: VLabel => b match
+        case y: VLabel =>
+          out = x.x == y.x && x.y == y.y && x.w == y.w && x.h == y.h &&
+            x.text == y.text && x.role == y.role && x.weight == y.weight &&
+            x.align == y.align && x.color == y.color && x.alpha == y.alpha
+        case _ => out = false
+      case x: VFill => b match
+        case y: VFill =>
+          out = x.x == y.x && x.y == y.y && x.w == y.w && x.h == y.h &&
+            x.radius == y.radius && x.color == y.color && x.alpha == y.alpha
         case _ => out = false
       case x: VGroup => b match
         case y: VGroup => out = eqChildren(x.children, y.children)

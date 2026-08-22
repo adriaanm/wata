@@ -51,6 +51,26 @@ roundtrip rect-same patches=0 ok=true
 roundtrip image-same patches=0 ok=true
 roundtrip image-bytes patches=1 ok=true
   set [] image(0,0,2,2,bytes=8,sum=72)
+roundtrip rolodex-card patches=3 ok=true
+  set [0] fill(8,8,144,64,r=4,31,a=255)
+  set [1] label(8,20,144,24,"Ada",name,bold,leading,65535,a=255)
+  set [3] fill(0,0,160,16,r=0,0,a=96)
+roundtrip label-same patches=0 ok=true
+roundtrip label-weight patches=1 ok=true
+  set [] label(0,0,40,12,"x",name,bold,leading,7,a=255)
+roundtrip fill-radius patches=1 ok=true
+  set [] fill(0,0,8,8,r=4,3,a=255)
+roundtrip fill-vs-rect patches=1 ok=true
+  set [] fill(0,0,8,8,r=0,3,a=255)
+alpha over(dst,src,a):
+  0000 ffff 0 -> 0000
+  0000 ffff 128 -> 7bef
+  0000 ffff 255 -> ffff
+  07e0 0000 128 -> 03e0
+  001f 0000 204 -> 0006
+  f800 001f 64 -> b807
+  1234 4321 -5 -> 1234
+  1234 4321 999 -> 4321
 roundtrip boot-states patches=3 ok=true
   set [1] glyph(150,1,132,63488)
   set [2] text(6,6,"can't reach server",63488)

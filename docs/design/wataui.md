@@ -15,7 +15,7 @@ gate).
 
 ## The algebra
 
-Five constructors, `view.scala`:
+Seven constructors, `view.scala`:
 
 | constructor | what it is |
 |---|---|
@@ -23,6 +23,8 @@ Five constructors, `view.scala`:
 | `VGlyph(x, y, glyph, color)` | one glyph by code, at a pixel |
 | `VRect(x, y, w, h, color)` | a filled rectangle |
 | `VImage(x, y, w, h, pixels)` | a raw RGB565-LE blit |
+| `VLabel(x, y, w, h, text, role, weight, align, color, alpha)` | text placed in pixels, at a type ROLE, aligned in a box |
+| `VFill(x, y, w, h, radius, color, alpha)` | a filled rectangle with a corner radius and an alpha |
 | `VGroup(children: List[Keyed])` | an ordered composite |
 
 plus `Keyed(key, view)`, a child and its identity within its group.
@@ -34,6 +36,54 @@ what the painter can already do. Coordinates are *semantic positions*:
 `VText` addresses a grid cell, the rest address pixels, and a backend
 that is not this panel scales both. Colors are RGB565 ints, the panel's
 own format.
+
+### Type is a ROLE, never a point size
+
+`VLabel` is the one element that names what its text *is* rather than how
+big it should be: `TypeRole.DISPLAY` (plan 0070's full-bleed rolodex
+name), `NAME` (a card or row title), `CAPTION` (the secondary line),
+`STATUS` (the small print). The renderer resolves the role against its
+own metrics.
+
+That is a ruling, not a convenience. A point size in an element would
+foreclose Dynamic Type — the system's preferred size is per device and
+per user, and only the renderer can read it — and it would force every
+body to know which panel it is drawing on. A role keeps that knowledge in
+one place. It is also what VoiceOver will want when the Apple clients ship.
+
+`VLabel` carries a **box** and an **alignment** rather than a bare
+position, because a name optically centred in a card is the design's
+whole point and a body cannot centre what it cannot measure: measuring a
+native face is the renderer's job with the renderer's numbers. Every
+Apple stage therefore frames the label to the box exactly and lets the
+toolkit place the text inside it.
+
+`VText`'s grid form **stays**. The TUI and the admin surfaces are
+character grids, today's bodies are written to cells, and the goldens are
+byte-exact against that. A grid run has nowhere to carry a role, so a
+stage that sizes grid text by role reads the role off the ROW instead
+(`TypeRoles.forRow` on the watch) — that function goes away with the last
+grid body, not with this vocabulary.
+
+### Alpha
+
+`Alpha` (0..255, `OPAQUE`/`CLEAR`) is an int rather than a fraction for
+two reasons: the differ compares fields exactly, and a framebuffer blend
+is integer arithmetic. `Alpha.over(dst, src, a)` is what alpha **means**
+here — source over destination in RGB565 — and every backend composites
+to those numbers: the framebuffer per pixel, a toolkit through its own
+compositor. The oracle prints the blend as a table, so a channel that
+loses a bit is visible rather than arithmetic.
+
+Alpha is carried by `VLabel` and `VFill` and by nothing else. The older
+constructors keep their five and four fields: adding a field to `VRect`
+would rewrite ~64 call sites and every golden for a property no body
+asks of them, and `VFill` with `radius = 0, alpha = OPAQUE` already *is*
+a `VRect`.
+
+What deliberately stays **out**: shadows and gradients. The handset
+cannot draw either well, and an element that degrades quietly on the
+device that matters most is worse than one that does not exist.
 
 Children paint in list order — a later child draws over an earlier one,
 the same rule the immediate-mode painter always had.
@@ -99,6 +149,15 @@ plan calls: these lists are at most a dozen rows, and a minimal-move
 script (an LIS over the key positions) buys nothing perceivable at the
 price of the one part of the module that would be hard to read.
 
+The two new leaves diff like every other leaf: field by field, `PSet` at
+leaf granularity, and a `VFill` where a `VRect` was is a **constructor
+change** (a subtree replace), not a comparison. Each stage's PSet fast
+path mutates in place when the constructor matches, and re-derives what
+the changed field implies — a `VLabel` whose role, weight or box height
+moved is re-fonted, a `VFill` whose radius or size moved has its radius
+recomputed, because both are resolved against the box rather than taken
+literally.
+
 ### The differ does NOT retain what it walks (settled by `tools/diff-spike`)
 
 When the wata-mac idle leak (~200 MB/hour) bisected to the diff call, the
@@ -135,6 +194,18 @@ painter always called, in the same order with the same arguments —
 RGB565 pairs, `VGroup` to its children in order. Nothing new sits
 between a view and the pixels, which is why a ported screen leaves every
 golden byte-identical.
+
+`VFill` and `VLabel` are the two arms that are not a straight pass-through.
+`VFill` goes to `Draw.fillRoundRect`, which is a real rounded, alpha-blended
+fill (`Draw.blendPixel` over `Alpha.over`, the corner test being the squared
+distance from the arc's centre, the radius clamped to half the shorter side).
+`VLabel` places the 5x8 strike in the box — the alignment and the alpha are
+honoured, the **role is not**, because the handset has one strike and eight
+times up is a wall of squares. Plan 0070's answer is baked strikes at the
+handful of sizes the design uses; until they ship, every role draws at 6x8
+and every weight is regular. That is the one place in the vocabulary where a
+backend cannot yet say what the element means, and it is stated in the arm
+rather than left to be discovered.
 
 `FbPaint.centerCol` is the one piece of layout that had to move: the
 grid arithmetic `Font.drawTextCentered` did, lifted so a BODY does it
@@ -210,6 +281,19 @@ mapping and threading rule are documented in `interp.scala` and in
 native hierarchy after an applied script mirrors what
 `Patches.applyAll` says — on the real toolkit (`wata-mac interptest`,
 run by `just nativeui-tests`, macOS-only).
+
+Both retained arms — AppKit and the two UIKit ones — draw `VFill` as the
+class they already draw `VRect` with, plus the two properties: an `NSBox`
+states `cornerRadius` itself, while UIKit's lives on `CALayer`, which is
+not on the bindgen allowlist, so it is reached through the layer in
+`go-pkgs/iosui` (the same route the render probe already takes). `VLabel`
+is a label at the role's resolved size, framed to its box, with the
+toolkit doing the alignment — `NSTextAlignment` has no Go mapping and is
+refused by bindgen, so that too is one glue call, and each stage maps
+`TextAlign` to its own platform's enum (AppKit orders it left/right/center,
+UIKit left/center/right). Grid text stays monospaced; a `VLabel` takes the
+proportional system face, because a name on a card is read rather than
+tabulated.
 
 The `wata-mac` app is the arm's driver: its pump runs the same bodies
 the framebuffer runs, calls `Diff.diff` each frame, and hands the

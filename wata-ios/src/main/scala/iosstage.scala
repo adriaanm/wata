@@ -325,6 +325,17 @@ object IosStage:
       // never interpolate: the pixels arrive pre-scaled to the frame's size
       go.iosui.asImageView(native).setImage(image(s, x))
       IosNode(v, native, Nil)
+    case x: VFill =>
+      // the rolodex fill: VRect's plain UIView plus the two properties this
+      // element exists for — the radius through the layer (glue: cornerRadius
+      // lives on CALayer, which bindgen does not allow), the alpha in the
+      // colour. The layer draws the background, so the radius clips it.
+      val native = go.uikit.getUIViewClass().alloc().initWithFrame(frame(s, x.x, x.y, x.w, x.h))
+      native.setBackgroundColor(colorA(x.color, x.alpha))
+      go.iosui.setCornerRadius(native, radiusPts(s, x))
+      IosNode(v, native, Nil)
+    case x: VLabel =>
+      IosNode(v, roleLabel(s, x), Nil)
 
   /** update one native view's properties in place when the new view has the
    *  same constructor — the PSet fast path. Groups always answer None: a
@@ -355,6 +366,30 @@ object IosStage:
         n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
         Some(IosNode(v, n.native, n.kids))
       case _ => None
+    case old: VFill => v match
+      case x: VFill =>
+        if x.color != old.color || x.alpha != old.alpha then
+          n.native.setBackgroundColor(colorA(x.color, x.alpha))
+        // the radius is clamped to the box, so a resize moves it with the
+        // radius field untouched
+        if x.radius != old.radius || x.w != old.w || x.h != old.h then
+          go.iosui.setCornerRadius(n.native, radiusPts(s, x))
+        n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
+        Some(IosNode(v, n.native, n.kids))
+      case _ => None
+    case old: VLabel => v match
+      case x: VLabel =>
+        val lbl = go.iosui.asLabel(n.native)
+        if x.text != old.text then lbl.setText(x.text)
+        if x.color != old.color || x.alpha != old.alpha then
+          lbl.setTextColor(colorA(x.color, x.alpha))
+        if x.role != old.role || x.weight != old.weight || x.h != old.h then
+          setRoleFont(n.native, labelPts(s, x), x.weight)
+        if x.align != old.align then
+          go.iosui.setLabelAlignment(n.native, IosType.alignment(x.align))
+        n.native.setFrame(frame(s, x.x, x.y, x.w, x.h))
+        Some(IosNode(v, n.native, n.kids))
+      case _ => None
     case _ => None
 
   def relabel(s: IosStageSt, native: go.uikit.UIView, text: String,
@@ -375,14 +410,50 @@ object IosStage:
     lbl.setTextColor(color(c))
     v
 
+  /** a `VLabel`: pixel-placed text at a ROLE, aligned inside its box. The
+   *  frame IS the box and UIKit does the alignment — a body that had to
+   *  measure a native font to centre a name would be doing the renderer's job
+   *  with the renderer's numbers missing. Not monospaced: grid text is
+   *  (its columns must line up with the cells a body counted), a name on a
+   *  card is read rather than tabulated. */
+  def roleLabel(s: IosStageSt, x: VLabel): go.uikit.UIView =
+    val v = go.iosui.allocLabelAsView().initWithFrame(frame(s, x.x, x.y, x.w, x.h))
+    val lbl = go.iosui.asLabel(v)
+    lbl.setText(x.text)
+    setRoleFont(v, labelPts(s, x), x.weight)
+    lbl.setTextColor(colorA(x.color, x.alpha))
+    go.iosui.setLabelAlignment(v, IosType.alignment(x.align))
+    v
+
+  def setRoleFont(v: go.uikit.UIView, pts: Double, weight: Int): Unit =
+    go.iosui.asLabel(v).setFont(go.uikit.getUIFontClass()
+      .systemFontOfSizeWeight(pts, IosType.weight(weight)))
+
+  /** the point size a `VLabel` gets: its ROLE at this stage's scale, clamped
+   *  to the box it was given, so a label never overflows its own box. */
+  def labelPts(s: IosStageSt, x: VLabel): Double =
+    val byRole = IosType.points(x.role, s.scale)
+    val byBox = (x.h * s.scale).toDouble / IosType.LINE_EM
+    if byBox < byRole then byBox else byRole
+
+  /** a `VFill`'s corner radius in points: semantic pixels at the stage's
+   *  scale, clamped to half the shorter side (wataui's `VFill` contract). */
+  def radiusPts(s: IosStageSt, x: VFill): Double =
+    val half = (if x.w < x.h then x.w else x.h) / 2
+    val r = if x.radius < 0 then 0 else if x.radius > half then half else x.radius
+    (r * s.scale).toDouble
+
   def image(s: IosStageSt, x: VImage): go.uikit.UIImage =
     val rgba = IosPixels.scaleRGBANearest(
       IosPixels.expandRGB565(x.pixels, x.w, x.h), x.w, x.h, s.scale)
     go.iosui.imageFromRGBA(rgba, x.w * s.scale, x.h * s.scale)
 
-  def color(c: Int): go.uikit.UIColor =
+  def color(c: Int): go.uikit.UIColor = colorA(c, Alpha.OPAQUE)
+
+  /** the same colour at a coverage: `Alpha`'s 0..255 as UIKit's fraction. */
+  def colorA(c: Int, alpha: Int): go.uikit.UIColor =
     go.uikit.getUIColorClass().colorWithRedGreenBlueAlpha(
-      IosPixels.red(c), IosPixels.green(c), IosPixels.blue(c), 1.0)
+      IosPixels.red(c), IosPixels.green(c), IosPixels.blue(c), Alpha.fraction(alpha))
 
   // ---- geometry -------------------------------------------------------------
 
@@ -494,3 +565,34 @@ object IosStage:
           cur = t
         case Nil => going = false
     n
+
+/** what wataui's TYPE ROLES resolve to on this stage.
+ *
+ *  The phone is a development surface, so its stage is still an integer scale
+ *  of the handset's 160x128 panel rather than a `StageMetrics` read off the
+ *  screen (plan 0071 step 2 has only reached the watch). The roles are
+ *  therefore multiples of the grid's own cell font. When this stage grows
+ *  metrics, these fractions move there and this object goes away — the BODIES
+ *  never change, which is the whole reason the element names a role and not a
+ *  size. */
+object IosType:
+  /** ascent + descent per em: what clamping a role to its box measures. */
+  val LINE_EM = 1.16
+
+  def points(role: Int, scale: Int): Double =
+    val cell = IosStage.cellFontPts * scale.toDouble
+    if role == TypeRole.DISPLAY then cell * 3.2
+    else if role == TypeRole.NAME then cell * 1.6
+    else if role == TypeRole.CAPTION then cell * 1.1
+    else cell
+
+  /** the system font's weight axis: regular 0.0, medium 0.23, bold 0.4. */
+  def weight(w: Int): Double =
+    if w == TypeWeight.MEDIUM then 0.23
+    else if w == TypeWeight.BOLD then 0.4
+    else 0.0
+
+  /** UIKit's NSTextAlignment: left 0, CENTER 1, right 2 — deliberately not
+   *  AppKit's ordering (left 0, right 1, center 2). */
+  def alignment(a: Int): Int =
+    if a == TextAlign.CENTER then 1 else if a == TextAlign.TRAILING then 2 else 0

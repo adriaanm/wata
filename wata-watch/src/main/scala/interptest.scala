@@ -46,6 +46,7 @@ object InterpTest:
     withPool(() => rootPSetReplacesWholeTree())
     withPool(() => insertOrderIsPaintOrder())
     withPool(() => offscreenRenderProbes())
+    withPool(() => rolodexVocabularyDraws())
     val n = failsC.get()
     if n == 0 then println("interptest: PASS")
     else println("interptest: FAIL (" + n + ")")
@@ -104,6 +105,8 @@ object InterpTest:
     case _: VGlyph => "UILabel"
     case _: VRect  => "UIView" // a plain background-filled UIView, like the group
     case _: VImage => "UIImageView"
+    case _: VFill  => "UIView" // VRect's native, plus a radius and an alpha
+    case _: VLabel => "UILabel"
 
   /** recompute the scaled SEMANTIC rect independently of the interpreter —
    *  the geometry convention, pinned. UIKit's y points down like the stage's,
@@ -119,6 +122,8 @@ object InterpTest:
       case t: VGlyph => rect(t.x, t.y, 6, 8)
       case t: VRect  => rect(t.x, t.y, t.w, t.h)
       case t: VImage => rect(t.x, t.y, t.w, t.h)
+      case t: VFill  => rect(t.x, t.y, t.w, t.h)
+      case t: VLabel => rect(t.x, t.y, t.w, t.h) // the frame IS the box
       case _: VGroup => None
 
   /** walk the native hierarchy and the plain tree side by side. */
@@ -132,6 +137,9 @@ object InterpTest:
       case None => ()
     v match
       case x: VText =>
+        val got = go.iosui.asLabel(native).text()
+        check(got == x.text, path + ": label \"" + got + "\", want \"" + x.text + "\"")
+      case x: VLabel =>
         val got = go.iosui.asLabel(native).text()
         check(got == x.text, path + ": label \"" + got + "\", want \"" + x.text + "\"")
       case x: VGlyph =>
@@ -155,6 +163,8 @@ object InterpTest:
     case x: VGlyph => "VGlyph(" + x.x + "," + x.y + ")"
     case x: VRect  => "VRect(" + x.x + "," + x.y + "," + x.w + "," + x.h + ")"
     case x: VImage => "VImage(" + x.x + "," + x.y + "," + x.w + "," + x.h + ")"
+    case x: VFill  => "VFill(" + x.x + "," + x.y + "," + x.w + "," + x.h + ",r=" + x.radius + ")"
+    case x: VLabel => "VLabel(" + x.x + "," + x.y + "," + TypeRole.show(x.role) + ")"
     case _: VGroup => "VGroup"
 
   /** the stage's single mounted subview (the tree's root). */
@@ -290,6 +300,90 @@ object InterpTest:
         x += 1
       y += 1
     check(found, "text: the label rendered nothing visible")
+
+  // ---- the rolodex vocabulary, drawn for real -------------------------------
+
+  /** is any pixel in this semantic rectangle near-white? The label assertions
+   *  are ink/no-ink rather than exact colours: a native face antialiases, and
+   *  what is being proved is WHERE the glyphs landed, not their coverage. */
+  def anyInk(root: go.uikit.UIView, x0: Int, y0: Int, x1: Int, y1: Int, scale: Int): Boolean =
+    var found = false
+    var y = y0
+    while y < y1 && !found do
+      var x = x0
+      while x < x1 && !found do
+        val c = probe(root, x, y, scale)
+        if ((c >> 16) & 0xff) + ((c >> 8) & 0xff) + (c & 0xff) > 306 then found = true
+        x += 1
+      y += 1
+    found
+
+  /** PLAN 0070's THREE ELEMENTS, drawn on the real toolkit and read back as
+   *  pixels: a rounded card, a `display`-role name optically centred in it, a
+   *  caption under that, and a translucent black band over the top.
+   *
+   *  This is the case that says the vocabulary is real rather than declared.
+   *  Each probe is aimed at one claim:
+   *
+   *   - the CARD is filled and its corners are ROUNDED — a point outside the
+   *     arc reads background, a point on the same edge below the arc reads
+   *     card, so a stage that dropped the radius fails on the first and a
+   *     stage that clipped the whole corner fails on the second;
+   *   - the BAND is TRANSLUCENT — half-black over a saturated blue reads half
+   *     blue, which an opaque black band and a missing band both fail;
+   *   - the NAME is CENTRED — ink in the middle of the box and none against
+   *     its leading edge, which is the alignment the design is made of and the
+   *     one thing a body cannot compute for itself;
+   *   - the CAPTION drew, under the name, in its own smaller box. */
+  def rolodexVocabularyDraws(): Unit =
+    val scale = 4
+    val root = IosStage.create(Metrics.uniform(scale), false)
+    // semantic pixels, the space every body addresses. The card is x 24..136,
+    // y 12..116, with a 20px radius; the band covers its top 20 rows.
+    val blue = 0x001f
+    IosStage.setTree(VGroup(
+      Keyed("bg", VRect(0, 0, 160, 128, 0x0000)) ::
+      Keyed("card", VFill(24, 12, 112, 104, 20, blue, Alpha.OPAQUE)) ::
+      Keyed("band", VFill(24, 12, 112, 20, 0, 0x0000, 128)) ::
+      Keyed("name", VLabel(24, 40, 112, 28, "Ada", TypeRole.DISPLAY,
+        TypeWeight.BOLD, TextAlign.CENTER, 0xffff, Alpha.OPAQUE)) ::
+      Keyed("cap", VLabel(24, 76, 112, 12, "2 unheard", TypeRole.CAPTION,
+        TypeWeight.REGULAR, TextAlign.CENTER, 0xffff, Alpha.OPAQUE)) :: Nil))
+
+    // the fill, where nothing is over it
+    probeIs(root, 80, 100, scale, 0, 0, 255, "vfill: the card")
+    // the ROUNDED corner: (27,15) is 24 semantic px from the top-left arc's
+    // centre (44,32) and the radius is 20, so it is OUTSIDE the card — square
+    // corners would put half-black-over-blue there instead of background
+    probeIs(root, 27, 15, scale, 0, 0, 0, "vfill: the top-left corner is rounded")
+    // ... and the same left edge below the arc is still card, so the radius
+    // rounded a corner rather than eating the side
+    probeIs(root, 26, 60, scale, 0, 0, 255, "vfill: the left edge below the arc")
+    // the TRANSLUCENT band: 50% black over saturated blue
+    probeIs(root, 80, 20, scale, 0, 0, 128, "vfill: the band is translucent")
+
+    // the display name is CENTRED in its box: ink in the middle, none against
+    // the leading edge
+    check(anyInk(root, 70, 44, 92, 64, scale),
+      "vlabel: the display name drew nothing in the centre of its box")
+    check(!anyInk(root, 26, 44, 40, 64, scale),
+      "vlabel: a centred name must leave its leading edge empty")
+    // the caption drew, in its own row under the name
+    check(anyInk(root, 40, 77, 120, 87, scale),
+      "vlabel: the caption drew nothing")
+
+    // and the roles order by size, which is what makes a role worth naming
+    val m = Metrics.uniform(scale)
+    val big = 1.0e9
+    val disp = TypeRoles.labelPoints(TypeRole.DISPLAY, m, big)
+    val nm = TypeRoles.labelPoints(TypeRole.NAME, m, big)
+    val cap = TypeRoles.labelPoints(TypeRole.CAPTION, m, big)
+    val st = TypeRoles.labelPoints(TypeRole.STATUS, m, big)
+    check(disp > nm && nm > cap && cap > st, "roles: display > name > caption > status")
+    // a role is CLAMPED to the box it was given, so a display name in a
+    // caption-sized strip is the biggest thing that fits, never an overflow
+    check(TypeRoles.labelPoints(TypeRole.DISPLAY, m, 24.0) <= 24.0,
+      "roles: a role must never overflow its box")
 
   // ---- the pure arm: applyAll hand cases + the tables -----------------------
 

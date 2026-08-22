@@ -104,6 +104,8 @@ object InterpTest:
     case _: VGlyph => "UILabel"
     case _: VRect  => "UIView" // a plain background-filled UIView, like the group
     case _: VImage => "UIImageView"
+    case _: VFill  => "UIView" // VRect's native, plus a radius and an alpha
+    case _: VLabel => "UILabel"
 
   /** recompute the scaled SEMANTIC rect independently of the interpreter —
    *  the geometry convention, pinned. UIKit's y points down like the stage's,
@@ -119,6 +121,8 @@ object InterpTest:
       case t: VGlyph => rect(t.x, t.y, 6, 8)
       case t: VRect  => rect(t.x, t.y, t.w, t.h)
       case t: VImage => rect(t.x, t.y, t.w, t.h)
+      case t: VFill  => rect(t.x, t.y, t.w, t.h)
+      case t: VLabel => rect(t.x, t.y, t.w, t.h) // the frame IS the box
       case _: VGroup => None
 
   /** walk the native hierarchy and the plain tree side by side. */
@@ -132,6 +136,9 @@ object InterpTest:
       case None => ()
     v match
       case x: VText =>
+        val got = go.iosui.asLabel(native).text()
+        check(got == x.text, path + ": label \"" + got + "\", want \"" + x.text + "\"")
+      case x: VLabel =>
         val got = go.iosui.asLabel(native).text()
         check(got == x.text, path + ": label \"" + got + "\", want \"" + x.text + "\"")
       case x: VGlyph =>
@@ -155,6 +162,8 @@ object InterpTest:
     case x: VGlyph => "VGlyph(" + x.x + "," + x.y + ")"
     case x: VRect  => "VRect(" + x.x + "," + x.y + "," + x.w + "," + x.h + ")"
     case x: VImage => "VImage(" + x.x + "," + x.y + "," + x.w + "," + x.h + ")"
+    case x: VFill  => "VFill(" + x.x + "," + x.y + "," + x.w + "," + x.h + ",r=" + x.radius + ")"
+    case x: VLabel => "VLabel(" + x.x + "," + x.y + "," + TypeRole.show(x.role) + ")"
     case _: VGroup => "VGroup"
 
   /** the stage's single mounted subview (the tree's root). */

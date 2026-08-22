@@ -40,6 +40,7 @@ var (
 	selInitBitmap = objc.RegisterName("initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bytesPerRow:bitsPerPixel:")
 	selBitmapData = objc.RegisterName("bitmapData")
 	selDesc       = objc.RegisterName("description")
+	selSetAlign   = objc.RegisterName("setAlignment:")
 )
 
 // ---- autorelease pools + the main-queue seam --------------------------------
@@ -126,6 +127,16 @@ func SetLabelColor(v appkit.NSView, c appkit.NSColor) {
 
 func LabelText(v appkit.NSView) string {
 	return appkit.NSControl{ID: v.ID}.StringValue()
+}
+
+// SetLabelAlignment writes NSControl's `alignment` — where the text sits in
+// the label's own frame, which is what wataui's VLabel box + TextAlign mean.
+// It is here rather than in a facade because bindgen refuses the property
+// (`no Go mapping for 'NSTextAlignment'`, appkit/REFUSALS.md). The value is
+// AppKit's enum, which the caller maps (MacType.alignment): left 0, RIGHT 1,
+// CENTER 2 — deliberately NOT UIKit's ordering.
+func SetLabelAlignment(v appkit.NSView, a int) {
+	v.ID.Send(selSetAlign, a)
 }
 
 // RetainFont retains a factory-made (autoreleased) font the stage keeps

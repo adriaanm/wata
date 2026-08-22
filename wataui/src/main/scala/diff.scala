@@ -57,6 +57,19 @@ object Diff:
         case y: VImage =>
           if !Views.eqView(x, y) then out = PSet(pathOf(rpath), b) :: out
         case _ => out = PSet(pathOf(rpath), b) :: out
+      case x: VLabel => b match
+        case y: VLabel =>
+          if x.x != y.x || x.y != y.y || x.w != y.w || x.h != y.h ||
+            x.text != y.text || x.role != y.role || x.weight != y.weight ||
+            x.align != y.align || x.color != y.color || x.alpha != y.alpha then
+            out = PSet(pathOf(rpath), b) :: out
+        case _ => out = PSet(pathOf(rpath), b) :: out
+      case x: VFill => b match
+        case y: VFill =>
+          if x.x != y.x || x.y != y.y || x.w != y.w || x.h != y.h ||
+            x.radius != y.radius || x.color != y.color || x.alpha != y.alpha then
+            out = PSet(pathOf(rpath), b) :: out
+        case _ => out = PSet(pathOf(rpath), b) :: out
       case x: VGroup => b match
         case y: VGroup => out = walkGroup(x.children, y.children, rpath, out)
         case _         => out = PSet(pathOf(rpath), b) :: out
