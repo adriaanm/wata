@@ -3,8 +3,10 @@
 status: done
 
 Verified in ci (charge-anomaly uitest scenario: debounce negative,
-alert frame, recovery) and negatively on hardware 2026-08-22 (handset
-on USB and charging: `fb-shot` shows a clean header, no glyph). The
+alert frame, recovery) and negatively on hardware 2026-08-22 (deployed
+via `fb-deploy install`; handset on USB, `battery/status` = Charging;
+`fb-shot` immediately after restart AND after 4+ minutes plugged shows
+a clean header — zero red pixels in the mark's slot). The
 POSITIVE hardware state — plugged, charger idle for 3+ minutes —
 requires physically degrading the cradle contact and stays queued as a
 hardware verification for the next time the anomaly occurs naturally
