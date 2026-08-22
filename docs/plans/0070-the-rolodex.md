@@ -55,6 +55,55 @@ Why this shape:
 - **It is one mental model for a family.** "Roll to my colour and hold the
   button" is literally true on either device.
 
+**A thread is drawn, not listed.** Cards answer *which person*; inside a person
+the question is *which of these have I not heard*, and that wants density —
+but not today's density, which is a column of `hh:mm 0:07` strings you have to
+read like a table. Each message becomes a bar whose length is its duration, in
+the speaker's colour, growing from the left if it is theirs and from the right
+in white if it is mine. Unheard is full ink with a yellow cap; played is the
+same bar at a third of it. Duration, direction, speaker and state are all
+shape, and the family thread needs no names at all. Eight rows fit the watch,
+six the handset, with no chrome.
+
+Two details carry more than their size:
+
+- **Stamps back off.** A time column earns its width only where it says
+  something new, so precision degrades with age — the minute under five
+  minutes, five minutes under an hour, the quarter hour to six, the hour for
+  today, the day this week, the date beyond — and consecutive identical labels
+  collapse. A burst inside a minute carries one stamp; last week is a single
+  weekday. Rows without one leave the column empty rather than reflowing. The
+  exception is the row that is **playing**: it states its exact time in yellow
+  while it plays, because that is the one message whose "45m" is not the
+  question being asked.
+- **Delivery is squares, not checkmarks.** Two check marks are a borrowed
+  metaphor that must be taught and sit oddly beside a language made of bars. My
+  rows carry two small squares in the right gutter that fill as the message
+  travels: both hollow while queued, one filled once the server has it, both
+  once somebody played it, one red square when it will never arrive. Same
+  rectangle vocabulary as the unheard cap on the other side, and it survives
+  being 5 px wide on the handset — a pair of ticks does not.
+
+**Motion is physical, and it is the product's manner.** A walkie-talkie for kids
+should be fun to hold, and the rolodex is already a physical metaphor, so the
+scrolling is simulated rather than indexed: input adds **velocity**, friction
+decays it exponentially, a critically damped spring pulls into the nearest
+detent below a threshold speed, and a stiffer spring at each end gives and
+bounces back — which is how a kid learns the list has an end without being told.
+Two quick presses are twice the shove, so acceleration falls out for free; a drag
+takes a few pixels of stiction to break loose and rubber-bands past the last
+card while held. Starting constants, tuned in the mockups and to be re-tuned on
+hardware: 7 cards/s per detent, a 140 ms friction time constant, detent
+stiffness 180, wall stiffness 340, and the 450 ms settle before the stack closes.
+
+The model runs **once, above the platform** — plan 0071's boundary — because a
+crown, an arrow key and a thumb should differ in what they contribute, not in
+how the thing behaves afterwards. That is why navigation intents carry a
+magnitude. The horizontal axis is **reserved and unused**: no gesture is spent
+on it now, but the integrator runs per axis and layout positions items from an
+(x, y) offset, so a later per-card action strip or a scrub along a message is a
+body change rather than a re-architecture.
+
 **Colour is a property of the person, stored server-side.** We own both ends, so
 each client must not invent its own. The user picks it; it fans out the way
 display names already do; a profile that has never set one falls back to a
@@ -113,23 +162,33 @@ Not scope for this plan, but the shape below must not foreclose any of it:
   oracle. Grid text stays for now; it is what the TUI and the admin surfaces
   use.
 - **`wata-fb`** — the baked strikes and the painter work they need (alpha blend,
-  rounded-rect fill, strike blitting), then the new body: card, stack, settle,
-  talk. Its goldens are regenerated wholesale — this is a redesign, not a
-  regression.
+  rounded-rect fill, strike blitting), then the new bodies: card, stack, settle,
+  talk, and the drawn thread. Its goldens are regenerated wholesale — this is a
+  redesign, not a regression.
 - **`wata-watch`** — stage metrics taken from the screen's bounds rather than a
   scaled 160×128, and the same body in portrait, laid out from those bounds so
   it holds on every watch size.
 - **`wata-ios` / `wata-mac`** — map the new elements onto their stages and keep
   running; they do not get the rolodex in this plan.
 - **the picker** — one screen, both main clients: swatches, move, keep.
+- **motion** — the integrator (velocity, friction, detent spring, end spring)
+  lives with the domain UI, once, and each shell only contributes impulses and a
+  frame clock. It needs plan 0071's magnitude-carrying intents, and it is the
+  reason a frame can now differ from the last one because of time alone.
 
 ## How it is verified
 
-- `wataui-tests` for the new elements and their diff behaviour.
+- `wataui-tests` for the new elements and their diff behaviour, and for the two
+  rules that are pure functions and deserve to be tested as such: the stamp
+  back-off (a list of ages in, a list of labels and blanks out) and the delivery
+  squares.
 - `fb-ui-tests` scripted runs of the real frame loop, with fresh goldens per
   checkpoint — including the stack open, mid-roll and settled.
 - `just watch-e2e` end to end on the simulator, and `just golden` for the
   handset's byte-exact frame.
+- **A frame-rate floor on the handset**, measured before the motion constants are
+  tuned: a flick has to hold the panel's rate for as long as it coasts, and
+  physics at 8 fps is worse than none.
 - **On hardware, by eye**: a photo of the handset at arm's length and the watch
   on a wrist. The oracles prove it draws what we said; only a wrist proves it is
   readable, and only a kid proves it is usable.
@@ -138,17 +197,23 @@ Not scope for this plan, but the shape below must not foreclose any of it:
 
 - Emoji marks. The same profile field carries one and UIKit renders it from a
   label, but the handset needs a mark set in its strikes. Follow-on.
-- The conversation view. The rolodex covers choosing a person and talking to
-  them; browsing a thread's messages, favourites and deletion keep today's
-  screen until the language has been used on hardware.
+- Favourites and deletion inside a thread. The drawn thread renders a favourite
+  (a star past the bar's outer end) but the gestures that set or clear one, and
+  deletion, keep today's handling until the language has been used on hardware.
 - iOS, mac and TUI layouts, beyond keeping them building and running.
 - Notifications and APNs.
 
 ## Open questions
 
-- **Does a kid ever browse messages?** If tapping a card just plays the oldest
-  unheard message and then the next, the conversation view may not survive at
-  all on the handset. Decide after the first hardware run, not before.
+- **Does a kid ever browse messages?** The drawn thread makes browsing cheap
+  enough to keep, which is a change from where this plan started — but if a tap
+  on a card simply plays the oldest unheard message and then the next, the thread
+  may be a screen adults use and kids never open. Watch which one gets used
+  before adding anything to it.
+- **Do the motion constants survive a wrist and a keypad?** They were tuned in a
+  browser mockup with a trackpad. A crown has detents of its own and the handset
+  has key repeat, so both want re-tuning against the real input — and the two
+  may not want the same numbers even though they share the model.
 - **Where the picker lives** on a handset whose settings applet is already
   crowded.
 - **Palette size**: eight is a guess bounded by "no two confusable in motion".

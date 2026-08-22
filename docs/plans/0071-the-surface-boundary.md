@@ -71,11 +71,25 @@ device, and it is small.
 ```
 
 **Intents, not key codes.** A shell reports what the person did in wata's terms:
-`Navigate(±n)`, `Choose`, `Back`, `TalkDown`, `TalkUp`, plus lifecycle
-(`Wake`, `Sleep`) and a raw escape hatch for the device-specific applets (the
-handset's diag and exit menus). The crown, the arrow keys and a swipe all become
+`Navigate`, `Choose`, `Back`, `TalkDown`, `TalkUp`, plus lifecycle (`Wake`,
+`Sleep`) and a raw escape hatch for the device-specific applets (the handset's
+diag and exit menus). The crown, the arrow keys and a swipe all become
 `Navigate`; a long press and a hardware PTT button both become `TalkDown`. The
 applets stop containing the sentence "the watch has no keypad".
+
+`Navigate` carries **an axis and a magnitude**, not a direction:
+`Navigate(axis, amount)`. Both exist for reasons the design already has.
+
+- *Magnitude*, because plan 0070's scrolling is physical — impulse, friction,
+  detent, bounce — and a shell that can only say "down was pressed" cannot
+  express a flick. A crown reports angular velocity, a held key reports its
+  repeat ramp, a drag reports its speed at release; each device says how hard it
+  was pushed and the physics lives once, above the boundary.
+- *Axis*, because the horizontal one is **reserved and unused**. Nothing moves
+  sideways today and nothing should until there is a reason, but keeping it free
+  is nearly free now and structural later — so the integrator runs per axis
+  rather than on a scalar, and layout positions items from an (x, y) offset
+  rather than a scroll index.
 
 **Metrics, not constants.** A shell states its size in points, its scale, its
 safe insets and its kind (wrist / handset / desktop). Layout is computed from
@@ -83,6 +97,19 @@ those, so 208×248, 160×128 and the next watch size are inputs rather than
 edits. Type comes from *roles* — name, caption, status — which the renderer
 resolves against the metrics, and on Apple against the system's preferred size,
 which is what Dynamic Type and VoiceOver need.
+
+**Motion above the boundary.** The scroll position is not an index the shell
+moves; it is a simulated quantity the domain owns — velocity from impulses,
+exponential friction, a critically damped spring into the nearest detent, a
+stiffer one at each end. The shell contributes impulses and a frame clock and
+nothing else, which is what keeps the feel identical on a crown, a keypad and a
+trackpad rather than three tunings of three shells. Plan 0070 has the model and
+its constants.
+
+That has a consequence for the layer below: **a frame can differ from the last
+one because of time alone**, not only because state changed. The surface needs a
+"there is motion, keep painting" signal, and the renderer needs to be cheap
+enough to run at the device's frame rate while it is true.
 
 **Frames, not view trees.** The renderer produces pixels; the shell shows them.
 On Apple that is a `CGImage` into an image view or a texture; on the handset it
@@ -113,10 +140,13 @@ its platform.
 
 Each step is useful alone, and the order is chosen so the risky part comes last.
 
-1. **Intents.** Replace the key-code queue with the intent set, per shell. Small,
-   and it immediately deletes the handset-key mapping from the watch.
-2. **Metrics.** Bodies read size, scale and type roles instead of `Display`
-   constants. Unblocks plan 0070's layouts on both devices.
+1. **Intents.** Replace the key-code queue with the intent set, per shell —
+   `Navigate` carrying an axis and a magnitude from the start, since retrofitting
+   either into a settled interface is the expensive version. Small, and it
+   immediately deletes the handset-key mapping from the watch.
+2. **Metrics, and the integrator.** Bodies read size, scale and type roles
+   instead of `Display` constants, and scroll position becomes simulated rather
+   than indexed. Unblocks plan 0070's layouts and its motion on both devices.
 3. **The renderer on Apple.** CoreGraphics + CoreText behind the existing element
    vocabulary, producing a `CGImage` per frame. This is the step that drops
    `UIView`.
@@ -129,10 +159,15 @@ Each step is useful alone, and the order is chosen so the risky part comes last.
 
 ## Risks and unknowns
 
-- **Frame cost on the watch.** A `CGImage` per frame across the Swift boundary
-  wants measuring before the zoom animation is committed to it — one shared
-  buffer with a flip, not an allocation per frame. `SpriteView` over an
-  `SKScene` texture is the fallback, and the boundary makes swapping cheap.
+- **Frame cost, on both, and it is the same risk twice.** Motion means every
+  frame differs, so the question stops being "how fast can we repaint a change"
+  and becomes "can we hold the device's frame rate for as long as a flick
+  coasts". On the watch that is a `CGImage` per frame across the Swift boundary —
+  one shared buffer with a flip, not an allocation per frame, with `SpriteView`
+  over an `SKScene` texture as the fallback. On the handset it is whole frames
+  over SPI; the stack is rectangles and a few strings, which is the cheap case,
+  but a physics model that runs at 8 fps is worse than no physics at all. Measure
+  before the constants are tuned, on the handset first, because it is the floor.
 - **What the link check did not prove.** It proved the toolchain: Swift +
   SwiftUI + a Go c-archive produce one arm64 watchOS executable. It says nothing
   about the Go runtime starting from a Swift `main` on a real watch, the
