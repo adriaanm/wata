@@ -12,10 +12,11 @@ sending them from a held talk button. Written in Sgola, compiled to Go,
 linked into a watchOS arm64 binary. No Swift, no storyboard, no Xcode
 project.
 
-Its architecture is **wata-ios's**, and that is not a family resemblance:
-fifteen of its Scala files are byte-identical to wata-ios's. What differs
-is the entry point, the input, the LAYOUT (the stage is this panel's, not
-the handset's — below), and three surfaces the watch does not have.
+Its architecture is **wata-ios's**, and that started as more than a family
+resemblance: most of its Scala files were byte-identical to wata-ios's. What
+differs is the entry point, the input, the LAYOUT (the stage is this panel's,
+not the handset's — below), the CONTACT SCREEN (plan 0070's rolodex, which
+this client got first), and three surfaces the watch does not have.
 
 ## Why Go reaches watchOS at all
 
@@ -92,11 +93,13 @@ only say "down was pressed" cannot express a flick; the units are cards, and
 horizontal axis is **reserved and unused** — plumbed so the integrator runs
 per axis, with no gesture spent on it.
 
-The integrator itself is plan 0071's step 2 and does not exist yet, so
-`Intents.steps` (intents.scala) rounds a magnitude to whole rows and the
-pump repeats the arrow that many times — the felt behaviour of a crown
-detent is unchanged. The magnitude is **logged, not discarded**:
-`input: navigate axis=v amount=3.00 steps=3`.
+The magnitude reaches `wataui`'s motion integrator as an IMPULSE on the
+rolodex — `Motion.impulse`, and the physics decides where that lands (below).
+Two quick detents are twice the shove and coast twice as far with no
+acceleration curve anywhere in this shell. Inside a CONVERSATION the screen
+is still a grid list of message rows, so there the magnitude is rounded to
+whole rows and the arrow repeated: `Intents.steps` is what does that, and it
+is the only thing it still does.
 
 The seam passes scalars, so `NextIntent` pops a record and answers its
 KIND, and `IntentAxis` / `IntentAmount` / `IntentCode` read the rest of the
@@ -233,10 +236,88 @@ worth knowing before touching it:
   advance on watchOS 26 is 0.616em and `TypeRoles.ADVANCE_EM` is 0.64, a
   margin on top of it.
 
-The bodies are still wata-fb's grid-shaped screens; they read the grid
+The remaining grid-shaped bodies are wata-fb's screens; they read the grid
 through `Display`/`Font`, which on this client answer from the metrics
-rather than from constants (`display.scala`, the watch's own copy). Plan
-0070's rolodex is what replaces the screens themselves.
+rather than from constants (`display.scala`, the watch's own copy). The
+CONTACT screen is no longer one of them — see the rolodex below.
+
+## The rolodex (`rolodex.scala`)
+
+Plan 0070's contact screen, and the reason this client exists first. At rest
+the panel is ONE CONTACT, full bleed, in that person's colour: their name as
+large as the panel allows (`TypeRole.DISPLAY`), one line of state
+(`CAPTION`), and the unheard count in a band across the top when there is
+one. Navigating shrinks the card to reveal a vertical stack — five rows, the
+centre one under a fixed band — and 450 ms after the last input it grows back
+over whoever is centred.
+
+**One interpolation does the whole thing**, which is why there is no "closed"
+layout and "open" layout to keep in agreement. Card `i`, at scroll position
+`p` and openness `o`:
+
+```
+full-bleed stacking:  y = (i - p) * H            h = H
+the open stack:       y = centreY + (i-p)*rowH   h = rowH - GAP
+what is drawn:        the two, lerped by o
+```
+
+At `o = 0` that is one card filling the panel with its neighbours exactly one
+panel away — off screen, and already correctly placed the instant a flick
+starts. At `o = 1` it is five rows with a 2px gutter. Nothing special-cases
+"the centre card": it is simply the one whose `i - p` is small. Cards outside
+the panel are culled, so at rest the tree is a single card and the differ has
+nothing to say frame after frame.
+
+Three details are decisions rather than arithmetic:
+
+- **The unheard count and the unheard bar are ONE element.** A yellow band
+  across the top of the card, tall enough to hold "3 unheard" at full bleed
+  and degrading continuously into a yellow rule along the top of a stack row.
+  Two elements that had to agree about when to appear is how a design drifts.
+- **Every card's ink is BLACK** (`Palette.INK`), because that is the
+  palette's constraint (wataclient's `palette.scala`) rather than something
+  this body decides. A hue that needed white text would put a second rule in
+  every body.
+- **The connectivity element shows only when the link is NOT healthy**
+  (`NetStatus.isHealthy`), and then on a dark chip. Plan 0070 says the
+  resting screen is the contact and "nothing else"; an indicator that is
+  always green is not information, and green-on-yellow over the unheard band
+  is unreadable. What went with it are the "WATA" title and the footer legend
+  spelling out four key bindings — a wrist has no keys to spell.
+
+What the rolodex replaced is only the LIST. The states this client actually
+has are all still there and are still their own screens: the enrolment QR,
+the boot screen, the connection line, the empty roster ("No contacts" is not
+a card), the recording bar, and the send/play status flash.
+
+**Holding the talk button talks to the centre card at any zoom**, and that
+falls out rather than being a case: `Pump.stepMotion` writes
+`Motion.centre` into the applet's `selected` every frame, and
+`WataLogic.pttPress` reads `selected` exactly as it always did, never asking
+how the selection got there. It is what `just watch-e2e`'s send leg proves.
+
+`Rolodex.body` takes plain `RoloCard` values rather than a snapshot, so the
+oracle can hand it three contacts with hand-picked hues and read the result
+back as pixels; `Rolodex.cards` is the one function that reads the snapshot.
+
+## The frame clock
+
+Motion means a frame can differ from the last one because of TIME alone
+(plan 0071), so the pump needs a "keep painting" signal — and, just as much,
+has to stop. `Pump.frameMs` is three cadences:
+
+| when | wait |
+|---|---|
+| `Motion.live` — coasting, springing, or the stack opening/closing | 16 ms |
+| something else on a clock: the recording meter, a status flash, playback | 33 ms |
+| a still picture (the rolodex at rest is one) | 50 ms |
+
+The idle figure is a POLL interval, not a paint interval — nothing repaints
+unless the tree changed — and it is 50 ms rather than a second because it
+bounds how long a crown turn can wait to be noticed. `Motion.live` can only
+go false because the integrator snaps to rest exactly; a model that was
+forever a hair off a detent would hold the pump at 60 fps redrawing the same
+frame.
 
 ## Gates
 
@@ -246,6 +327,7 @@ rather than from constants (`display.scala`, the watch's own copy). Plan
 | `just watch-hello` | `watchshell` + `iosui` drive UIKit on watchOS, through the product packages |
 | `just watch-interptest` | wata-ios's whole stage suite passes on watchOS, plus the rolodex vocabulary drawn and read back as pixels |
 | `just watch-e2e` | the whole client: login, sync, an arrival, and a SEND the server confirms |
+| `just watch-rolodex` | not a gate — timed screenshots of the rolodex at rest, mid-scroll and settled |
 | `just watch-device` | build, sign, install on real hardware |
 
 None is in `ci` — they need Xcode and a watchOS simulator runtime
@@ -254,7 +336,21 @@ None is in `ci` — they need Xcode and a watchOS simulator runtime
 `watch-e2e` ends by having bob snapshot the family room server-side and
 find both messages, because `send: complete` is only the app's word for it.
 
-`watch-interptest`'s `rolodexVocabularyDraws` is where plan 0070's element
+`watch-interptest` holds plan 0070 in three places. `rolodexAtRestIsOneCard`
+and `rolodexMidScrollIsAStack` are the ROLODEX's oracle: the same body, the
+same three cards, two different `Motion` values, read back as rendered
+pixels — one card reaching the panel's corner with its name centred and its
+neighbours nowhere on the panel, against five rounded rows with black gutters
+between them, the right colour in each, and names against their leading
+edges. Both were seen to fail with the motion inverted (the rest case with the
+stack open loses all four of its colour probes; the stack case at rest reports
+one card where it wants three) before either was believed. The pure arm holds
+the INTEGRATOR — one detent lands exactly on card 1 and comes to a full stop,
+a flick coasts further, the end gives and bounces back to the last card, the
+reserved axis does not move, and a five-second hitch handed over in one step
+does not blow the springs up — and the PALETTE's determinism.
+
+`rolodexVocabularyDraws` is where plan 0070's element
 set stops being a declaration: it mounts a rounded card, a `display`-role
 name centred in it, a caption under that and a translucent black band over
 its top, then reads the rendered pixels back. Each probe discriminates one

@@ -47,6 +47,8 @@ object InterpTest:
     withPool(() => insertOrderIsPaintOrder())
     withPool(() => offscreenRenderProbes())
     withPool(() => rolodexVocabularyDraws())
+    withPool(() => rolodexAtRestIsOneCard())
+    withPool(() => rolodexMidScrollIsAStack())
     val n = failsC.get()
     if n == 0 then println("interptest: PASS")
     else println("interptest: FAIL (" + n + ")")
@@ -385,9 +387,130 @@ object InterpTest:
     check(TypeRoles.labelPoints(TypeRole.DISPLAY, m, 24.0) <= 24.0,
       "roles: a role must never overflow its box")
 
+  // ---- the rolodex itself, drawn (plan 0070) --------------------------------
+
+  /** any near-BLACK pixel in this semantic rectangle. The rolodex's ink is
+   *  black on a saturated card (`Palette.INK` — every hue in the palette
+   *  carries black text, which is the palette's constraint), so `anyInk`'s
+   *  near-white test says nothing here. Read inside a card's own box, where the
+   *  only thing that can be black is a glyph. */
+  def anyBlackInk(root: go.uikit.UIView, x0: Int, y0: Int, x1: Int, y1: Int,
+      scale: Int): Boolean =
+    var found = false
+    var y = y0
+    while y < y1 && !found do
+      var x = x0
+      while x < x1 && !found do
+        val c = probe(root, x, y, scale)
+        if ((c >> 16) & 0xff) < 70 && ((c >> 8) & 0xff) < 70 && (c & 0xff) < 70 then found = true
+        x += 1
+      y += 1
+    found
+
+  /** three contacts with hand-picked hues, so the pixel assertions below say
+   *  "this card" rather than "some card": blue, red, green in list order. */
+  def roloCards(): List[RoloCard] =
+    RoloCard("@ada:h", "Ada", 0x001f, "just now", 2, 0) ::
+      RoloCard("@bob:h", "Bob", 0xf800, "5m ago", 0, 0) ::
+      RoloCard("@cy:h", "Cy", 0x07e0, "no messages", 0, 0) :: Nil
+
+  /** the semantic panel these two cases lay out in — a portrait-ish box, stated
+   *  here rather than read from `Display`, so the geometry the assertions
+   *  compute against is the geometry the body was handed. */
+  val ROLO_W = 156
+  val ROLO_H = 120
+
+  def roloTree(m: Motion): View =
+    Rolodex.body(roloCards(), 3, m, ROLO_W, ROLO_H)
+
+  /** AT REST: one contact, FULL BLEED, in that person's colour — plan 0070's
+   *  first sentence, read back as pixels.
+   *
+   *  Each probe discriminates one claim: the card reaches the panel's corner
+   *  (full bleed has no rounded corner and no margin — a stack row would put
+   *  background there), the unheard band is across its top, the name is
+   *  CENTRED (ink in the middle, none against the leading edge), and the
+   *  neighbours are not on the panel at all — which is what "the list still
+   *  exists, but only when asked for" means as a frame. */
+  def rolodexAtRestIsOneCard(): Unit =
+    val scale = 4
+    val root = IosStage.create(Metrics.uniform(scale), false)
+    val v = roloTree(Motion.initial())
+    IosStage.setTree(v)
+    v match
+      case g: VGroup =>
+        check(Views.len(g.children) == 1,
+          "rolodex rest: " + Views.len(g.children) + " cards on the panel, want 1")
+      case _ => fail("rolodex rest: the body should be a group of cards")
+    // Ada's blue, well below the name and the state line
+    probeIs(root, 10, 110, scale, 0, 0, 255, "rolodex rest: the card is full bleed")
+    // ... including the panel's very corner: a full-bleed card has no radius
+    // and no side margin, so a stack row's geometry would read background here
+    probeIs(root, 1, 110, scale, 0, 0, 255, "rolodex rest: the card reaches the edge")
+    // the unheard band across the top (2 unheard), in yellow
+    probeIs(root, 10, 10, scale, 255, 255, 0, "rolodex rest: the unheard band")
+    // the name is CENTRED in the card: black ink in the middle of its box...
+    check(anyBlackInk(root, 60, 48, 96, 72, scale),
+      "rolodex rest: the display name drew nothing in the centre of the card")
+    // ... and none against the leading edge, which is what centring MEANS
+    check(!anyBlackInk(root, 4, 48, 20, 72, scale),
+      "rolodex rest: a centred name must leave the card's leading edge empty")
+    // the state line under it
+    check(anyBlackInk(root, 40, 82, 116, 94, scale),
+      "rolodex rest: the state line drew nothing")
+
+  /** MID-SCROLL: the stack open, the centre card under a fixed band and a
+   *  neighbour above and below — the same three cards, the same body, a
+   *  different `Motion`.
+   *
+   *  The geometry is recomputed here by hand from the panel rather than read
+   *  out of `Rolodex`: rows are `H/5 = 24` tall with a 2px gutter, the centre
+   *  band starts at `(H - 24)/2 = 48`, and the side margin is `W/26 = 6`. A
+   *  layout change that means to move things has to say so here. */
+  def rolodexMidScrollIsAStack(): Unit =
+    val scale = 4
+    val root = IosStage.create(Metrics.uniform(scale), false)
+    // the second card centred, the stack fully open, an input just now
+    val m = Motion(MotionAxis(1.0, 0.0, 0.0), MotionAxis(0.0, 0.0, 0.0), 0.0, 1.0)
+    val v = roloTree(m)
+    IosStage.setTree(v)
+    v match
+      case g: VGroup =>
+        check(Views.len(g.children) == 3,
+          "rolodex stack: " + Views.len(g.children) + " cards on the panel, want 3")
+      case _ => fail("rolodex stack: the body should be a group of cards")
+    // the centre band holds Bob (red), rows 48..70
+    probeIs(root, 135, 60, scale, 255, 0, 0, "rolodex stack: the centre card")
+    // Ada (blue) above it, rows 24..46
+    probeIs(root, 135, 35, scale, 0, 0, 255, "rolodex stack: the neighbour above")
+    // Cy (green) below it, rows 72..94
+    probeIs(root, 135, 82, scale, 0, 255, 0, "rolodex stack: the neighbour below")
+    // the gutter between two rows is the panel, not a card
+    probeIs(root, 80, 47, scale, 0, 0, 0, "rolodex stack: the gutter between rows")
+    // the rows are CARDS: the arc's centre is (14,56) and its radius is 8
+    // semantic px, so (7,49) — read at its pixel CENTRE, 7.8 away — is outside
+    // the card where a square-cornered row would read red
+    probeIs(root, 7, 49, scale, 0, 0, 0, "rolodex stack: the centre card's corner is rounded")
+    // ... and the same left edge below the arc is still card, so the radius
+    // rounded a corner rather than eating the side
+    probeIs(root, 8, 60, scale, 255, 0, 0, "rolodex stack: the left edge below the arc")
+    // the stack's names are LEADING-aligned — a roster is read down its left
+    // edge, not down its middle
+    check(anyBlackInk(root, 16, 52, 44, 68, scale),
+      "rolodex stack: the centre card's name drew nothing at its leading edge")
+    check(!anyBlackInk(root, 120, 52, 146, 68, scale),
+      "rolodex stack: a leading-aligned name must leave the trailing edge empty")
+
   // ---- the pure arm: applyAll hand cases + the tables -----------------------
 
   def pure(): Unit =
+    motionSettlesOnADetent()
+    motionFlickCoastsFurther()
+    motionEndSpringHolds()
+    motionHorizontalIsPinned()
+    motionSurvivesALongFrame()
+    motionAxesMatchTheIntents()
+    paletteIsDeterministic()
     applyAllHandExpectation()
     psetKeepsTheChildKey()
     applyAllToleratesBadPaths()
@@ -400,6 +523,133 @@ object InterpTest:
     // The watch has no probed equivalent yet — WATCH-AUDIO's question —
     // and the rule is pure list logic that the phone's suite already
     // gates, so copying it would duplicate a gate, not extend one.)
+
+  // ---- the motion integrator (wataui/motion.scala, plan 0070) ---------------
+
+  /** run the model at a fixed frame rate for `secs`, with no further input. */
+  def coast(m0: Motion, secs: Double, count: Int): Motion =
+    var m = m0
+    val dt = 1.0 / 60.0
+    var t = 0.0
+    while t < secs do
+      m = Motion.step(m, dt, count)
+      t = t + dt
+    m
+
+  /** ONE CROWN DETENT IS ONE CARD, and it comes to a full stop.
+   *
+   *  This is the whole model in one assertion: an impulse of one item adds 7
+   *  items/s, friction takes it down through the snap threshold having coasted
+   *  about half a card, the critically damped detent spring carries it the rest
+   *  of the way, and the rest snap parks it EXACTLY on the detent — which is
+   *  what lets the frame clock go quiet. A model that jittered forever would
+   *  pass "near 1.0" and fail `live`. */
+  def motionSettlesOnADetent(): Unit =
+    val m = coast(Motion.impulse(Motion.initial(), MotionAxes.V, 1.0), 2.0, 8)
+    check(Motion.offset(m) == 1.0,
+      "motion: one detent should land exactly on card 1, landed on " + Intents.fmt(Motion.offset(m)))
+    check(!Motion.live(m), "motion: the model must come to rest, so the pump can stop painting")
+    check(Motion.openness(m) == 0.0,
+      "motion: the stack must close " + Intents.fmt(Motion.SETTLE_S) + "s after the last input")
+    check(Motion.centre(m, 8) == 1, "motion: the centre detent should be card 1")
+
+  /** TWO QUICK PRESSES ARE TWICE THE SHOVE — acceleration falls out of adding
+   *  velocity, so a flick coasts several cards where a nudge coasts one, with
+   *  no curve anywhere in the shell. */
+  def motionFlickCoastsFurther(): Unit =
+    val nudge = coast(Motion.impulse(Motion.initial(), MotionAxes.V, 1.0), 2.0, 20)
+    val flick = coast(Motion.impulse(Motion.initial(), MotionAxes.V, 3.0), 2.0, 20)
+    check(Motion.offset(flick) > Motion.offset(nudge) + 1.0,
+      "motion: a flick must travel further than a nudge (" +
+        Intents.fmt(Motion.offset(flick)) + " vs " + Intents.fmt(Motion.offset(nudge)) + ")")
+    check(Motion.offset(flick) == Motion.nearest(Motion.offset(flick)),
+      "motion: a flick must still land on a detent, landed on " + Intents.fmt(Motion.offset(flick)))
+
+  /** THE END GIVES AND BOUNCES BACK. A shove far past the last card overshoots
+   *  — that overshoot is how a kid learns the list has an end — and then comes
+   *  back to the last card and stops there, rather than being clamped (which
+   *  would feel like hitting a wall that was always there). */
+  def motionEndSpringHolds(): Unit =
+    var m = Motion.impulse(Motion.initial(), MotionAxes.V, 20.0)
+    var maxPos = 0.0
+    var t = 0.0
+    val dt = 1.0 / 60.0
+    while t < 2.0 do
+      m = Motion.step(m, dt, 3)
+      if Motion.offset(m) > maxPos then maxPos = Motion.offset(m)
+      t = t + dt
+    check(maxPos > 2.0, "motion: the end must GIVE — nothing overshot card 2")
+    check(maxPos < 4.0, "motion: the end spring let the list run away to " + Intents.fmt(maxPos))
+    check(Motion.offset(m) == 2.0,
+      "motion: the list must come back to its last card, rests at " + Intents.fmt(Motion.offset(m)))
+
+  /** THE HORIZONTAL AXIS IS RESERVED AND UNUSED. It is integrated by the same
+   *  code against a single item, so even a shove leaves it where it started —
+   *  pinned by construction, not by a branch that would have to be found and
+   *  removed the day something does move sideways. */
+  def motionHorizontalIsPinned(): Unit =
+    val m = coast(Motion.impulse(Motion.initial(), MotionAxes.H, 5.0), 2.0, 8)
+    check(m.h.pos == 0.0,
+      "motion: the reserved axis moved to " + Intents.fmt(m.h.pos))
+    check(Motion.offset(m) == 0.0, "motion: a horizontal shove moved the vertical list")
+
+  /** A LONG FRAME MUST NOT EXPLODE. The springs are explicit Euler at
+   *  stiffness 340, which is unstable at a whole frame — the accumulator and
+   *  the sub-step are what make a stalled frame a slow frame rather than a
+   *  detonation, and `MAX_DT` caps what one step will ever simulate. */
+  def motionSurvivesALongFrame(): Unit =
+    var m = Motion.impulse(Motion.initial(), MotionAxes.V, 2.0)
+    m = Motion.step(m, 5.0, 8) // a five-second hitch, handed over in one go
+    check(Motion.offset(m) > -1.0 && Motion.offset(m) < 8.0,
+      "motion: a long frame blew the integrator to " + Intents.fmt(Motion.offset(m)))
+    m = coast(m, 2.0, 8)
+    check(Motion.offset(m) == Motion.nearest(Motion.offset(m)),
+      "motion: after a long frame the model must still settle on a detent")
+
+  /** the shell's axis constants and the model's are the same two numbers. They
+   *  are declared in two modules — `Intents` is the seam with watchshell's
+   *  input.go, `MotionAxes` is the model's — and a silent disagreement would
+   *  send every crown turn into the reserved axis. */
+  def motionAxesMatchTheIntents(): Unit =
+    check(Intents.AXIS_V == MotionAxes.V && Intents.AXIS_H == MotionAxes.H,
+      "motion: the intent axes and the model's axes have drifted apart")
+
+  // ---- the palette (wataclient/palette.scala, plan 0070) --------------------
+
+  /** THE SAME PERSON IS THE SAME COLOUR EVERYWHERE. The derivation is the
+   *  fallback until the profile field ships, and its whole job is that a
+   *  handset and a wrist agree without talking to each other — so it must be a
+   *  pure function of the id, the eight hues must be eight, and the family
+   *  thread must stay out of the rotation. */
+  def paletteIsDeterministic(): Unit =
+    check(Palette.forUser("@ada:example.org") == Palette.forUser("@ada:example.org"),
+      "palette: the derivation is not a function of the id")
+    check(Palette.forUser("@ada:h") != Palette.forUser("@bob:h"),
+      "palette: two ids that should differ do not (a real collision is fine; " +
+        "these two are the fixture)")
+    var i = 0
+    var distinct = true
+    while i < Palette.COUNT do
+      var j = i + 1
+      while j < Palette.COUNT do
+        if Palette.hue(i) == Palette.hue(j) then distinct = false
+        j += 1
+      i += 1
+    check(distinct, "palette: two hues in the palette are the same colour")
+    check(Palette.hue(Palette.COUNT) == Palette.hue(0), "palette: the palette must wrap")
+    check(Palette.hue(-1) == Palette.hue(Palette.COUNT - 1),
+      "palette: a negative index must wrap the same way")
+    var famClash = false
+    i = 0
+    while i < Palette.COUNT do
+      if Palette.hue(i) == Palette.FAMILY then famClash = true
+      i += 1
+    check(!famClash, "palette: a person's hue collides with the family thread's cyan")
+    check(Palette.forConversation(FamilyConv(), false, "", "!fam:h") == Palette.FAMILY,
+      "palette: the family thread must keep cyan")
+    check(Palette.forConversation(DmConv(), true, "@ada:h", "!dm:h") ==
+      Palette.forUser("@ada:h"),
+      "palette: a DM must take its CONTACT's colour, not its room's")
 
   def applyAllHandExpectation(): Unit =
     val got = Patches.applyAll(script(), fixture())

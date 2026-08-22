@@ -128,12 +128,41 @@ case class PumpSt(
   quit: Boolean,
   unsent: List[String],
   undelivered: List[String],
-  marks: NotifyState
+  marks: NotifyState,
+  // WHERE THE ROLODEX IS, as a simulated quantity rather than an index
+  // (wataui's Motion, plan 0070's physics): impulses come in from Navigate,
+  // `frame` integrates it against real elapsed time, and the centre detent is
+  // what `wata.selected` follows. It is carried here rather than inside
+  // WataState because it is the SHELL's clock talking to the domain, and the
+  // applet's own state is what a body reads.
+  motion: Motion
 )
 
 object Pump:
 
+  /** THE FRAME CLOCK.
+   *
+   *  Plan 0071's consequence of putting motion above the boundary: a frame can
+   *  now differ from the last one because of TIME alone, so the pump needs a
+   *  "there is motion, keep painting" signal — and, just as importantly, has to
+   *  stop when there is not. Three cadences, and each has a reason:
+   *
+   *  - `MOTION_FRAME_MS` while `Motion.live` — the panel's own rate. A flick
+   *    has to hold it for as long as it coasts; physics at 8 fps is worse than
+   *    no physics.
+   *  - `FRAME_MS` while something else is animating on a clock: the recording
+   *    meter and its elapsed time, a status flash ageing out, a message
+   *    playing. These moved at 30 fps before there was any motion and still do.
+   *  - `IDLE_FRAME_MS` when the screen is a still picture. The rolodex at rest
+   *    IS a still picture — one card, no cursor, nothing blinking — and a pump
+   *    that spun at 60 fps over it would burn a wrist's battery to redraw the
+   *    same frame. It is a POLL interval, not a paint interval: nothing repaints
+   *    unless the tree changed, and it bounds how long a crown turn can wait to
+   *    be noticed, which is why it is 50 ms and not a second.
+   */
   val FRAME_MS: Long = 33L
+  val MOTION_FRAME_MS: Long = 16L
+  val IDLE_FRAME_MS: Long = 50L
   val QUIT_ARM_S: scala.Double = 2.0
 
   /** the config the ready trampoline picks up (the callback literal captures
@@ -160,7 +189,7 @@ object Pump:
 
   def initial(clock: Clock): PumpSt =
     PumpSt(WataLogic.initial(), None, 0.0, clock.nowUnixMillis(), false, Nil, Nil,
-      Notify.initial())
+      Notify.initial(), Motion.initial())
 
   /** THIS device's metrics — the panel's own bounds, its scale and its
    *  system bands, asked of the surface at launch (plan 0071 step 2).
@@ -358,7 +387,7 @@ object Pump:
       // re-arms: an iOS app does not terminate itself.
       while !st.quit && !isRejected(h.connection()) && !restartC.get() do
         pollUrl()
-        val took = h.waitEvent(FRAME_MS)
+        val took = h.waitEvent(frameMs(st))
         st = frame(h, clock, evts, st)
         if !readyLate && NetStatus.everLive() then
           readyLate = true
@@ -366,6 +395,17 @@ object Pump:
       audioCmds.send(AcQuit())
     }
     if isRejected(h.connection()) then println("rejected")
+
+  /** how long this frame may wait for something to happen — the frame clock's
+   *  three cadences (above). */
+  def frameMs(st: PumpSt): Long =
+    if Motion.live(st.motion) then MOTION_FRAME_MS
+    else if animating(st.wata) then FRAME_MS
+    else IDLE_FRAME_MS
+
+  /** is anything on screen moving on a CLOCK rather than on an event? */
+  def animating(s: WataState): Boolean =
+    s.pttHeld || s.playing || s.statusTimer > 0.0 || s.backHeld || s.okHeld
 
   def isRejected(c: ConnectionState): Boolean = c match
     case _: ConnAuthRejected => true
@@ -378,7 +418,7 @@ object Pump:
   def frame(h: Handle, clock: Clock, evts: sgo.Chan[AudioEvt], st0: PumpSt): PumpSt =
     val nowMs = clock.nowUnixMillis()
     val dt = clampDt(nowMs - st0.lastMs).toDouble / 1000.0
-    var st = PumpSt(st0.wata, st0.last, st0.quitArm, nowMs, st0.quit, st0.unsent, st0.undelivered, st0.marks)
+    var st = PumpSt(st0.wata, st0.last, st0.quitArm, nowMs, st0.quit, st0.unsent, st0.undelivered, st0.marks, st0.motion)
     st = drainUiEvents(h, st)
     val snap = h.snapshot()
     val conn = h.connection()
@@ -392,18 +432,48 @@ object Pump:
     st = applyIntents(st, ctx)
     st = drainAudio(st, ctx)
     st = notifyStep(h, st, snap)
+    st = stepMotion(st, dt, ctx)
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
-      st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+      st.lastMs, st.quit, st.unsent, st.undelivered, st.marks, st.motion)
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
       st.unsent, st.undelivered,
       NetStatus.everLive(), FbCaps.transportUnavailable(),
       WataLogic.enrolSnap(ctx, NetStatus.everLive()), Enrol.provisioning(),
-      NetStatus.clockOk(), nowMs)
+      NetStatus.clockOk(), nowMs, st.motion)
     st.last match
       case old: Some[View] => patchTo(old.value, v)
       case None            => IosStage.submitTree(v)
     noteScreen(screenName(st.wata))
-    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    PumpSt(st.wata, Some(v), st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks, st.motion)
+
+  /** integrate the rolodex's motion, then hand the applet the item the centre
+   *  band is over.
+   *
+   *  This is the whole join between plan 0070's physics and the client that
+   *  already existed. `selected` stays what it always was — the conversation a
+   *  press acts on — and the integrator is what MOVES it, so **holding the talk
+   *  button talks to the centre card at any zoom** falls out rather than being
+   *  a special case: `WataLogic.pttPress` reads `selected` and never asks how
+   *  the selection got there.
+   *
+   *  The integrator is only fed while the ROLODEX is on screen. A conversation
+   *  keeps today's grid list of messages (plan 0070's drawn thread is the next
+   *  step), and a message cursor that coasted and bounced would be motion
+   *  without a design behind it. */
+  def stepMotion(st: PumpSt, dt: scala.Double, ctx: FrameCtx): PumpSt =
+    val count = WataLogic.convCount(ctx.snap)
+    var m = Motion.step(st.motion, dt, count)
+    // The list changes under the cursor with no input at all — a peer leaving
+    // drops a conversation — so a position past the end is put back rather
+    // than left for the end spring to argue with a list that shrank.
+    if count > 0 && Motion.offset(m) > (count - 1).toDouble + 1.0 then
+      m = Motion.placeAt(m, count - 1)
+    val sel = Motion.centre(m, count)
+    var w = st.wata
+    if isContacts(w.view) && w.selected != sel then
+      w = WataLogic.withSel(w, sel, w.scrollOffset)
+    PumpSt(w, st.last, st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered,
+      st.marks, m)
 
   def patchTo(old: View, v: View): Unit =
     val ps = Diff.diff(old, v)
@@ -537,7 +607,7 @@ object Pump:
       // a PTT episode's own playback failing must not be reported as played.
       withWata(st, WataLogic.notifyPlayError(st.wata, pe.fetchFailed))
     case ob: EvOutbox =>
-      PumpSt(st.wata, st.last, st.quitArm, st.lastMs, st.quit, ob.unsent, ob.undelivered, st.marks)
+      PumpSt(st.wata, st.last, st.quitArm, st.lastMs, st.quit, ob.unsent, ob.undelivered, st.marks, st.motion)
     case _ => st // EvConn -> h.connection(), EvSnapshot -> h.snapshot()
 
   /** the audio thread's `AudioEvt` queue, ONCE per frame. The echo events
@@ -601,7 +671,7 @@ object Pump:
     val r = Notify.step(st0.marks, snap)
     val badge = Notify.totalUnplayed(snap)
     var st = PumpSt(st0.wata, st0.last, st0.quitArm, st0.lastMs, st0.quit,
-      st0.unsent, st0.undelivered, r.marks)
+      st0.unsent, st0.undelivered, r.marks, st0.motion)
     var cur = r.arrivals
     var going = true
     while going do
@@ -628,7 +698,7 @@ object Pump:
       "\" badge=" + badge
 
   def withWata(st: PumpSt, w: WataState): PumpSt =
-    PumpSt(w, st.last, st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    PumpSt(w, st.last, st.quitArm, st.lastMs, st.quit, st.unsent, st.undelivered, st.marks, st.motion)
 
   // ---- input ----------------------------------------------------------------
 
@@ -673,24 +743,44 @@ object Pump:
         println("input: " + Intents.name(kind))
       st0
 
-  /** one Navigate: log what was contributed, then move that many rows.
-   *  Horizontal is RESERVED (plan 0070/0071) — reported, never acted on, and
-   *  logged when something starts producing it so the silence is not
-   *  mistaken for a dropped gesture. */
+  /** one Navigate: an IMPULSE into the motion model on the rolodex, and whole
+   *  rows in a conversation.
+   *
+   *  On the contact screen the magnitude is what it says it is — items of
+   *  shove — and the physics above the boundary decides where that lands
+   *  (`wataui`'s `Motion`). Two quick crown detents are twice the impulse and
+   *  coast twice as far with no acceleration curve anywhere in the shell; a
+   *  swipe's constant magnitude is a flick because it is bigger, not because
+   *  a branch here says so.
+   *
+   *  A conversation is still a grid list of message rows, so there the
+   *  magnitude is rounded to rows and the arrow is repeated — which is what
+   *  `Intents.steps` is still for, and the only thing it is still for.
+   *
+   *  BOTH AXES reach the model; only the vertical one has a list under it.
+   *  Horizontal is RESERVED — nothing produces it and it is integrated against
+   *  a single item, so it is pinned at zero by construction rather than by a
+   *  branch that would have to be removed later. */
   def navigate(st0: PumpSt, axis: scala.Int, amount: scala.Double, ctx: FrameCtx): PumpSt =
-    val n = Intents.steps(amount)
-    println("input: navigate axis=" + Intents.axisName(axis) + " amount=" +
-      Intents.fmt(amount) + " steps=" + n)
-    if axis != Intents.AXIS_V then st0
+    if isContacts(st0.wata.view) then
+      println("input: navigate axis=" + Intents.axisName(axis) + " amount=" +
+        Intents.fmt(amount) + " impulse")
+      PumpSt(st0.wata, st0.last, st0.quitArm, st0.lastMs, st0.quit, st0.unsent,
+        st0.undelivered, st0.marks, Motion.impulse(st0.motion, axis, amount))
     else
-      val key = if n < 0 then KUp() else KDown()
-      val count = if n < 0 then -n else n
-      var st = st0
-      var i = 0
-      while i < count do
-        st = tap(st, key, ctx)
-        i += 1
-      st
+      val n = Intents.steps(amount)
+      println("input: navigate axis=" + Intents.axisName(axis) + " amount=" +
+        Intents.fmt(amount) + " steps=" + n)
+      if axis != Intents.AXIS_V then st0
+      else
+        val key = if n < 0 then KUp() else KDown()
+        val count = if n < 0 then -n else n
+        var st = st0
+        var i = 0
+        while i < count do
+          st = tap(st, key, ctx)
+          i += 1
+        st
 
   /** a press and its release — a tap, a click, a swipe: the gestures with no
    *  meaningful edges of their own. Only talk has real ones. */
@@ -710,7 +800,7 @@ object Pump:
     if edge && arm > 0.0 then quit = true
     if edge then arm = QUIT_ARM_S
     PumpSt(WataLogic.handleInput(st.wata, ev.key, ev.state, ctx), st.last, arm, st.lastMs, quit,
-      st.unsent, st.undelivered, st.marks)
+      st.unsent, st.undelivered, st.marks, st.motion)
 
   def isQuitEdge(s: WataState, ev: KeyEvent): Boolean =
     Shell.isPressed(ev.state) && Shell.isBackKey(ev.key) && isContacts(s.view)

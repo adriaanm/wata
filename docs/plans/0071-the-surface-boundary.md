@@ -1,9 +1,10 @@
 # 0071 — the surface boundary: one domain UI, replaceable shells
 
-status: accepted (step 1 landed 2026-08-22; step 2's METRICS half landed
-2026-08-22 — the watch's stage, grid and type roles now come from the panel
-it is on. The motion integrator is step 2's remainder and is still open,
-so `Intents.steps` still rounds a magnitude to whole rows.)
+status: accepted (steps 1 and 2 landed 2026-08-22 — the watch reports
+intents, its stage/grid/type come from the panel it is on, and the MOTION
+INTEGRATOR is in `wataui` and drives the watch's rolodex. `Intents.steps`
+survives only for the conversation's grid list of message rows. Steps 3-5 —
+the Apple renderer, the Swift shell, the handset's baked strikes — are open.)
 
 ## Why this exists
 
@@ -165,7 +166,16 @@ Each step is useful alone, and the order is chosen so the risky part comes last.
    is type) and the integrator is a property of the DOMAIN (where is the
    list, how fast is it moving). Doing the metrics alone is a complete
    change — the watch stopped being a cropped handset — and the integrator
-   can land against any layout. One correction to what this section
+   can land against any layout. **The integrator landed 2026-08-22** as
+   `wataui/motion.scala`, above every platform: `Motion.impulse` from a
+   `Navigate`, `Motion.step` from the shell's frame clock, and `centre` /
+   `offset` / `openness` / `live` as what a body and a pump read. Two things
+   it taught. Explicit Euler at these stiffnesses needs a FIXED SUB-STEP
+   accumulated against real time — a spring handed a whole frame diverges,
+   and a dropped frame would turn a bounce into an explosion. And the model
+   has to come to an EXACT stop (snap to the detent, zero the velocity), or
+   `live` never goes false and the "keep painting" signal this plan asks for
+   becomes "paint forever". One correction to what this section
    predicted: type roles cannot be a property of GRID text, because a
    `VText` is a run of character cells and has nowhere to carry one. The
    watch resolves a role from the grid ROW instead (header / list / footer,

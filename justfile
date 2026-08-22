@@ -529,6 +529,12 @@ watch-interptest *FLAGS:
 watch-device *FLAGS:
     tools/watch-device.py {{FLAGS}}
 
+# plan 0070: photograph the rolodex on the watch simulator — at rest, mid-scroll
+# with the stack open, and settled on another contact. A LOOKING tool, not a
+# gate (watch-interptest's rolodex cases are the oracle); not in ci.
+watch-rolodex *FLAGS:
+    tools/watch-rolodex.py {{FLAGS}}
+
 # plan 0069's stage-2 gate: wata-watch on the watch simulator against a live
 # wata-server — login, sync, and bob's voice message ARRIVING mid-session
 # (ios-smoke's twin). The whole client, not a probe.

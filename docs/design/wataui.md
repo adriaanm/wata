@@ -27,6 +27,8 @@ Seven constructors, `view.scala`:
 | `VFill(x, y, w, h, radius, color, alpha)` | a filled rectangle with a corner radius and an alpha |
 | `VGroup(children: List[Keyed])` | an ordered composite |
 
+(and `motion.scala`, which is not a view at all — see *Motion* below.)
+
 plus `Keyed(key, view)`, a child and its identity within its group.
 
 The vocabulary is deliberately the **painter's**, not a layout engine's.
@@ -98,6 +100,46 @@ screen cannot be expressed without one.
 color, so a framebuffer arm is a row copy. The one image wata draws is
 the enrolment QR block, whose body scales the module bitmap into that
 buffer.
+
+## Motion
+
+`motion.scala` is plan 0070's physical scrolling, and it lives here for the
+same reason the algebra does: every backend has to be able to link it. A
+crown, an arrow key and a thumb differ in what they CONTRIBUTE, not in how
+the thing behaves afterwards, so the model runs once above every platform
+and a shell owes it exactly two things — an impulse and a frame clock.
+
+`Motion` is two `MotionAxis` records (position in ITEMS, velocity in items
+per second, and the sub-step remainder), how long since the last input, and
+how open the stack is. `impulse` adds velocity; `step(m, dt, count)`
+integrates; `centre`, `offset`, `openness` and `live` are what a body and a
+pump read.
+
+Three things about it are load-bearing:
+
+- **Fixed sub-steps against accumulated real time.** The springs are
+  explicit Euler at stiffness 340, which goes unstable if handed a whole
+  frame — a dropped frame would turn a bounce into an explosion. Elapsed
+  time is accumulated and spent in 1/240 s steps with the remainder carried
+  in the state, so the frame rate changes how smooth the motion looks and
+  never what it does. `MAX_DT` caps what one call will simulate, so a launch
+  hitch is not paid back as a burst of motion nobody asked for.
+- **It comes to a full stop.** Below `REST_VEL` and within `REST_POS` of a
+  detent the position SNAPS and the velocity is zeroed, which is what lets
+  `live` go false and the surface stop painting. A model that was forever
+  1e-9 off a detent would keep a pump redrawing identical frames.
+- **`SNAP_SPEED` is derived, not chosen.** Plan 0070 gives every other
+  constant and says only "below a threshold speed". Under friction an
+  impulse coasts `v0 * FRICTION_TAU * (1 - s/v0)` before the detent spring
+  captures it, and the spring pulls to the NEAREST detent — so a threshold
+  that leaves one detent short of half a card pulls it straight back where
+  it started. That is a hard floor at 3.43 for a 7-items/s detent; the first
+  value tried was 3.5, one detent coasted 0.49 cards, and the crown did
+  nothing at all.
+
+The horizontal axis is integrated by the same code against a count of one
+item, so it is pinned at zero by construction rather than by a branch that
+would have to be found and removed the day something moves sideways.
 
 ## The purity rule
 

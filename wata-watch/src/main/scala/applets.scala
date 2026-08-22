@@ -559,7 +559,7 @@ object WataLogic:
     FbPaint.draw(px, body(s, ctx.snap, ctx.net, ctx.connection, ctx.quitArmed,
       ctx.unsent, ctx.undelivered, everLive, FbCaps.transportUnavailable(),
       enrolSnap(ctx, everLive), Enrol.provisioning(), NetStatus.clockOk(),
-      ctx.client.clock.nowUnixMillis()))
+      ctx.client.clock.nowUnixMillis(), Motion.initial()))
 
   /** the screen, then the two things that sit OVER it: the send/play status
    *  flash and the recording bar. They are children after the screen because
@@ -568,11 +568,11 @@ object WataLogic:
   def body(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
       everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean,
-      clockOk: Boolean, nowMs: Long): View =
+      clockOk: Boolean, nowMs: Long, motion: Motion): View =
     val screen: View = s.view match
       case _: VContacts =>
         bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol,
-          prov, clockOk)
+          prov, clockOk, nowMs, motion)
       case _: VConversation => bodyConversation(s, snap, nowMs)
     var kids: List[Keyed] = Nil
     if s.pttHeld then kids = Keyed("rec", recordingView(s)) :: kids
@@ -602,77 +602,72 @@ object WataLogic:
   def bodyContacts(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
       everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean,
-      clockOk: Boolean): View =
+      clockOk: Boolean, nowMs: Long, motion: Motion): View =
     enrol match
       case e: Some[EnrolSnap] => Enrol.body(e.value)
       case None               =>
-        bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, prov, clockOk)
+        bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, prov,
+          clockOk, nowMs, motion)
 
+  /** four screens in one, and the fourth is now plan 0070's ROLODEX rather
+   *  than a scrolling list of 18-character rows.
+   *
+   *  What the rolodex replaces is only the LIST: the enrolment QR, the boot
+   *  screen and the connection line are the states this client actually has,
+   *  and a screen that lost them would be a regression however good it looks.
+   *  The empty roster keeps its own words too — "No contacts" is not a card.
+   *
+   *  What it DROPS on purpose is the model-forward chrome: the "WATA" title
+   *  and the footer legend spelling out four key bindings. A wrist has no keys
+   *  to spell and the panel is the contact. The connectivity element STAYS —
+   *  it is the only thing on this screen that answers "is this thing even
+   *  connected", and it is two glyphs in the corner. */
   def bodyLive(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean, prov: Boolean, clockOk: Boolean): View =
+      everLive: Boolean, unavail: Boolean, prov: Boolean, clockOk: Boolean,
+      nowMs: Long, motion: Motion): View =
     if !everLive then bodyBoot(net, c, quitArmed, unavail, prov, clockOk)
     else if !snap.hasSelfUser && convCount(snap) == 0 then
       VText(1, 2, connectingMsg(c), Color.midGray)
     else
       val count = convCount(snap)
-      // the footer is the key legend, except while Back is armed: the quit
-      // confirmation is the only thing the next press does, so it takes the row
-      var kids: List[Keyed] =
-        Keyed("footer", VText(0, FOOTER_ROW, contactsFooter(quitArmed), Color.midGray)) :: Nil
       if count == 0 then
-        kids = Keyed("empty", Views.group(
-          VText(3, 4, "No contacts", Color.midGray) ::
-            (VText(3, 5, "Waiting sync", Color.midGray) :: Nil))) :: kids
-      else kids = Keyed("rows", contactRowsView(s, snap, unsent, undelivered, count)) :: kids
-      VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) :: (Keyed("net", netView(net)) :: kids))
+        VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) ::
+          (Keyed("net", netView(net)) ::
+            (Keyed("empty", Views.group(
+              VText(3, 4, "No contacts", Color.midGray) ::
+                (VText(3, 5, "Waiting sync", Color.midGray) :: Nil))) ::
+              (Keyed("footer",
+                VText(0, FOOTER_ROW, contactsFooter(quitArmed), Color.midGray)) :: Nil))))
+      else
+        val roll = Rolodex.body(
+          Rolodex.cards(snap, nowMs, s.playingRoom, unsent, undelivered), count, motion,
+          Display.W, Display.H)
+        var kids: List[Keyed] = Nil
+        if !NetStatus.isHealthy(net.health) then
+          kids = Keyed("net", netChip(net)) :: kids
+        if quitArmed then
+          kids = Keyed("footer",
+            VText(0, FOOTER_ROW, contactsFooter(quitArmed), Color.white)) :: kids
+        VGroup(Keyed("roll", roll) :: ListOps.reverse(kids))
+
+  /** the connectivity element on a rolodex card, which is the one place it has
+   *  to survive being drawn over an arbitrary hue.
+   *
+   *  Two departures from every other screen, both because the background is no
+   *  longer black. It shows only while the link is NOT healthy — plan 0070 says
+   *  the resting screen is the contact and "nothing else", and an indicator
+   *  that is always green says nothing; one that appears exactly when the
+   *  connection is in trouble says everything. And it sits on a dark CHIP,
+   *  because green-on-yellow (the unheard band) is unreadable and the card's
+   *  colour is a stranger's choice. */
+  def netChip(net: NetState): View =
+    val w = 6 * Font.GLYPH_W
+    VGroup(Keyed("chip", VFill(Display.W - w, 0, w, Font.GLYPH_H + 2, 2,
+      Color.black, 210)) :: (Keyed("net", netView(net)) :: Nil))
 
   def contactsFooter(quitArmed: Boolean): String =
     if quitArmed then "BACK again to exit" else "UP/DN sel OK open PTT talk"
-
-  /** the visible window of contact rows, keyed on the conversation's identity —
-   *  the same room-or-contact key the outbox marks are matched by. */
-  def contactRowsView(s: WataState, snap: StateSnapshot, unsent: List[String],
-      undelivered: List[String], count: scala.Int): View =
-    val vis = visibleRows()
-    val end = if count < s.scrollOffset + vis then count else s.scrollOffset + vis
-    var acc: List[Keyed] = Nil
-    var i = s.scrollOffset
-    while i < end do
-      val row = FONT_ROWS_HEADER + (i - s.scrollOffset)
-      val selected = i == s.selected
-      convAt(snap, i) match
-        case c: Some[Conversation] =>
-          val mark = outboxMark(unsent, undelivered, c.value)
-          acc = Keyed(convKey(c.value), contactRowView(snap, c.value, mark, row, selected)) :: acc
-        case None => ()
-      i += 1
-    VGroup(ListOps.reverse(acc))
-
-  /** the row: the selection highlight first (children paint in list order),
-   *  then the unplayed underline (plan 0041) — a yellow rule under any row
-   *  whose count is up, persistent until played because it renders the COUNT,
-   *  not the arrival edge; a count digit alone is a channel a kid never
-   *  notices — the name — cyan for the family thread unless this row is the
-   *  selected one, whose black-on-green has to stay legible — then the outbox
-   *  mark in the last column and the unplayed badge, which slides two columns
-   *  left to clear the mark when there is one. */
-  def contactRowView(snap: StateSnapshot, conv: Conversation, mark: scala.Int,
-      row: scala.Int, selected: Boolean): View =
-    val y = 1 + row * Font.GLYPH_H
-    val fg = if selected then Color.black else Color.green
-    var kids: List[Keyed] = Nil
-    if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
-    if conv.unplayedCount > 0 then
-      kids = Keyed("unp", VRect(0, y + Font.GLYPH_H - 1, Display.W, 1, Color.yellow)) :: kids
-    val nameColor = if isFamily(conv.convType) && !selected then Color.cyan else fg
-    kids = Keyed("name", VText(0, row, clip(convName(snap, conv), 18), nameColor)) :: kids
-    if mark > 0 then kids = Keyed("mark", outboxMarkView(mark, y)) :: kids
-    if conv.unplayedCount > 0 then
-      val badge = "" + conv.unplayedCount
-      val shift = if mark == 0 then 0 else 2
-      kids = Keyed("badge", VText(Font.COLS - badge.length - shift, row, badge, Color.yellow)) :: kids
-    VGroup(ListOps.reverse(kids))
 
   /** 0 = nothing pending, 1 = something of ours is still queued, 2 = something
    *  of ours will never arrive. The louder one wins: a lost message is worth
@@ -713,14 +708,6 @@ object WataLogic:
           else cur = t
         case Nil => going = false
     out
-
-  /** the mark sits in the last column, right-aligned like the favorite star,
-   *  so a message going out never reflows the name. Custom glyphs (> 0x7F) are
-   *  `VGlyph`s: inside a string they would UTF-8 encode into two wrong ones. */
-  def outboxMarkView(mark: scala.Int, y: scala.Int): View =
-    val g = if mark == 2 then Font.ICON_UNDELIV else Font.ICON_UNSENT
-    val fg = if mark == 2 then Color.red else Color.yellow
-    VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, g, fg)
 
   /** the conversation screen: a pure function of the applet state and the
    *  frame's snapshot. Nothing here reads an atomic, a clock or the network. */

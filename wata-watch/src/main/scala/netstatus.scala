@@ -370,6 +370,13 @@ object NetStatus:
     case _: NetDown => true
     case _          => false
 
+  /** is the link working? The rolodex shows its connectivity element only when
+   *  this is false: a resting card is the contact and nothing else (plan 0070),
+   *  and an indicator that is always green is not information. */
+  def isHealthy(h: NetHealth): Boolean = h match
+    case _: NetLive => true
+    case _          => false
+
   /** green while it is working, yellow while it is coming back, red when it
    *  is down or there is no pipe at all. */
   def color(n: NetState): scala.Int =

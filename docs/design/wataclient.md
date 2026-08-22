@@ -509,6 +509,34 @@ snapshot are built from:
   `MembershipChanged`, `ReceiptUpdated`) is the engine's
   per-`process()`-call output vocabulary.
 
+### A person's colour (`palette.scala`)
+
+Plan 0070's rolodex makes identity the screen rather than a field on it, and
+identity is a hue. The colour is meant to be a property of the PERSON, stored
+server-side and fanned out the way display names already are; that field does
+not exist yet, and what does exist here is the fallback the plan specifies —
+a deterministic derivation from the user id, so every screen is colourful
+from the first sync rather than waiting on a setup gate.
+
+It lives in the client core because each client must NOT invent its own. A
+handset and a wrist showing the same kid two different colours breaks the one
+thing the design is built on ("roll to my colour and hold the button"), and
+one shared function is the only way to prevent it. `Palette.forUser(id)` is
+that function, `forConversation` is the conversation-level rule (a DM takes
+its CONTACT's colour, a group its room's, and the family thread keeps cyan,
+which is not in the rotation).
+
+Eight hues, spread around the wheel, every one carrying black text
+(`Palette.INK`) — that is the palette's constraint rather than a decision
+each body makes, and it is why a card can be full bleed with its name drawn
+straight onto it. The hash folds its whole accumulator before anyone takes it
+modulo eight (a hue index is three bits, and without the fold those three
+bits are all that ever mattered), and it reduces modulo a prime at every step
+so the answer cannot depend on how wide an `Int` is on the platform doing the
+asking. Five people in eight hues share one about four times in five: that is
+arithmetic, not a defect, and the fix is the profile field this stands in
+for, not a cleverer hash.
+
 ## HTTP transport and JSON handling
 
 Two small modules separate "shape the Matrix wire protocol" from "send
@@ -740,6 +768,7 @@ checked against a separately pinned expected-output file in CI.
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |
 | `outbox.scala` | 465 | The bounded, persistent outbox: the `OutboxStore` capability, `MemOutbox`, the classified send/retry policy, and the entry format. |
 | `playq.scala` | 166 | The woken-playback queue: a burst of messages a push woke the client to play, drained in arrival order, with the per-message live-play window and the no-progress cap. |
+| `palette.scala` | 118 | A person's colour: the eight-hue palette (black text on every one), the family thread's cyan, and the deterministic user-id derivation that stands in for the server-side profile field. |
 | `playqoracle.scala` | 183 | The caller's serve loop over a virtual clock, eight scripted bursts, rendered as a deterministic transcript for CI pinning. |
 | `oracle.scala` | 398 | Portable byte-level self-test report (CRC, Ogg round trip, `Bytes`/`IArray` conformance) plus a foreign-container fixture walker. |
 | `runtime.scala` | 796 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |

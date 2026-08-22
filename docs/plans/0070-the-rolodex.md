@@ -142,6 +142,37 @@ that in the renderer's metrics, which is the one place that knows. The
 handset's arm honours the box, the alignment and the alpha, and cannot honour
 the role until the baked strikes ship; that is stated in the arm.
 
+**Landed on the watch** (2026-08-22): the motion integrator, the cards, and
+the colour. `wataui/motion.scala` is the model — velocity, exponential
+friction, a critically damped detent spring, a stiffer end spring — run per
+axis above every platform, with the horizontal one integrated against a
+single item so it is pinned by construction rather than by a branch.
+`wata-watch/rolodex.scala` is the screen: one interpolation between
+full-bleed stacking and the open stack, so there is no "closed layout" and
+"open layout" to keep in agreement. `wataclient/palette.scala` is the
+derived fallback colour, in the client core so every client will agree.
+Three things this design did not survive contact with a real panel saying:
+
+- **`SNAP_SPEED` is derived, not chosen.** The plan gives every other
+  constant and says only "below a threshold speed". Under friction an
+  impulse coasts `v0 * tau * (1 - s/v0)` before the spring captures it, and
+  the spring pulls to the NEAREST detent — so a threshold that leaves one
+  detent short of half a card pulls it straight back. The floor is 3.43 for
+  a 7-items/s detent, the first value tried was 3.5, and one crown detent
+  did nothing at all.
+- **The connectivity element cannot just sit on a card.** "Nothing else" and
+  "a status indicator in the corner" are not compatible over an arbitrary
+  hue: green-on-yellow is unreadable. The ruling is that it shows only when
+  the link is NOT healthy, and then on a dark chip — an indicator that is
+  always green is not information anyway.
+- **The unheard count and the unheard bar are the same element.** A yellow
+  band across the card's top that holds "3 unheard" at full bleed and
+  degrades into a rule along a stack row's top. Written as two elements they
+  would have to agree about when each appears.
+
+Still open here: the server-side colour field and its picker, the drawn
+thread, and the handset's half (baked strikes, then the same bodies).
+
 ## What commercial means for the layout
 
 Not scope for this plan, but the shape below must not foreclose any of it:
