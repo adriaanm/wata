@@ -458,11 +458,24 @@ not, both fixed in `go-pkgs/watchshell`:
 - **A watch container has no `Documents/`** (an iPhone's does), so TeeLog
   lost the whole sandbox log to ENOENT; it now creates the parent.
 
-The open hardware questions are whether a real long press is delivered
-(`WATCH-INPUT-DELIVERY`), the real-audio round trip (`WATCH-AUDIO`), and
-the first paint: with the signal fix in, the process runs and stays up,
-but the first look showed the launch spinner, not the stage
-(`WATCH-DEVICE-FIRST-PAINT` — read `Documents/wata.log` for the
-`metrics:`/`paint` lines before theorizing; the compositing route is the
-prime suspect, and it is exactly the part the shell's own header warns
-is silent).
+With the signal fix in, the wall moved but did not fall: on the device
+the process never reaches Go `main` (`WATCH-DEVICE-PREMAIN`). Launches
+either spin ~20s in pre-main code and take the `0x8BADF00D` launch
+watchdog — heavy system CPU, a main thread the crash reporter cannot
+unwind — or exit quickly and cleanly with no crash report at all; the
+minimal watch-hello app behaves the same, so it is not wata's init
+graph. The shell carries permanent instrumentation for exactly this
+blindness: `BootMark` (one fsynced line per launch stage into the
+container's `boot.log`, from `main` through `wkmain`/`launched`/
+`willActivate` to `painted`), a dyld-constructor mark that stamps
+`cinit` before the Go runtime's first instruction, and the
+`WATA_BOOT_ABORT=<stage>` tripwire that turns "did this stage run" into
+a crash report. What those already established: the constructor runs
+and neither aborts nor shows up in the `appDataContainer` domain pull —
+the file lands somewhere devicectl's view of the container does not
+reach, with a stale container mapping after many reinstalls the live
+suspect.
+
+The open hardware questions are `WATCH-DEVICE-PREMAIN` first, then
+whether a real long press is delivered (`WATCH-INPUT-DELIVERY`) and the
+real-audio round trip (`WATCH-AUDIO`).

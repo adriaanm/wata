@@ -63,6 +63,7 @@ object Main:
   val readyCb: go.Uintptr = go.callback(() => Pump.onReady())
 
   def main(args: Array[String]): Unit =
+    go.watchshell.bootMark("main")
     initLog()
     if args.length > 0 && args(0) == "interptest" then
       go.watchshell.start()
@@ -91,7 +92,9 @@ object Main:
     // just supplied; a stored one is already where it belongs.
     if passIn != "" then FbConfig.savePassword(cfg.homeserver, cfg.username, passIn)
     Pump.setConfig(cfg)
+    go.watchshell.bootMark("config")
     go.watchshell.start()
+    go.watchshell.bootMark("started")
     go.watchshell.runApp(readyCb) // never returns
 
   def runInterptest(): Unit =
@@ -228,12 +231,14 @@ object Pump:
   // ---- the ready hop (main thread, inside UIApplicationMain) ----------------
 
   def onReady(): Unit =
+    go.watchshell.bootMark("ready")
     val m = metrics()
     Metrics.set(m)
     println(metricsLine(m))
     val pool = go.iosui.poolPush()
     val root = IosStage.create(m, true)
     go.iosui.poolPop(pool)
+    go.watchshell.bootMark("stage")
     go.watchshell.adoptRoot(root)
     // The watch's input: crown, tap, swipe, long press — reported as INTENTS
     // in wata's own terms (go-pkgs/watchshell's input.go, plan 0071). Long
@@ -252,6 +257,7 @@ object Pump:
     IosStage.setTree(bootTree())
     go.iosui.poolPop(pool2)
     noteScreen("boot")
+    go.watchshell.bootMark("painted")
     sgo.spawn(() => Pump.session())
 
   /** the pre-session boot screen: the same body the pump would build before

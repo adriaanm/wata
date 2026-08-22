@@ -81,13 +81,13 @@ const (
 )
 
 var (
-	mu        sync.Mutex
-	window    uikit.UIWindow
-	rootVC    objc.ID
-	container uikit.UIView
-	root      uikit.UIView
-	hasRoot   bool
-	insets    uiEdgeInsets
+	mu         sync.Mutex
+	window     uikit.UIWindow
+	rootVC     objc.ID
+	container  uikit.UIView
+	root       uikit.UIView
+	hasRoot    bool
+	insets     uiEdgeInsets
 	readyFn    uintptr
 	readyRun   bool
 	controller objc.ID // the live WKInterfaceController (the crown's owner)
@@ -133,7 +133,7 @@ func Start() {
 	}
 	delegateMethods := []objc.MethodDef{
 		{Cmd: objc.RegisterName("applicationDidFinishLaunching"),
-			Fn: func(self objc.ID, _ objc.SEL) {}},
+			Fn: func(self objc.ID, _ objc.SEL) { BootMark("launched") }},
 		// The storyboard-free entry point: answering with a class is what
 		// lets this app ship without an Interface.plist.
 		{Cmd: objc.RegisterName("applicationRootInterfaceControllerClass"),
@@ -155,6 +155,7 @@ func Start() {
 		// every return to the app, so the build is idempotent.
 		{Cmd: objc.RegisterName("willActivate"),
 			Fn: func(self objc.ID, _ objc.SEL) {
+				BootMark("willActivate")
 				// Keep the instance: the Digital Crown's sequencer hangs off
 				// the interface controller, not off any view, so input.go has
 				// no other way to reach it.
@@ -187,6 +188,7 @@ func RunApp(ready uintptr) {
 	mu.Lock()
 	readyFn = ready
 	mu.Unlock()
+	BootMark("wkmain")
 	wkApplicationMain(0, 0, objcrt.NSString(delegateClass))
 }
 

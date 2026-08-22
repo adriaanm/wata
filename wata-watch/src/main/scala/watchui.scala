@@ -112,6 +112,10 @@ object watchshell:
    *  to be pulled off the watch. Answers "" or the error. */
   @go.name("TeeLog") def teeLog(path: String): String = ???
 
+  /** the boot trace: append one fsynced line to $HOME/boot.log — the only
+   *  channel that survives a launch the watchdog kills (bootmark.go). */
+  @go.name("BootMark") def bootMark(stage: String): Unit = ???
+
   /** always "" today — the watch declares no URL scheme (see input.go). */
   @go.name("TakeURL") def takeURL(): String = ???
 
