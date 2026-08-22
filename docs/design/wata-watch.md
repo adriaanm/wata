@@ -443,39 +443,55 @@ now encode them:
 Running on the device surfaced two facts the simulator structurally could
 not, both fixed in `go-pkgs/watchshell`:
 
-- **A real watch refuses the Go runtime's signal setup.** watchOS's
-  libsystem_c aborts any process calling `sigaction()` for a fatal signal
-  ("sigaction on fatal signals is not supported"), and Go installs exactly
-  those at startup — so an unmodified Go watch app dies before main, with
-  `devicectl` misreporting "exit code 0" and printing nothing. The fix is
-  `sigaction_watchos.c` (`WATCH-SIGACTION-FATAL`): the app defines
-  `sigaction` itself, reports success for the fatal set without installing
-  anything, and passes the rest (SIGURG drives Go's preemption) to the
-  real one. Device-only (`!TARGET_OS_SIMULATOR`); the cost is that a
-  fault Go would panic on is a hard crash on the wrist. The diagnosis
-  route, since console output and exit codes are both unreliable there:
-  `devicectl device copy from --domain-type systemCrashLogs`.
+- **A real watch refuses the Go runtime's signal setup, and kills any Go
+  signal handler that ever fires.** Two independent walls, one interposer.
+  First (`WATCH-SIGACTION-FATAL`): watchOS's libsystem_c aborts any
+  process calling `sigaction()` for a fatal signal ("sigaction on fatal
+  signals is not supported"), and Go installs exactly those at startup —
+  an unmodified Go watch app dies before main, with `devicectl`
+  misreporting "exit code 0". Second
+  (`WATCH-ASYNCPREEMPT-NULL-UCONTEXT`): watchOS delivers signals to
+  `SA_SIGINFO` handlers with a **NULL ucontext argument**; Go's handlers
+  read the interrupted registers out of it (`uc_mcontext` is offset 0x30,
+  hence every crash report's `KERN_INVALID_ADDRESS at 0x0000000000000030`)
+  and the fault re-raises inside the handler forever — ~20s of pure
+  system time on a main thread the crash reporter cannot unwind, until
+  the `0x8BADF00D` launch watchdog. SIGURG from Go's async preemption
+  (sysmon signals any goroutine running >10ms; a package initializer is
+  enough) fired it on every launch. `GODEBUG=asyncpreemptoff=1` from a
+  dyld constructor does NOT fix it — Go reads env from the original stack
+  envp at rt0, so a constructor `setenv` is invisible to the runtime. So
+  `sigaction_watchos.c` swallows EVERY handler install on device:
+  SIGURG's default disposition is discard (preemption degrades to
+  cooperative, the pre-Go-1.14 behavior), and SIGPIPE — whose default
+  would kill — is parked on `SIG_IGN` by a constructor. Device-only
+  (`!TARGET_OS_SIMULATOR`); the costs are that a fault Go would panic on
+  is a hard crash on the wrist, and `os/signal.Notify` can never fire
+  there. The diagnosis route, since console output and exit codes are
+  both unreliable: `devicectl device copy from --domain-type
+  systemCrashLogs`.
 - **A watch container has no `Documents/`** (an iPhone's does), so TeeLog
-  lost the whole sandbox log to ENOENT; it now creates the parent.
+  lost the whole sandbox log to ENOENT; it now creates the parent. The
+  container ROOT (`$HOME`) is not writable at all — anything writing
+  there must fall back to `$TMPDIR`, which is why `boot.log` lives in
+  `tmp/` on a real watch.
 
-With the signal fix in, the wall moved but did not fall: on the device
-the process never reaches Go `main` (`WATCH-DEVICE-PREMAIN`). Launches
-either spin ~20s in pre-main code and take the `0x8BADF00D` launch
-watchdog — heavy system CPU, a main thread the crash reporter cannot
-unwind — or exit quickly and cleanly with no crash report at all; the
-minimal watch-hello app behaves the same, so it is not wata's init
-graph. The shell carries permanent instrumentation for exactly this
-blindness: `BootMark` (one fsynced line per launch stage into the
-container's `boot.log`, from `main` through `wkmain`/`launched`/
-`willActivate` to `painted`), a dyld-constructor mark that stamps
-`cinit` before the Go runtime's first instruction, and the
-`WATA_BOOT_ABORT=<stage>` tripwire that turns "did this stage run" into
-a crash report. What those already established: the constructor runs
-and neither aborts nor shows up in the `appDataContainer` domain pull —
-the file lands somewhere devicectl's view of the container does not
-reach, with a stale container mapping after many reinstalls the live
-suspect.
+With all of that in, the full boot trace runs on the wrist:
+`cinit → goinit → main → config → started → wkmain → launched →
+willActivate → ready → stage → painted` (Series 10, watchOS 26.6,
+2026-08-22). The shell keeps its launch instrumentation permanently:
+`BootMark` (one fsynced line per stage into the container's `boot.log`),
+a dyld-constructor `cinit` mark stamped before the Go runtime's first
+instruction, the `WATA_BOOT_ABORT=<stage>` tripwire that turns "did this
+stage run" into a crash report, and the **pre-main sampler**
+(`bootmark_ctor.c`): a constructor-spawned thread that profiles the main
+thread via dlsym'd `thread_get_state` (the SDK marks the thread_* mach
+calls unavailable on watchOS; the traps exist) and appends PC/LR/frame
+chains to `boot.log` until Go marks itself alive — `atos -l <base>`
+against the built binary names the hang. That sampler is what cracked
+the NULL-ucontext loop after three crash reports with unwindable main
+threads had not.
 
-The open hardware questions are `WATCH-DEVICE-PREMAIN` first, then
-whether a real long press is delivered (`WATCH-INPUT-DELIVERY`) and the
-real-audio round trip (`WATCH-AUDIO`).
+The open hardware questions are now whether a real long press is
+delivered (`WATCH-INPUT-DELIVERY`) and the real-audio round trip
+(`WATCH-AUDIO`).
