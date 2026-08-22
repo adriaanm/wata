@@ -263,12 +263,46 @@ what is drawn:        the two, lerped by o
 
 At `o = 0` that is one card filling the panel with its neighbours exactly one
 panel away — off screen, and already correctly placed the instant a flick
-starts. At `o = 1` it is five rows with a 2px gutter. Nothing special-cases
-"the centre card": it is simply the one whose `i - p` is small. Cards outside
-the panel are culled, so at rest the tree is a single card and the differ has
-nothing to say frame after frame.
+starts. At `o = 1` it is five rows with a 2px gutter. Cards outside the panel
+are culled, so at rest the tree is a single card and the differ has nothing to
+say frame after frame.
 
-Three details are decisions rather than arithmetic:
+### Which card the talk button reaches
+
+An open stack of same-sized rows says nothing about which one a held talk button
+will send to, and on this screen that is the one thing that must never be
+ambiguous — a held press sends a voice message to whoever is centred. So the
+centre card is drawn differently, and the card it marks is `Motion.centre`
+itself, the very value `Pump.stepMotion` writes into `selected` and `pttPress`
+reads back. Not an approximation of it: the emphasis flips exactly where the
+send target flips, at the half-card mark.
+
+Three means at once, because none of them alone survives a small dim panel with
+eight different hues on it:
+
+- **Inset.** A neighbour loses another `padOpen` on each side and `QUIET_INSET`
+  top and bottom, so the centre card is plainly the widest and tallest row.
+- **Dim.** A neighbour's card is drawn at `QUIET_ALPHA` over the black panel,
+  which makes the centre card the brightest thing on screen whatever the two
+  hues are — a size differential cannot promise that when a `sand` neighbour
+  sits next to a `coral` centre. 0.65 rather than something lower because the
+  ink on these cards is BLACK: dimming the card dims the contrast its name is
+  read through, and at half strength a neighbour's name is nearly unreadable.
+  The roster is the whole reason the stack opened.
+- **Type.** The centre card keeps the `name` role and bold weight; a neighbour
+  drops to `caption` and medium.
+
+And the band the cards move under is DRAWN: a pair of white nubs at the panel's
+edges, half a row tall, fixed in panel space and faded in with `o`. They are
+built last so they sit on top of whatever is sliding under them, and they are
+the only thing on this screen that does not move. That is what makes the
+treatment hold MID-SCROLL — a partly-aligned centre card is judged against a
+mark rather than by eye.
+
+All three effects scale with `o`, so the closed card is untouched and the stack
+opens *into* the emphasis rather than snapping into it.
+
+Three more details are decisions rather than arithmetic:
 
 - **The unheard count and the unheard bar are ONE element.** A yellow band
   across the top of the card, tall enough to hold "3 unheard" at full bleed
@@ -299,6 +333,13 @@ how the selection got there. It is what `just watch-e2e`'s send leg proves.
 `Rolodex.body` takes plain `RoloCard` values rather than a snapshot, so the
 oracle can hand it three contacts with hand-picked hues and read the result
 back as pixels; `Rolodex.cards` is the one function that reads the snapshot.
+
+`Rolodex.cards` takes the roster's colours **all at once**
+(`Palette.forRoster`), not one conversation at a time. A per-id hash and eight
+hues put two of five contacts in the same colour about four times in five, and
+that is what a real family on the simulator showed — Bob and Erin the same light
+green. The set-based assignment is wataclient's; this file only has to ask for
+the whole roster rather than for each card.
 
 ## The frame clock
 
@@ -344,11 +385,28 @@ neighbours nowhere on the panel, against five rounded rows with black gutters
 between them, the right colour in each, and names against their leading
 edges. Both were seen to fail with the motion inverted (the rest case with the
 stack open loses all four of its colour probes; the stack case at rest reports
-one card where it wants three) before either was believed. The pure arm holds
-the INTEGRATOR — one detent lands exactly on card 1 and comes to a full stop,
-a flick coasts further, the end gives and bounces back to the last card, the
-reserved axis does not move, and a five-second hitch handed over in one step
-does not blow the springs up — and the PALETTE's determinism.
+one card where it wants three) before either was believed.
+
+`rolodexCentreCardIsMarked` is the third, and it is the one that says the send
+target is VISIBLE. Its three cards are deliberately the SAME COLOUR: identity is
+removed from the frame, so the only thing that can distinguish the centre row
+from a neighbour is the emphasis itself. It reads the centre card's brightness
+against a neighbour's, reads a point that is inside the centre card and outside
+an inset neighbour, and reads the band's nub at the centre row's height and the
+panel where the nub is not — then does the width pair again at `p = 1.3`, where
+the centre card is only partly aligned with the band. It was seen to FAIL with
+the emphasis disabled (`quiet` forced to zero and the nubs suppressed) before it
+was believed: four of its probes go red, including "the centre card is no
+brighter than its neighbour (255 vs 255)".
+
+The pure arm holds the INTEGRATOR — one detent lands exactly on card 1 and comes
+to a full stop, a flick coasts further, the end gives and bounces back to the
+last card, the reserved axis does not move, and a five-second hitch handed over
+in one step does not blow the springs up — and the PALETTE, which is now two
+claims rather than one: the derivation is a function of the id, and a
+five-person roster comes out in five DIFFERENT colours, in the same colours
+whatever order the list arrives in, with the family thread still cyan and a
+20-person roster still answering one colour each.
 
 `rolodexVocabularyDraws` is where plan 0070's element
 set stops being a declaration: it mounts a rounded card, a `display`-role

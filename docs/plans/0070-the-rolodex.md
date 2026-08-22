@@ -170,6 +170,39 @@ Three things this design did not survive contact with a real panel saying:
   degrades into a rule along a stack row's top. Written as two elements they
   would have to agree about when each appears.
 
+**Amended by five real contacts** (2026-08-22). The paragraphs above were
+written from mockups, and a mockup has two or three cards in it with hues chosen
+by hand. Run against a real roster on the simulator, two things this plan says
+turned out to be understated rather than wrong:
+
+- **"Nothing special-cases the centre card" was a geometry claim that leaked
+  into the design.** It is true and worth keeping of the LAYOUT — one
+  interpolation, no branch — but the rendered result was five identical rows,
+  and nothing on the panel said which one a held talk button would reach. The
+  fixed centre band this plan describes (the mockups' white nubs) is not
+  decoration: it is the only fixed thing on a screen made of moving cards, and
+  without it a partly-aligned card has nothing to be judged against. The centre
+  card now also carries the treatment this plan gives it — the larger type role,
+  full width and full strength — against inset, dimmed, caption-role neighbours.
+  The rule the design has to state is that the emphasised card is
+  `Motion.centre` ITSELF, so what is drawn and what the talk button sends to
+  cannot drift apart.
+- **"Deterministic derivation from the user id" is the wrong granularity.** Per
+  id, eight hues and five people collide about four times in five, and they did:
+  two of five contacts came out the same light green. The derivation is now a
+  function of the ROSTER — sort the ids, assign greedily from each id's hashed
+  preference — which keeps every property the plan wanted it for (no server
+  round trip, every client agrees, colourful from the first sync) and adds the
+  one it silently assumed. The profile field is still the answer; this is what
+  the interim looks like when it is not embarrassing.
+- **"The palette is small (≈8) and constrained"** needs its second constraint
+  read as being about APPEARANCE, not hue angle. Eight light saturated colours
+  spread evenly around the wheel gave two yellow-greens and three warm pinks.
+  The palette is now spread by hue AND lightness AND chroma, with one
+  near-neutral (`sand`) doing more work than an eighth saturated hue could. The
+  open question below about palette size stands; the answer to it is not "more
+  hues".
+
 Still open here: the server-side colour field and its picker, the drawn
 thread, and the handset's half (baked strikes, then the same bodies).
 

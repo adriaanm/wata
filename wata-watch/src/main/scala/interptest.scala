@@ -49,6 +49,7 @@ object InterpTest:
     withPool(() => rolodexVocabularyDraws())
     withPool(() => rolodexAtRestIsOneCard())
     withPool(() => rolodexMidScrollIsAStack())
+    withPool(() => rolodexCentreCardIsMarked())
     val n = failsC.get()
     if n == 0 then println("interptest: PASS")
     else println("interptest: FAIL (" + n + ")")
@@ -476,15 +477,17 @@ object InterpTest:
     IosStage.setTree(v)
     v match
       case g: VGroup =>
-        check(Views.len(g.children) == 3,
-          "rolodex stack: " + Views.len(g.children) + " cards on the panel, want 3")
+        check(Views.len(g.children) == 5,
+          "rolodex stack: " + Views.len(g.children) + " children on the panel, " +
+            "want 3 cards and the band's two nubs")
       case _ => fail("rolodex stack: the body should be a group of cards")
     // the centre band holds Bob (red), rows 48..70
     probeIs(root, 135, 60, scale, 255, 0, 0, "rolodex stack: the centre card")
-    // Ada (blue) above it, rows 24..46
-    probeIs(root, 135, 35, scale, 0, 0, 255, "rolodex stack: the neighbour above")
-    // Cy (green) below it, rows 72..94
-    probeIs(root, 135, 82, scale, 0, 255, 0, "rolodex stack: the neighbour below")
+    // Ada (blue) above it, rows 27..43 — a NEIGHBOUR, so inset and at half
+    // strength over the black panel (the centre treatment, below)
+    probeIs(root, 135, 35, scale, 0, 0, 166, "rolodex stack: the neighbour above")
+    // Cy (green) below it, rows 75..91
+    probeIs(root, 135, 82, scale, 0, 166, 0, "rolodex stack: the neighbour below")
     // the gutter between two rows is the panel, not a card
     probeIs(root, 80, 47, scale, 0, 0, 0, "rolodex stack: the gutter between rows")
     // the rows are CARDS: the arc's centre is (14,56) and its radius is 8
@@ -500,6 +503,55 @@ object InterpTest:
       "rolodex stack: the centre card's name drew nothing at its leading edge")
     check(!anyBlackInk(root, 120, 52, 146, 68, scale),
       "rolodex stack: a leading-aligned name must leave the trailing edge empty")
+
+  /** WHICH CARD THE TALK BUTTON REACHES, read off the panel.
+   *
+   *  The three cards here are the SAME COLOUR on purpose: identity is removed
+   *  from the frame, so the only thing that can tell the centre row from a
+   *  neighbour is the emphasis itself. A stack that drew every row alike — what
+   *  this screen did before — fails every probe below.
+   *
+   *  Each probe is one of the three means, plus the band:
+   *
+   *   - BRIGHTNESS: the centre card is at full strength and a neighbour is
+   *     dimmed over the black panel;
+   *   - WIDTH: `x = 147` is inside the centre card and outside an inset
+   *     neighbour, so one reads card and the other reads panel;
+   *   - the BAND: the fixed white nubs are at the centre row's height and
+   *     nowhere else, which is what holds mid-scroll;
+   *   - and it all holds when the centre card is only PARTLY aligned with the
+   *     band, which is the frame a screenshot is most likely to catch. */
+  def rolodexCentreCardIsMarked(): Unit =
+    val scale = 4
+    val root = IosStage.create(Metrics.uniform(scale), false)
+    val same =
+      RoloCard("@a:h", "Ada", 0x001f, "", 0, 0) ::
+        RoloCard("@b:h", "Bob", 0x001f, "", 0, 0) ::
+        RoloCard("@c:h", "Cy", 0x001f, "", 0, 0) :: Nil
+    // card 1 centred, the stack fully open
+    IosStage.setTree(Rolodex.body(same, 3,
+      Motion(MotionAxis(1.0, 0.0, 0.0), MotionAxis(0.0, 0.0, 0.0), 0.0, 1.0),
+      ROLO_W, ROLO_H))
+    val cb = probe(root, 80, 60, scale) & 0xff
+    val nb = probe(root, 80, 35, scale) & 0xff
+    check(cb > nb + 60,
+      "rolodex centre: the centre card is no brighter than its neighbour (" +
+        cb + " vs " + nb + ")")
+    probeIs(root, 147, 60, scale, 0, 0, 255, "rolodex centre: the centre card is the wide one")
+    probeIs(root, 147, 35, scale, 0, 0, 0, "rolodex centre: a neighbour is inset")
+    probeIs(root, 1, 60, scale, 255, 255, 255, "rolodex centre: the band's nub")
+    probeIs(root, 1, 35, scale, 0, 0, 0, "rolodex centre: the nub marks the band, not the panel")
+
+    // MID-SCROLL: p = 1.3, so card 1 is still what `Motion.centre` rounds to
+    // and is still the emphasised one, though it sits 7px above the band.
+    val root2 = IosStage.create(Metrics.uniform(scale), false)
+    IosStage.setTree(Rolodex.body(same, 3,
+      Motion(MotionAxis(1.3, 0.0, 0.0), MotionAxis(0.0, 0.0, 0.0), 0.0, 1.0),
+      ROLO_W, ROLO_H))
+    probeIs(root2, 147, 50, scale, 0, 0, 255,
+      "rolodex centre: mid-scroll the centre card is still the wide one")
+    probeIs(root2, 147, 75, scale, 0, 0, 0,
+      "rolodex centre: mid-scroll a neighbour is still inset")
 
   // ---- the pure arm: applyAll hand cases + the tables -----------------------
 
@@ -650,6 +702,79 @@ object InterpTest:
     check(Palette.forConversation(DmConv(), true, "@ada:h", "!dm:h") ==
       Palette.forUser("@ada:h"),
       "palette: a DM must take its CONTACT's colour, not its room's")
+    paletteRosterIsDistinct()
+
+  /** A ROSTER'S COLOURS ARE ALL DIFFERENT, up to the palette's size.
+   *
+   *  This is what a per-id hash cannot promise: eight hues and five people
+   *  collide about four times in five, and a screen where two of five contacts
+   *  are the same colour is a screen whose whole argument ("roll to my colour")
+   *  has failed. `forRoster` assigns over the SET, so the only thing left to
+   *  prove is that the answer is distinct, order-independent, and the same on
+   *  every client — which for a pure function means: the same set in, the same
+   *  colours out, whatever order they arrive in. */
+  def nthInt(xs: List[Int], i: Int): Int =
+    var cur = xs
+    var j = 0
+    var out = -1
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          if j == i then
+            out = h
+            going = false
+          else
+            j += 1
+            cur = t
+        case Nil => going = false
+    out
+
+  def lenInt(xs: List[Int]): Int =
+    var n = 0
+    var cur = xs
+    var going = true
+    while going do
+      cur match
+        case _ :: t =>
+          n += 1
+          cur = t
+        case Nil => going = false
+    n
+
+  def paletteRosterIsDistinct(): Unit =
+    // the five the owner watched collide on the simulator, plus the family
+    // thread (the `""` subject, which takes no hue out of the rotation)
+    val ids = "" :: "@bob:h" :: "@carol:h" :: "@dave:h" :: "@erin:h" :: "@alice:h" :: Nil
+    val cols = Palette.forRoster(ids)
+    check(lenInt(cols) == 6,
+      "palette: forRoster must answer one colour per subject, answered " + lenInt(cols))
+    check(nthInt(cols, 0) == Palette.FAMILY,
+      "palette: the empty subject is the family thread and must stay cyan")
+    var i = 1
+    var clash = false
+    while i < 6 do
+      var j = i + 1
+      while j < 6 do
+        if nthInt(cols, i) == nthInt(cols, j) then clash = true
+        j += 1
+      i += 1
+    check(!clash,
+      "palette: two people in a five-person roster came out the same colour")
+    // the SET decides, not the order a client's sync happened to build its list
+    // in — which is the property that lets two devices agree without talking
+    val shuffled = "@erin:h" :: "@alice:h" :: "@dave:h" :: "@bob:h" :: "@carol:h" :: Nil
+    check(nthInt(Palette.forRoster(shuffled), 0) == nthInt(cols, 4),
+      "palette: the same roster in a different order gave a person a different colour")
+    // a roster larger than the palette must still answer, wrapping rather than
+    // stalling once all eight hues are spent
+    var big: List[String] = Nil
+    var n = 0
+    while n < 20 do
+      big = ("@u" + n + ":h") :: big
+      n += 1
+    check(lenInt(Palette.forRoster(big)) == 20,
+      "palette: a roster larger than the palette must still get a colour each")
 
   def applyAllHandExpectation(): Unit =
     val got = Patches.applyAll(script(), fixture())

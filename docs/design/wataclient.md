@@ -521,21 +521,45 @@ from the first sync rather than waiting on a setup gate.
 It lives in the client core because each client must NOT invent its own. A
 handset and a wrist showing the same kid two different colours breaks the one
 thing the design is built on ("roll to my colour and hold the button"), and
-one shared function is the only way to prevent it. `Palette.forUser(id)` is
-that function, `forConversation` is the conversation-level rule (a DM takes
-its CONTACT's colour, a group its room's, and the family thread keeps cyan,
-which is not in the rotation).
+one shared function is the only way to prevent it. `Palette.subjectOf` is the
+conversation-level rule about *whose* colour a thread wears — a DM takes its
+CONTACT's, a group its room's, and the family thread answers `""` and keeps
+cyan, which is not in the rotation.
 
-Eight hues, spread around the wheel, every one carrying black text
-(`Palette.INK`) — that is the palette's constraint rather than a decision
-each body makes, and it is why a card can be full bleed with its name drawn
-straight onto it. The hash folds its whole accumulator before anyone takes it
-modulo eight (a hue index is three bits, and without the fold those three
-bits are all that ever mattered), and it reduces modulo a prime at every step
-so the answer cannot depend on how wide an `Int` is on the platform doing the
-asking. Five people in eight hues share one about four times in five: that is
-arithmetic, not a defect, and the fix is the profile field this stands in
-for, not a cleverer hash.
+**The assignment is over the SET, not over each id.** `Palette.forRoster` takes
+the roster's subjects and answers one colour each: the ids are sorted, walked in
+that order, and each takes its hashed preference or the next free hue after it.
+That is what a screen showing several people must call. `forUser` is only the
+PREFERENCE one id brings — on its own it is the birthday problem, and eight hues
+with five contacts made two of them identical about four times in five, which
+was visible on the simulator the day the rolodex first ran with a real family in
+it. Sorting is what keeps the answer client-independent: two devices with the
+same roster compute the same mapping without talking, which is the property that
+made a derived colour acceptable at all. A roster larger than the palette wraps
+— it must collide eventually — but only after all eight are spent. The real
+answer is still plan 0070's server-side profile colour; this is what keeps the
+months before it from demoing two identical greens.
+
+The hash folds its whole accumulator before anyone takes it modulo eight (a hue
+index is three bits, and without the fold those three bits are all that ever
+mattered), and it reduces modulo a prime at every step so the answer cannot
+depend on how wide an `Int` is on the platform doing the asking. Byte-lexicographic
+`lessId` is spelled out over UTF-8 bytes for the same reason: a locale-aware
+compare is exactly the kind of thing two clients could disagree about.
+
+**The eight hues are spread on three axes, not one.** Every one carries black
+text (`Palette.INK`) at 7.5:1 or better — that is the palette's constraint rather
+than a decision each body makes, and it is why a card can be full bleed with its
+name drawn straight onto it. But eight LIGHT saturated colours spread evenly
+around the wheel are not eight distinguishable colours: the first pass put a
+`lime` at 75° beside a `green` at 120° and they read as one, and three of the
+eight were warm pinks. So the spread is by **hue** (coral, amber, yellow, green,
+sky, violet, magenta — with a deliberate hole at 180°, where cyan is the family
+thread's), by **lightness** (the yellow is the brightest thing here and the green
+next to it a third darker, which is what separates them at 22 px and moving), and
+by **chroma** — the eighth is a low-saturation `sand` rather than a second pink,
+because a near-neutral is instantly not-a-hue and buys more separation than an
+eighth saturated colour crammed between two others.
 
 ## HTTP transport and JSON handling
 
@@ -768,7 +792,7 @@ checked against a separately pinned expected-output file in CI.
 | `ogg.scala` | 193 | Ogg container reader/writer for Opus audio, plus a bit-serial CRC-32. |
 | `outbox.scala` | 465 | The bounded, persistent outbox: the `OutboxStore` capability, `MemOutbox`, the classified send/retry policy, and the entry format. |
 | `playq.scala` | 166 | The woken-playback queue: a burst of messages a push woke the client to play, drained in arrival order, with the per-message live-play window and the no-progress cap. |
-| `palette.scala` | 118 | A person's colour: the eight-hue palette (black text on every one), the family thread's cyan, and the deterministic user-id derivation that stands in for the server-side profile field. |
+| `palette.scala` | 309 | A person's colour: the eight-hue palette (black text on every one, spread by hue, lightness and chroma), the family thread's cyan, and the set-based derivation (`forRoster`) that stands in for the server-side profile field. |
 | `playqoracle.scala` | 183 | The caller's serve loop over a virtual clock, eight scripted bursts, rendered as a deterministic transcript for CI pinning. |
 | `oracle.scala` | 398 | Portable byte-level self-test report (CRC, Ogg round trip, `Bytes`/`IArray` conformance) plus a foreign-container fixture walker. |
 | `runtime.scala` | 796 | `MatrixClient` handle, `Runtime` object: construction, the retrying session loop, backoff, action loop, backfill orchestration, polling helpers. |
