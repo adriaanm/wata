@@ -1,6 +1,15 @@
 # 0072 — charge stats on the settings screens
 
-status: accepted
+status: done
+
+Verified on hardware 2026-08-22 (deployed via `fb-deploy install`, walked
+remotely by evdev injection, read with `fb-shot`, handset on the charger):
+the kid battery row's help line reads `now: 90% chg 4.19V` and the
+developer panel's Device Info detail reads `Bat:90% chg 4.18V` /
+`Up:0h25m Mem:324M` — status verb and pack voltage live on both surfaces.
+The `bat`/`usb` verbs were not observed (the handset stayed plugged and
+charging); the verb choice is the pure `chargeText`, negative-probed at
+the kid-battery golden.
 
 ## Problem
 
