@@ -95,12 +95,11 @@ Not scope for this plan, but the shape below must not foreclose any of it:
   companion app left, and the watch's URL surfaces are inert. A product bought
   on the watch has to be set up on the watch — a screen this design does not yet
   have.
-- **The stage rests on a bet.** Every UIKit class it uses is marked
-  `API_UNAVAILABLE(watchos)` in the SDK headers; it works on the runtime and is
-  proven by the full stage suite, but it is undocumented surface for a shipping
-  product, and a review or an OS release could take it away. Worth a deliberate
-  read of the risk before the commercial work starts — not because the design
-  changes, but because the backend under it might have to.
+- **The stage rests on a bet.** Every UIKit view class it uses is marked
+  `API_UNAVAILABLE(watchos)`; it works on the runtime, but it is undocumented
+  surface under a shipping product. Plan 0071 reads that risk and answers it: a
+  renderer of our own feeding one image view per platform, which is public API
+  everywhere and takes the design's type requirements with it.
 
 ## What changes
 
