@@ -28,24 +28,32 @@ Checked against the watchOS 26.2 SDK rather than recalled:
   `WKInterfaceGroup`, `WKInterfaceSKScene`, `WKGestureRecognizer`,
   `WKCrownSequencer` — are present, watchOS-only, and **not deprecated** in this
   SDK.
-- **SwiftUI ships no `arm64-apple-watchos` module interface.** The device
-  interfaces are `arm64_32`, `arm64e` and `armv7k` only; across the whole SDK
-  exactly one framework offers an arm64 device interface. Apple builds watch
-  apps as arm64e.
+- **Swift links against a Go core for a real watch.** Built and checked rather
+  than inferred: a SwiftUI `@main` app compiled for `arm64-apple-watchos26.0`,
+  linked against a `go build -buildmode=c-archive` of a `GOOS=ios GOARCH=arm64`
+  package built with the watchOS sysroot, produces one executable stamped
+  `platform WATCHOS`, `minos 26.0`, arch arm64, with both the Swift entry point
+  and the exported Go symbol in it.
 
-That last one decides the shape of a SwiftUI shell. Go emits arm64 and has no
-arm64e target, and object files cannot be mixed across the two — so a SwiftUI
-front end linked against a Go core **cannot be built for a real watch today**.
-It builds for the simulator, which is arm64, and stops there. The path is not
-closed forever (an arm64 interface, or a Swift-side split, would open it), but it
-cannot be the plan.
+  The SDK's Swift *module interfaces* for watch devices cover `arm64_32`,
+  `arm64e` and `armv7k` and not `arm64`, which looks like it forecloses this —
+  Apple builds their own watch code as arm64e, and Go emits arm64, which cannot
+  be mixed with it. It does not: `swiftc` resolves SwiftUI for an arm64 device
+  target regardless, and `SDKSettings.plist` lists arm64 among the supported
+  watchOS device archs. The missing interface files are a red herring, and an
+  earlier revision of this plan was wrong to conclude otherwise.
 
 Every Objective-C framework we need — WatchKit, SpriteKit, CoreText,
-CoreGraphics, AVFAudio — ships `arm64-watchos`. So the approved *and reachable*
-shell is WatchKit's: a full-screen `WKInterfaceImage` (or an `SKScene`, which
-animates better), fed by our own renderer, with WatchKit's own gesture and crown
-APIs for input. That is a supported-API shell, in the architecture Go can
-produce, and it is close to what plan 0069 built and deleted.
+CoreGraphics, AVFAudio — also ships `arm64-watchos`, so an all-Objective-C shell
+(a `WKInterfaceImage` or an `SKScene`) remains available as a fallback with no
+Swift at all.
+
+**The decision (owner, 2026-08-22) is to use Swift on the watch.** Sgola is an
+experiment in how far a restricted dialect can be pushed, and spending that
+budget fighting a platform's own front door is the wrong fight: the shell is the
+one place where being native costs nothing and being clever costs a product. So
+the watch shell is SwiftUI on the documented path, and everything above the
+boundary stays Sgola.
 
 ## The boundary
 
@@ -110,19 +118,29 @@ Each step is useful alone, and the order is chosen so the risky part comes last.
 2. **Metrics.** Bodies read size, scale and type roles instead of `Display`
    constants. Unblocks plan 0070's layouts on both devices.
 3. **The renderer on Apple.** CoreGraphics + CoreText behind the existing element
-   vocabulary, feeding one image view per shell. This is the step that drops
-   `UIView`, and it can land on WatchKit's `WKInterfaceImage` with no Swift at
-   all.
-4. **Baked strikes on the handset**, same renderer, same design.
-5. **A Swift shell — only if the architecture opens.** By then it is a shell
-   swap, not a rewrite.
+   vocabulary, producing a `CGImage` per frame. This is the step that drops
+   `UIView`.
+4. **The Swift shell.** A SwiftUI app that owns the scene, shows the frame, and
+   forwards crown/tap/long-press as intents into the Go archive — with the Go
+   client built `-buildmode=c-archive` instead of owning `main`. The bundle and
+   signing path is `tools/watch-device.py`'s, with a Swift compile in front of
+   it.
+5. **Baked strikes on the handset**, same renderer, same design.
 
 ## Risks and unknowns
 
-- **Frame cost on the watch.** Handing a full-screen image over per frame is not
-  what `WKInterfaceImage` was designed for. Measure before committing the zoom
-  animation to it; `SKScene` with a texture is the fallback, and the boundary
-  makes swapping cheap.
+- **Frame cost on the watch.** A `CGImage` per frame across the Swift boundary
+  wants measuring before the zoom animation is committed to it — one shared
+  buffer with a flip, not an allocation per frame. `SpriteView` over an
+  `SKScene` texture is the fallback, and the boundary makes swapping cheap.
+- **What the link check did not prove.** It proved the toolchain: Swift +
+  SwiftUI + a Go c-archive produce one arm64 watchOS executable. It says nothing
+  about the Go runtime starting from a Swift `main` on a real watch, the
+  bundle/signing path, or the first launch — all of which the device install
+  (still waiting on a watchOS provisioning profile) will answer.
+- **The Go client stops owning `main`.** Under `-buildmode=c-archive` the
+  runtime starts at load and `main()` never runs, so today's startup arc has to
+  move into an exported entry point the shell calls.
 - **No `CADisplayLink` on watchOS** (`API_UNAVAILABLE(watchos)`), so animation
   cadence comes from a timer. The settle-and-zoom timing is ours to schedule.
 - **The retained AppKit/UIKit backends** (plan 0032) become redundant on the
