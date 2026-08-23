@@ -138,14 +138,14 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
-- **`SELECT2-ARM-VAR-MUT`** (filed 2026-08-23, `sgola-bugs/`) — an
+- **`SELECT2-ARM-VAR-MUT`** (filed 2026-08-23, sgola inbox) — an
   `sgo.select2` arm assigning to an enclosing var emits
   `scala.runtime.BooleanRef`, which the Go backend cannot map; the
   compile dies after typing. Workaround shipped in wata-watch's
   `nsurlsession.scala`: a module `Atomic[Boolean]` the producer sets
   before the completion token lands, read after the select.
 
-- **`UINTPTR-INT-ARGS`** (filed 2026-08-23, `sgola-bugs/`) — not a
+- **`UINTPTR-INT-ARGS`** (filed 2026-08-23, sgola inbox) — not a
   defect but an IOP-2 edge that makes pure-Sgola FFI awkward both ways:
   no Uintptr literal/conversion means non-zero integer arguments are
   unspellable across SyscallN (zero works by omission), and scalar

@@ -28,7 +28,7 @@ import language.experimental.saferExceptions
  *    the same route so the cause line names something real (`http: …
  *    failed: <cause>` at this seam — status 0 is all the core ever sees).
  *    Temp files are unlinked after every request.
- *  - **No integers across msgSend.** `go.Uintptr` has no literal and no
+ *  - **No integers across msgSend** (UINTPTR-INT-ARGS). `go.Uintptr` has no literal and no
  *    conversion, so a non-zero integer argument is unspellable — but zero
  *    is spelled by OMISSION (`SyscallN` zero-fills untouched registers),
  *    which covers every integer argument this code needs:
@@ -93,7 +93,8 @@ object NsHttp:
   private def msg3(t: go.Uintptr, sel: go.Uintptr, a: go.Uintptr, b: go.Uintptr): go.Uintptr =
     go.purego.syscallN(pMsgSend, t, sel, a, b)._1
 
-  /** scalar results ride Uintptr's concat render — the honest round-trip. */
+  /** scalar results ride Uintptr's concat render — the honest round-trip.
+   *  UINTPTR-INT-ARGS: delete both helpers when a Uintptr/Int conversion lands. */
   private def asBool(w: go.Uintptr): Boolean = ("" + w) == "1"
   private def asInt(w: go.Uintptr): scala.Int =
     val s = "" + w
@@ -176,8 +177,8 @@ object NsHttp:
    *  timed-out send just leaves the token for the next request's drain. */
   private val doneCh: sgo.Chan[go.Uintptr] = sgo.makeChan[go.Uintptr](1)
 
-  /** which arm fired: select2's arms cannot mutate an outer var (the emitter
-   *  has no BooleanRef), so the delegate sets this BEFORE the token lands
+  /** which arm fired: select2's arms cannot mutate an outer var (SELECT2-ARM-VAR-MUT:
+   *  the emitter has no BooleanRef), so the delegate sets this BEFORE the token lands
    *  and send() reads it after the select. */
   private val doneC: sgo.Atomic[Boolean] = sgo.atomic(false)
 
