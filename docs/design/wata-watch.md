@@ -498,9 +498,19 @@ against the built binary names the hang. That sampler is what cracked
 the NULL-ucontext loop after three crash reports with unwindable main
 threads had not.
 
-The open hardware questions are now whether a real long press is
-delivered (`WATCH-INPUT-DELIVERY`) and the real-audio round trip
-(`WATCH-AUDIO`). Their evidence surfaces are in place: every discrete
+Input delivery is ANSWERED on hardware (2026-08-23, plan 0069's
+wrist-verdict section): tap, long press (driving real mic capture),
+swipe up and swipe right all fire the UIKit recognizers on the app's own
+window; wake/sleep ride the lifecycle. The one exception is the Digital
+Crown — watchOS 26's WKCrownSequencer is a partial shim in a
+no-storyboard shell (delegate wired and focused, rotation never
+delivered, documented properties missing from the runtime), so crown
+input rides plan 0071 step 4's SwiftUI shell (`digitalCrownRotation`).
+The remaining hardware question is `WATCH-AUDIO`'s round trip: capture
+is proven (a counted 3s hold recorded ms=3720), but rapid consecutive
+holds crash mid-capture (a dead objc object via purego on the audio
+thread — reproducible), and playback of a received message is blocked on
+`WATCH-URLSESSION-HTTP`. The evidence surfaces: every discrete
 intent prints `input: <name>` as it is applied (navigate prints its
 richer line), and the audio thread prints `audio: recorded ms=… ogg=…`
 at capture end and `audio: playback done pcm=…` when a clip plays to

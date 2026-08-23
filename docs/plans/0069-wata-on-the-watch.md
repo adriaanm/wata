@@ -744,3 +744,39 @@ The last line is the one that matters most: `send: complete` is the app's
 word for it, so bob then snapshots the family room server-side and must find
 BOTH messages. A client that believes it sent and a server that has the
 message are different claims, and only the second one is worth anything.
+
+## The wrist verdict on input (2026-08-23): everything delivers except the crown
+
+The first hardware session (`just watch-wrist` + the owner's fingers,
+Series 10 / watchOS 26.6) settled delivery gesture by gesture, via the
+`input:` lines pulled off the wrist:
+
+- **Tap** → `input: choose`; **long press** → `input: talk-down` /
+  `talk-up` — and the talk edges drove REAL mic capture
+  (`audio: recorded ms=3720` for a counted 3s hold); **swipe up** →
+  `navigate axis=v amount=-3.00`; **swipe right** → `input: back`;
+  **wake/sleep** ride along per activation. UIKit recognizers on the
+  app's own window fire on hardware. Delivery is answered YES.
+- **The Digital Crown does not deliver, and cannot in this shell.** The
+  wiring was verified beyond doubt — same sequencer instance across
+  activations, `delegate` readback identical to our delegate, focus
+  re-asserted on every `willActivate` — and rotation still never
+  arrives. The class itself is the tell: watchOS 26's WKCrownSequencer
+  here fails `respondsToSelector:` for its own documented `focused` and
+  `isVisible` properties (calling one unguarded is an uncaught
+  objc-exception SIGABRT — it cost a crash to learn). It stores a
+  delegate and swallows `focus` but is never wired to the rotation
+  source; the storyboard/page machinery a real WatchKit app runs is
+  what engages it, and this shell deliberately has none. Crown input
+  therefore rides plan 0071 step 4 (the SwiftUI shell), where
+  `digitalCrownRotation` is the platform's first-class path.
+- **Swipe down was never observed** — likely claimed by the system's
+  top-edge gesture on a panel this small. Unresolved but minor: nothing
+  in the current UI depends on it (crown-up/down and swipe-up cover
+  vertical motion).
+
+Two pump bugs found on the way, both fixed: `setupWait` (watch and iOS
+twin) never drained the input queue, so gestures during setup were
+invisible AND would have replayed into the session once configured; and
+gesture evidence relied on a per-launch-truncated log, so a crash
+destroyed exactly the run that mattered (TeeLog now keeps `wata.log.1`).

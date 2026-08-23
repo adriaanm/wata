@@ -65,6 +65,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/adriaanm/wata/go-pkgs/appleptt/uikit"
@@ -147,6 +148,7 @@ var (
 	crownDeleg  objc.ID // owned; the sequencer does not retain its delegate
 	recognizers []objc.ID
 	crownAccum  float64
+	crownCalls  atomic.Int64
 
 	selState        = objc.RegisterName("state")
 	selAddGesture   = objc.RegisterName("addGestureRecognizer:")
@@ -332,6 +334,14 @@ func startCrown() {
 			protos, nil, []objc.MethodDef{
 				{Cmd: objc.RegisterName("crownDidRotate:rotationalDelta:"),
 					Fn: func(self objc.ID, _ objc.SEL, seq objc.ID, delta float64) {
+						// Crown delivery has never been observed on hardware
+						// (the probe asserted focus, not rotation), so the
+						// first few callbacks log their raw delta: "called
+						// with garbage" and "never called" need different
+						// fixes, and only this line can tell them apart.
+						if n := crownCalls.Add(1); n <= 5 {
+							log.Printf("watchshell: crown delta=%v (call %d)", delta, n)
+						}
 						crownRotated(delta)
 					}},
 			})
@@ -347,6 +357,22 @@ func startCrown() {
 	seq.Send(objc.RegisterName("setDelegate:"), crownDeleg)
 	// Without focus the sequencer reports nothing, silently.
 	seq.Send(objc.RegisterName("focus"))
+	// The wiring readback, because hardware has already shown this class
+	// lying: watchOS 26's WKCrownSequencer answers `focus` and `setDelegate:`
+	// but NOT its own documented `focused` getter (an unrecognized selector —
+	// a SIGABRT when called unguarded), so every claim here is checked with
+	// respondsToSelector and read back rather than trusted.
+	responds := func(name string) int {
+		return int(seq.Send(objc.RegisterName("respondsToSelector:"),
+			objc.RegisterName(name)))
+	}
+	var back objc.ID
+	if responds("delegate") != 0 {
+		back = seq.Send(objc.RegisterName("delegate"))
+	}
+	log.Printf("watchshell: crown seq=%#x delegateBack=%#x (want %#x) responds focused=%d delegate=%d isVisible=%d",
+		uintptr(seq), uintptr(back), uintptr(crownDeleg),
+		responds("focused"), responds("delegate"), responds("isVisible"))
 }
 
 // crownRotated accumulates continuous rotation into whole cards and reports
