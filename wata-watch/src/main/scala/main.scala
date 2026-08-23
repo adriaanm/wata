@@ -333,6 +333,16 @@ object Pump:
       val u = go.watchshell.takeURL()
       if u != "" && Enrol.handleConfigure(u) then going = false
       else
+        // Drain gestures even here: they mean nothing on this screen, but an
+        // undrained queue is a backlog that would replay into the session the
+        // moment setup completes — and popping them prints the `input:` line,
+        // which on a wrist is the only evidence a gesture arrived at all
+        // (both of the first wrist session's "silent" gesture passes landed
+        // in this loop's queue, invisibly).
+        var k = go.watchshell.nextIntent()
+        while k >= 0 do
+          println("input: " + Intents.name(k) + " (setup)")
+          k = go.watchshell.nextIntent()
         val v = setupTree()
         patchTo(old, v)
         old = v

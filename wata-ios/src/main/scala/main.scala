@@ -274,6 +274,12 @@ object Pump:
       val u = go.iosshell.takeURL()
       if u != "" && Enrol.handleConfigure(u) then going = false
       else
+        // Drain keys even here: an undrained queue is a backlog that would
+        // replay into the session the moment setup completes (the watch's
+        // setupWait had exactly this, found on hardware 2026-08-23).
+        var packed = go.iosshell.nextKey()
+        while packed >= 0 do
+          packed = go.iosshell.nextKey()
         val v = setupTree()
         patchTo(old, v)
         old = v

@@ -167,6 +167,14 @@ func Start() {
 				// and the app should be able to react to it without
 				// learning WatchKit's callback names.
 				pushSimple(IntentWake)
+				// Crown focus does not survive deactivation: focusing once
+				// at stage build worked on the simulator but a real wrist
+				// re-activates constantly, and an unfocused sequencer
+				// reports NOTHING, silently (first wrist session: taps,
+				// swipes and holds all logged; crown rotation never did).
+				// Re-assert focus on every activation — willActivate is the
+				// main thread, which the sequencer requires.
+				refocusCrown()
 				didActivate()
 			}},
 		{Cmd: objc.RegisterName("didDeactivate"),

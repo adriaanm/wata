@@ -305,6 +305,13 @@ func AddGestures(v uikit.UIView) {
 	startCrown()
 }
 
+// refocusCrown re-asserts crown focus on activation (shell.go's
+// willActivate). startCrown is idempotent — the delegate class and instance
+// are created once, and re-setting the delegate plus `focus` is exactly what
+// a re-activation needs. Before the first AddGestures this focuses a
+// sequencer nothing listens to yet, which is harmless.
+func refocusCrown() { startCrown() }
+
 // startCrown focuses the Digital Crown and turns its rotation into Navigate.
 // The sequencer belongs to the interface controller, which is why shell.go
 // keeps the instance.
