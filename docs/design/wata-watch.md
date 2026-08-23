@@ -511,3 +511,41 @@ hands the installed app alice's credentials as argv — the config
 persists, so later icon taps rejoin the session — (`launch`), bob's
 inbound voice message (`send`), the log pull (`log`), and the
 server-side family message count (`check`).
+
+## The socket wall (2026-08-23): watchOS denies BSD sockets, so Go cannot dial
+
+The first wrist session hit a wall the simulator structurally cannot
+show: **every dial from the app fails with EHOSTUNREACH** (`connect: no
+route to host`) — the LAN server, public IPv4 (`1.1.1.1:80`), public
+IPv6, identically — and it fails the same on the Bluetooth phone proxy
+and on the watch's own wifi (paired iPhone in Bluetooth-off, watch
+visibly on the network, the CoreDevice tunnel riding that same wifi the
+whole time). That pattern is not routing and not local-network privacy
+(a privacy denial would spare public addresses): it is watchOS policy.
+Third-party watch apps get networking through **URLSession**; low-level
+sockets are reserved for streaming-audio sessions, and Go's entire net
+stack is raw BSD sockets. DNS half-works in the same runs because Go's
+darwin resolver goes through `getaddrinfo` (system services), which is
+how a lookup can succeed while every connect is refused. The simulator
+shares the host's network stack, so `watch-spike --only net` and every
+watch gate passed while this wall existed all along.
+
+The consequence and the fix are both at the capability seam that exists
+for exactly this: `caps.scala`'s `HttpDo`. The queued work
+(`WATCH-URLSESSION-HTTP`) is an NSURLSession-backed `HttpDo` — purego,
+delegate-based (`didReceiveData` / `didCompleteWithError`, no Obj-C
+blocks), macaudio's delegate shape — which is also strictly better than
+sockets ever were on this platform: URLSession traffic transparently
+rides the Bluetooth proxy when the phone is nearby, which raw sockets
+never would. Open and separate: iroh/QUIC is UDP behind the same wall,
+so the watch's long-term transport story (relay over URLSession
+streams? companion-proxied?) is unresolved; until the HttpDo lands the
+watch client cannot log in on hardware at all, which blocks
+`WATCH-AUDIO`'s receive half but none of the input work.
+
+Diagnosis note for the next wall of this kind: the error text only
+became visible because the app-side `HttpDo` now prints
+`http: <method> <url> failed: <Go error>` on transport failure — the
+core's `status == 0` contract deliberately erases the cause, so the
+naming has to happen at the capability implementation, and on a wrist
+the pulled sandbox log is the only place it can surface.

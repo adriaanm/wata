@@ -95,7 +95,12 @@ object IosCaps:
       val raw = go.io.readAll(resp.body)
       resp.body.close()
       out = HttpResponse(resp.statusCode.toInt, go.string(raw))
-    catch case e: sgo.GoError => out = HttpResponse(0, "")
+    catch
+      case e: sgo.GoError =>
+        // status 0 is all the core sees; the CAUSE is only nameable here,
+        // and on a device a pulled log is the one place it can surface.
+        println("http: " + req.method + " " + req.url + " failed: " + e.message)
+        out = HttpResponse(0, "")
     out
 
   /** "" body -> nil reader (a GET), else a strings.Reader over the
