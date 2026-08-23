@@ -102,6 +102,10 @@ def bundle(app_path, binary, bundle_id, min_watchos=MIN_WATCHOS,
         # lands on SetupMixer, nowhere near an obvious mic call.
         "NSMicrophoneUsageDescription":
             "wata records voice messages to send to your family.",
+        # The transport is URLSession (plan 0075); the dev-tier server is
+        # plain http on a LAN address, which ATS refuses by default. Same
+        # key watch-device.py sets for the device bundle.
+        "NSAppTransportSecurity": {"NSAllowsArbitraryLoads": True},
     }
     if delegate_class is not None:
         # WatchKit reads the delegate under the EXTENSION key even for a

@@ -1,21 +1,22 @@
 import language.experimental.saferExceptions
 
-/** The APP-side capability impls for the iOS client: `HttpDo` over the
- *  net/http CLIENT facade and `Clock` over `go.time`, with wata-fb's iroh
- *  seam (plan 0062): a present iroh config (Enrol.irohPath — the sandbox
- *  file, or `WATA_IROH_CONFIG` for a harness) swaps the client for one
- *  whose connections are iroh streams to the configured peer. Same
- *  `go.net.http.Client` facade type, so nothing above the capability line
- *  knows. Transport failure of a single request is the same everywhere: a
- *  thrown `GoError` becomes `HttpResponse(0, "")` — the portable core never
- *  sees Go errors. */
+/** The watch-side capability impls: `Clock` over `go.time`, and `HttpDo`
+ *  over **NSURLSession** (`nsurlsession.scala`) — plan 0075. watchOS denies
+ *  BSD sockets to third-party apps, so the net/http client this file used to
+ *  build (and the iroh-stream variant behind Enrol's seam, plan 0062) could
+ *  never complete a request from the wrist; both socket transports are gone
+ *  from this app. Plan 0074 ruled the watch never speaks iroh anyway — its
+ *  transport is Matrix C-S HTTPS over URLSession, which also rides the
+ *  phone's Bluetooth proxy for free. Enrol's CONFIG half still serves (it
+ *  provisions credentials); only its transport half is inert here.
+ *
+ *  Transport failure of a single request is the same contract as ever: the
+ *  capability folds it into `HttpResponse(0, "")`, naming the cause on the
+ *  log at the seam, and the portable core never sees an error. */
 
 class IosClock extends Clock:
   def nowUnixMillis(): Long = go.time.nowUnixMilli()
   def sleepMs(ms: Long): Unit = IosCaps.sleepMs(ms)
-
-class IosHttp(client: go.net.http.Client) extends HttpDo:
-  def send(req: HttpRequest): HttpResponse = IosCaps.send(req, client)
 
 object IosCaps:
 
@@ -27,31 +28,18 @@ object IosCaps:
     if ms > 0L then go.time.After(go.time.milliseconds(ms.toInt)).recv()
     ()
 
-  def httpDo(): HttpDo =
-    if Enrol.configured() then IosHttp(irohClient(Enrol.irohPath()))
-    else IosHttp(go.httpc.newClient(timeoutMs()))
+  def httpDo(): HttpDo = WristHttp(timeoutMs())
 
-  /** a PLAIN-TCP `HttpDo`, whatever the session's transport — the enrolment
-   *  announce needs it (wata-fb's same seam: a device showing the enrol
-   *  screen is a device the iroh transport has just refused). */
-  def plainHttp(timeoutMs: Long): HttpDo = IosHttp(go.httpc.newClient(timeoutMs))
+  /** the same transport at a caller-chosen deadline — the enrolment
+   *  announce's shorter fuse (wata-fb's seam shape). There is one transport
+   *  on this platform; "plain" only means the deadline is not the sync
+   *  long-poll's. */
+  def plainHttp(timeoutMs: Long): HttpDo = WristHttp(timeoutMs)
 
-  /** the iroh-backed client, or — on a failed init (bad config, a build
-   *  without the staged lib) — a loud line, a LATCHED "transport
-   *  unavailable" the boot screen names, and a client that can only fail.
-   *  Downgrading silently to plain TCP would show "waiting for network"
-   *  forever against a transport that was never coming up. */
-  def irohClient(cfgPath: String): go.net.http.Client =
-    var out = go.net.http.DefaultClient
-    try out = go.irohnet.newHTTPClient(cfgPath)
-    catch
-      case e: sgo.GoError =>
-        println("irohnet: client init failed: " + e.message)
-        transportDownC.set(true)
-    go.httpc.withTimeout(out, timeoutMs())
-
-  private val transportDownC: sgo.Atomic[Boolean] = sgo.atomic(false)
-  def transportUnavailable(): Boolean = transportDownC.get()
+  /** always false today: there is no second transport left to lose. The
+   *  boot screen still asks (the shared bodies read it), so the answer
+   *  stays rather than the question being forked per platform. */
+  def transportUnavailable(): Boolean = false
 
   /** per-request deadline (wata-fb's shape — plan 0045 slice 1). Without one
    *  a hung server freezes the state machine in Connecting/Syncing forever.
@@ -86,40 +74,4 @@ object IosCaps:
       i = i + 1
     out
 
-  def send(req: HttpRequest, client: go.net.http.Client): HttpResponse =
-    var out = HttpResponse(0, "")
-    try
-      val r = go.net.http.newRequest(req.method, req.url, bodyReader(req))
-      setHeaders(r, req.headers)
-      val resp = client.Do(r)
-      val raw = go.io.readAll(resp.body)
-      resp.body.close()
-      out = HttpResponse(resp.statusCode.toInt, go.string(raw))
-    catch
-      case e: sgo.GoError =>
-        // status 0 is all the core sees; the CAUSE is only nameable here,
-        // and on a device a pulled log is the one place it can surface.
-        println("http: " + req.method + " " + req.url + " failed: " + e.message)
-        out = HttpResponse(0, "")
-    out
 
-  /** "" body -> nil reader (a GET), else a strings.Reader over the
-   *  (binary-safe) body String. */
-  def bodyReader(req: HttpRequest): go.io.Reader =
-    if req.body == "" then null.asInstanceOf[go.io.Reader]
-    else go.strings.newReader(req.body)
-
-  def setHeaders(r: go.net.http.Request, hs: List[(String, String)]): Unit =
-    var cur = hs
-    var going = true
-    while going do
-      cur match
-        case p :: t =>
-          setHeader1(r, p)
-          cur = t
-        case Nil => going = false
-
-  def setHeader1(r: go.net.http.Request, p: (String, String)): Unit =
-    val k: String = p._1
-    val v: String = p._2
-    r.header.set(k, v)

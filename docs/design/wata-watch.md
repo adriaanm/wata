@@ -541,17 +541,29 @@ shares the host's network stack, so `watch-spike --only net` and every
 watch gate passed while this wall existed all along.
 
 The consequence and the fix are both at the capability seam that exists
-for exactly this: `caps.scala`'s `HttpDo`. The queued work
-(`WATCH-URLSESSION-HTTP`) is an NSURLSession-backed `HttpDo` — purego,
-delegate-based (`didReceiveData` / `didCompleteWithError`, no Obj-C
-blocks), macaudio's delegate shape — which is also strictly better than
-sockets ever were on this platform: URLSession traffic transparently
-rides the Bluetooth proxy when the phone is nearby, which raw sockets
-never would. Open and separate: iroh/QUIC is UDP behind the same wall,
-so the watch's long-term transport story (relay over URLSession
-streams? companion-proxied?) is unresolved; until the HttpDo lands the
-watch client cannot log in on hardware at all, which blocks
-`WATCH-AUDIO`'s receive half but none of the input work.
+for exactly this: `caps.scala`'s `HttpDo`. The fix has LANDED
+(plan 0075): an NSURLSession-backed `HttpDo` written entirely in Sgola
+(`nsurlsession.scala`) — msgSend out through `go.purego.syscallN`, the
+delegate methods IN as `go.callback` IMPs on a synthesized
+`WataHttpDelegate` — behind the same seam, so nothing above
+`caps.httpDo()` changed. The dialect constraints that shaped it (bytes
+cross by sandbox temp file because Sgola cannot dereference; integer
+arguments are spelled by omission because Uintptr has no literal, which
+is also why the deadline is a Sgola-side select rather than
+NSURLSession's double-valued timeout) are recorded in the file header
+and plan 0075. And it is strictly better than sockets ever were on this
+platform: URLSession traffic transparently rides the Bluetooth proxy
+when the phone is nearby, which raw sockets never would.
+
+Verification state: the sgola compile is green (the CONC-8 crossing
+checks included); the runtime gates are Mac-bound — `just
+watch-interptest` / `just watch-e2e` must re-run green over the new
+transport in the simulator, then `just watch-wrist` is the point of the
+whole exercise: login from the wrist, where every dial was structurally
+impossible before. iroh/QUIC remains UDP behind the same wall — the
+watch never speaks iroh (plan 0074's ruling), and its long-term
+transport story past plain HTTPS is unresolved by choice until the
+funnel chain lands.
 
 Diagnosis note for the next wall of this kind: the error text only
 became visible because the app-side `HttpDo` now prints

@@ -183,6 +183,11 @@ def bundle():
         # Required. Without it the first mic use is a SIGABRT, not a prompt.
         "NSMicrophoneUsageDescription":
             "wata records voice messages to send to your family.",
+        # The transport is URLSession (plan 0075) and the dev-tier server is
+        # plain http on a LAN address, which ATS refuses by default (only
+        # localhost is exempt). Self-hosters serve over their own TLS name in
+        # production; the dev server must be reachable to get there.
+        "NSAppTransportSecurity": {"NSAllowsArbitraryLoads": True},
     }
     (APP / "Info.plist").write_bytes(plistlib.dumps(info))
     print(f"bundled {APP} (unsigned)")
