@@ -1,6 +1,25 @@
 # 0074 — The watch goes out alone
 
-Status: proposed
+Status: accepted
+
+Owner rulings (2026-08-23):
+
+- **Self-hosters bring their own Apple developer account.** APNs pushes
+  go through the operator's own key and bundle id; wata does not proxy
+  pushes for third-party servers. The hosted tier uses ours.
+- **The ingress is Tailscale Funnel** — the owner already runs
+  tailscale. Funnel terminates TLS *on the served node* (its ingress
+  relays are SNI proxies carrying ciphertext), which keeps "the network
+  is the trust boundary" intact; the ts.net hostname and HTTPS-only
+  ports are fine because the URL is client config and the watch speaks
+  HTTPS anyway.
+- **Open question, deliberately not decided here:** once Funnel gives
+  every self-hosted server a public HTTPS name, is iroh still earning
+  its keep on the handsets? Its remaining distinct value: direct LAN
+  paths when a kid is home, node-id-as-credential enrolment, and no
+  dependence on Tailscale as a third party. Queued as
+  `IROH-STILL-EARNING-KEEP`; nothing in this plan depends on the
+  answer.
 
 ## The problem
 
