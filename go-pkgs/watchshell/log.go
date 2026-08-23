@@ -61,6 +61,11 @@ func TeeLog(path string) string {
 				continue
 			}
 		}
+		// Keep ONE previous generation: the truncate-per-launch contract
+		// means an unexpected relaunch (a crash, a watchdog kill) destroys
+		// exactly the run whose evidence mattered. Rename-then-truncate is
+		// cheap and makes `<path>.1` always the run before this one.
+		os.Rename(p, p+".1")
 		f, err = os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if err == nil {
 			landed = p

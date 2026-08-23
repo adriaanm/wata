@@ -36,6 +36,10 @@ var (
 // success, else the error text; on failure the fds are left usable (at
 // worst one stream is already teed).
 func TeeLog(path string) string {
+	// Keep ONE previous generation (watchshell's rule, same reason): an
+	// unexpected relaunch destroys exactly the run whose evidence mattered,
+	// so `<path>.1` is always the run before this one.
+	os.Rename(path, path+".1")
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err.Error()
