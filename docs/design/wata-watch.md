@@ -551,12 +551,19 @@ cross by sandbox temp file because Sgola cannot dereference; integer
 arguments are spelled by omission because Uintptr has no literal, which
 is also why the deadline is a Sgola-side select rather than
 NSURLSession's double-valued timeout) are recorded in the file header
-and plan 0075. And it is strictly better than sockets ever were on this
+and plan 0075. Requests run CONCURRENTLY (plan 0076): `Runtime.start`'s
+syncLoop and actionLoop both drive the same `HttpDo`, and an action must
+not queue behind the ~25s sync long-poll — so all request state
+(accumulator, completion channel, temp paths) is per-send, routed to the
+delegate IMPs off the NSURLSession task pointer through a registry; a
+timed-out send cancels its task and blocks on its own channel, so no
+token or callback outlives its request. The session's serial delegate
+queue serializes callbacks, not transfers.
+And it is strictly better than sockets ever were on this
 platform: URLSession traffic transparently rides the Bluetooth proxy
 when the phone is nearby, which raw sockets never would.
 
-Verification state: the sgola compile is green (the CONC-8 crossing
-checks included); the runtime gates are Mac-bound — `just
+Verification state: the runtime gates are Mac-bound — `just
 watch-interptest` / `just watch-e2e` must re-run green over the new
 transport in the simulator, then `just watch-wrist` is the point of the
 whole exercise: login from the wrist, where every dial was structurally

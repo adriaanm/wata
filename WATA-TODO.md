@@ -141,9 +141,12 @@ blocks + git log; each entry cites where it was recorded.*
 - **`SELECT2-ARM-VAR-MUT`** (filed 2026-08-23, sgola inbox) — an
   `sgo.select2` arm assigning to an enclosing var emits
   `scala.runtime.BooleanRef`, which the Go backend cannot map; the
-  compile dies after typing. Workaround shipped in wata-watch's
-  `nsurlsession.scala`: a module `Atomic[Boolean]` the producer sets
-  before the completion token lands, read after the select.
+  compile dies after typing. Wata's workaround (a module `Atomic[Boolean]`
+  set before the completion token lands) was REMOVED by plan 0076 —
+  `nsurlsession.scala` blocks on a per-request channel after cancel
+  instead of reading an arm flag — but the watch gates have not re-run
+  green over it yet; strike this entry once they have. The underlying
+  emitter gap remains open upstream for any future select-arm mutation.
 
 - **`UINTPTR-INT-ARGS`** (filed 2026-08-23, sgola inbox) — not a
   defect but an IOP-2 edge that makes pure-Sgola FFI awkward both ways:
@@ -151,7 +154,11 @@ blocks + git log; each entry cites where it was recorded.*
   unspellable across SyscallN (zero works by omission), and scalar
   results come back only by render-parse. Workaround shipped:
   omission-of-zero plus contained `asBool`/`asInt` helpers in
-  `nsurlsession.scala` (grep `UINTPTR-INT-ARGS`).
+  `nsurlsession.scala` (grep `UINTPTR-INT-ARGS`; since plan 0076,
+  `asInt` signals garbage as -1 rather than folding it into status 0).
+  Also blocks the honest error-description route there:
+  `dataUsingEncoding:` needs integer argument 8, so diagnostics ride
+  NSString's defaultCStringEncoding write.
 
 - **`PRUNE-DANGLING-MODULE-INIT`** (filed 2026-08-17) — a module-init
   `val x = go.callback(() => Obj.f())` whose val is not read from any

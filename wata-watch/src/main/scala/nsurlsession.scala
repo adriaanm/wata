@@ -1,4 +1,5 @@
 import language.experimental.saferExceptions
+import sgo.add // the Atomic[Int] add extension (the temp-file counter)
 
 /** The watch's `HttpDo` over **NSURLSession** — the socket wall's answer
  *  (`WATCH-URLSESSION-HTTP`, plan 0075, step 1 of plan 0074). watchOS denies
@@ -42,11 +43,18 @@ import language.experimental.saferExceptions
  *    own thread, where no pool exists; both callback bodies and the
  *    send-side construction run inside `go.iosui.poolPush/Pop` brackets.
  *
- *  Threading: the two IMPs share state only through synchronizers (`errC`,
- *  `doneCh`) because they run on a foreign thread — exactly the CONC-8
- *  predicate the registration site checks. `send` itself stays synchronous,
- *  like every other HttpDo; the client core drives it from one goroutine,
- *  so the per-request temp files are not contended. */
+ *  Threading (plan 0076): ALL request state is per-send — accumulator,
+ *  completion channel, temp paths — held in a `ReqState` and routed to the
+ *  delegate IMPs off the NSURLSession task pointer through a registry
+ *  (`Mutex[List[...]]`). The client core drives it from TWO goroutines
+ *  (`Runtime.start`'s syncLoop and actionLoop), and a user action during
+ *  the ~25s sync long-poll must go out immediately, so requests run
+ *  concurrently: the session's serial delegate queue serializes callbacks,
+ *  not transfers. The registry is the only sender↔delegate shared cell.
+ *  A timed-out send cancels its task and blocks on its OWN channel's recv
+ *  — cancellation guarantees exactly one completion callback with an error
+ *  token — then deregisters, so no callback or token ever outlives its
+ *  request and there is nothing global to reset between sends. */
 
 /** the caps-seam impl; `timeoutMs` is the per-request deadline (30s default,
  *  `WATA_HTTP_TIMEOUT_MS` override — clears the server's ~25s long-poll). */
@@ -115,7 +123,7 @@ object NsHttp:
       else if ch == "9" then out = out * 10 + 9
       else ok = false
       i = i + 1
-    if ok then out else 0
+    if ok then out else -1 // garbage is NOT status 0: callers fold < 0 into transport failure
 
   private def cls(name: String): go.Uintptr =
     val (c, _, _) = go.cstring(name) { p => go.purego.syscallN(pGetClass, p) }
@@ -137,10 +145,8 @@ object NsHttp:
   private val selAlloc = mkSel("alloc")
   private val selInit = mkSel("init")
   private val selStringWithUTF8 = mkSel("stringWithUTF8String:")
-  private val selData = mkSel("data")
   private val selDataWithContentsOfFile = mkSel("dataWithContentsOfFile:")
   private val selAppendData = mkSel("appendData:")
-  private val selSetData = mkSel("setData:")
   private val selWriteToFile = mkSel("writeToFile:atomically:") // atomically omitted = NO
   private val selURLWithString = mkSel("URLWithString:")
   private val selRequestWithURL = mkSel("requestWithURL:")
@@ -165,29 +171,43 @@ object NsHttp:
     val (h, _, _) = go.cstring(s) { p => go.purego.syscallN(pMsgSend, clsNSString, selStringWithUTF8, p) }
     h
 
-  // ---- the shared state the delegate IMPs reach ----------------------------
+  // ---- per-request state and the task→state registry (plan 0076) ----------
 
-  /** the reply accumulator, owned (+alloc) and process-long: didReceiveData
-   *  appends into it, send reads and resets it between tasks. */
-  private val acc: go.Uintptr =
-    msg1(msg1(clsMutData, selAlloc), selInit)
+  /** everything a delegate callback needs about ONE request. Shareable:
+   *  `acc` is an address word, `doneCh` a synchronizer. The channel is
+   *  buffered(1) so the delegate thread can NEVER block; it belongs to
+   *  exactly one task, so its recv is unambiguous by construction. */
+  private final class ReqState(val acc: go.Uintptr, val doneCh: sgo.Chan[go.Uintptr]) extends sgo.Shareable
 
-  /** the completion token IS the error handle (nil renders "0"): one
-   *  buffered(1) channel, so the delegate thread can NEVER block — a
-   *  timed-out send just leaves the token for the next request's drain. */
-  private val doneCh: sgo.Chan[go.Uintptr] = sgo.makeChan[go.Uintptr](1)
+  /** task pointer → its ReqState, for live requests only. Inserted before
+   *  resume, removed after the send has its token. The delegate queue is
+   *  serial, so callbacks among themselves never race; this Mutex is the
+   *  only cell they share with senders. */
+  private val live: sgo.Mutex[List[(go.Uintptr, ReqState)]] = sgo.Mutex(Nil)
 
-  /** which arm fired: select2's arms cannot mutate an outer var (SELECT2-ARM-VAR-MUT:
-   *  the emitter has no BooleanRef), so the delegate sets this BEFORE the token lands
-   *  and send() reads it after the select. */
-  private val doneC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  private def samePtr(a: go.Uintptr, b: go.Uintptr): Boolean = ("" + a) == ("" + b)
 
-  private def drainDone(): Unit =
-    var going = true
-    while going do
-      doneCh.tryReceive() match
-        case Some(_) => ()
-        case None    => going = false
+  /** run f with the state registered for `task`, if any (a cancelled
+   *  task's last callbacks may land after deregistration — ignored). */
+  private def route(task: go.Uintptr, f: ReqState => Unit): Unit =
+    live.withLock { l =>
+      def step(xs: List[(go.Uintptr, ReqState)]): Unit = xs match
+        case (t, st) :: rest => if samePtr(t, task) then f(st) else step(rest)
+        case Nil             => ()
+      step(l)
+    }
+
+  private def register(t: go.Uintptr, st: ReqState): Unit =
+    live.withLock(l => l :+ ((t, st)))
+    ()
+
+  private def deregister(t: go.Uintptr): Unit =
+    live.withLock(l => l.filter(p => !samePtr(p._1, t)))
+    ()
+
+  /** unique temp-file names: an incrementing tag per request, since two
+   *  sends can be in flight at once (plan 0076). */
+  private val tmpN: sgo.Atomic[scala.Int] = sgo.atomic(0)
 
   // ---- the two delegate methods, bodies in Sgola ---------------------------
   // Registered ONCE at module init (the trampoline-cap rule); the literals
@@ -196,22 +216,25 @@ object NsHttp:
 
   private val impData: go.Uintptr = go.callback(
     (self: go.Uintptr, cmd: go.Uintptr, sess: go.Uintptr, task: go.Uintptr, data: go.Uintptr) =>
-      onData(data))
+      onData(task, data))
 
   private val impComplete: go.Uintptr = go.callback(
     (self: go.Uintptr, cmd: go.Uintptr, sess: go.Uintptr, task: go.Uintptr, err: go.Uintptr) =>
-      onComplete(err))
+      onComplete(task, err))
 
-  private def onData(data: go.Uintptr): scala.Int =
+  private def onData(task: go.Uintptr, data: go.Uintptr): scala.Int =
     val pool = go.iosui.poolPush()
-    msg2(acc, selAppendData, data)
+    route(task, st => msg2(st.acc, selAppendData, data))
     go.iosui.poolPop(pool)
     0
 
-  private def onComplete(err: go.Uintptr): scala.Int =
+  /** the completion token IS the error handle (nil renders "0") and lands
+   *  on the requesting send's own channel — cancellation of a timed-out
+   *  task still completes through here, which is what makes the send-side
+   *  blocking recv deadlock-free. */
+  private def onComplete(task: go.Uintptr, err: go.Uintptr): scala.Int =
     val pool = go.iosui.poolPush()
-    doneC.set(true)
-    doneCh.send(err)
+    route(task, st => st.doneCh.send(err))
     go.iosui.poolPop(pool)
     0
 
@@ -232,7 +255,7 @@ object NsHttp:
     }
     // v@: = void return, id self, SEL _cmd; one @ per object argument after
     addM(c, "URLSession:dataTask:didReceiveData:", impData, "v@:@@@")
-    addM(c, "URLSession:task:didCompleteWithError:", impComplete, "v@:@@")
+    addM(c, "URLSession:task:didCompleteWithError:", impComplete, "v@:@@@")
     val (_, _, _) = go.purego.syscallN(pRegPair, c)
     msg1(msg1(c, selAlloc), selInit)
 
@@ -254,6 +277,11 @@ object NsHttp:
     val d = FbConfig.stateDir()
     if d == "" then "/tmp" else d
 
+  /** the state dir is process-wide setup, not per-request work: create it
+   *  once here beside the session (review finding: every send paid an
+   *  mkdir syscall). */
+  FbConfig.mkdirAll(tmpDir())
+
   private def writeTmp(path: String, text: String): Unit =
     try
       val fd = go.syscall.open(path,
@@ -272,22 +300,16 @@ object NsHttp:
 
   /** the deadline contract caps.timeoutMs() documents, enforced by select. */
   def send(req: HttpRequest, timeoutMs: Long): HttpResponse =
-    FbConfig.mkdirAll(tmpDir())
     val pool = go.iosui.poolPush()
     val out = doSend(req, timeoutMs)
     go.iosui.poolPop(pool)
     out
 
   private def doSend(req: HttpRequest, timeoutMs: Long): HttpResponse =
-    val reqTmp = tmpDir() + "/wata-http-req.tmp"
-    val resTmp = tmpDir() + "/wata-http-res.tmp"
-    val errTmp = tmpDir() + "/wata-http-err.tmp"
-
-    // reset the shared state BEFORE anything can resume
-    doneC.set(false)
-    drainDone()
-    val empty = msg1(clsNSData, selData) // factory answer, autoreleased
-    msg2(acc, selSetData, empty)
+    val n = tmpN.add(1)
+    val reqTmp = tmpDir() + "/wata-http-" + n + "-req.tmp"
+    val resTmp = tmpDir() + "/wata-http-" + n + "-res.tmp"
+    val errTmp = tmpDir() + "/wata-http-" + n + "-err.tmp"
 
     if req.url == "" then return HttpResponse(0, "")
     val url = nsstr(req.url)
@@ -315,21 +337,29 @@ object NsHttp:
       msg2(r, selSetHTTPBody, body)
       rmTmp(reqTmp) // NSData copied the contents
 
+    // per-request state, visible to the delegates from BEFORE resume until
+    // AFTER our token is consumed (plan 0076)
     val task = msg2(session, selDataTask, r)
+    val acc = msg1(msg1(clsMutData, selAlloc), selInit)
+    val st = ReqState(acc, sgo.makeChan[go.Uintptr](1))
+    register(task, st)
     msg1(task, selResume)
 
-    sgo.select2(doneCh, go.time.After(go.time.milliseconds(timeoutMs.toInt)))(
-      (_err: go.Uintptr) => (), (_t: go.time.Time) => ())
+    sgo.select2(st.doneCh, go.time.After(go.time.milliseconds(timeoutMs.toInt)))(
+      (_err: go.Uintptr) => (), (_t: go.time.Time) => msg1(task, selCancel))
 
-    if !doneC.get() then
-      msg1(task, selCancel)
-      println("http: " + req.method + " " + req.url + " failed: timed out after " + timeoutMs + " ms")
-      return HttpResponse(0, "")
-
-    // the completion token IS the error handle; nil renders "0"
-    val err = doneCh.recv()
+    // ONE token per task, guaranteed: cancel makes NSURLSession deliver
+    // didCompleteWithError: with an error token, so blocking here after
+    // either select arm is deadlock-free and nothing stale survives us.
+    val err = st.doneCh.recv()
+    deregister(task)
     if ("" + err) != "0" then
       // name the cause while we can: description -> temp file -> Sgola.
+      // UINTPTR-INT-ARGS blocks the honest route (dataUsingEncoding: needs
+      // integer argument 8, unspellable), so this rides
+      // -[NSString writeToFile:] in defaultCStringEncoding — non-ASCII
+      // causes may mangle. Diagnostic-only; revisit when a Uintptr/Int
+      // conversion lands.
       // writeToFile:atomically:'s flag is zero, spelled by OMISSION (msg2's
       // trailing registers are zero-filled) — the one integer argument the
       // selector takes, and it is the zero.
@@ -339,13 +369,19 @@ object NsHttp:
       rmTmp(errTmp)
       HttpResponse(0, "")
     else
-      var st = 0
+      var code = 0
       val resp = msg1(task, selResponse)
       if ("" + resp) != "0" then
         if asBool(msg2(resp, selRespondsTo, selStatusCode)) then
-          st = asInt(msg1(resp, selStatusCode))
+          code = asInt(msg1(resp, selStatusCode))
+      if code < 0 then code = 0
       var bodyS = ""
+      // pre-create at 0600: writeToFile:atomically:NO truncates in place and
+      // keeps the mode, and this file carries access tokens inside the sandbox
+      val rfd = go.syscall.open(resTmp,
+        go.syscall.O_WRONLY | go.syscall.O_CREAT | go.syscall.O_TRUNC, 384)
+      go.syscall.close(rfd)
       if asBool(msg2(acc, selWriteToFile, nsstr(resTmp))) then
         bodyS = readTmp(resTmp)
       rmTmp(resTmp)
-      HttpResponse(st, bodyS)
+      HttpResponse(code, bodyS)

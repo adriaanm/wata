@@ -1,0 +1,9 @@
+0
+12402 139093335 1776012279127140454 3eeab8cbedc5b3edca2a49fc9d23f86c 0 /Users/adriaan/g/wata/src/fbclient/zig-pkg/N-V-__8AAIXaBgCxF6eJGl2-u82_CFMzLWeFnRxykudW0Zrt/include/tinyalsa/pcm.h
+1443 139093328 1776012279126704168 6b29db96ae3baa90eaff69b3f7bee795 0 /Users/adriaan/g/wata/src/fbclient/zig-pkg/N-V-__8AAIXaBgCxF6eJGl2-u82_CFMzLWeFnRxykudW0Zrt/include/tinyalsa/attributes.h
+2253 139075905 1775912607000000000 4068489c4c33e4df826e1c38b4476e42 1 libc/include/generic-musl/sys/time.h
+864 139075775 1775912607000000000 b766f9fa61ab633e671c8aa30b77b4c5 1 libc/include/generic-musl/features.h
+1331 139075887 1775912607000000000 6ca8ee6217e512396d19db8b8a3753ba 1 libc/include/generic-musl/sys/select.h
+11201 139073426 1775912608000000000 f6b09bdde89dc0697a7b972eb9cab7b3 1 libc/include/arm-linux-musl/bits/alltypes.h
+761 139068518 1775912609000000000 3053693e792410f4ae4914dc1d6113db 1 compiler/aro/include/stddef.h
+5555 139093333 1776012279127052663 63127d545941e9f6b775c8617876912b 0 /Users/adriaan/g/wata/src/fbclient/zig-pkg/N-V-__8AAIXaBgCxF6eJGl2-u82_CFMzLWeFnRxykudW0Zrt/include/tinyalsa/mixer.h
