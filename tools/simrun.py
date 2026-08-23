@@ -219,8 +219,11 @@ def launch_and_expect(sc, udid, app_path, bundle_id, expect,
                    capture_output=True, text=True)
     proc.terminate()
 
+    # re.M so an anchored pattern (^...$) means "some LINE is exactly this",
+    # not "the whole capture starts with this" — without it, any line printed
+    # before the expected one silently un-matches every anchored expectation.
     text = "\n".join(lines)
-    missing = [p for p in expect if not re.search(p, text)]
+    missing = [p for p in expect if not re.search(p, text, re.M)]
     return lines, elapsed, missing
 
 

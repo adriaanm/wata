@@ -77,24 +77,36 @@ def main(argv):
                     help="app data container to read (default: "
                          "$WATA_BUNDLE_ID, else the wata app installed on the "
                          "phone)")
-    ap.add_argument("--source", default="Documents/wata.log",
-                    help="path inside the container (default: %(default)s)")
+    ap.add_argument("--source", default=None,
+                    help="path inside the container (default: "
+                         "Documents/wata.log, then tmp/wata.log — a real "
+                         "watch's container root is unwritable, so TeeLog "
+                         "lands the log in tmp/ there)")
     ap.add_argument("--out", default=None,
                     help="save the log here instead of printing it")
     args = ap.parse_args(argv)
 
     device = args.device or ios_device.pick_device()
     bundle_id = args.bundle_id or wata_bundle(device)
+    sources = [args.source] if args.source else ["Documents/wata.log",
+                                                 "tmp/wata.log"]
     with tempfile.TemporaryDirectory() as td:
         dest = pathlib.Path(args.out) if args.out else pathlib.Path(td) / "wata.log"
-        cmd = ["xcrun", "devicectl", "device", "copy", "from",
-               "--device", device,
-               "--domain-type", "appDataContainer",
-               "--domain-identifier", bundle_id,
-               "--source", args.source,
-               "--destination", str(dest), "--quiet"]
-        print("+", " ".join(cmd), file=sys.stderr)
-        subprocess.run(cmd, check=True)
+        for i, source in enumerate(sources):
+            cmd = ["xcrun", "devicectl", "device", "copy", "from",
+                   "--device", device,
+                   "--domain-type", "appDataContainer",
+                   "--domain-identifier", bundle_id,
+                   "--source", source,
+                   "--destination", str(dest), "--quiet"]
+            print("+", " ".join(cmd), file=sys.stderr)
+            r = subprocess.run(cmd)
+            if r.returncode == 0:
+                break
+            if i + 1 < len(sources):
+                print(f"({source} not there — trying the next)", file=sys.stderr)
+            else:
+                raise SystemExit(r.returncode)
         if args.out:
             print(f"saved {dest}", file=sys.stderr)
         else:

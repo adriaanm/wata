@@ -17,6 +17,7 @@
 package watchshell
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -32,20 +33,41 @@ var (
 )
 
 // TeeLog redirects fds 1 and 2 (stdout, stderr) through pipes whose reader
-// goroutines copy every chunk to both the original fd and `path` (created/
-// truncated, 0600). Call FIRST in main, before any output. Returns "" on
-// success, else the error text; on failure the fds are left usable (at
+// goroutines copy every chunk to both the original fd and a log file
+// (created/truncated, 0600). Call FIRST in main, before any output. Returns
+// "" on success, else the error text; on failure the fds are left usable (at
 // worst one stream is already teed).
+//
+// The file is `path` where that is creatable, else `$TMPDIR/<basename>` —
+// the same fallback boot.log needs and for the same reason: a real watch's
+// container root ($HOME) is not writable, so $HOME/Documents cannot even be
+// created there and a tee bound to it would drop every line an icon-tap
+// launch produces. The first teed line names where the log landed, so a
+// pulled file identifies itself and a puller knows which path to try.
 func TeeLog(path string) string {
-	// A watch container starts without Documents/ (an iPhone's has it) —
-	// create the parent rather than losing the whole log to ENOENT.
-	if dir := filepath.Dir(path); dir != "." && dir != "/" {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err.Error()
+	candidates := []string{path}
+	if t := os.Getenv("TMPDIR"); t != "" {
+		candidates = append(candidates, filepath.Join(t, filepath.Base(path)))
+	}
+	var f *os.File
+	var err error
+	var landed string
+	for _, p := range candidates {
+		// A watch container starts without Documents/ (an iPhone's has it) —
+		// create the parent rather than losing the whole log to ENOENT.
+		if dir := filepath.Dir(p); dir != "." && dir != "/" {
+			if e := os.MkdirAll(dir, 0o700); e != nil {
+				err = e
+				continue
+			}
+		}
+		f, err = os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err == nil {
+			landed = p
+			break
 		}
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
+	if f == nil {
 		return err.Error()
 	}
 	if err := teeFd(1, f); err != nil {
@@ -55,6 +77,7 @@ func TeeLog(path string) string {
 	if err := teeFd(2, f); err != nil {
 		return err.Error()
 	}
+	fmt.Fprintf(os.Stdout, "log: tee -> %s\n", landed)
 	return ""
 }
 

@@ -74,8 +74,9 @@ PASSWORD = "testpass123"
 PORT = int(os.environ.get("WATCH_E2E_PORT") or random.randint(20000, 39999))
 BASE = f"http://127.0.0.1:{PORT}"
 
-# NO ^/$ anchors: launch_and_expect searches the JOINED output without
-# MULTILINE, and console-pty lines can carry a stray \r.
+# ^/$ anchors are line-wise (launch_and_expect searches with re.M), but
+# console-pty lines can carry a stray \r that still defeats `$` — prefer
+# unanchored patterns here.
 EXPECT = [
     # the stage was built from a panel the device REPORTED, not from a
     # constant: a wrist, a non-zero size in points, and a grid derived from

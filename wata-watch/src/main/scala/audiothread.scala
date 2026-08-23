@@ -199,6 +199,10 @@ object AudioThread:
   def finishRecording(evts: sgo.Chan[AudioEvt], frames: List[Bytes], totalSamples: Long): Unit =
     val ogg = Ogg.writeStream(ListOps.reverse(frames))
     val durMs = totalSamples * 1000L / 48000L
+    // The capture's assertable surface: `send: complete` needs the network,
+    // so without this line a wrist recording that uploads slowly (or never)
+    // is indistinguishable in a pulled log from a mic that captured nothing.
+    println("audio: recorded ms=" + durMs + " ogg=" + ogg.length)
     evts.trySend(AeRecordingDone(ogg, durMs))
     ()
 
@@ -289,6 +293,10 @@ object AudioThread:
         println("audio: playback failed: " + e.getMessage)
         ok = false
     if ok then
+      // The playback's assertable surface: the receipt AePlaybackDone
+      // triggers is invisible in a log pulled off a wrist, and failures
+      // already print — a run with neither line means playback never ran.
+      println("audio: playback done pcm=" + pcm.length)
       evts.trySend(AePlaybackDone())
       ()
     else

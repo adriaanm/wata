@@ -474,7 +474,13 @@ not, both fixed in `go-pkgs/watchshell`:
   lost the whole sandbox log to ENOENT; it now creates the parent. The
   container ROOT (`$HOME`) is not writable at all — anything writing
   there must fall back to `$TMPDIR`, which is why `boot.log` lives in
-  `tmp/` on a real watch.
+  `tmp/` on a real watch, and why TeeLog carries the same fallback:
+  where `$HOME/Documents` cannot be created the tee lands at
+  `$TMPDIR/wata.log`, its first line names where it landed, and
+  `just ios-log` tries `Documents/wata.log` then `tmp/wata.log`. Without
+  that, every line an icon-tap launch prints — including the `input:`
+  and `audio:` evidence the hardware legs are judged on — went to the
+  void.
 
 With all of that in, the full boot trace runs on the wrist:
 `cinit → goinit → main → config → started → wkmain → launched →
@@ -494,4 +500,14 @@ threads had not.
 
 The open hardware questions are now whether a real long press is
 delivered (`WATCH-INPUT-DELIVERY`) and the real-audio round trip
-(`WATCH-AUDIO`).
+(`WATCH-AUDIO`). Their evidence surfaces are in place: every discrete
+intent prints `input: <name>` as it is applied (navigate prints its
+richer line), and the audio thread prints `audio: recorded ms=… ogg=…`
+at capture end and `audio: playback done pcm=…` when a clip plays to
+completion — all of it lands in the sandbox log a wrist session pulls
+afterwards. `just watch-wrist` (tools/watch-wrist.py) is that session's
+scriptable half: a LAN wata-server (`serve`), a devicectl launch that
+hands the installed app alice's credentials as argv — the config
+persists, so later icon taps rejoin the session — (`launch`), bob's
+inbound voice message (`send`), the log pull (`log`), and the
+server-side family message count (`check`).

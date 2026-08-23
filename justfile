@@ -529,6 +529,16 @@ watch-interptest *FLAGS:
 watch-device *FLAGS:
     tools/watch-device.py {{FLAGS}}
 
+# plan 0069's wrist session: the scriptable half of the hardware legs
+# (WATCH-INPUT-DELIVERY, WATCH-AUDIO). Stages, owner's fingers between them:
+#   just watch-wrist serve    # LAN wata-server, foreground
+#   just watch-wrist launch   # start the installed app against it
+#   just watch-wrist send     # bob sends a voice message
+#   just watch-wrist log      # pull the app's sandbox log off the watch
+#   just watch-wrist check    # server-side family message count
+watch-wrist *FLAGS:
+    tools/watch-wrist.py {{FLAGS}}
+
 # plan 0070: photograph the rolodex on the watch simulator — at rest, mid-scroll
 # with the stack open, and settled on another contact. A LOOKING tool, not a
 # gate (watch-interptest's rolodex cases are the oracle); not in ci.

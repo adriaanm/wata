@@ -736,18 +736,19 @@ object Pump:
   def applyIntent(st0: PumpSt, kind: scala.Int, ctx: FrameCtx): PumpSt =
     if kind == Intents.NAVIGATE then navigate(st0, go.watchshell.intentAxis(),
       go.watchshell.intentAmount(), ctx)
-    else if kind == Intents.CHOOSE then tap(st0, KEnter(), ctx)
-    else if kind == Intents.BACK then tap(st0, KBack(), ctx)
-    else if kind == Intents.TALK_DOWN then applyKey(st0, KeyEvent(KPtt(), Pressed()), ctx)
-    else if kind == Intents.TALK_UP then applyKey(st0, KeyEvent(KPtt(), Released()), ctx)
-    else if kind == Intents.RAW then tap(st0, rawKey(go.watchshell.intentCode()), ctx)
     else
-      // WAKE / SLEEP: the wrist rose or dropped. Nothing acts on them yet —
-      // the screen is WatchKit's to blank — but they are logged so the
-      // lifecycle is visible in the same trace as everything else.
-      if kind == Intents.WAKE || kind == Intents.SLEEP then
-        println("input: " + Intents.name(kind))
-      st0
+      // Every discrete intent leaves a line before it acts (navigate logs
+      // its own richer one). On a wrist this log is the ONLY witness that a
+      // recognizer's action fired at all — a pulled wata.log with these
+      // lines is what settles WATCH-INPUT-DELIVERY, and WAKE/SLEEP ride
+      // along so the lifecycle is visible in the same trace.
+      println("input: " + Intents.name(kind))
+      if kind == Intents.CHOOSE then tap(st0, KEnter(), ctx)
+      else if kind == Intents.BACK then tap(st0, KBack(), ctx)
+      else if kind == Intents.TALK_DOWN then applyKey(st0, KeyEvent(KPtt(), Pressed()), ctx)
+      else if kind == Intents.TALK_UP then applyKey(st0, KeyEvent(KPtt(), Released()), ctx)
+      else if kind == Intents.RAW then tap(st0, rawKey(go.watchshell.intentCode()), ctx)
+      else st0
 
   /** one Navigate: an IMPULSE into the motion model on the rolodex, and whole
    *  rows in a conversation.
