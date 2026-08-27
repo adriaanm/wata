@@ -98,11 +98,21 @@ Bold — all OFL/free, vendored under `tools/fonts/`.
 > face on the handset, once. Two fallbacks stay named if the physical panel
 > disagrees: `github.com/golang/freetype`'s bytecode hinter (matches
 > baked-hinted; archived upstream, which is why it is not first choice), and
-> 12 px in place of 11. The FACE is still the owner's pick by eye — Inter
-> leads at DISPLAY, Atkinson Hyperlegible at 16/11 px — so both are vendored
-> and the role table names a face per entry; the default is Inter until the
-> on-panel session rules. `HintingFull` in x/image is a trap: it has no
+> 12 px in place of 11. The FACE is a runtime CONFIGURATION, not a constant
+> (owner ruling 2026-08-27): both faces are vendored, `FbTypeRoles` resolves
+> the role table against the `type_face` config key ("atkinson" | "inter"),
+> and the default is ATKINSON — the on-panel A/B is a config edit plus a
+> restart, never a rebuild. `HintingFull` in x/image is a trap: it has no
 > hinter and only quantises advances — soft pixels AND the gaps.
+>
+> **Landed 2026-08-27 (stage 1):** `go-pkgs/strikes` (pure Go, embeds the
+> four ttfs, lazy per-strike rasterisation), the `go.strikes` facade,
+> `FbTypeRoles`, the role-aware `FbPaint.drawLabel` (measure/align/centre/
+> clip, coverage x alpha x colour blending, 5x8 fallback for STATUS), the
+> `type_face` config key, and the `striketest` selfcheck in fb-smoke with a
+> pinned byte-determinism digest. No golden moved — no fb body emits `VLabel`
+> into a rendered frame until stage 3. Detail in `docs/design/wata-fb.md`,
+> "The display stack".
 
 Whatever produces them:
 

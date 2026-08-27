@@ -160,7 +160,45 @@ methods on a class; there's no object wrapping the buffer.
 `Color` (`display.scala:23`) holds precomputed RGB565 constants plus
 an `rgb()` helper for dynamic colors.
 
-Text uses a 5x8 bitmap font (`Font`, `display.scala:92`), a 256-glyph
+**Type comes in two tiers.** The rolodex design language (plan 0077)
+draws real type through **strikes**: one face at one pixel size as
+renderable data — per-glyph alpha-coverage bitmaps plus
+advance/bearing tables, printable ASCII. They are rasterised **once at
+boot, lazily per strike**, by `go-pkgs/strikes` (pure Go,
+`golang.org/x/image/font/opentype` at `HintingNone` — x/image has no
+hinter; `HintingFull` only quantises advances, opening uneven word
+gaps at 11 px), which embeds two OFL faces: Inter and Atkinson
+Hyperlegible (Bold + Medium cuts; Atkinson's "medium" is its Regular).
+The `go.strikes` facade (`strikes.scala`) crosses plain ints/strings/
+bytes; a strike is a small int id from the Go-owned table.
+
+`FbTypeRoles` (`typeroles.scala`, symlink-shared to wata-mac) is the
+ONE place a `TypeRole` becomes a strike: `DISPLAY` → 30 px bold,
+`NAME` → 16 px (bold when `TypeWeight.BOLD`, else medium), `CAPTION` →
+11 px medium, `STATUS` → no strike, the 5x8 grid font. The **face is a
+config choice**, not a constant (owner ruling 2026-08-27):
+`FbConfig.typeFace()` reads the `type_face` key — `"atkinson"`
+(default) or `"inter"`, unknown values fall back loudly — primed by
+`Ui.resetCells`, so the on-panel A/B is a config edit plus a restart,
+no rebuild. Live switching has no machinery on purpose;
+restart-applies is the contract. Open item: no settings row exposes
+the key yet — a dev-settings row can come later if the A/B wants one.
+
+`FbPaint.drawLabel` is the consumer: resolve the strike, measure the
+text (fractional advances summed Go-side, rounded once) to honour
+`TextAlign`, centre vertically by ascent+descent, then blend each
+glyph pixel as coverage x label alpha x colour (`Draw.blendPixel` →
+`Alpha.over`), with the pen accumulating 26.6 fixed-point advances and
+each glyph landing at the rounded pen. The label's box is a hard clip
+— a run wider than its box truncates at the edge, mid-glyph if it
+must. A strike-less role takes `drawLabelGrid`, the pre-strike 5x8
+path, verbatim. Rasterisation is byte-deterministic across
+darwin/linux (integer fixed point, no platform text stack); the
+`striketest` selfcheck in fb-smoke pins width bands, coverage, and one
+strike's FNV digest — the portability witness that lets goldens drawn
+with strikes be regenerated on any host.
+
+Below the strikes, text uses a 5x8 bitmap font (`Font`, `display.scala:92`), a 256-glyph
 table baked in as an `IArray[Int]` literal (`display.scala:112`) —
 mostly ASCII plus a handful of custom icon glyphs at 0x80-0x90
 (battery, checkmark, wifi, signal bars, the connectivity element's

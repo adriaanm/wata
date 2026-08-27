@@ -36,3 +36,8 @@ godep github.com/adriaanm/wata/go-pkgs/mackeychain go-pkgs/mackeychain
 # net/http facade binds the Client type, not its fields, so the per-request
 # Timeout comes from this tiny Go package, same as wata-fb
 godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc
+
+# the boot-time type rasteriser (plan 0077 stage 1) — the shared paint.scala
+# compiles here, so its go.strikes facade must bind; the retained backend
+# never takes the strike path (it draws VLabel natively). Pure Go.
+godep github.com/adriaanm/wata/go-pkgs/strikes go-pkgs/strikes

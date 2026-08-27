@@ -166,6 +166,31 @@ object FbConfig:
    *  cannot smuggle its mode into the next session's store. */
   def forceNotifyMode(m: NotifyMode): Unit = modeC.set(Notify.spellMode(m))
 
+  // ---- the type face (plan 0077 stage 1) -----------------------------------
+
+  /** Which face `FbTypeRoles` resolves the strikes against — "atkinson"
+   *  (default; owner ruling 2026-08-27) or "inter". A CONFIG choice, not a
+   *  constant, so the on-panel A/B is an edit of `type_face` in the config
+   *  file plus a restart — no rebuild, and no settings row yet (the key is
+   *  the A/B's whole surface this stage). Same single-cell shape as the
+   *  notify mode: `loadTypeFace` primes it (`Ui.resetCells`), `typeFace` is
+   *  the per-frame reader, `writeStore` stamps the cell back so an unrelated
+   *  save preserves the choice. */
+  val FACE_DEFAULT: String = "atkinson"
+  private val faceC: sgo.Atomic[String] = sgo.atomic(FACE_DEFAULT)
+
+  def loadTypeFace(): String =
+    val raw = WJson.strField(readJson(), "type_face", FACE_DEFAULT)
+    var f = raw
+    if f != "atkinson" && f != "inter" then
+      // loud, not silent: an unknown face falls back to the default and says so
+      println("config: unknown type_face \"" + raw + "\" — using " + FACE_DEFAULT)
+      f = FACE_DEFAULT
+    faceC.set(f)
+    f
+
+  def typeFace(): String = faceC.get()
+
   /** the one writer: session fields first (the Zig client's file order), then
    *  the preference fields. Both halves are always written, so a caller that
    *  changed one of them has to have read the other back — which `saveSession`
@@ -174,6 +199,7 @@ object FbConfig:
 
   def toJson(s: Session, p: FbPrefs): Json =
     var fs: List[(String, Json)] = Nil
+    fs = ("type_face", JStr(faceC.get())) :: fs
     fs = ("notify_mode", JStr(storedModeC.get())) :: fs
     fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
     fs = ("brightness", JInt(p.brightness.toLong)) :: fs

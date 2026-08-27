@@ -293,6 +293,7 @@ object Ui:
     // applets (`KidSettingsLogic.restored` / `SettingsLogic.restored`), and
     // each reads it for its notify row, so it is primed before the shell.
     FbConfig.loadNotifyMode()
+    FbConfig.loadTypeFace()
     stateC.set(Shell.initial(FbConfig.loadPrefs()))
     connC.set(Disconnected())
     idleC.set(0.0)

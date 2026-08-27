@@ -47,6 +47,13 @@ echo "-- wata-fb (1b3): message-row age column (agecheck) --"
 AGEOUT="$("$FB_EMIT/$FB_BIN" agecheck)" || { echo "wata-fb agecheck run failed"; exit 1; }
 printf '%s\n' "$AGEOUT" | grep -qF "agecheck: PASS" || { printf '%s\n' "$AGEOUT"; echo "wata-fb: agecheck did not PASS"; exit 1; }
 
+# The strike selfcheck (plan 0077 stage 1): the boot-time type rasteriser's
+# measured widths, coverage, and the pinned byte-determinism digest — the
+# goldens do not reach the strike path until stage 3 (strikecheck.scala).
+echo "-- wata-fb (1b4): boot-time strikes (striketest) --"
+STRIKEOUT="$("$FB_EMIT/$FB_BIN" striketest)" || { echo "wata-fb striketest run failed"; exit 1; }
+printf '%s\n' "$STRIKEOUT" | grep -qF "striketest: PASS" || { printf '%s\n' "$STRIKEOUT"; echo "wata-fb: striketest did not PASS"; exit 1; }
+
 # -- (1c) the Gio blit pipeline (plan 0023 M2): the RGB565->RGBA conversion and
 # the integer nearest-neighbour scaler that go-pkgs/gioshell blits the panel
 # with. Pure Go, no window and no GPU — this is the assertion that the window

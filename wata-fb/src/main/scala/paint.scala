@@ -25,18 +25,74 @@ object FbPaint:
     case x: VLabel => drawLabel(px, x)
     case x: VGroup => drawChildren(px, x.children)
 
-  /** a `VLabel` on the framebuffer: the 5x8 strike, placed in the box.
+  /** a `VLabel` on the framebuffer: role-aware since plan 0077 stage 1.
    *
-   *  The handset has ONE strike, so a ROLE cannot pick a size here yet — plan
-   *  0070's answer is baked strikes at the handful of sizes the design uses,
-   *  and until they ship (FB-BIG-CONTACT-ROWS is the queue item that
-   *  wants them first) every role draws at 6x8 and every weight is regular.
-   *  What this arm does honour is what it can: the box and the alignment (the
-   *  text is placed in PIXELS, free of the character grid) and the alpha,
-   *  blended per lit pixel. A text run wider than its box overflows to the
-   *  right rather than being clipped or ellipsized — the same thing
-   *  `Font.drawText` does at the panel's edge. */
+   *  The ROLE picks a strike through `FbTypeRoles` — rasterised type at the
+   *  size the role means, blended as coverage x label alpha x colour over
+   *  whatever is under it (a card colour, usually). The label's box is a hard
+   *  CLIP: a run wider than its box truncates at the edge, mid-glyph if it
+   *  must — a label may never overflow itself (the watch learned this).
+   *  `TextAlign` is honoured against the MEASURED width, and the line is
+   *  vertically centred by the strike's ascent+descent.
+   *
+   *  `STATUS` — and any role the strike table cannot serve — resolves to no
+   *  strike and keeps the 5x8 grid-font path below verbatim, so that gap is
+   *  stated here rather than hidden: small print still draws exactly as it
+   *  did before the strikes existed (including its overflow-to-the-right,
+   *  which the goldens pin). */
   def drawLabel(px: go.Bytes, l: VLabel): Unit =
+    val s = FbTypeRoles.strikeFor(l.role, l.weight)
+    if s < 0 then drawLabelGrid(px, l)
+    else
+      val tw = go.strikes.measureText(s, l.text)
+      var x0 = l.x
+      if l.align == TextAlign.CENTER then x0 = l.x + (l.w - tw) / 2
+      else if l.align == TextAlign.TRAILING then x0 = l.x + l.w - tw
+      val asc = go.strikes.ascent(s)
+      val base = l.y + (l.h - (asc + go.strikes.descent(s))) / 2 + asc
+      val bs = go.bytes(l.text)
+      // the pen runs in 26.6 fixed point so the FRACTIONAL advances the
+      // rasteriser keeps (HintingNone — see go-pkgs/strikes) accumulate; each
+      // glyph lands at the rounded pen, so rounding error never piles up.
+      var pen = x0 * 64
+      var i = 0
+      while i < bs.length do
+        val ch = bs(i).toInt & 0xff
+        drawStrikeChar(px, s, ch, (pen + 32) / 64, base, l)
+        pen = pen + go.strikes.advance64(s, ch)
+        i = i + 1
+
+  /** one strike glyph at pen position `penX` on baseline `base`, clipped to
+   *  the label's box and blended per coverage pixel. Correct for arbitrary
+   *  ink over arbitrary ground — black over a card colour is merely the
+   *  common case. */
+  def drawStrikeChar(px: go.Bytes, s: scala.Int, ch: scala.Int, penX: scala.Int,
+      base: scala.Int, l: VLabel): Unit =
+    val gw = go.strikes.glyphW(s, ch)
+    val gh = go.strikes.glyphH(s, ch)
+    if gw > 0 && gh > 0 then
+      val gx = penX + go.strikes.glyphLeft(s, ch)
+      val gy = base - go.strikes.glyphTop(s, ch)
+      val cov = go.strikes.cover(s, ch)
+      var row = 0
+      while row < gh do
+        val y = gy + row
+        if y >= l.y && y < l.y + l.h then
+          var col = 0
+          while col < gw do
+            val x = gx + col
+            if x >= l.x && x < l.x + l.w then
+              val c = cov(row * gw + col).toInt & 0xff
+              if c > 0 then Draw.blendPixel(px, x, y, l.color, c * l.alpha / 255)
+            col = col + 1
+        row = row + 1
+
+  /** the strike-less fallback: the 5x8 grid font placed in the box — exactly
+   *  the pre-strike `VLabel` arm. The box and alignment are honoured (text
+   *  placed in PIXELS, free of the character grid) and the alpha blended per
+   *  lit pixel; a run wider than its box overflows to the right, the same
+   *  thing `Font.drawText` does at the panel's edge. */
+  def drawLabelGrid(px: go.Bytes, l: VLabel): Unit =
     val bs = go.bytes(l.text)
     val tw = bs.length * Font.GLYPH_W
     var x0 = l.x

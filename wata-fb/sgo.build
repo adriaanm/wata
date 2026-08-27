@@ -18,6 +18,10 @@ godep github.com/adriaanm/wata/go-pkgs/httpc go-pkgs/httpc
 # `godep` names a local dir, so an upstream package rides in through one.
 # Pure Go, no build tag.
 godep github.com/adriaanm/wata/go-pkgs/qr go-pkgs/qr
+# The boot-time type rasteriser (plan 0077 stage 1): strikes for the role-
+# aware VLabel painter, over golang.org/x/image (an ordinary fetched dep, the
+# same plan-0014 pattern as qr). Pure Go, no build tag.
+godep github.com/adriaanm/wata/go-pkgs/strikes go-pkgs/strikes
 # The Gio window (plan 0023 M2): the desktop/phone shell that hosts this same
 # frame loop. Gio compiles in only with the `gioshell` build tag (just
 # phone-blit); ordinary builds — including the armv7 device cross-build — ride

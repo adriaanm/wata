@@ -179,6 +179,12 @@ object FbConfig:
 
   def notifyMode(): NotifyMode = Notify.parseMode(modeC.get())
 
+  /** the handset's type-face preference (plan 0077 stage 1), present because
+   *  the shared `FbTypeRoles`/`paint.scala` reach for it — the mac's retained
+   *  backend draws `VLabel` natively and never takes the strike path, so this
+   *  stays the default and is not a stored preference here. */
+  def typeFace(): String = "atkinson"
+
   /** the user changed it in Settings: remember it for the next launch. */
   def saveNotifyMode(m: NotifyMode): Unit =
     modeC.set(Notify.spellMode(m))
