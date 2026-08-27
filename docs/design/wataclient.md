@@ -171,7 +171,7 @@ and a hole in the conversation (`outbox.scala`, plan 0022).
   the conversation keys on every change, including once at `Runtime.start`
   for what came off disk. `unsent` holds ONE KEY PER QUEUED ENTRY (a
   conversation with two sends waiting appears twice), so a UI can count a
-  conversation's queued sends — the rolodex card's "N sending" band — as
+  conversation's queued sends — the rolodex card's "N sending" state-line suffix — as
   well as ask membership; `undelivered` stays one key per conversation. It is an event rather than a snapshot field
   because a device that cannot reach the server publishes no snapshots —
   and that is exactly the device with a queue. `ActAckOutbox(key)` clears

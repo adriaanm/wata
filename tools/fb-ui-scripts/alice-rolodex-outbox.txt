@@ -1,10 +1,12 @@
-# rolodex-outbox: the card's BOTTOM band — the unheard band's mirror — in
-# both its states and its stack-row degradation, and the ack that clears it.
-# Three users so the open stack has real rows (like alice-rolodex.txt).
+# rolodex-outbox: the card's outbox states under the HYBRID ruling — a
+# queued send as the discreet state-line suffix, a refused-for-good send as
+# the loud red bottom band with its stack-row rule degradation, and the ack
+# that clears it. Three users so the open stack has real rows (like
+# alice-rolodex.txt).
 #
 # 1. queued: every upload answers 500 (RETRY class), so the ptt send lands in
-#    the outbox and the family card carries the translucent dark band with
-#    "1 sending" at full bleed.
+#    the outbox. No band for merely-queued (sending is transient plumbing):
+#    the full-bleed card's STATE LINE reads "just now - 1 sending".
 
 wait syncing 1 900
 wait convs 3 900
@@ -19,13 +21,13 @@ key ptt release
 wait sendfail 1 1500
 wait unsent 1 600
 
-# the 2s SEND FAILED flash ages out; the band stays
+# the 2s SEND FAILED flash ages out; the state-line suffix stays
 advance 90
 checkpoint obox-sending
 
-# 2. the stack row: one detent down — Family becomes the top row and the band
-#    degrades to a dark rule along that row's BOTTOM edge (the unheard band's
-#    degradation, mirrored).
+# 2. the stack row: one detent down — Family becomes the top row. A queued
+#    send leaves the row UNMARKED (the state line only draws at full bleed,
+#    and the rule degradation is the red undelivered band's alone).
 tap down
 advance 12
 expect motioncentre 1
@@ -39,8 +41,8 @@ expect motioncentre 0
 
 # 3. undelivered: re-arm ONE failure answering 400 — the next retry of the
 #    queued entry is refused for good (UNDELIVERABLE), the outbox drops it and
-#    marks the conversation, and the band goes red: "not sent" wins over
-#    "sending".
+#    marks the conversation, and the red band appears: "not sent" is the loud
+#    state, and the state line does NOT also say sending.
 failnext 1 400
 wait undeliv 1 2500
 waitmax unsent 0 600

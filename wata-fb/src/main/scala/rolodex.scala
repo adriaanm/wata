@@ -89,19 +89,22 @@ import language.experimental.saferExceptions
  *  second element that had to agree with the first about when to appear is
  *  how a design drifts.
  *
- *  The OUTBOX state is that band's mirror, along the card's BOTTOM edge, and
- *  the same one-element rule holds: while sends of mine are queued, a
- *  translucent dark band (the connectivity chip's dark, ~50% over the hue)
- *  with "1 sending" in white; once a send is refused for good, the band goes
- *  red with "not sent" in ink — the louder state wins when both apply, the
- *  rule the old row marks had. On a stack row it degrades to a rule along
- *  the row's bottom exactly as the unheard band does along the top. The ack
- *  semantics are untouched: opening the conversation clears the undelivered
- *  state (`WataLogic.enterConversation` -> `ActAckOutbox`); this file only
- *  draws what the outbox lists say. At full bleed the two bands and the
- *  lifted name cannot meet: the tallest name rung tops out at y = 26 (below
- *  the top band's 21), the state strip ends at 98, and the bottom band
- *  starts at 107.
+ *  The OUTBOX states are HYBRID (owner ruling 2026-08-27): unplayed is the
+ *  product's primary signal and failure is worth shouting about, but a
+ *  merely QUEUED send is transient plumbing and gets no band of its own.
+ *  So a refused-for-good send draws as the unheard band's mirror along the
+ *  card's BOTTOM edge — red, "not sent" in ink, degrading to a red rule
+ *  along a stack row's bottom exactly as the unheard band does along the
+ *  top — while a queued send shows only as a discreet suffix on the STATE
+ *  LINE: "just now - 1 sending" (the separator is " - ": the strike set is
+ *  printable ASCII 0x20..0x7E, so there is no middot to draw). The louder
+ *  state wins when both apply (`outboxMark` already picks it): a red band
+ *  never also says "sending". The ack semantics are untouched: opening the
+ *  conversation clears the undelivered state (`WataLogic.enterConversation`
+ *  -> `ActAckOutbox`); this file only draws what the outbox lists say. At
+ *  full bleed the band and the lifted name cannot meet: the tallest name
+ *  rung tops out at y = 26 (below the top band's 21), the state strip ends
+ *  at 98, and the bottom band starts at 107.
  *
  *  Text is black on every card, because that is the palette's constraint
  *  (`Palette.INK`) rather than a decision this file makes. Type is by ROLE:
@@ -124,11 +127,11 @@ case class RoloCard(
   state: String,
   unheard: scala.Int,
   // 0 = nothing of ours is pending, 1 = still queued, 2 = it will never
-  // arrive. Draws as the bottom band: dark "N sending" for 1, red "not
-  // sent" for 2 (the louder state wins — outboxMark already picks it).
+  // arrive. Only 2 draws a band (red, "not sent"); 1 rides the state line
+  // as a suffix (the louder state wins — outboxMark already picks it).
   mark: scala.Int,
-  // how many sends are queued for this conversation — the bottom band's
-  // count while `mark == 1`.
+  // how many sends are queued for this conversation — the state-line
+  // suffix's count while `mark == 1`.
   sending: scala.Int
 )
 
@@ -304,28 +307,37 @@ object Rolodex:
       val stH = h / 6
       val stY = nameY + nameH + 2
       if sa > 8 && stH >= 6 && stY + stH <= y + ch && c.state != "" then
+        // one fit-down rung, the display ladder's discipline: the plain
+        // state reads at NAME medium, and a line the suffix lengthened past
+        // the card ("no messages - 1 sending") steps to CAPTION rather than
+        // clipping at both edges.
+        val stRole = stateRoleFor(c.state, cw - 2 * pad)
         kids = Keyed("state", VLabel(x + pad, stY, cw - 2 * pad, stH, c.state,
-          TypeRole.NAME, TypeWeight.MEDIUM, TextAlign.CENTER,
+          stRole, TypeWeight.MEDIUM, TextAlign.CENTER,
           Palette.INK, sa)) :: kids
-      // the outbox band — the unheard band's mirror along the BOTTOM edge,
-      // same one-element degradation into a rule on a stack row. Queued
-      // sends: the connectivity chip's dark at ~50% over the hue, "N
-      // sending" in white. Refused for good: red, "not sent" in ink — the
-      // louder state won upstream (outboxMark). The label shares the count's
-      // fade and its box IS the band, for the same clipping rule.
-      if c.mark > 0 then
+      // the outbox band — refused-for-good ONLY (the hybrid ruling): the
+      // unheard band's mirror along the BOTTOM edge, red with "not sent" in
+      // ink, same one-element degradation into a rule on a stack row. A
+      // merely queued send draws NO band — it is the state line's suffix
+      // (`stateWithSending`). The label shares the count's fade and its box
+      // IS the band, for the same clipping rule.
+      if c.mark == 2 then
         val obH = roundI(lerp((h / 6).toDouble, 3.0, o))
         if obH >= 2 then
           val oy = y + ch - obH
-          val obc = if c.mark == 2 then Color.red else Color.black
-          val oba = if c.mark == 2 then ca0 else alphaOf(0.5 * cov)
-          kids = Keyed("obband", VFill(x, oy, cw, obH, radius, obc, oba)) :: kids
+          kids = Keyed("obband", VFill(x, oy, cw, obH, radius, Color.red, ca0)) :: kids
           if obH >= 8 && ca > 8 then
-            val txt = if c.mark == 2 then "not sent" else sendingText(c.sending)
-            val ink = if c.mark == 2 then Palette.INK else Color.white
-            kids = Keyed("obtext", VLabel(x + pad, oy, cw - 2 * pad, obH, txt,
-              TypeRole.NAME, TypeWeight.MEDIUM, TextAlign.CENTER, ink, ca)) :: kids
+            kids = Keyed("obtext", VLabel(x + pad, oy, cw - 2 * pad, obH, "not sent",
+              TypeRole.NAME, TypeWeight.MEDIUM, TextAlign.CENTER, Palette.INK, ca)) :: kids
       Some(VGroup(ListOps.reverse(kids)))
+
+  /** the state line's role: NAME medium unless the measured text overflows
+   *  the box, then CAPTION — a label may never overflow itself, and the
+   *  queued-send suffix is what makes the line long. */
+  def stateRoleFor(text: String, availW: scala.Int): scala.Int =
+    val st = FbTypeRoles.strikeFor(TypeRole.NAME, TypeWeight.MEDIUM)
+    if st >= 0 && go.strikes.measureText(st, text) <= availW then TypeRole.NAME
+    else TypeRole.CAPTION
 
   def unheardText(n: scala.Int): String =
     if n == 1 then "1 unheard" else "" + n + " unheard"
@@ -382,10 +394,20 @@ object Rolodex:
       undelivered: List[String]): RoloCard =
     var name = WataLogic.convName(snap, conv)
     if name == "" || name == "?" then name = "Chat"
+    val mark = WataLogic.outboxMark(unsent, undelivered, conv)
+    val snd = WataLogic.outboxSending(unsent, conv)
     RoloCard(WataLogic.convKey(conv), name, color,
-      stateOf(conv, nowMs, playingRoom), conv.unplayedCount,
-      WataLogic.outboxMark(unsent, undelivered, conv),
-      WataLogic.outboxSending(unsent, conv))
+      stateWithSending(stateOf(conv, nowMs, playingRoom), mark, snd),
+      conv.unplayedCount, mark, snd)
+
+  /** the queued-send suffix on the state line (the hybrid ruling): "just
+   *  now - 1 sending" while sends are queued and nothing louder applies —
+   *  the red "not sent" band outranks, and then the line stays plain. The
+   *  separator is " - " because the strikes cover printable ASCII only
+   *  (0x20..0x7E — no middot). */
+  def stateWithSending(base: String, mark: scala.Int, sending: scala.Int): String =
+    if mark == 1 && sending > 0 then base + " - " + sendingText(sending)
+    else base
 
   /** the one line under a full-bleed name: what this conversation is doing, or
    *  when it last said anything. The message list is newest-first. */

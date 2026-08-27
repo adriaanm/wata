@@ -373,6 +373,12 @@ the arm's-length photo as the owner's leg.
   > suppressed), 10 goldens regenerated, mac-smoke's count-label pins
   > updated from the real tree. Detail in wata-fb.md ("Outbox marks", the
   > rolodex section).
+  > **Revised same day (the HYBRID ruling, owner):** the dark "N sending"
+  > band is gone — a queued send is transient plumbing and shows only as a
+  > discreet state-line suffix ("just now - 1 sending"; " - " because the
+  > strikes are printable-ASCII only, no middot), while unplayed (yellow
+  > band) and failure (red "not sent" band, stack-row rule included) stay
+  > loud. Current state in wata-fb.md.
 
 - **Does the ST7735S path sustain >30 fps at all?** If not, `MOTION_FRAME_MS`
   is 33 and the springs still work; the measurement decides, not the code.

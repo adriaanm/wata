@@ -165,10 +165,11 @@ SCENARIOS = [
         ],
     },
     {
-        # the rolodex card's bottom outbox band (the unheard band's mirror):
-        # dark "1 sending" while a send is queued, its stack-row rule, red
-        # "not sent" once the server refuses one for good (failnext's 4xx
-        # arm), and the clear on opening the conversation (ActAckOutbox).
+        # the rolodex card's outbox states, hybrid: a queued send as the
+        # state line's discreet "N sending" suffix (no band, no stack-row
+        # mark), the red "not sent" bottom band once the server refuses one
+        # for good (failnext's 4xx arm) with its stack-row rule, and the
+        # clear on opening the conversation (ActAckOutbox).
         "name": "rolodex-outbox",
         "hooks": True,
         "users": ["alice", "bob", "charlie"],
