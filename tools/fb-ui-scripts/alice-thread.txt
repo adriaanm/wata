@@ -51,7 +51,7 @@ advance 5
 # fail)
 expect thrsq 19
 waitmax thrsq 19 1
-expect thrstc 12
+expect thrstc 22
 waitmax thrstn 0 1
 # the NORMALISED length (owner tweak 2026-08-27, replacing CAP_S): the
 # longest row — charlie's 2s, on the row below the centre — spans 80% of
@@ -75,7 +75,12 @@ checkpoint thread-mixed
 # taken while it shows.
 tap down
 expect thrchip 1
-expect thrchw 12
+# a FLOOR, not an exact pin: the chip's hh:mm is the real wall clock, so the
+# near-white count varies with the digits drawn (seen 91 and 94 across runs
+# at 13 px bold; all-1s would be the thinnest). 40 is comfortably below any
+# digit set yet ~3x the retired Regular floor — the claim stays "the chip is
+# bold white ink", which forcing the chip text off Bold breaks.
+expect thrchw 40
 wait motioncentre 1 200
 waitmax motionlive 0 200
 # settled, still inside the linger window: the chip holds

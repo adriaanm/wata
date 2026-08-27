@@ -12,7 +12,7 @@ package go
 @go.bind("github.com/adriaanm/wata/go-pkgs/strikes")
 object strikes:
   /** `strikes.Strike(face, px, weight)` — the strike id, or -1 for a
-   *  combination the table does not carry. face "inter"|"atkinson",
+   *  combination the table does not carry. face "atkinson",
    *  weight "bold"|"medium". */
   @go.name("Strike") def strike(face: String, px: scala.Int, weight: String): scala.Int = ???
   /** pixels above / below the baseline — the line box a centring uses. */
@@ -22,17 +22,18 @@ object strikes:
    *  once) — what `TextAlign` aligns by. */
   @go.name("MeasureText") def measureText(id: scala.Int, text: String): scala.Int = ???
   /** ch's advance in 26.6 fixed point — the pen accumulates these and rounds
-   *  per glyph, so word gaps stay even. */
+   *  per glyph, so word gaps stay even. Phase-independent. */
   @go.name("Advance64") def advance64(id: scala.Int, ch: scala.Int): scala.Int = ???
   /** ch's coverage box (w*h), left bearing from the pen, and top edge above
-   *  the baseline. */
-  @go.name("GlyphW") def glyphW(id: scala.Int, ch: scala.Int): scala.Int = ???
-  @go.name("GlyphH") def glyphH(id: scala.Int, ch: scala.Int): scala.Int = ???
-  @go.name("GlyphLeft") def glyphLeft(id: scala.Int, ch: scala.Int): scala.Int = ???
-  @go.name("GlyphTop") def glyphTop(id: scala.Int, ch: scala.Int): scala.Int = ???
-  /** ch's coverage bitmap: glyphW*glyphH bytes, row-major, 0..255. The
-   *  Go-side buffer, NOT a copy — read-only by contract. */
-  @go.name("Cover") def cover(id: scala.Int, ch: scala.Int): go.Bytes = ???
+   *  the baseline — all AT x-phase `phase` (0..3, quarter-pixel raster
+   *  origins; the painter picks the phase nearest the pen's fraction). */
+  @go.name("GlyphW") def glyphW(id: scala.Int, ch: scala.Int, phase: scala.Int): scala.Int = ???
+  @go.name("GlyphH") def glyphH(id: scala.Int, ch: scala.Int, phase: scala.Int): scala.Int = ???
+  @go.name("GlyphLeft") def glyphLeft(id: scala.Int, ch: scala.Int, phase: scala.Int): scala.Int = ???
+  @go.name("GlyphTop") def glyphTop(id: scala.Int, ch: scala.Int, phase: scala.Int): scala.Int = ???
+  /** ch's coverage bitmap at x-phase `phase`: glyphW*glyphH bytes, row-major,
+   *  0..255. The Go-side buffer, NOT a copy — read-only by contract. */
+  @go.name("Cover") def cover(id: scala.Int, ch: scala.Int, phase: scala.Int): go.Bytes = ???
   /** 16 hex digits over the strike's metrics + coverage — the fb-smoke
    *  selfcheck's byte-determinism witness. */
   @go.name("Digest") def digest(id: scala.Int): String = ???

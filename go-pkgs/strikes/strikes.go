@@ -8,10 +8,16 @@
 // font.HintingNone, and that is deliberate, NEVER HintingFull: x/image has no
 // hinter — HintingFull only quantises advances to whole pixels, which at
 // 11 px opens uneven word gaps while sharpening nothing (the plan-0077 probe,
-// 2026-08-27). Glyphs are rendered once at an integer dot and placed at
-// rounded pen positions; the pen itself accumulates FRACTIONAL advances
-// (26.6 fixed point), so rounding error distributes per glyph instead of
-// piling up per word.
+// 2026-08-27).
+//
+// SUBPIXEL X-PHASES (owner-approved, 2026-08-27): each glyph is rasterised
+// at FOUR fractional x origins — 0, ¼, ½, ¾ px (the rasteriser takes a
+// fractional dot) — and the painter's pen keeps the fractional advance sum,
+// picking the phase nearest the pen's fraction per glyph. Word spacing is
+// then optically even at every size, instead of each gap rounding to a
+// whole pixel. The pen accumulates FRACTIONAL advances (26.6 fixed point)
+// as before, so rounding error never piles up per word; what the phases add
+// is that the residual quantisation per glyph drops from ±½ px to ±⅛ px.
 //
 // The strike table is owned here: a strike is named by a small integer id
 // resolved by Strike(face, px, weight). Each entry rasterises lazily, once
@@ -43,27 +49,32 @@ import (
 //go:embed fonts/AtkinsonHyperlegible-Bold.ttf
 var atkinsonBold []byte
 
-// Atkinson Hyperlegible ships no Medium cut; its "medium" strikes rasterise
-// the Regular ttf (fonts/README).
-//
-//go:embed fonts/AtkinsonHyperlegible-Regular.ttf
-var atkinsonRegular []byte
-
 const (
 	glyphLo = 0x20 // first printable ASCII
 	glyphHi = 0x7e // last
 	nGlyphs = glyphHi - glyphLo + 1
 )
 
-// glyph is one rasterised glyph: a w*h coverage bitmap (row-major, one byte
-// per pixel, 0..255) drawn at (penX+left, baselineY-top), advancing the pen
-// by adv64 (26.6 fixed point).
+// nPhases is the subpixel x-phase count: a glyph is rasterised at origins
+// 0, ¼, ½ and ¾ of a pixel (26.6: 0, 16, 32, 48).
+const nPhases = 4
+
+// phased is one glyph AT ONE X-PHASE: a w*h coverage bitmap (row-major, one
+// byte per pixel, 0..255) drawn at (penX+left, baselineY-top). The bearings
+// are phase-specific — shifting the origin by ¼ px can move the box edge.
+type phased struct {
+	w, h int
+	left int // horizontal bearing: box left edge relative to the pen
+	top  int // vertical bearing: box top edge ABOVE the baseline
+	cov  []byte
+}
+
+// glyph is one rasterised glyph: its four x-phases plus the advance the pen
+// moves by (26.6 fixed point; phase-independent — the outline is the same,
+// only its raster origin shifts).
 type glyph struct {
-	w, h  int
-	left  int // horizontal bearing: box left edge relative to the pen
-	top   int // vertical bearing: box top edge ABOVE the baseline
 	adv64 int
-	cov   []byte
+	ph    [nPhases]phased
 }
 
 // strike is one table entry. face/px/weight are the lookup key; the rest
@@ -88,8 +99,11 @@ type strike struct {
 var table = []*strike{
 	{face: "atkinson", px: 30, weight: "bold", ttf: atkinsonBold},
 	{face: "atkinson", px: 16, weight: "bold", ttf: atkinsonBold},
-	{face: "atkinson", px: 16, weight: "medium", ttf: atkinsonRegular},
-	{face: "atkinson", px: 13, weight: "medium", ttf: atkinsonRegular},
+	// 13 bold: the small roles. Classic Atkinson ships no Medium cut, so the
+	// old "medium" entries silently rasterised Regular — which read too thin
+	// on the panel (owner, 2026-08-27); FbTypeRoles resolves every small
+	// role to Bold now and the Regular rows are gone with their ttf.
+	{face: "atkinson", px: 13, weight: "bold", ttf: atkinsonBold},
 	// the full-bleed DISPLAY ladder's other rungs (38 is the resting card's
 	// first choice, 24 the floor; 30 above is the middle rung) — boot-lazy
 	// like everything else, so a rung no name ever needs costs only these
@@ -140,30 +154,36 @@ func (s *strike) rasterise() {
 	met := face.Metrics()
 	s.ascent = met.Ascent.Ceil()
 	s.descent = met.Descent.Ceil()
-	// An integer dot far from the origin keeps every glyph box positive; the
-	// bearings below are relative to it.
-	dot := fixed.P(100, 100)
+	// A dot far from the origin keeps every glyph box positive; the bearings
+	// below are relative to its integer part. Each phase shifts the dot by a
+	// quarter pixel (16 in 26.6) — the same outline, four raster origins.
 	for c := glyphLo; c <= glyphHi; c++ {
-		dr, mask, maskp, adv, ok := face.Glyph(dot, rune(c))
 		g := &s.glyphs[c-glyphLo]
-		if !ok {
-			continue
-		}
-		w, h := dr.Dx(), dr.Dy()
-		g.w, g.h = w, h
-		g.left = dr.Min.X - 100
-		g.top = 100 - dr.Min.Y
-		g.adv64 = int(adv)
-		if w > 0 && h > 0 {
-			// copy the mask into a tight one-byte-per-pixel buffer
-			al := image.NewAlpha(image.Rect(0, 0, w, h))
-			draw.DrawMask(al, al.Bounds(), image.NewUniform(image.White),
-				image.Point{}, mask, maskp, draw.Src)
-			cov := make([]byte, 0, w*h)
-			for y := 0; y < h; y++ {
-				cov = append(cov, al.Pix[y*al.Stride:y*al.Stride+w]...)
+		for p := 0; p < nPhases; p++ {
+			dot := fixed.Point26_6{X: fixed.I(100) + fixed.Int26_6(p*16), Y: fixed.I(100)}
+			dr, mask, maskp, adv, ok := face.Glyph(dot, rune(c))
+			if !ok {
+				continue
 			}
-			g.cov = cov
+			if p == 0 {
+				g.adv64 = int(adv)
+			}
+			ph := &g.ph[p]
+			w, h := dr.Dx(), dr.Dy()
+			ph.w, ph.h = w, h
+			ph.left = dr.Min.X - 100
+			ph.top = 100 - dr.Min.Y
+			if w > 0 && h > 0 {
+				// copy the mask into a tight one-byte-per-pixel buffer
+				al := image.NewAlpha(image.Rect(0, 0, w, h))
+				draw.DrawMask(al, al.Bounds(), image.NewUniform(image.White),
+					image.Point{}, mask, maskp, draw.Src)
+				cov := make([]byte, 0, w*h)
+				for y := 0; y < h; y++ {
+					cov = append(cov, al.Pix[y*al.Stride:y*al.Stride+w]...)
+				}
+				ph.cov = cov
+			}
 		}
 	}
 	s.ok = true
@@ -181,6 +201,15 @@ func gl(id, ch int) *glyph {
 		ch = glyphLo
 	}
 	return &s.glyphs[ch-glyphLo]
+}
+
+// phOf returns ch's raster at x-phase `phase` (clamped into 0..3), or nil.
+func phOf(id, ch, phase int) *phased {
+	g := gl(id, ch)
+	if g == nil {
+		return nil
+	}
+	return &g.ph[phase&(nPhases-1)]
 }
 
 // Ascent is the strike's pixels above the baseline; Descent below (positive).
@@ -222,49 +251,53 @@ func Advance64(id, ch int) int {
 	return 0
 }
 
-// GlyphW/GlyphH are ch's coverage-box size; GlyphLeft its left bearing from
-// the pen; GlyphTop its top edge's height above the baseline.
-func GlyphW(id, ch int) int {
-	if g := gl(id, ch); g != nil {
-		return g.w
+// GlyphW/GlyphH are ch's coverage-box size AT x-phase `phase` (0..3 —
+// quarter-pixel raster origins); GlyphLeft its left bearing from the pen;
+// GlyphTop its top edge's height above the baseline. The bearings carry the
+// phase's sub-shift, so a caller draws at the pen's FLOOR pixel and the
+// quarter-pixel placement is already in the raster.
+func GlyphW(id, ch, phase int) int {
+	if p := phOf(id, ch, phase); p != nil {
+		return p.w
 	}
 	return 0
 }
 
-func GlyphH(id, ch int) int {
-	if g := gl(id, ch); g != nil {
-		return g.h
+func GlyphH(id, ch, phase int) int {
+	if p := phOf(id, ch, phase); p != nil {
+		return p.h
 	}
 	return 0
 }
 
-func GlyphLeft(id, ch int) int {
-	if g := gl(id, ch); g != nil {
-		return g.left
+func GlyphLeft(id, ch, phase int) int {
+	if p := phOf(id, ch, phase); p != nil {
+		return p.left
 	}
 	return 0
 }
 
-func GlyphTop(id, ch int) int {
-	if g := gl(id, ch); g != nil {
-		return g.top
+func GlyphTop(id, ch, phase int) int {
+	if p := phOf(id, ch, phase); p != nil {
+		return p.top
 	}
 	return 0
 }
 
-// Cover is ch's coverage bitmap: GlyphW*GlyphH bytes, row-major, 0..255.
-// The INTERNAL buffer, not a copy — callers read it, per frame, and must not
-// write into it.
-func Cover(id, ch int) []byte {
-	if g := gl(id, ch); g != nil {
-		return g.cov
+// Cover is ch's coverage bitmap at x-phase `phase`: GlyphW*GlyphH bytes,
+// row-major, 0..255. The INTERNAL buffer, not a copy — callers read it, per
+// frame, and must not write into it.
+func Cover(id, ch, phase int) []byte {
+	if p := phOf(id, ch, phase); p != nil {
+		return p.cov
 	}
 	return nil
 }
 
 // Digest is an FNV-1a 64 over the strike's metrics and every glyph's
-// metrics+coverage, as 16 hex digits — the byte-determinism witness the
-// fb-smoke selfcheck pins. "" for a bad id or a failed rasterisation.
+// metrics+coverage — ALL FOUR x-phases, so a phase silently collapsing onto
+// phase 0 moves the digest — as 16 hex digits: the byte-determinism witness
+// the fb-smoke selfcheck pins. "" for a bad id or a failed rasterisation.
 func Digest(id int) string {
 	s := at(id)
 	if s == nil {
@@ -281,14 +314,17 @@ func Digest(id int) string {
 	mix(s.descent)
 	for i := range s.glyphs {
 		g := &s.glyphs[i]
-		mix(g.w)
-		mix(g.h)
-		mix(g.left)
-		mix(g.top)
 		mix(g.adv64)
-		for _, b := range g.cov {
-			h ^= uint64(b)
-			h *= 1099511628211
+		for p := 0; p < nPhases; p++ {
+			ph := &g.ph[p]
+			mix(ph.w)
+			mix(ph.h)
+			mix(ph.left)
+			mix(ph.top)
+			for _, b := range ph.cov {
+				h ^= uint64(b)
+				h *= 1099511628211
+			}
 		}
 	}
 	return fmt.Sprintf("%016x", h)

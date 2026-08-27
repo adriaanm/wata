@@ -23,13 +23,18 @@ object FbTypeRoles:
 
   /** the strike for (role, weight), or -1 for the 5x8 fallback. Called per
    *  label per frame; the Go side is a small table scan.
-   *  DISPLAY never arrives here (see `displayStrikeFor`). */
+   *  DISPLAY never arrives here (see `displayStrikeFor`).
+   *
+   *  EVERY small role resolves to BOLD (owner ruling 2026-08-27): classic
+   *  Atkinson ships no Medium cut, so the "medium" rows silently rasterised
+   *  Regular — which read too thin at 13/16 px on this panel. The flip lives
+   *  HERE, at strike resolution: the bodies keep their medium/bold weight
+   *  vocabulary (a native backend like wata-mac's may still honour it), and
+   *  on this renderer both weights land on the Bold strike. */
   def strikeFor(role: scala.Int, weight: scala.Int): scala.Int =
     if role == TypeRole.STATUS then -1
-    else if role == TypeRole.NAME then
-      val w = if weight == TypeWeight.BOLD then "bold" else "medium"
-      go.strikes.strike(FACE, 16, w)
-    else if role == TypeRole.CAPTION then go.strikes.strike(FACE, 13, "medium")
+    else if role == TypeRole.NAME then go.strikes.strike(FACE, 16, "bold")
+    else if role == TypeRole.CAPTION then go.strikes.strike(FACE, 13, "bold")
     else -1
 
   /** the full-bleed DISPLAY ladder (plan 0077 tuning, owner 2026-08-27): the

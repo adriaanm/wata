@@ -36,14 +36,15 @@ checkpoint roll-stack
 # scanline sums visibly less light. Each claim is an expect (>=) paired with
 # a waitmax (<=), and each FAILS when the emphasis is inverted (quiet forced
 # to zero in rolodex.scala) — the red runs are recorded in plan 0077. The
-# rollnw margin is narrow but the frames are deterministic: the 13 px caption
-# puts more black ink columns on the neighbour scanline, which pulls the
-# UN-inset red card's lit width down to 139 while the inset green card reads
-# an inkless 136 (re-measured 2026-08-27 for the caption bump).
-expect rollcw 140
-waitmax rollnw 137 1
-expect rollcl 600
-waitmax rollnl 600 1
+# rollnw margin is narrow but the frames are deterministic: the 13 px bold
+# caption's black ink columns pull the neighbour scanline's lit width to an
+# inkless 136 while the centre reads 142 (re-measured 2026-08-27 when the
+# small roles went Bold + subpixel phases; the luminance pair moved the same
+# way, 699 centre vs 457 neighbour — all four pinned exactly).
+expect rollcw 142
+waitmax rollnw 136 1
+expect rollcl 699
+waitmax rollnl 457 1
 
 # a second detent: a genuinely mid-roll frame, cards sliding under the nubs
 tap down

@@ -1,15 +1,17 @@
 The face the handset's type roles resolve against (plan 0077 stage 1),
 vendored so `go:embed` can reach it (embed only takes in-module files).
-SIL OFL 1.1 — the license text sits beside the ttfs.
+SIL OFL 1.1 — the license text sits beside the ttf.
 
-  AtkinsonHyperlegible-Bold.ttf,          ATKINSON-LICENSE.txt
-  AtkinsonHyperlegible-Regular.ttf
+  AtkinsonHyperlegible-Bold.ttf           ATKINSON-LICENSE.txt
     https://www.brailleinstitute.org/freefont/
     (also https://github.com/googlefonts/atkinson-hyperlegible)
-
-Atkinson Hyperlegible has no Medium cut, so the strike table maps its
-"medium" entries to the Regular ttf.
 
 Atkinson is the SETTLED face (owner on-panel A/B verdict, 2026-08-27 —
 plan 0077 records it); Inter was the other candidate and its ttfs and
 license were removed with the verdict.
+
+Only the Bold cut ships: classic Atkinson has no Medium, so the old
+"medium" strike-table rows silently rasterised Regular — which read too
+thin at the small sizes on this panel (owner, 2026-08-27). Every small
+role now resolves to Bold (FbTypeRoles), and the Regular ttf was removed
+as dead weight.

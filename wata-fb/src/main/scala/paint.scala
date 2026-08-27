@@ -58,27 +58,40 @@ object FbPaint:
       val bs = go.bytes(l.text)
       // the pen runs in 26.6 fixed point so the FRACTIONAL advances the
       // rasteriser keeps (HintingNone — see go-pkgs/strikes) accumulate; each
-      // glyph lands at the rounded pen, so rounding error never piles up.
+      // glyph lands at the pen's FLOOR pixel in the x-PHASE nearest the pen's
+      // fraction (the strikes carry four quarter-pixel rasters per glyph —
+      // owner-approved subpixel positioning, 2026-08-27), so the residual
+      // quantisation per glyph is ±1/8 px and word gaps read optically even.
       var pen = x0 * 64
       var i = 0
       while i < bs.length do
         val ch = bs(i).toInt & 0xff
-        drawStrikeChar(px, s, ch, (pen + 32) / 64, base, l)
+        // nearest quarter: q in 0..4, where 4 carries into the next pixel
+        val fl = floor64(pen)
+        val q = (pen - fl * 64 + 8) / 16
+        drawStrikeChar(px, s, ch, (q & 3).toInt, fl + (q >> 2), base, l)
         pen = pen + go.strikes.advance64(s, ch)
         i = i + 1
 
-  /** one strike glyph at pen position `penX` on baseline `base`, clipped to
-   *  the label's box and blended per coverage pixel. Correct for arbitrary
-   *  ink over arbitrary ground — black over a card colour is merely the
-   *  common case. */
-  def drawStrikeChar(px: go.Bytes, s: scala.Int, ch: scala.Int, penX: scala.Int,
-      base: scala.Int, l: VLabel): Unit =
-    val gw = go.strikes.glyphW(s, ch)
-    val gh = go.strikes.glyphH(s, ch)
+  /** 26.6 floor toward negative infinity (a centre/trailing-aligned overlong
+   *  run can put the pen left of zero; truncation there would jitter). */
+  def floor64(v: scala.Int): scala.Int =
+    var out = v / 64
+    if v < 0 && out * 64 != v then out = out - 1
+    out
+
+  /** one strike glyph at pen floor `penX`, x-phase `phase`, baseline `base`,
+   *  clipped to the label's box and blended per coverage pixel. Correct for
+   *  arbitrary ink over arbitrary ground — black over a card colour is
+   *  merely the common case. */
+  def drawStrikeChar(px: go.Bytes, s: scala.Int, ch: scala.Int, phase: scala.Int,
+      penX: scala.Int, base: scala.Int, l: VLabel): Unit =
+    val gw = go.strikes.glyphW(s, ch, phase)
+    val gh = go.strikes.glyphH(s, ch, phase)
     if gw > 0 && gh > 0 then
-      val gx = penX + go.strikes.glyphLeft(s, ch)
-      val gy = base - go.strikes.glyphTop(s, ch)
-      val cov = go.strikes.cover(s, ch)
+      val gx = penX + go.strikes.glyphLeft(s, ch, phase)
+      val gy = base - go.strikes.glyphTop(s, ch, phase)
+      val cov = go.strikes.cover(s, ch, phase)
       var row = 0
       while row < gh do
         val y = gy + row

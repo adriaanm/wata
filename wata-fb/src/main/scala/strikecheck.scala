@@ -16,21 +16,45 @@
 object StrikeCheck:
 
   /** the byte-determinism witness: atkinson bold 30 (the DISPLAY ladder's
-   *  middle rung), metrics + all 95 coverage bitmaps, FNV-1a 64. */
-  val PINNED_DIGEST: String = "f956822f72281f15"
+   *  middle rung), metrics + all 95 glyphs' FOUR quarter-pixel phase rasters
+   *  (subpixel positioning, plan 0077 polish), FNV-1a 64. Re-pinned when the
+   *  phases landed — the digest deliberately covers every phase, so phases
+   *  collapsing onto phase 0 moves it. */
+  val PINNED_DIGEST: String = "a7bea23e9ff6a869"
 
   def run(): Unit =
     var bad = 0
     // every (size, weight) the role table can ask for resolves, and measures
     // the same known string within a band — wide enough to survive nothing,
-    // tight enough that a wrong size or a collapsed advance fails. One face:
-    // Atkinson, the settled verdict (plan 0077; the Inter bands died with it).
+    // tight enough that a wrong size or a collapsed advance fails. One face
+    // (Atkinson, the settled verdict) and one weight (BOLD — the small-roles
+    // flip, owner 2026-08-27): plan 0077 records both rulings.
     bad += band("atkinson", 38, "bold", 220, 260)
     bad += band("atkinson", 30, "bold", 170, 210)
     bad += band("atkinson", 24, "bold", 138, 168)
     bad += band("atkinson", 16, "bold", 90, 115)
-    bad += band("atkinson", 16, "medium", 82, 106)
-    bad += band("atkinson", 13, "medium", 66, 86)
+    // the 13-bold band is the BOLD-SMALLS DISCRIMINATOR: "Ada Lovelace"
+    // measures 82 at 13 bold and 76 at the retired 13 Regular, so the 79
+    // floor is what makes "small roles draw Bold" a claim this check can
+    // fail — seen red with CAPTION forced back onto a Regular row.
+    bad += band("atkinson", 13, "bold", 79, 90)
+    // the role table's flip: BOTH weights of the small roles land on the
+    // Bold strike (classic Atkinson has no Medium; Regular read too thin
+    // on the panel).
+    if FbTypeRoles.strikeFor(TypeRole.NAME, TypeWeight.MEDIUM)
+        != go.strikes.strike("atkinson", 16, "bold") then
+      println("striketest: NAME medium did not resolve to the 16 bold strike")
+      bad += 1
+    val capId = FbTypeRoles.strikeFor(TypeRole.CAPTION, TypeWeight.MEDIUM)
+    if capId != go.strikes.strike("atkinson", 13, "bold") then
+      println("striketest: CAPTION did not resolve to the 13 bold strike")
+      bad += 1
+    else
+      val capW = go.strikes.measureText(capId, "Ada Lovelace")
+      if capW < 79 || capW > 90 then
+        println("striketest: CAPTION measures " + capW
+          + " — outside the 13-bold band [79, 90] (Regular measures 76)")
+        bad += 1
     // the role table routes as stated: STATUS has no strike at all, and the
     // DISPLAY fit-down ladder (38 → 30 → 24 against the box width, floor 24)
     // steps exactly where the measured widths say it must. The widths:
@@ -49,7 +73,7 @@ object StrikeCheck:
     // coverage is real antialiased ink: 'A' at DISPLAY size has fully-opaque
     // pixels AND a substantial lit area.
     val cid = go.strikes.strike("atkinson", 30, "bold")
-    val cov = go.strikes.cover(cid, 65)
+    val cov = go.strikes.cover(cid, 65, 0)
     var maxC = 0
     var lit = 0
     var i = 0
@@ -64,6 +88,12 @@ object StrikeCheck:
     if lit <= 50 then
       println("striketest: 'A' has only " + lit + " lit pixels (want > 50)")
       bad += 1
+    // SUBPIXEL PHASE COVERAGE: the strikes carry four quarter-pixel rasters
+    // per glyph, and a phase must actually be a different raster — phase 1
+    // (¼ px) of 'A' differs from phase 0 in ink or in box. A rasteriser
+    // that quietly renders every phase at the integer dot fails here (the
+    // seen-red run: the phase offset zeroed in go-pkgs/strikes).
+    bad += phaseDiffers(cid, 65)
     // the pinned digest (header comment owns why).
     val dg = go.strikes.digest(cid)
     if dg != PINNED_DIGEST then
@@ -72,6 +102,25 @@ object StrikeCheck:
       bad += 1
     if bad == 0 then println("striketest: PASS")
     else println("striketest: FAIL (" + bad + " checks)")
+
+  /** 0 when ch's phase-1 raster differs from its phase-0 one (box or ink) —
+   *  the subpixel-positioning witness. */
+  def phaseDiffers(id: scala.Int, ch: scala.Int): scala.Int =
+    var differs = go.strikes.glyphW(id, ch, 1) != go.strikes.glyphW(id, ch, 0) ||
+      go.strikes.glyphLeft(id, ch, 1) != go.strikes.glyphLeft(id, ch, 0)
+    if !differs then
+      val c0 = go.strikes.cover(id, ch, 0)
+      val c1 = go.strikes.cover(id, ch, 1)
+      if c0.length != c1.length then differs = true
+      else
+        var i = 0
+        while i < c0.length && !differs do
+          if c0(i) != c1(i) then differs = true
+          i += 1
+    if differs then 0
+    else
+      println("striketest: phase 1 of 'A' is byte-identical to phase 0 — the subpixel rasters collapsed")
+      1
 
   /** the DISPLAY ladder picks the expected rung for `text` in `availW`. */
   def rung(text: String, availW: scala.Int, wantPx: scala.Int): scala.Int =
