@@ -89,6 +89,21 @@ path is deleted. Face candidates are hand-picked for legibility at low
 resolution — Inter, Atkinson Hyperlegible, IBM Plex Sans, DejaVu Sans
 Bold — all OFL/free, vendored under `tools/fonts/`.
 
+> **Probed 2026-08-27, producer decided: B**, `golang.org/x/image/font/opentype`
+> at `HintingNone`, rasterised once at startup. The probe (contact sheets +
+> numbers, published for the owner) found the pure-Go output pixel-equivalent
+> to unhinted FreeType over all 95 glyphs, so baking could only add hinting —
+> and hinting at these sizes rounds advances to whole pixels, opening uneven
+> word gaps, while sharpening 11 px only slightly. Boot cost ≤ ~120 ms per
+> face on the handset, once. Two fallbacks stay named if the physical panel
+> disagrees: `github.com/golang/freetype`'s bytecode hinter (matches
+> baked-hinted; archived upstream, which is why it is not first choice), and
+> 12 px in place of 11. The FACE is still the owner's pick by eye — Inter
+> leads at DISPLAY, Atkinson Hyperlegible at 16/11 px — so both are vendored
+> and the role table names a face per entry; the default is Inter until the
+> on-panel session rules. `HintingFull` in x/image is a trap: it has no
+> hinter and only quantises advances — soft pixels AND the gaps.
+
 Whatever produces them:
 
 - **The sizes come from the roles**, resolved by a new `FbTypeRoles` in the
