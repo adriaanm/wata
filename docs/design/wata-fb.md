@@ -1220,6 +1220,22 @@ spring); the pump around it:
   is what ramps a held arrow into a coast. There is no discrete
   up/down selection move any more (`contactsInput` keeps only OK);
   navigation is impulse-only.
+- **The `Repeat` edges are the frame loop's own** (`Ui.withSynthRepeats`):
+  the matrix keypad's input node advertises no EV_REP, so the kernel
+  NEVER autorepeats these keys — a held arrow delivered exactly one
+  `Pressed`, one detent, no coast (found 2026-08-27 as "holding scrolls
+  once then stops" in the thread; the plan-0077 hardware ramp was
+  measured with injected value=2 trains, which masked it, and EVIOCSREP
+  cannot enable repeat on a node without EV_REP). A held up/down arms a
+  hold clock; after `REPEAT_DELAY_S` (0.33) a synthesized `Repeat()`
+  fires every `REPEAT_PERIOD_S` (0.066), at most one per frame, routed
+  through the ordinary input path — both integrators ride it, a
+  wake-swallowed press never arms, and only the last pressed arrow
+  repeats (the typematic rule). Pinned by hold phases in `motion-pump`
+  and `drawn-thread` (a hold must cross the list where a lone press
+  moves one detent — each seen red against the unfixed loop first),
+  plus an injected `key <k> repeat` directive leg that pins the
+  above-the-gate feed on its own.
 - **Step + write** (`Ui.stepMotion`, once per `frameStep`): steps the
   motion with the frame's clamped `dt`, puts a position past the end
   of a shrunk list back (`Motion.placeAt`), and writes `Motion.centre`

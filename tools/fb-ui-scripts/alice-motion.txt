@@ -44,3 +44,31 @@ advance 40
 waitmax motionlive 0 1
 expect motioncentre 2
 waitmax motioncentre 2 1
+
+# a HELD key must coast (owner bug 2026-08-27): the keypad's input node
+# advertises no EV_REP, so the kernel NEVER autorepeats these keys and a
+# held arrow used to deliver exactly one Pressed — one detent, then
+# nothing. The frame loop now synthesizes the missing Repeat edges from a
+# held arrow (REPEAT_DELAY_S, then one per REPEAT_PERIOD_S), so a hold
+# ramps exactly like the injected value=2 trains the hardware floor was
+# measured with. Holding DOWN across the list reaches the far end; the
+# unfixed loop moved one detent and stopped. The double-press phase left
+# the centre on 2, so the hold runs UP: it must land on 0, where a lone
+# press lands 1.
+key up press
+advance 40
+key up release
+waitmax motionlive 0 90
+waitmax motioncentre 0 1
+expect motioncentre 0
+
+# and an injected kernel-style repeat still impulses on its own (the
+# impulse feed sits ABOVE the press-only gate): press + one repeat is a
+# double shove, so from centre 0 it lands at 2 where a lone press lands 1
+key down press
+key down repeat
+key down release
+advance 40
+waitmax motionlive 0 1
+expect motioncentre 2
+waitmax motioncentre 2 1

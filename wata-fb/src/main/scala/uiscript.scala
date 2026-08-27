@@ -48,7 +48,7 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              explicitly (alice-kid-settings.txt's timeout
  *                              leg is the template)
  *    tap <key>                 press + release <key>, then one frame
- *    key <key> <press|release> one edge of <key>, then one frame (PTT needs
+ *    key <key> <press|release|repeat> one edge of <key>, then one frame (PTT
  *                              its press and release separated)
  *    wait <probe> <n> <frames> advance until probe >= n, or fail after
  *                              <frames> frames
@@ -354,8 +354,8 @@ object UiScript:
     val k = keyOf(name)
     var err = ""
     if !Evdev.known(k) then err = "unknown key '" + name + "'"
-    else if state != "press" && state != "release" then
-      err = "key wants press|release, got '" + state + "'"
+    else if state != "press" && state != "release" && state != "repeat" then
+      err = "key wants press|release|repeat, got '" + state + "'"
     else
       inject(KeyEvent(k, stateOf(state)))
       step(c, clock, evts, dev, px)
@@ -984,6 +984,7 @@ object UiScript:
   def stateOf(s: String): KeyState =
     var out: KeyState = Released()
     if s == "press" then out = Pressed()
+    if s == "repeat" then out = Repeat()
     out
 
   // ---- the tiny script lexer ---------------------------------------------------

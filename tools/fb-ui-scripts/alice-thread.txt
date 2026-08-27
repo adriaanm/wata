@@ -127,3 +127,19 @@ waitmax thrchw 0 1
 waitmax motionlive 0 200
 advance 25
 waitmax thrchip 0 1
+
+# HOLD-TO-SCROLL in the thread (owner bug 2026-08-27: holding scrolled
+# once, then stopped — no EV_REP on the keypad node, so no kernel
+# repeats; the frame loop synthesizes them). From centre 1 a hold runs
+# the remaining detents into the end spring and rests on the last row —
+# with the scrub chip up as the visible witness mid-coast.
+key down press
+advance 20
+expect thrchip 1
+advance 20
+key down release
+waitmax motionlive 0 200
+expect motioncentre 5
+waitmax motioncentre 5 1
+advance 25
+waitmax thrchip 0 1

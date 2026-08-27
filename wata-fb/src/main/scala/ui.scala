@@ -315,6 +315,9 @@ object Ui:
     notifyC.set(Notify.initial())
     bannerC.set(None)
     lastLedC.set(None)
+    repKeyC.set(0)
+    repTimeC.set(0.0)
+    repNextC.set(0.0)
     NetStatus.reset()
     ChargeStatus.reset()
     Enrol.reset()
@@ -385,8 +388,9 @@ object Ui:
     val ctx = FrameCtx(snapC.get(), conn, net, c, c.audioCmds, evts,
       unsentC.get(), undelivC.get(), quitArmed)
 
-    // poll input; only a confirmed `Restart app` in the exit menu ends the loop
-    val keyEvents = dev.pollInput()
+    // poll input — synthesizing the auto-repeat the keypad hardware cannot
+    // (no EV_REP; see `withSynthRepeats`) — then route it
+    val keyEvents = withSynthRepeats(dev.pollInput(), dt)
     val quit = handleFrameInput(keyEvents, ctx, dev)
     if !quit then
       // the quit confirmation ages out; a press this frame re-armed it, so
@@ -509,6 +513,82 @@ object Ui:
 
   def clampDt(raw: Long): Long =
     if raw < 0L then 0L else if raw > 1000L then 1000L else raw
+
+  // ---- held-arrow auto-repeat (the keypad has no EV_REP) ----------------------
+  // The matrix keypad's input node advertises EV=0x13 — SYN|KEY|MSC, NO
+  // EV_REP — so the kernel never autorepeats these keys: a held arrow
+  // delivered exactly one `Pressed`, one detent, no coast (the owner's
+  // "holding scrolls once then stops"). The plan-0077 hardware ramp was
+  // measured with INJECTED value=2 trains, which masked this; and EVIOCSREP
+  // cannot enable the kernel's repeat on a node without EV_REP (ENOSYS). So
+  // the frame loop synthesizes the missing edges itself: a held up/down
+  // arms a hold clock, and after `REPEAT_DELAY_S` a `Repeat()` edge fires
+  // every `REPEAT_PERIOD_S` (at most one per frame), routed through the
+  // ordinary input path — the impulse feeds see exactly what a kernel
+  // repeat would be, and the scripted driver's fixed 33 ms clock makes the
+  // ramp deterministic under `advance N`.
+
+  /** the typematic pace: first repeat after ~1/3 s, then ~15/s — between the
+   *  kernel default (250/33 ms, too eager at one detent per edge) and the
+   *  ~50 ms trains the plan-0077 hardware session ramped with. */
+  val REPEAT_DELAY_S: scala.Double = 0.33
+  val REPEAT_PERIOD_S: scala.Double = 0.066
+
+  // 0 = nothing held, 1 = up, 2 = down; the hold clock and the next-edge
+  // threshold (seconds since the press).
+  private val repKeyC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  private val repTimeC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
+  private val repNextC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
+
+  /** track held arrows from this frame's real events and prepend the
+   *  synthesized `Repeat` edge when one is due. A wake-swallowed press
+   *  (display off) never arms — the hold that woke the screen must not
+   *  scroll it — and only the LAST pressed arrow repeats, the typematic
+   *  rule. */
+  def withSynthRepeats(evs: List[KeyEvent], dt: scala.Double): List[KeyEvent] =
+    if displayOff then
+      repKeyC.set(0)
+      evs
+    else
+      trackHeld(evs)
+      if repKeyC.get() == 0 then evs
+      else
+        repTimeC.set(repTimeC.get() + dt)
+        if repTimeC.get() >= repNextC.get() then
+          repNextC.set(repNextC.get() + REPEAT_PERIOD_S)
+          KeyEvent(heldKey(), Repeat()) :: evs
+        else evs
+
+  def heldKey(): Key = if repKeyC.get() == 1 then KUp() else KDown()
+
+  def trackHeld(evs: List[KeyEvent]): Unit =
+    var cur = evs
+    var going = true
+    while going do
+      cur match
+        case ev :: t =>
+          trackOne(ev)
+          cur = t
+        case Nil => going = false
+
+  def trackOne(ev: KeyEvent): Unit =
+    val arrow = arrowOf(ev.key)
+    if arrow != 0 then
+      if Shell.isPressed(ev.state) then
+        repKeyC.set(arrow)
+        repTimeC.set(0.0)
+        repNextC.set(REPEAT_DELAY_S)
+      else if isReleased(ev.state) && repKeyC.get() == arrow then
+        repKeyC.set(0)
+
+  def arrowOf(k: Key): scala.Int = k match
+    case _: KUp   => 1
+    case _: KDown => 2
+    case _        => 0
+
+  def isReleased(ks: KeyState): Boolean = ks match
+    case Released() => true
+    case _          => false
 
   /** apply this frame's input to the shell; returns true if a quit edge fired
    *  (back pressed while on the contacts view with no active applet override).
