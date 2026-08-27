@@ -14,6 +14,10 @@ wait msgs 1 1500
 
 # two clips into bob's DM (the first send resolves the canonical room)
 tap down
+# rolodex physics: the impulse has to coast a detent and the pump write the
+# new centre into the selection before anything acts on it
+wait motioncentre 1 90
+waitmax motionlive 0 90
 key ptt press
 advance 4
 key ptt release

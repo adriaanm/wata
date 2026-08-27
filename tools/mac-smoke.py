@@ -235,23 +235,28 @@ def run(tmp):
         first = sess.cmd("wait 800", lambda l: l == "waited 800")
         c.line(first, lambda l: l == "tree set", "first wait: no `tree set`")
 
-        # the contact list as a NATIVE hierarchy: title, connectivity, the
-        # family row (selected: an NSBox highlight), bob's DM row, the footer
-        # — and no unplayed badge yet.
+        # the contact screen is plan 0070's ROLODEX (plan 0077 stage 3): at
+        # rest, ONE full-bleed card in the contact's colour — the selected
+        # (family) card as an NSBox filling the stage, the name at the
+        # DISPLAY role in its box, the state line under it — and nothing
+        # else: no WATA title, no footer key legend, no connectivity element
+        # while the link is healthy. Bob's card is culled off-panel at rest,
+        # which is why he does not appear. (AppKit frames are bottom-left
+        # origin, so wata's y=0 prints as 128-h.)
         t1 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
-        c.line(t1, lambda l: l.strip() == 'NSTextField 0 119 24 8 "WATA"',
-               "tree 1: no WATA title label")
-        c.line(t1, lambda l: l.strip() == 'NSTextField 138 119 18 8 "NET"',
-               "tree 1: no NET connectivity label")
-        c.line(t1, lambda l: l.strip() == 'NSBox 0 103 160 8',
-               "tree 1: no selection highlight NSBox on the family row")
-        c.line(t1, lambda l: l.strip() == 'NSTextField 0 103 36 8 "Family"',
-               "tree 1: no Family row label")
-        c.line(t1, lambda l: l.strip() == 'NSTextField 0 95 18 8 "Bob"',
-               "tree 1: no Bob row label")
-        c.line(t1, lambda l: l.strip() == 'NSTextField 0 7 102 8 "UP/DN sel OK open"',
-               "tree 1: no footer legend")
-        c.ok(not any('"1"' in l for l in t1), "tree 1: unplayed badge already present")
+        c.line(t1, lambda l: l.strip() == 'NSBox 0 0 160 128',
+               "tree 1: no full-bleed family card NSBox")
+        c.line(t1, lambda l: l.strip() == 'NSTextField 2 43 156 42 "Family"',
+               "tree 1: no full-bleed Family name label")
+        c.line(t1, lambda l: l.strip() == 'NSTextField 2 25 156 16 "no messages"',
+               "tree 1: no state line under the name")
+        c.ok(not any('"WATA"' in l for l in t1),
+             "tree 1: the WATA title chrome is back on the rolodex")
+        c.ok(not any('UP/DN' in l for l in t1),
+             "tree 1: the footer key legend is back on the rolodex")
+        c.ok(not any('"NET"' in l for l in t1),
+             "tree 1: connectivity element shown on a healthy link")
+        c.ok(not any('unheard' in l for l in t1), "tree 1: unheard band already present")
 
         # bob sends a voice message to the family room MID-SESSION, via the tui.
         tenv = dict(env, WATA_TUI_HS=BASE, WATA_TUI_USER="bob", WATA_TUI_PASS=PASSWORD)
@@ -261,22 +266,27 @@ def run(tmp):
         c.line(boblines, lambda l: l == "ready @bob:localhost", "bob: no `ready`")
         c.line(boblines, lambda l: l.startswith("sent "), "bob: no `sent` line")
 
-        # the message arrives over sync; the differ patches EXACTLY the row
-        # it changes: the unplayed underline (plan 0041's highlight, shared
-        # with the handset) and the unplayed badge inserted into the family
-        # row (row 0 of the rows group at path [2]), and nothing else.
+        # the message arrives over sync; the differ patches EXACTLY what the
+        # card changes: the unheard band (plan 0070's one-element count/bar)
+        # and its count label inserted into the family card, and the state
+        # line reworded — and nothing else. The card itself is untouched.
         arrival = sess.cmd("wait 6000", lambda l: l == "waited 6000")
         patches = [l for l in arrival if l.startswith("patch ")]
-        c.ok(patches == ['patch insert [0.2.0] 1 unp:rect(0,24,160,1,65504)',
-                         'patch insert [0.2.0] 3 badge:text(25,2,"1",65504)'],
-             f"arrival: want exactly the underline + badge inserts, got {patches!r}")
+        c.ok(patches == ['patch insert [0.0.0] 1 band:fill(0,0,160,21,r=0,65504,a=255)',
+                         'patch insert [0.0.0] 3 count:label(2,1,156,19,"1 unheard",'
+                         'caption,medium,center,0,a=255)',
+                         'patch set [0.0.0.4] label(2,87,156,16,"just now",'
+                         'caption,regular,center,0,a=255)'],
+             f"arrival: want exactly the band + count inserts and the state set, got {patches!r}")
 
         # and the native tree now shows it, retained (no rebuild: same frames).
         t2 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
-        c.line(t2, lambda l: l.strip() == 'NSTextField 150 103 6 8 "1"',
-               "tree 2: no unplayed badge label")
-        c.line(t2, lambda l: l.strip() == 'NSTextField 0 103 36 8 "Family"',
-               "tree 2: family row label gone")
+        c.line(t2, lambda l: l.strip() == 'NSBox 0 107 160 21',
+               "tree 2: no unheard band NSBox across the card's top")
+        c.line(t2, lambda l: l.strip() == 'NSTextField 2 108 156 19 "1 unheard"',
+               "tree 2: no unheard count label in the band")
+        c.line(t2, lambda l: l.strip() == 'NSTextField 2 43 156 42 "Family"',
+               "tree 2: family card name gone")
 
         # the key path: OK (a real kVK code through the real translation
         # table) opens the family conversation; its native tree shows bob's

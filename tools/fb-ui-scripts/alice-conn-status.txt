@@ -1,7 +1,8 @@
-# conn-status: the header's connectivity element and the 1px status line it
-# shares its computed state with (netstatus.scala, plan 0013 milestone 4).
-# One phase, alice only — nothing here needs a peer beyond a family room to
-# render a contact list under the header.
+# conn-status: the connectivity element on the rolodex (plan 0077 stage 3's
+# ruling, inherited from the watch): it shows ONLY while the link is not
+# simply working — an unhealthy connection, or no interface holding an
+# address — and then on a dark chip over the card. A healthy link shows
+# NOTHING, which the healthy checkpoints now pin. One phase, alice only.
 #
 # The connection is forced with the `conn` directive rather than provoked: the
 # sync loop republishes `Syncing` on every snapshot, so a bad-connection frame
@@ -18,7 +19,7 @@ wait syncing 1 900
 wait convs 1 900
 advance 30
 
-# connected, on a host: the plain `NET` label in green, status line cyan.
+# connected, on a host: healthy — the resting card and NOTHING else.
 checkpoint conn-live
 
 # reconnecting: yellow, with the `..` on the FIRST phase of the alternation —
@@ -37,16 +38,17 @@ checkpoint conn-reconnect-blank
 conn off
 checkpoint conn-down
 
-# the device-only pipes. Health back to live, then each interface in turn:
-# the wifi glyph, then the cellular mast glyph (font 0x8C).
+# the device-only pipes with a HEALTHY link: no chip — a working wifi or
+# cellular interface is not information on this screen. The two frames pin
+# exactly the resting card (they are conn-live again, deliberately).
 conn syncing
 netpipe wifi
 checkpoint conn-wifi
 netpipe cell
 checkpoint conn-cell
 
-# no interface holds an address: `OFF` in red, and the status line goes red
-# with it even though the client still believes it is syncing — the pipe is
-# the stronger claim, and both marks derive from the one computed state.
+# no interface holds an address: the chip comes back with `OFF` in red even
+# though the client still believes it is syncing — the pipe is the stronger
+# claim.
 netpipe none
 checkpoint conn-off

@@ -561,6 +561,29 @@ object Pump:
     else if phase == "repeat" then 2
     else -1
 
+  /** integrate the rolodex's motion, then hand the applet the item the centre
+   *  band is over — the same join wata-fb's `Ui.stepMotion` and the watch's
+   *  `Pump.stepMotion` make (plan 0077 stage 3): the shared bodies render the
+   *  rolodex here too, so this pump owes it the same physics. `selected`
+   *  stays the conversation a press acts on and the integrator is what moves
+   *  it; off the contact screen the integrator is seated on `selected`
+   *  instead of stepped. */
+  def stepMotion(w: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
+    val count = WataLogic.convCount(ctx.snap)
+    if WataLogic.isContactsView(w) then
+      var m = Motion.step(w.motion, dt, count)
+      // a position past the end of a list that SHRANK is put back rather than
+      // left for the end spring to argue with the model
+      if count > 0 && Motion.offset(m) > (count - 1).toDouble + 1.0 then
+        m = Motion.placeAt(m, count - 1)
+      val sel = Motion.centre(m, count)
+      var out = WataLogic.withMotion(w, m)
+      if out.selected != sel then out = WataLogic.withSel(out, sel, out.scrollOffset)
+      out
+    else if Motion.centre(w.motion, count) != w.selected || Motion.live(w.motion) then
+      WataLogic.withMotion(w, Motion.placeAt(w.motion, w.selected))
+    else w
+
   // ---- one frame ------------------------------------------------------------
 
   /** one frame: UI events -> flash/outbox, keys -> input, audio events, tick,
@@ -587,6 +610,8 @@ object Pump:
     st = notifyStep(h, st, snap)
     Devices.publishHandsets(snap) // the Devices window's picker, when it moves
     st = PumpSt(WataLogic.update(st.wata, dt, ctx), st.last, tickArm(st.quitArm, dt),
+      st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
+    st = PumpSt(stepMotion(st.wata, dt, ctx), st.last, st.quitArm,
       st.lastMs, st.quit, st.unsent, st.undelivered, st.marks)
     val v = WataLogic.body(st.wata, snap, net, conn, st.quitArm > 0.0,
       st.unsent, st.undelivered,

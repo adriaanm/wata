@@ -11,6 +11,10 @@ wait syncing 1 900
 wait convs 2 900
 advance 30
 tap down
+# rolodex physics: the impulse has to coast a detent and the pump write the
+# new centre into the selection before anything acts on it
+wait motioncentre 1 90
+waitmax motionlive 0 90
 advance 5
 checkpoint dm-roster
 

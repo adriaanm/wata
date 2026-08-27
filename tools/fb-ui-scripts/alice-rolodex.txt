@@ -1,0 +1,62 @@
+# rolodex (plan 0077 stages 3+4): the contact screen IS the rolodex. Three
+# users -> three cards [Family, Bob, Charlie], which is what gives the open
+# stack a neighbour on each side of the centre band.
+#
+# The virtual clock ticks a fixed 33ms per frame, so every "advance N" frame
+# is the same frame every run — including the mid-animation ones, which is
+# what lets a physics screen be pinned as goldens at all.
+
+wait syncing 1 900
+wait convs 3 900
+# settled at the top: the resting screen is ONE CONTACT, full bleed
+waitmax motionlive 0 90
+advance 5
+expect motioncentre 0
+checkpoint roll-rest
+
+# one down press: the stack opens INTO the navigation (a mid-opening frame —
+# the single interpolation, caught between full bleed and the open stack)
+tap down
+advance 3
+expect motionlive 1
+checkpoint roll-open
+
+# ~12 frames after the impulse the position has converged on card 1 while
+# the settle window still holds the stack open: three rows under the fixed
+# white nubs, centre on Bob. This is the frame the centre-emphasis claims
+# are pinned on (see the probes below).
+advance 9
+expect motioncentre 1
+checkpoint roll-stack
+
+# the centre card is MARKED, as numbers off the live pixels (probe doc in
+# uiscript.scala). Wider: the centre scanline is lit nearly edge to edge
+# (stack pad only) while a neighbour loses another padOpen each side.
+# Brighter: the neighbour's card is drawn at QUIET_ALPHA over black, so its
+# scanline sums visibly less light. Each claim is an expect (>=) paired with
+# a waitmax (<=), and each FAILS when the emphasis is inverted (quiet forced
+# to zero in rolodex.scala) — the red runs are recorded in plan 0077.
+expect rollcw 140
+waitmax rollnw 140 1
+expect rollcl 600
+waitmax rollnl 600 1
+
+# a second detent: a genuinely mid-roll frame, cards sliding under the nubs
+tap down
+advance 4
+expect motionlive 1
+checkpoint roll-midroll
+
+# stopping closes the stack: 450ms after the last input the centre card
+# grows back to full bleed — over Charlie, where the physics landed
+waitmax motionlive 0 90
+advance 5
+expect motioncentre 2
+checkpoint roll-settled
+
+# OK opens whoever is centred — `selected` IS `Motion.centre`, by the frame
+# pump's write, so this must be Charlie's (empty) conversation. The frame is
+# the authority claim's golden: with the write removed it opens Family.
+tap enter
+advance 10
+checkpoint roll-charlie-conv

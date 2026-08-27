@@ -10,6 +10,10 @@ notifymode quiet
 wait syncing 1 900
 wait convs 2 900
 tap down
+# rolodex physics: the impulse has to coast a detent and the pump write the
+# new centre into the selection before anything acts on it
+wait motioncentre 1 90
+waitmax motionlive 0 90
 wait msgs 2 2000
 # same gate as dm-bob-roster: the checkpoint shows the badge for bob's reply,
 # so wait for the badge state itself before shooting the frame, then outlast

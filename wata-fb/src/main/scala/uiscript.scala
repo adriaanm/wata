@@ -137,9 +137,15 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell), kidapply
  *  (the applying wait's frame count, same shift: 0 = not applying), chargebad
  *  (plan 0073: 1 while the debounced charge-anomaly mark is up), and the
- *  motion-pump probes (plan 0077 stage 2): motioncentre (the rolodex
- *  integrator's centre index against the live conversation count) and
- *  motionlive (1 while the integrator is still moving). */
+ *  motion-pump probes (plan 0077): motioncentre (the rolodex integrator's
+ *  centre index against the live conversation count — the selection itself,
+ *  since the pump writes it into `selected`), motionlive (1 while the
+ *  integrator is still moving), and the rolodex-emphasis pixel probes
+ *  (stage 4): rollcw/rollnw (lit pixels on a scanline through the centre
+ *  band's middle / through the row above it) and rollcl/rollnl (the same
+ *  scanlines' summed brightness /16) — what pins "the centre card is wider
+ *  and brighter than a neighbour" as numbers that fail when the emphasis is
+ *  inverted. */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -277,7 +283,7 @@ object UiScript:
       err = waitMax(nth(ts, 1), num(nth(ts, 2), 0), num(nth(ts, 3), 600),
         c, clock, evts, dev, px)
     else if cmd == "expect" then
-      err = expect(nth(ts, 1), num(nth(ts, 2), 1))
+      err = expect(nth(ts, 1), num(nth(ts, 2), 1), px)
     else if cmd == "checkpoint" then
       err = checkpoint(nth(ts, 1), px)
     else if cmd == "group" then
@@ -352,15 +358,15 @@ object UiScript:
   def waitFor(name: String, want: scala.Int, maxFrames: scala.Int, c: MatrixClient,
               clock: Clock, evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
     var i = 0
-    var ok = probe(name) >= want
+    var ok = probe(name, px) >= want
     while !ok && i < maxFrames do
       step(c, clock, evts, dev, px)
-      ok = probe(name) >= want
+      ok = probe(name, px) >= want
       i = i + 1
     var err = ""
     if !ok then
       err = "wait " + name + " >= " + want + " timed out after " + maxFrames +
-        " frames (saw " + probe(name) + diag() + ")"
+        " frames (saw " + probe(name, px) + diag() + ")"
     err
 
   /** the mirror of `wait`: advance until a probe DROPS to `want` or below.
@@ -369,15 +375,15 @@ object UiScript:
   def waitMax(name: String, want: scala.Int, maxFrames: scala.Int, c: MatrixClient,
               clock: Clock, evts: sgo.Chan[AudioEvt], dev: UiDevice, px: go.Bytes): String =
     var i = 0
-    var ok = probe(name) <= want
+    var ok = probe(name, px) <= want
     while !ok && i < maxFrames do
       step(c, clock, evts, dev, px)
-      ok = probe(name) <= want
+      ok = probe(name, px) <= want
       i = i + 1
     var err = ""
     if !ok then
       err = "waitmax " + name + " <= " + want + " timed out after " + maxFrames +
-        " frames (saw " + probe(name) + diag() + ")"
+        " frames (saw " + probe(name, px) + diag() + ")"
     err
 
   /** the wait-timeout postmortem: connection tag + the session's send/conn
@@ -388,8 +394,8 @@ object UiScript:
       " sendfail=" + Ui.sendFails + " playfail=" + Ui.playFails +
       " connerr=" + Ui.connErrs
 
-  def expect(name: String, want: scala.Int): String =
-    val got = probe(name)
+  def expect(name: String, want: scala.Int, px: go.Bytes): String =
+    val got = probe(name, px)
     var err = ""
     if got < want then err = "expect " + name + " >= " + want + ", got " + got
     err
@@ -640,7 +646,7 @@ object UiScript:
 
   // ---- probes ------------------------------------------------------------------------
 
-  def probe(name: String): scala.Int =
+  def probe(name: String, px: go.Bytes): scala.Int =
     if name == "syncing" then syncingProbe()
     else if name == "convs" then WataLogic.convCount(Ui.frameSnap)
     else if name == "msgs" then WataLogic.msgCount(Ui.frameSnap, curConvIdx())
@@ -694,14 +700,54 @@ object UiScript:
     // `charge` directive's forced reads feed. 0 for the whole debounce
     // window is the assertion that matters.
     else if name == "chargebad" then boolProbe(ChargeStatus.active())
-    // the rolodex motion integrator (plan 0077 stage 2, FB-MOTION-PUMP):
-    // the centre index the physics has converged on, and whether it is still
-    // moving. The pair is the stage's whole observable — nothing rendered
-    // reads the motion yet — and the fixed 33ms virtual clock is what makes
-    // "advance N then expect" deterministic against it.
+    // the rolodex motion integrator (plan 0077): the centre index the physics
+    // has converged on — the selection itself, since the pump writes it into
+    // `selected` — and whether it is still moving. The fixed 33ms virtual
+    // clock is what makes "advance N then expect" deterministic against it.
     else if name == "motioncentre" then Ui.motionCentre
     else if name == "motionlive" then boolProbe(Ui.motionLive)
+    // the rolodex EMPHASIS probes (plan 0077 stage 4), read straight off the
+    // live pixel buffer: the lit width and summed brightness of one scanline
+    // through the centre band's middle (rollcw/rollcl) and one through the
+    // row above it (rollnw/rollnl). With the stack open and near a detent the
+    // first crosses the centre card and the second a quiet neighbour, so the
+    // centre-card-is-marked claims — wider (inset) and brighter (QUIET_ALPHA)
+    // — are numbers a script can pin, and numbers that FAIL when the
+    // emphasis is inverted (quiet forced to zero), which is what makes the
+    // green run believable.
+    else if name == "rollcw" then scanLit(px, Rolodex.centreY(Display.H) + Rolodex.rowH(Display.H) / 2)
+    else if name == "rollnw" then scanLit(px, Rolodex.centreY(Display.H) - Rolodex.rowH(Display.H) / 2)
+    else if name == "rollcl" then scanLum(px, Rolodex.centreY(Display.H) + Rolodex.rowH(Display.H) / 2)
+    else if name == "rollnl" then scanLum(px, Rolodex.centreY(Display.H) - Rolodex.rowH(Display.H) / 2)
     else -1
+
+  /** pixels on scanline `y` that are not (near-)black — the lit width the
+   *  emphasis probes compare. RGB565 little-endian, the buffer's own format. */
+  def scanLit(px: go.Bytes, y: scala.Int): scala.Int =
+    var n = 0
+    if px.length >= Display.BYTES then
+      var x = 0
+      while x < Display.W do
+        if pixSum(px, x, y) > 4 then n += 1
+        x += 1
+    n
+
+  /** the scanline's summed channel values, /16 to keep the number readable in
+   *  a script — the brightness the emphasis probes compare. */
+  def scanLum(px: go.Bytes, y: scala.Int): scala.Int =
+    var tot = 0
+    if px.length >= Display.BYTES then
+      var x = 0
+      while x < Display.W do
+        tot += pixSum(px, x, y)
+        x += 1
+    tot / 16
+
+  /** r5+g6+b5 of one pixel (0..125). */
+  def pixSum(px: go.Bytes, x: scala.Int, y: scala.Int): scala.Int =
+    val i = (y * Display.W + x) * 2
+    val v = (px(i).toInt & 0xff) | ((px(i + 1).toInt & 0xff) << 8)
+    ((v >> 11) & 31) + ((v >> 5) & 63) + (v & 31)
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run
    *  on a goroutine of their own, so "OK pressed" and "the row shows a result"

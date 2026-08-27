@@ -1,7 +1,8 @@
-# motion-pump (plan 0077 stage 2): the rolodex integrator runs in the fb
-# frame loop, probe-only — NOTHING rendered reads it yet, so this scenario
-# takes no checkpoints and no golden may move. The virtual clock ticks a
-# fixed 33ms per frame, so "advance N then expect" is deterministic.
+# motion-pump (plan 0077): the rolodex integrator's PHYSICS, probe-only —
+# one detent per press, double impulses coasting further, rest exactly on a
+# detent. The rendered rolodex has its own scenario (alice-rolodex.txt);
+# this one pins the model's numbers. The virtual clock ticks a fixed 33ms
+# per frame, so "advance N then expect" is deterministic.
 #
 # Three users -> three conversations [Family, Bob, Charlie]: room for a
 # single detent (centre 0 -> 1) and a two-press double impulse (0 -> 2).

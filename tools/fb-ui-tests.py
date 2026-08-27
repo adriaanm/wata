@@ -284,17 +284,27 @@ SCENARIOS = [
         ],
     },
     {
-        # plan 0077 stage 2 (FB-MOTION-PUMP): the rolodex motion integrator
-        # runs in the frame loop, probe-only — one down press converges the
-        # centre one detent and comes to rest; two quick presses are twice
-        # the shove and coast further by the same frame count. No checkpoints
-        # on purpose: nothing rendered reads the motion until stage 3, and
-        # this scenario existing must not move a single golden.
+        # plan 0077 stage 2 (FB-MOTION-PUMP): the rolodex motion integrator's
+        # physics, probe-only — one down press converges the centre one detent
+        # and comes to rest; two quick presses are twice the shove and coast
+        # further by the same frame count.
         "name": "motion-pump",
         "probe_only": True,
         "users": ["alice", "bob", "charlie"],
         "phases": [
             ("alice", "alice-motion.txt"),
+        ],
+    },
+    {
+        # plan 0077 stages 3+4: the rolodex ON SCREEN — the resting full-bleed
+        # card, the stack opening mid-navigation, the aligned open stack with
+        # the centre-emphasis pixel claims, a genuinely mid-roll frame, the
+        # settle back to full bleed, and OK opening the conversation the
+        # centre names (the selection-authority claim).
+        "name": "rolodex",
+        "users": ["alice", "bob", "charlie"],
+        "phases": [
+            ("alice", "alice-rolodex.txt"),
         ],
     },
     {

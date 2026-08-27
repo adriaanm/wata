@@ -288,8 +288,10 @@ explicit state machine, not a generic widget framework:
   (`isDevBack`, which also drops DEV's confirm latch — except while
   the enrolment QR is open, whose only way out is Back, so the key
   routes into the applet then) — the red-goes-back convention; neither
-  applet ever sees the key (`Shell.handleInput`). The contacts footer
-  carries the `PTT talk` hint.
+  applet ever sees the key (`Shell.handleInput`). (The key legend that
+  once footed the contact list is gone with the rolodex — see "The
+  rolodex" below; the boot and empty-roster screens still name their
+  keys.)
 - The shell owns the `AudioEvt` mailbox's SINGLE per-frame drain
   (`Shell.drainAudio` -> `routeAudio`): echo events go to the developer
   settings applet (the echo test's home), recording/playback events to
@@ -312,7 +314,7 @@ explicit state machine, not a generic widget framework:
 applet's `render` reads whatever is ambient, hands it to a pure
 `(state, ...) => View`, and makes ONE `FbPaint.draw` call. `WataLogic`
 has one body (`body` -> the enrolment screen, the boot screen, the
-connection line, the contact list or the conversation, plus the status
+connection line, the rolodex or the conversation, plus the status
 flash and the recording bar as children over it) and `SettingsLogic` one
 (`body` -> the menu or the enrolment screen). Nothing else writes into
 the pixel buffer from an applet. The exception is deliberate: the snake
@@ -558,6 +560,18 @@ The status line derives from the same record (`ShellStatus.fromNet`):
 no pipe at all is red whatever the sync loop last managed to say, and
 otherwise the connection keeps the colors it always had.
 
+**On the rolodex (plan 0077 stage 3) the element earns its place.** The
+resting screen is the contact and nothing else, and an indicator that is
+always green is not information — so the contact screen shows the
+element ONLY while something is wrong (`NetStatus.isHealthy` false, no
+pipe, or the charge-anomaly mark below), and then on a dark chip
+(`WataLogic.netChip`) so the marks survive being drawn over an arbitrary
+card hue. The full-bleed card also covers the shell's 1 px status line
+on this one screen, by the same ruling; every other screen keeps line
+and header element exactly as the table above says. The healthy
+`conn-live`/`conn-wifi`/`conn-cell` goldens now pin exactly the resting
+card — a working interface is not information here either.
+
 Two uitest-only overrides make the whole table pinnable off-device
 without faking interfaces underneath `Diag` (which would make the
 goldens depend on the host's network): the `conn` directive forces the
@@ -587,7 +601,10 @@ one ever shows the mark) and arms only after the anomaly holds
 `DEBOUNCE_FRAMES` (~3 minutes of frames — frames, not wall time,
 because the device's clock STEPS when NTP lands): a BC1.2
 renegotiation or a dock-time bounce never flashes it. One clean read
-clears it at once — recovery is good news. Percentage is never
+clears it at once — recovery is good news. On the rolodex the mark is
+one of the three things that summon the dark chip (above), which widens
+to cover the mark's fixed slot — a failed cradle contact shows whatever
+the network is doing. Percentage is never
 consulted: the boot-time BMS percentage is inflated when booted on a
 charger. The `charge bad|ok|auto` directive forces the READ only (the
 debounce runs for real — the charge-anomaly scenario's point), and the
@@ -599,15 +616,15 @@ Two row marks say what the client is doing with the user's own audio
 (plan 0022 milestone B; the queue itself is `wataclient`'s —
 [wataclient.md](wataclient.md)).
 
-- **The contact row's outbox mark**, last column, right-aligned like the
-  favorite star so nothing reflows: `ICON_UNSENT` in yellow while that
-  conversation has a send still queued, `ICON_UNDELIV` in red once one
-  was refused for good. The louder one wins when both apply, and the
-  unplayed badge shifts two columns left to make room. The undelivered
-  mark stays until the user OPENS that conversation, which is where they
-  find out — `WataLogic.enterConversation` sends `ActAckOutbox` for both
-  spellings of the conversation's key (room id and contact id, since a
-  send queued before the DM room existed is filed under the contact).
+- **The card's outbox mark** (plan 0070's delivery vocabulary is
+  SQUARES): one small square in the rolodex card's trailing corner,
+  yellow (`mark == 1`) while that conversation has a send still queued,
+  red (`mark == 2`) once one was refused for good — the louder one wins
+  when both apply (`WataLogic.outboxMark`). The undelivered mark stays
+  until the user OPENS that conversation, which is where they find out —
+  `WataLogic.enterConversation` sends `ActAckOutbox` for both spellings
+  of the conversation's key (room id and contact id, since a send queued
+  before the DM room existed is filed under the contact).
 - **The message row is one fixed grid** (plan 0049,
   `WataLogic.msgRowView`): marks in columns 0-1, the age at column 2
   (3 wide — `ageStr`: "now" under a minute, then "59m"/"23h"/"99d",
@@ -696,7 +713,7 @@ are `NetDown`/`NetReconnecting` — and the latch is the whole of that
 distinction.
 
 While the latch is unset, `WataLogic.bodyContacts` yields
-`bodyBoot` instead of the contact list or the connection line: the
+`bodyBoot` instead of the rolodex or the connection line: the
 `WATA` title, the ordinary connectivity element (the header is
 unchanged — the same `NetState` the rest of the frame draws from), a
 centered headline in the conversation area, an optional second line
@@ -790,7 +807,7 @@ would ride `NetState.blink`, whose phase resets on a health change — the
 discipline that keeps a scripted frame reproducible).
 
 Once the latch is set it stays set for the session, so a later drop
-shows the ordinary presentation — the contact list the snapshot still
+shows the ordinary presentation — the rolodex the snapshot still
 holds, under a yellow header — and never the boot screen again. The
 `early-boot` uitest scenario (`alice-boot.txt`) pins all four frames,
 the last of them being precisely that non-return; `boot-retry` and
@@ -1041,7 +1058,7 @@ real mistyped PSK, and `wifi_off` proving the report rides cellular
 `back` on the contacts view is the only exit edge (`Ui.isQuitEdge`), and
 it takes two presses within `Ui.QUIT_ARM_S` (2s): the first arms the
 confirmation and the applet says so (on the boot screen and on the
-contact list footer, via `FrameCtx.quitArmed`), an unconfirmed arm ages
+contact screen's footer row, via `FrameCtx.quitArmed`), an unconfirmed arm ages
 out in `Ui.tickQuitArm`, and the second **opens the exit menu**. The
 ordinary in-session `back` (conversation -> contacts, settings -> wata)
 is untouched.
@@ -1117,42 +1134,73 @@ if it's on a fourth device node. This module reproduces that
 behavior rather than fixing it; `WATA-TODO.md` tracks it as an open
 item ("dot2 input bus undiscovered").
 
-### The rolodex motion pump (plan 0077 stage 2)
+### The rolodex (plan 0077 stage 3, `rolodex.scala`)
 
-The contact list carries wataui's motion integrator (`Motion`,
-`wataui/motion.scala` — plan 0070's physical scrolling), plumbed but not
-yet in charge: `WataState.motion` holds the value (a plain immutable
-record, so the applet stays `Shareable`), and nothing rendered reads it
-until stage 3 (FB-ROLODEX-BODY) swaps the grid list for the rolodex and
-makes `Motion.centre` the selection.
+The contact screen is plan 0070's ROLODEX. At rest the panel is ONE
+CONTACT, full bleed, in that person's own colour (`Palette.forRoster` —
+the whole roster at once, so no two cards collide): the name at the
+DISPLAY role, one line of state (CAPTION) under it, the yellow unheard
+band across the top when there is one — and nothing else. No WATA
+title, no footer key legend, no connectivity element while the link is
+healthy (the chip, above), and the full-bleed card covers the shell's
+1 px status line. Navigating shrinks the card into a vertical stack of
+`VISIBLE = 3` rows scrolling under a fixed pair of white nubs, and
+450 ms after the last input the centre card grows back to full bleed.
 
-- **Impulse feed** (`WataLogic.motionImpulse`, called at the top of
-  `WataLogic.handleInput`): up/down on the contact list shove the
-  integrator one detent, on `Pressed` AND `Repeat` — the feed sits ABOVE
-  the press-only gate precisely because that gate drops the kernel's
-  key-repeat events, and repeat is what ramps a held arrow into a coast.
-  The discrete `downSel`/`upSel` below stay press-only and remain the
-  authority a press acts on.
-- **Step** (`Ui.stepMotion`, once per `frameStep` with the same clamped
-  `dt` as every other timer): the fb half of the watch's
-  `Pump.stepMotion`, gated on the wata applet's contact view being what
-  the shell shows. A position past the end of a list that shrank is put
-  back with `Motion.placeAt`, and a SETTLED integrator whose centre
-  disagrees with `selected` (the selection moved by other means —
-  entering the screen, a shrink's discrete clamp) is re-seated on it, so
-  the two cannot drift apart while the selection is still discrete.
+`rolodex.scala` is the watch's file restated for a LANDSCAPE panel —
+the design language (one interpolation, culling, the quiet-neighbour
+treatment, the nubs, the one-element unheard band, black `Palette.INK`
+on every card) is identical and documented at length in the file
+itself and in `docs/design/wata-watch.md`; the geometry fractions are
+this panel's own: three ~42 px rows rather than five (bigger absolute
+type than the watch — the point of the port), `REACH = 2`, the
+full-bleed name box `h/3`, the band `h/6`, the state line `h/8` (the
+watch's `h/10` is 12 px here, which clips a caption's descenders). The
+two files stay separate copies until the iOS client adopts the rolodex
+(plan 0077's duplication note).
+
+**The integrator is the selection authority.** `WataState.motion`
+holds wataui's `Motion` (impulse, friction, detent spring, end
+spring); the pump around it:
+
+- **Impulse feed** (`WataLogic.motionImpulse`, above the press-only
+  gate): up/down shove one detent, on `Pressed` AND `Repeat` — repeat
+  is what ramps a held arrow into a coast. There is no discrete
+  up/down selection move any more (`contactsInput` keeps only OK);
+  navigation is impulse-only.
+- **Step + write** (`Ui.stepMotion`, once per `frameStep`): steps the
+  motion with the frame's clamped `dt`, puts a position past the end
+  of a shrunk list back (`Motion.placeAt`), and writes `Motion.centre`
+  into `selected` every frame the contact screen shows — so the drawn
+  emphasis (the centre card IS `Motion.centre`) and what a held talk
+  button reaches cannot disagree, at any zoom. While another screen
+  shows, the integrator is SEATED on `selected` (`placeAt`) instead of
+  stepped, so an externally moved selection is where the rolodex
+  resumes. wata-mac's pump (`Main.stepMotion`) makes the same join,
+  since the shared bodies render the rolodex there too.
 - **Pace** (`Ui.framePaceMs`): the device's `frameSleep` drops to
   `MOTION_FRAME_MS` (16 ms) while the shown rolodex is `Motion.live`,
   else the ordinary `FRAME_MS`. Whether the ST7735S path can actually
-  show 60 fps is stage 4's hardware measurement; the scripted driver is
-  untouched (its `frameSleep` ignores the argument and its clock ticks a
-  fixed 33 ms per frame).
-- **Gate**: the `motioncentre`/`motionlive` uitest probes and the
-  probe-only `motion-pump` scenario (`tools/fb-ui-scripts/alice-motion.txt`)
-  — one press converges the centre one detent and comes to rest, two
-  quick presses coast further by the same frame count. Probe-only by
-  design: the stage is invisible, and the scenario pins no pixels
-  (`"probe_only"` in `tools/fb-ui-tests.py`).
+  show 60 fps is the hardware leg's measurement (`FB-ROLODEX-HW`); the
+  scripted driver is untouched (its `frameSleep` ignores the argument
+  and its clock ticks a fixed 33 ms per frame).
+- **Gates**: the probe-only `motion-pump` scenario pins the physics
+  (one press converges one detent; two quick presses coast further by
+  the same frame count), and the `rolodex` scenario
+  (`tools/fb-ui-scripts/alice-rolodex.txt`) pins the pixels: the
+  resting card, a mid-opening frame, the aligned open stack, a
+  mid-roll frame, the settle back to full bleed, and OK opening the
+  conversation the centre names. The centre-card emphasis is pinned as
+  NUMBERS off the live pixels (the `rollcw`/`rollnw`/`rollcl`/`rollnl`
+  probes — lit width and summed brightness of a scanline through the
+  centre band vs one through the neighbour row), with thresholds that
+  sit between the measured green values and the values measured with
+  the claim inverted (quiet forced to zero; openness pinned closed;
+  the selected-write removed) — each claim was SEEN TO FAIL before its
+  green run was believed, the watch's `rolodexCentreCardIsMarked`
+  discipline. Scripts that navigate the roster settle the physics
+  first (`wait motioncentre N` + `waitmax motionlive 0`) before acting
+  on the selection.
 
 ## Audio
 
@@ -1408,16 +1456,17 @@ once per session.
   playing it receipts it.
 - **Quiet mode announces on three channels, all derived from the one
   number** (`Notify.totalUnplayed` + the per-conversation counts the
-  contact list already badges — no second state threads through the sync
+  cards already carry — no second state threads through the sync
   engine): the green LED **blinks** ~1 Hz while anything is unplayed (the
   screen-off channel — see the LED arbiter below); a **banner**
   (`Ui.bannerView`, two rows at the top of the panel showing
   `Notify.title`/`Notify.body`) stays up `BANNER_MS` (~4s), drawn only
   while the screen is on, never over the modal exit menu, and not when
-  the announced conversation is already open on a lit screen; and the
-  contact row of any conversation with `unplayedCount > 0` carries a
-  **yellow underline** (`contactRowView`'s `"unp"` child) — persistent
-  until played, because it renders the count, not the edge. An arrival
+  the announced conversation is already open on a lit screen; and any
+  card with `unplayedCount > 0` carries the rolodex's **yellow unheard
+  band** across its top (count text at full bleed, degrading to a rule
+  along a stack row — one element, `Rolodex.cardView`'s `"band"`) —
+  persistent until played, because it renders the count, not the edge. An arrival
   never wakes the screen: a handset in a dark bedroom staying dark is a
   feature.
 - **Priming latches on sync-caught-up, and an arrival is a NEW newest
@@ -1609,7 +1658,7 @@ scope for this repo area (read-only). `wata-fb` supplies:
 Received messages become UI state purely through the snapshot: the
 sync loop (inside `wataclient`) updates server state and publishes a
 new `StateSnapshot`; the UI loop picks it up next frame and the
-applet bodies (`WataLogic.bodyContacts`'s `contactRowsView`,
+applet bodies (`WataLogic.bodyContacts`'s rolodex via `Rolodex.cards`,
 `bodyConversation`'s `msgRowsView`) build their views from it directly —
 there is no separate "apply message" step in this module.
 
@@ -1785,12 +1834,16 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Twenty-three scripted scenarios, each a fresh server and a sequence of
-one-user phases:
+Twenty-eight scripted scenarios, each a fresh server and a sequence of
+one-user phases (the table names the foundational ones; the newer
+scenarios — kid-settings, charge-anomaly, rec-meter, arrival-notify,
+ptt-first, enroll, motion-pump, rolodex — are described in their own
+sections):
 
 | scenario | what it pins |
 |---|---|
-| `voice-alice-to-bob` | the send path end to end: the server-minted family room is there from boot (plan 0018 — no bootstrap phase exists anywhere in this suite), alice holds PTT and sends; bob runs, opens the conversation and renders the message row. Goldens both contact lists, the post-send frame and the settings menu. |
+| `voice-alice-to-bob` | the send path end to end: the server-minted family room is there from boot (plan 0018 — no bootstrap phase exists anywhere in this suite), alice holds PTT and sends; bob runs, opens the conversation and renders the message row. Goldens both resting rolodex cards, the post-send frame and the settings menu. |
+| `rolodex` | plan 0077 stages 3+4: the rendered rolodex — resting card, mid-opening frame, aligned open stack with the centre-emphasis pixel claims, mid-roll frame, settle back to full bleed, and OK opening whoever is centred (see "The rolodex"). |
 | `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, redacts one by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, the starred row, and the played marks. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
 | `cursor-anchor` | the message cursor's event-id anchoring, via the `msgsel` probe: an idle cursor on row 0 stays on 0 through an arrival (tracking newest), a cursor moved one row down keeps the SAME message as an arrival shifts its index from 1 to 2, and redacting the anchored message falls back to the nearest surviving row. Goldens the held highlight two rows down. |
 | `group-list` | plan 0018's list rendering: the `group` directive mints "kids" through `POST /_wata/v1/group` (server-stamped, both members joined server-side), and the goldens pin the roster `[Family, kids, Bob]` and the opened group view titled by the stamp's name. |
@@ -1800,11 +1853,11 @@ one-user phases:
 | `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED` over a row that now carries the unsent mark, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm, and the send's retry is the OUTBOX's, not a second press. |
 | `outbox-restart` | a message survives an outage and a restart (plan 0022): with every upload answering 500, the send is queued and the row marked; a SECOND PROCESS resumes from the config store, finds the queue on disk beside it, and — once the hook is disarmed — delivers it on the next sync round, clearing the mark. Goldens the marked row, the cleared row with its badge, and the message in the conversation. |
 | `playing-hung` | the playback mark and the hung download: a SIGSTOPped server (`stop_server_after` + `http_timeout_ms: 1500`) means the fetch never answers, so the mark drawn on the OK release stays until the deadline turns it into `PLAY FAILED` and clears it. |
-| `early-boot` | the applet's boot presentation and its session latch: the earliest cold-boot frame (`starting up...`, no interface), a dial that FAILED while there is still no interface (`starting up...` again — plan 0035's calm-outranks-failure rule, and the frame the field sequence got wrong), the frame after an interface appears and the client starts trying (`waiting for network`), the ordinary contact list once the link has been live once, and — after a scripted health drop — that the boot screen does NOT come back. Forced with `conn`/`netpipe` from the first frame the script steps, so no frame is ever polled live before the boot frames are taken. |
-| `conn-status` | the header's connectivity element and the status line it shares its computed state with: connected (`NET` off-device), reconnecting on both phases of the `..` alternation, disconnected, and — through the `netpipe` override — the device-only wifi and cellular glyphs and the `OFF` state, whose red status line the client's own belief that it is syncing does not override. |
+| `early-boot` | the applet's boot presentation and its session latch: the earliest cold-boot frame (`starting up...`, no interface), a dial that FAILED while there is still no interface (`starting up...` again — plan 0035's calm-outranks-failure rule, and the frame the field sequence got wrong), the frame after an interface appears and the client starts trying (`waiting for network`), the resting rolodex card once the link has been live once, and — after a scripted health drop — that the boot screen does NOT come back (with the reconnect chip over the card). Forced with `conn`/`netpipe` from the first frame the script steps, so no frame is ever polled live before the boot frames are taken. |
+| `conn-status` | the connectivity element on the rolodex: a healthy link shows NOTHING (three checkpoints pin exactly the resting card), reconnecting on both phases of the `..` alternation and disconnected show the dark chip, and — through the `netpipe` override — `OFF` brings the chip back even while the client believes it is syncing. |
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Nineteen checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
 | `session-resume` | the config store: one phase logs in with arguments, the next starts with `-` in every credential slot and has to come up on the stored token. The phase running at all is as much the assertion as its frames. |
-| `boot-retry` | the connect lifecycle off the happy path (plan 0022): the phase starts with NO server (the scenario's `late_server` key boots one four seconds in), so the client faces a failed first login. Goldens the `can't reach server / retrying...` boot copy with its key footer, the armed two-step quit, and — with no restart, the same process — the ordinary contact list once the server appears. Also asserts the loop is still attempting (`logins`) and that the quit arm ages out. |
+| `boot-retry` | the connect lifecycle off the happy path (plan 0022): the phase starts with NO server (the scenario's `late_server` key boots one four seconds in), so the client faces a failed first login. Goldens the `can't reach server / retrying...` boot copy with its key footer, the armed two-step quit, and — with no restart, the same process — the resting rolodex card once the server appears. Also asserts the loop is still attempting (`logins`) and that the quit arm ages out. |
 | `auth-rejected` | the scenario's `password` key hands the phase the wrong one: the boot screen must say `account rejected / check server`, not `waiting for network`, and the loop must still be alive behind it (OK pokes it). Needs no `conn` forcing — a rejected login reads as DOWN, and a down header draws no `..`. |
 | `hung-server` | the server that ACCEPTS and never answers: the harness SIGSTOPs it six seconds in (`stop_server_after`) with `http_timeout_ms: 1500`, so the per-request deadline fires inside the test. A hung round becomes a `connerr` and a hung upload becomes `SEND FAILED` — and the script REACHING ITS END is the assertion that the frame loop never blocked on the client. |
 | `disconnect-quit` | Settings -> Network OFF and then the quit edge, i.e. `Runtime.stopClient` twice. The frames are incidental; the run printing `UITEST PASS` is the assertion, since the second close used to panic. |
@@ -1962,7 +2015,7 @@ information in the equivalent place, not the same number.
 | boot with no credentials | yes | yes | same |
 | session written after login | yes | yes | same |
 | **Conversation view** ||||
-| contact list: select, scroll window, family accent | yes | yes | same |
+| contact list: select, scroll window, family accent | yes | replaced | plan 0070's rolodex replaced the grid list (plan 0077 stage 3) |
 | unplayed-count badge, right-aligned | yes | yes | same |
 | open conversation (NO receipt: a receipt means heard, and only playback posts one) | receipts | no receipt | wata-fb changed the rule — see `docs/design/wataclient.md` |
 | message rows: duration `m:ss`, sender, played check-mark, gray-when-played | yes | yes | same |

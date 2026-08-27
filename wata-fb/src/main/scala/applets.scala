@@ -78,13 +78,12 @@ case class WataState(
   // intents only — a new session starts from `initial()`, so nothing here
   // outlives the session that meant it.
   pendingOneshots: List[Action],
-  // the rolodex motion integrator (plan 0077 stage 2, FB-MOTION-PUMP): the
-  // physical scroll position of the contact list, fed by up/down impulses and
-  // stepped once per frame by `Ui.stepMotion`. Applet state, not a UI cell —
-  // a plain immutable wataui record, so the applet stays Shareable. This
-  // stage it is plumbing only: `selected` remains the discrete authority and
-  // nothing rendered reads the motion; stage 3 (FB-ROLODEX-BODY) flips the
-  // authority to `Motion.centre`.
+  // the rolodex motion integrator (plan 0077): the physical scroll position
+  // of the contact screen, fed by up/down impulses and stepped once per frame
+  // by `Ui.stepMotion`, which writes `Motion.centre` back into `selected` —
+  // the integrator IS the selection authority while the rolodex shows.
+  // Applet state, not a UI cell — a plain immutable wataui record, so the
+  // applet stays Shareable.
   motion: Motion
 )
 
@@ -199,14 +198,14 @@ object WataLogic:
       case _: VContacts     => contactsInput(s, k, ctx)
       case _: VConversation => conversationInput(s, k, ctx)
 
-  /** FB-MOTION-PUMP (plan 0077 stage 2): up/down on the contact list shove the
-   *  motion integrator — one detent per event, `Pressed` AND `Repeat`, which
-   *  is the key-repeat ramp (two quick shoves are twice the velocity, so
-   *  acceleration falls out of `Motion.impulse` itself). Fed ALONGSIDE the
-   *  discrete `downSel`/`upSel` this stage: `selected` stays the authority a
-   *  press acts on, and `Ui.stepMotion` re-seats a settled integrator on it
-   *  (`Motion.placeAt`) so the two cannot drift apart before stage 3 makes
-   *  `Motion.centre` the selection. */
+  /** the rolodex's whole navigation (plan 0077): up/down on the contact
+   *  screen shove the motion integrator — one detent per event, `Pressed`
+   *  AND `Repeat`, which is the key-repeat ramp (two quick shoves are twice
+   *  the velocity, so acceleration falls out of `Motion.impulse` itself).
+   *  There is no discrete selection move any more: the frame pump
+   *  (`Ui.stepMotion`) writes `Motion.centre` into `selected` every frame,
+   *  so the drawn emphasis and what a held talk button reaches cannot
+   *  disagree. */
   def motionImpulse(s: WataState, k: Key, ks: KeyState): WataState =
     if isContactsView(s) && isImpulseEdge(ks) then impulseFor(s, k) else s
 
@@ -290,30 +289,23 @@ object WataLogic:
   /** With no conversations to open there is nothing for OK to do — except on
    *  the screen the device actually sits on when it cannot connect, where OK
    *  is RETRY NOW: it pokes the client's login/backoff sleep so the next
-   *  attempt happens immediately instead of at the end of a 60s ceiling. */
+   *  attempt happens immediately instead of at the end of a 60s ceiling.
+   *
+   *  Up/down are ABSENT on purpose (plan 0077 stage 3): rolodex navigation
+   *  is impulse-only — `motionImpulse` above already shoved the integrator
+   *  for this very press, and the frame pump writes `Motion.centre` into
+   *  `selected` every frame, so a discrete increment here would fight the
+   *  physics for the same value. */
   def contactsInput(s: WataState, k: Key, ctx: FrameCtx): WataState =
     val count = convCount(ctx.snap)
     if count == 0 then retryOnOk(s, k, ctx)
     else k match
-      case _: KDown => downSel(s, count)
-      case _: KUp   => upSel(s)
       case _: KEnter => enterConversation(s, ctx)
       case _          => s
 
   def retryOnOk(s: WataState, k: Key, ctx: FrameCtx): WataState =
     if isEnter(k) then Runtime.retryNow(ctx.client)
     s
-
-  def downSel(s: WataState, count: scala.Int): WataState =
-    val sel = if s.selected < count - 1 then s.selected + 1 else s.selected
-    val vis = visibleRows()
-    val off = if sel >= s.scrollOffset + vis then sel - vis + 1 else s.scrollOffset
-    withSel(s, sel, off)
-
-  def upSel(s: WataState): WataState =
-    val sel = if s.selected > 0 then s.selected - 1 else 0
-    val off = if sel < s.scrollOffset then sel else s.scrollOffset
-    withSel(s, sel, off)
 
   /** Open the selected conversation and clear its undelivered marker: the
    *  mark exists to tell the user a message of theirs never arrived, and
@@ -616,7 +608,7 @@ object WataLogic:
     val screen: View = s.view match
       case _: VContacts =>
         bodyContacts(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, enrol,
-          prov, clockOk)
+          prov, clockOk, nowMs)
       case _: VConversation => bodyConversation(s, snap, nowMs)
     var kids: List[Keyed] = Nil
     if s.pttHeld then kids = Keyed("rec", recordingView(s)) :: kids
@@ -642,81 +634,85 @@ object WataLogic:
    *  enrolment QR when the server has refused this handset outright, the boot
    *  screen until the link has been live once (`bodyBoot` — ONE definition, not
    *  a second copy of it), the connection line while the sync has not yet
-   *  produced a self user or a conversation, then the list. */
+   *  produced a self user or a conversation, then the rolodex. */
   def bodyContacts(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
       everLive: Boolean, unavail: Boolean, enrol: Option[EnrolSnap], prov: Boolean,
-      clockOk: Boolean): View =
+      clockOk: Boolean, nowMs: Long): View =
     enrol match
       case e: Some[EnrolSnap] => Enrol.body(e.value)
       case None               =>
-        bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, prov, clockOk)
+        bodyLive(s, snap, net, c, quitArmed, unsent, undelivered, everLive, unavail, prov,
+          clockOk, nowMs)
 
+  /** four screens in one, and the fourth is plan 0070's ROLODEX (plan 0077
+   *  stage 3) rather than a scrolling list of 18-character rows.
+   *
+   *  What the rolodex replaces is only the LIST: the enrolment QR, the boot
+   *  screen and the connection line are the states this client actually has,
+   *  and a screen that lost them would be a regression however good it looks.
+   *  The empty roster keeps its own words too — "No contacts" is not a card.
+   *
+   *  What it DROPS on purpose is the model-forward chrome: the "WATA" title,
+   *  the footer legend spelling out four key bindings, and the shell's 1 px
+   *  status line (the full-bleed card owns the whole panel — an
+   *  always-green line is not information, and the states worth showing come
+   *  back as the dark chip). The resting screen is the contact and nothing
+   *  else. The quit confirmation still takes the footer row while Back is
+   *  armed — that is the one thing the next press does, and it has to be
+   *  legible wherever it lands. */
   def bodyLive(s: WataState, snap: StateSnapshot, net: NetState, c: ConnectionState,
       quitArmed: Boolean, unsent: List[String], undelivered: List[String],
-      everLive: Boolean, unavail: Boolean, prov: Boolean, clockOk: Boolean): View =
+      everLive: Boolean, unavail: Boolean, prov: Boolean, clockOk: Boolean,
+      nowMs: Long): View =
     if !everLive then bodyBoot(net, c, quitArmed, unavail, prov, clockOk)
     else if !snap.hasSelfUser && convCount(snap) == 0 then
       VText(1, 2, connectingMsg(c), Color.midGray)
     else
       val count = convCount(snap)
-      // the footer is the key legend, except while Back is armed: the quit
-      // confirmation is the only thing the next press does, so it takes the row
-      var kids: List[Keyed] =
-        Keyed("footer", VText(0, FOOTER_ROW, contactsFooter(quitArmed), Color.midGray)) :: Nil
       if count == 0 then
-        kids = Keyed("empty", Views.group(
-          VText(3, 4, "No contacts", Color.midGray) ::
-            (VText(3, 5, "Waiting sync", Color.midGray) :: Nil))) :: kids
-      else kids = Keyed("rows", contactRowsView(s, snap, unsent, undelivered, count)) :: kids
-      VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) :: (Keyed("net", netView(net)) :: kids))
+        VGroup(Keyed("title", VText(0, 0, "WATA", Color.cyan)) ::
+          (Keyed("net", netView(net)) ::
+            (Keyed("empty", Views.group(
+              VText(3, 4, "No contacts", Color.midGray) ::
+                (VText(3, 5, "Waiting sync", Color.midGray) :: Nil))) ::
+              (Keyed("footer",
+                VText(0, FOOTER_ROW, contactsFooter(quitArmed), Color.midGray)) :: Nil))))
+      else
+        val roll = Rolodex.body(
+          Rolodex.cards(snap, nowMs, s.playingRoom, unsent, undelivered), count, s.motion,
+          Display.W, Display.H)
+        var kids: List[Keyed] = Nil
+        if !NetStatus.isHealthy(net.health) || NetStatus.isNoPipe(net.pipe)
+            || ChargeStatus.active() then
+          kids = Keyed("net", netChip(net)) :: kids
+        if quitArmed then
+          kids = Keyed("footer",
+            VText(0, FOOTER_ROW, contactsFooter(quitArmed), Color.white)) :: kids
+        VGroup(Keyed("roll", roll) :: ListOps.reverse(kids))
+
+  /** the connectivity element on a rolodex card, which is the one place it has
+   *  to survive being drawn over an arbitrary hue.
+   *
+   *  Two departures from every other screen, both because the background is no
+   *  longer black. It shows only while the link is NOT simply working — an
+   *  unhealthy connection, a device with no interface holding an address
+   *  (`OFF`), or the charge-anomaly mark (plan 0073: a failed cradle contact
+   *  must be seen at cradle time, whatever the network is doing). Plan 0070
+   *  says the resting screen is the contact and "nothing else", and an
+   *  indicator that is always green says nothing; one that appears exactly
+   *  when something is wrong says everything. And it sits on a dark CHIP,
+   *  because green-on-yellow (the unheard band) is unreadable and the card's
+   *  colour is a stranger's choice. The chip widens to cover the charge
+   *  mark's fixed slot when that mark is up. */
+  def netChip(net: NetState): View =
+    val cells = if ChargeStatus.active() then 9 else 6
+    val w = cells * Font.GLYPH_W
+    VGroup(Keyed("chip", VFill(Display.W - w, 0, w, Font.GLYPH_H + 2, 2,
+      Color.black, 210)) :: (Keyed("net", netView(net)) :: Nil))
 
   def contactsFooter(quitArmed: Boolean): String =
     if quitArmed then "BACK again to exit" else "UP/DN sel OK open PTT talk"
-
-  /** the visible window of contact rows, keyed on the conversation's identity —
-   *  the same room-or-contact key the outbox marks are matched by. */
-  def contactRowsView(s: WataState, snap: StateSnapshot, unsent: List[String],
-      undelivered: List[String], count: scala.Int): View =
-    val vis = visibleRows()
-    val end = if count < s.scrollOffset + vis then count else s.scrollOffset + vis
-    var acc: List[Keyed] = Nil
-    var i = s.scrollOffset
-    while i < end do
-      val row = FONT_ROWS_HEADER + (i - s.scrollOffset)
-      val selected = i == s.selected
-      convAt(snap, i) match
-        case c: Some[Conversation] =>
-          val mark = outboxMark(unsent, undelivered, c.value)
-          acc = Keyed(convKey(c.value), contactRowView(snap, c.value, mark, row, selected)) :: acc
-        case None => ()
-      i += 1
-    VGroup(ListOps.reverse(acc))
-
-  /** the row: the selection highlight first (children paint in list order),
-   *  then the unplayed underline (plan 0041) — a yellow rule under any row
-   *  whose count is up, persistent until played because it renders the COUNT,
-   *  not the arrival edge; a count digit alone is a channel a kid never
-   *  notices — the name — cyan for the family thread unless this row is the
-   *  selected one, whose black-on-green has to stay legible — then the outbox
-   *  mark in the last column and the unplayed badge, which slides two columns
-   *  left to clear the mark when there is one. */
-  def contactRowView(snap: StateSnapshot, conv: Conversation, mark: scala.Int,
-      row: scala.Int, selected: Boolean): View =
-    val y = 1 + row * Font.GLYPH_H
-    val fg = if selected then Color.black else Color.green
-    var kids: List[Keyed] = Nil
-    if selected then kids = Keyed("hl", VRect(0, y, Display.W, Font.GLYPH_H, Color.green)) :: kids
-    if conv.unplayedCount > 0 then
-      kids = Keyed("unp", VRect(0, y + Font.GLYPH_H - 1, Display.W, 1, Color.yellow)) :: kids
-    val nameColor = if isFamily(conv.convType) && !selected then Color.cyan else fg
-    kids = Keyed("name", VText(0, row, clip(convName(snap, conv), 18), nameColor)) :: kids
-    if mark > 0 then kids = Keyed("mark", outboxMarkView(mark, y)) :: kids
-    if conv.unplayedCount > 0 then
-      val badge = "" + conv.unplayedCount
-      val shift = if mark == 0 then 0 else 2
-      kids = Keyed("badge", VText(Font.COLS - badge.length - shift, row, badge, Color.yellow)) :: kids
-    VGroup(ListOps.reverse(kids))
 
   /** 0 = nothing pending, 1 = something of ours is still queued, 2 = something
    *  of ours will never arrive. The louder one wins: a lost message is worth
@@ -757,14 +753,6 @@ object WataLogic:
           else cur = t
         case Nil => going = false
     out
-
-  /** the mark sits in the last column, right-aligned like the favorite star,
-   *  so a message going out never reflows the name. Custom glyphs (> 0x7F) are
-   *  `VGlyph`s: inside a string they would UTF-8 encode into two wrong ones. */
-  def outboxMarkView(mark: scala.Int, y: scala.Int): View =
-    val g = if mark == 2 then Font.ICON_UNDELIV else Font.ICON_UNSENT
-    val fg = if mark == 2 then Color.red else Color.yellow
-    VGlyph((Font.COLS - 1) * Font.GLYPH_W, y, g, fg)
 
   /** the conversation screen: a pure function of the applet state and the
    *  frame's snapshot. Nothing here reads an atomic, a clock or the network. */

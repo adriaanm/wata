@@ -182,6 +182,34 @@ When the iOS client adopts the rolodex, that is the moment to lift the
 shared body up rather than make a third copy; recorded here so it is a
 decision, not an accident.
 
+> **Landed 2026-08-27 (stages 3 + 4, host half):** `rolodex.scala` in
+> wata-fb (symlinked into wata-mac), landscape geometry `VISIBLE=3` /
+> `REACH=2` / name box `h/3` / band `h/6` / state line `h/8` (re-derived,
+> not copied — `h/10` clips an 11 px caption's descenders on 128 px).
+> `Ui.stepMotion` writes `Motion.centre` into `selected` every frame the
+> screen shows (the stage-2 clamp deleted; off-screen the integrator is
+> seated on `selected` with `placeAt`), `contactsInput` lost its discrete
+> up/down, and wata-mac's pump grew the same `stepMotion` join. The
+> handset-specific rulings: the resting card drops the WATA title, the
+> footer legend AND the shell's 1 px status line; the connectivity
+> element is the watch's dark chip, shown when unhealthy / no pipe / the
+> charge-anomaly mark (which widens the chip — plan 0073's mark must not
+> vanish behind a healthy link); the empty roster, boot, enrolment and
+> conversation screens are untouched. Gates: the `rolodex` fb-ui
+> scenario (six goldens: rest, mid-opening, aligned stack, mid-roll,
+> settle, OK-opens-the-centre) with the emphasis pinned as pixel probes
+> (`rollcw`/`rollnw`/`rollcl`/`rollnl`); red/green pairs recorded —
+> quiet forced to 0: rollnw 136→146, rollnl 487→798, both past their
+> thresholds (140/600); openness pinned closed: rollnw 160; the
+> selected-write removed: `roll-charlie-conv` opens Family and the
+> golden mismatches. 42 contact-screen goldens regenerated wholesale;
+> every non-contact golden byte-identical; `tools/fb-golden.png` is the
+> draw-primitive test pattern and did not move. `just mac-smoke` green
+> for the first time in weeks (the contact assertions rewritten to the
+> rolodex tree, retiring `MAC-SMOKE-STALE-LEGEND`). Remaining:
+> `FB-ROLODEX-HW`, the hardware leg (frame-rate floor before tuning,
+> then the arm's-length photo).
+
 ### 4. Gates, goldens, and the hardware floor
 
 - Fresh `fb-ui-tests` phases: stack open, mid-roll (a fixed `advance` count

@@ -14,9 +14,12 @@ advance 30
 checkpoint group-list
 
 # down to the group row and open it: an empty group conversation view,
-# named by the stamp.
+# named by the stamp. The rolodex physics has to land on the row first.
 tap down
-advance 10
+# rolodex physics: the impulse has to coast a detent and the pump write the
+# new centre into the selection before anything acts on it
+wait motioncentre 1 90
+waitmax motionlive 0 90
 tap enter
 advance 30
 checkpoint group-open

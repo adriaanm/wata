@@ -841,11 +841,21 @@ next probe, and the only one that can.
   split exists for: no `access_token` key in the config file.
 - `just mac-smoke` (~30s, standalone like tui-smoke; macOS-only, not in
   ci): one fresh wata-server; alice's headless session asserts the
-  contact-list NATIVE hierarchy line by line, then bob (a tui session)
-  sends a voice message MID-SESSION and the smoke asserts the printed
-  differ script is EXACTLY the unplayed-badge insert into the family
-  row — then the key path (real kVK codes through the real table) opens
-  the conversation and the native tree shows the message row. Then the two
+  contact screen's NATIVE hierarchy line by line — since plan 0077
+  stage 3 that is the ROLODEX (the shared `rolodex.scala` rides the
+  symlink like `applets.scala`, and `Main.stepMotion` gives this pump
+  the same physics-writes-`selected` join as wata-fb's): the full-bleed
+  family card as an `NSBox` filling the stage, the DISPLAY-role name
+  label, the state line, and the retired chrome asserted ABSENT (no
+  WATA title, no footer legend, no connectivity element on a healthy
+  link). Then bob (a tui session) sends a voice message MID-SESSION and
+  the smoke asserts the printed differ script is EXACTLY the unheard
+  band + count inserts into the card and the state-line set — then the
+  key path (real kVK codes through the real table) opens the
+  conversation and the native tree shows the message row. (This gate
+  was red for weeks on a stale pre-rolodex footer-legend assertion —
+  the `MAC-SMOKE-STALE-LEGEND` item; the rolodex rewrite of the contact
+  assertions retired it, and the gate is what guards the next drift.) Then the two
   AUDIO legs under `WATA_MAC_AUDIO=fake`: OK plays bob's message (the differ
   prints the play triangle then the played check) and PTT records one (the
   overlay counts up, alice's own row and the SENT flash appear, and a fresh

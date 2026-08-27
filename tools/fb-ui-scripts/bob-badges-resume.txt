@@ -13,8 +13,14 @@ wait syncing 1 900
 wait convs 2 900
 wait msgs 1 2000
 tap down
+# rolodex physics: the impulse has to coast a detent and the pump write the
+# new centre into the selection before anything acts on it
+wait motioncentre 1 90
+waitmax motionlive 0 90
 wait msgs 2 2000
 tap up
+waitmax motioncentre 0 90
+waitmax motionlive 0 90
 # gate on the summed badge state itself (family 1 + DM 2), then outlast any
 # quiet banner a raced arrival raised; both are 0-frame no-ops normally.
 wait unplayed 3 2000
@@ -24,8 +30,12 @@ checkpoint badges-restored
 
 # play out the DM only: opening receipts nothing, so both of its rows have to
 # be played through before the badge can clear — which is the point of the
-# badge. OK on the newest, DOWN, OK on the next.
+# badge. OK on the newest, DOWN, OK on the next. (The first DOWN is on the
+# contact screen: rolodex physics, so the OK that opens the DM waits for the
+# centre to land on it.)
 tap down
+wait motioncentre 1 90
+waitmax motionlive 0 90
 tap enter
 tap enter
 wait played 1 2000

@@ -9,8 +9,9 @@
 # mark arms, and one clean read must clear it.
 #
 # The window is burned with `idle` in chunks under the screensaver's 60s
-# threshold, with a key the contact list ignores (up, clamped at the top row)
-# between them — the alice-kid-settings pattern.
+# threshold, with an `up` between them (at the top of the rolodex it is a
+# wall bounce that settles back to card 0 well inside each idle chunk) —
+# the alice-kid-settings pattern.
 
 wait syncing 1 900
 wait convs 1 900

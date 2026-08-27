@@ -354,6 +354,14 @@ object NetStatus:
     case _: NetReconnecting => true
     case _                  => false
 
+  /** is the link simply WORKING? What the rolodex's connectivity ruling keys
+   *  on: the element shows only when this is false — an indicator that is
+   *  always green is not information (plan 0070's watch ruling, shared by the
+   *  handset since plan 0077 stage 3). */
+  def isHealthy(h: NetHealth): Boolean = h match
+    case _: NetLive => true
+    case _          => false
+
   def isNoPipe(p: NetPipe): Boolean = p match
     case _: PipeNone => true
     case _           => false

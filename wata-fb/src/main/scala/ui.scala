@@ -423,28 +423,36 @@ object Ui:
     stateV.active == Shell.WATA && isContacts(Shell.wataState(stateV).view)
 
   /** Step the wata applet's motion integrator with this frame's real clamped
-   *  dt — the fb half of the watch's `Pump.stepMotion`, WITHOUT the write of
-   *  `Motion.centre` into `selected`: this stage the integrator is plumbing
-   *  only, `selected` stays the discrete authority, and nothing rendered
-   *  reads the motion (stage 3, FB-ROLODEX-BODY, flips that). Two clamps keep
-   *  the two from drifting apart in the meantime: a position past the end of
-   *  a list that SHRANK is put back (`placeAt`, the watch's rule — the end
-   *  spring must not argue with the model), and a settled integrator whose
-   *  centre disagrees with `selected` (the selection moved by other means —
-   *  entering the screen, a list shrink's discrete clamp) is re-seated on it.
-   *  Only stepped while the contact list is showing; elsewhere the motion
-   *  simply holds, and the pace below ignores it. */
+   *  dt, then hand the applet the item the centre band is over — the fb half
+   *  of the watch's `Pump.stepMotion`, write included (plan 0077 stage 3).
+   *
+   *  `selected` stays what it always was — the conversation a press acts on —
+   *  and the integrator is what MOVES it, so **holding the talk button talks
+   *  to the centre card at any zoom** falls out rather than being a special
+   *  case: `WataLogic.pttPress` reads `selected` and never asks how the
+   *  selection got there. A position past the end of a list that SHRANK is
+   *  put back first (`placeAt`, the watch's rule — the end spring must not
+   *  argue with the model).
+   *
+   *  While the contact screen is NOT showing, the integrator is not stepped —
+   *  it is SEATED on `selected` instead, so a selection that moved by other
+   *  means (entering a conversation, a shrink's discrete clamp) is where the
+   *  rolodex starts from when the screen comes back, not something the
+   *  physics argues with. */
   def stepMotion(dt: scala.Double): Unit =
+    val w = Shell.wataState(stateV)
+    val count = WataLogic.convCount(snapC.get())
     if motionShowing then
-      val w = Shell.wataState(stateV)
-      val count = WataLogic.convCount(snapC.get())
       var m = Motion.step(w.motion, dt, count)
       if count > 0 && Motion.offset(m) > (count - 1).toDouble + 1.0 then
         m = Motion.placeAt(m, count - 1)
-      if !Motion.live(m) && Motion.centre(m, count) != w.selected then
-        m = Motion.placeAt(m, w.selected)
+      val sel = Motion.centre(m, count)
+      var w2 = WataLogic.withMotion(w, m)
+      if w2.selected != sel then w2 = WataLogic.withSel(w2, sel, w2.scrollOffset)
+      stateC.set(Shell.withApplet(stateV, Shell.WATA, WataApplet(w2)))
+    else if Motion.centre(w.motion, count) != w.selected || Motion.live(w.motion) then
       stateC.set(Shell.withApplet(stateV, Shell.WATA,
-        WataApplet(WataLogic.withMotion(w, m))))
+        WataApplet(WataLogic.withMotion(w, Motion.placeAt(w.motion, w.selected)))))
 
   /** this frame's pace: the motion rate while the shown rolodex is coasting,
    *  the ordinary ~30fps otherwise. */
