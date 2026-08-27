@@ -35,10 +35,17 @@ import language.experimental.saferExceptions
  *  stack bigger absolute type than the watch's five — which is the point of
  *  landing this design on the handset at all. The other fractions are
  *  re-derived from this panel's height rather than copied (the watch's were
- *  portrait choices): the full-bleed name box is h/3 (the DISPLAY strike
- *  sits in 42 px), the unheard band h/6 (holds a 13 px caption), and the
- *  state line h/6 — the NAME strike's line box is 21 px, and h/6 is exactly
- *  that on 128 px (h/8 = 16 clips five pixels of it).
+ *  portrait choices): the full-bleed name box is the line box of the
+ *  DISPLAY strike the fit-down ladder picks for THIS name
+ *  (`FbTypeRoles.displayStrikeFor` — 38 px bold unless the measured name
+ *  overflows the card's usable width, then 30, floor 24), its centre
+ *  LIFTED to 40% of panel height (h/2 − h/10 — dead centre read as "a bit
+ *  meh" on the panel, owner 2026-08-27; the lift fades with openness, so
+ *  the open-stack rows are untouched), the unheard band h/6 (holds a
+ *  13 px caption), and the state line h/6 — the NAME strike's line box is
+ *  21 px, and h/6 is exactly that on 128 px (h/8 = 16 clips five pixels
+ *  of it). The lifted name clears the band: the tallest rung's 49 px line
+ *  box tops out at y = 26, five below the band's 21.
  *
  *  ## Which card the talk button reaches
  *
@@ -226,11 +233,20 @@ object Rolodex:
       if bandH >= 2 then
         kids = Keyed("band", VFill(x, y, cw, bandH, radius, Color.yellow, ca0)) :: kids
       val pad = 2 + roundI(o * padOpen(w).toDouble)
-      // the name, optically centred in the card — a body cannot centre what it
-      // cannot measure, so the element carries the BOX and the renderer places
-      // the text in it.
-      val nameH = roundI(lerp((h / 3).toDouble, (rh - GAP - 2).toDouble, o)) - 2 * inY
-      val nameY = y + (ch - nameH) / 2
+      // the name box. Its full-bleed endpoint is the line box of the strike
+      // the fit-down ladder picks for this name against the card's usable
+      // width — the painter runs the SAME ladder on the same box width, so
+      // the box and the drawn rung agree by construction. Up to three
+      // measures per card per frame, each a cheap advance scan.
+      val ds = FbTypeRoles.displayStrikeFor(c.name, cw - 2 * pad)
+      val lineBox = go.strikes.ascent(ds) + go.strikes.descent(ds)
+      val nameH = roundI(lerp(lineBox.toDouble, (rh - GAP - 2).toDouble, o)) - 2 * inY
+      // the LIFT: at full bleed the name's centre sits at 40% of panel
+      // height (h/2 − h/10 — vertically dead-centred read as "a bit meh",
+      // owner 2026-08-27), fading with openness so the open-stack row
+      // geometry is exactly the unlifted interpolation.
+      val lift = roundI((1.0 - o) * (h.toDouble / 10.0))
+      val nameY = y + (ch - nameH) / 2 - lift
       val open = o >= 0.5
       val quietly = open && !isCentre
       val role =

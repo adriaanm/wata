@@ -41,7 +41,12 @@ object FbPaint:
    *  did before the strikes existed (including its overflow-to-the-right,
    *  which the goldens pin). */
   def drawLabel(px: go.Bytes, l: VLabel): Unit =
-    val s = FbTypeRoles.strikeFor(l.role, l.weight)
+    // DISPLAY resolves per text through the fit-down ladder, against the
+    // label's own box width — the same call the rolodex body sized the box
+    // with, so the drawn rung and the box that holds it cannot disagree.
+    val s =
+      if l.role == TypeRole.DISPLAY then FbTypeRoles.displayStrikeFor(l.text, l.w)
+      else FbTypeRoles.strikeFor(l.role, l.weight)
     if s < 0 then drawLabelGrid(px, l)
     else
       val tw = go.strikes.measureText(s, l.text)

@@ -23,6 +23,11 @@ wait msgs 1 2000
 # frames of frame time); both waits are 0-frame no-ops on the common path.
 wait unplayed 1 2000
 waitmax notifybanner 0 200
+# and settle the rolodex physics the `tap down` above set live, so the
+# checkpoint pins the settled full-bleed frame whatever number of frames the
+# real-event waits above consumed (the other roster-navigating scripts'
+# pattern) — without this gate the checkpoint can land mid-settle under load.
+waitmax motionlive 0 90
 advance 30
 checkpoint dm-bob-roster
 

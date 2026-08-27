@@ -12,18 +12,39 @@
  *
  *  `STATUS` — and any (role, face) combination the strike table cannot serve
  *  — resolves to NO strike (-1), and the painter keeps the 5x8 grid font for
- *  it, stated there so the gap is visible rather than silent. */
+ *  it, stated there so the gap is visible rather than silent.
+ *
+ *  `DISPLAY` is NOT a single size: the full-bleed name resolves per TEXT
+ *  through `displayStrikeFor`'s fit-down ladder, so it never appears in
+ *  `strikeFor` — the painter routes the DISPLAY role there itself. */
 object FbTypeRoles:
 
   /** the strike for (role, weight) under the configured face, or -1 for the
-   *  5x8 fallback. Called per label per frame; the Go side is a scan of 8. */
+   *  5x8 fallback. Called per label per frame; the Go side is a scan of 12.
+   *  DISPLAY never arrives here (see `displayStrikeFor`). */
   def strikeFor(role: scala.Int, weight: scala.Int): scala.Int =
     if role == TypeRole.STATUS then -1
     else
       val face = FbConfig.typeFace()
-      if role == TypeRole.DISPLAY then go.strikes.strike(face, 30, "bold")
-      else if role == TypeRole.NAME then
+      if role == TypeRole.NAME then
         val w = if weight == TypeWeight.BOLD then "bold" else "medium"
         go.strikes.strike(face, 16, w)
       else if role == TypeRole.CAPTION then go.strikes.strike(face, 13, "medium")
       else -1
+
+  /** the full-bleed DISPLAY ladder (plan 0077 tuning, owner 2026-08-27): the
+   *  resting name is as big as its card can fit — try 38 px bold, step down
+   *  to 30, floor at 24 (below the floor the painter clips at the box edge,
+   *  as it does for any overlong run). Resolved per NAME by measurement, and
+   *  called with the SAME box width by the rolodex body (to size the name
+   *  box from the rung's line box) and the painter (to pick the strike), so
+   *  the two cannot disagree. Deterministic and cheap: at most three
+   *  measures, each a scan of the text's advances. */
+  def displayStrikeFor(text: String, availW: scala.Int): scala.Int =
+    val face = FbConfig.typeFace()
+    val s1 = go.strikes.strike(face, 38, "bold")
+    if go.strikes.measureText(s1, text) <= availW then s1
+    else
+      val s2 = go.strikes.strike(face, 30, "bold")
+      if go.strikes.measureText(s2, text) <= availW then s2
+      else go.strikes.strike(face, 24, "bold")

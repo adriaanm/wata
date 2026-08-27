@@ -308,6 +308,17 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0077 tuning: the full-bleed DISPLAY fit-down ladder on a real
+        # card — "Gabriella" overflows the 38 px rung and rests at 30, pinned
+        # as a golden at full bleed (seen to fail with the ladder forced to
+        # 38: the name clips at both card edges).
+        "name": "rolodex-fit",
+        "users": ["alice", "gabriella"],
+        "phases": [
+            ("alice", "alice-rolodex-fit.txt"),
+        ],
+    },
+    {
         # The message cursor's event-id anchoring: an arrival must not slide
         # an explicitly moved selection onto a different message, while an
         # idle cursor on row 0 keeps tracking newest. The probe assertions do

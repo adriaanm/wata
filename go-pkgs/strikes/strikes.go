@@ -98,6 +98,14 @@ var table = []*strike{
 	{face: "atkinson", px: 16, weight: "bold", ttf: atkinsonBold},
 	{face: "atkinson", px: 16, weight: "medium", ttf: atkinsonRegular},
 	{face: "atkinson", px: 13, weight: "medium", ttf: atkinsonRegular},
+	// the full-bleed DISPLAY ladder's other rungs (38 is the resting card's
+	// first choice, 24 the floor; 30 above is the middle rung) — appended so
+	// the earlier ids keep their positions, and boot-lazy like everything
+	// else, so a rung no name ever needs costs only these table rows.
+	{face: "inter", px: 38, weight: "bold", ttf: interBold},
+	{face: "inter", px: 24, weight: "bold", ttf: interBold},
+	{face: "atkinson", px: 38, weight: "bold", ttf: atkinsonBold},
+	{face: "atkinson", px: 24, weight: "bold", ttf: atkinsonBold},
 }
 
 // Strike resolves (face, px, weight) to a strike id, or -1 if the table has

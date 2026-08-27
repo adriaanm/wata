@@ -333,6 +333,29 @@ the arm's-length photo as the owner's leg.
   > and striketest untouched (its digest pins strike bytes, not blends).
   > The A/B itself is the owner's; the handset deploys with gamma off.
 
+  > **Second panel verdict, 2026-08-27 (after the type rebalance):** sizes
+  > read well; the full-bleed resting card wanted the name HIGHER (dead
+  > centre "is a bit meh") and BIGGER. Landed: the name box's centre lifts
+  > to 40% of panel height (h/2 − h/10 ≈ 13 px up on 128), full-bleed
+  > endpoint only — the lift term is scaled by (1 − o), so the open-stack
+  > row geometry is bit-identical (roll-stack/roll-midroll goldens did not
+  > move, and the emphasis probes kept their pins untouched). DISPLAY is no
+  > longer one size but a per-name fit-down ladder
+  > (`FbTypeRoles.displayStrikeFor`): 38 px bold, stepping 30 then floor 24
+  > when the measured name overflows the card's usable width, with the body
+  > sizing the name box from the chosen rung's line box and the painter
+  > resolving the same ladder on the same box width (strike table grew
+  > 38/24 bold for both faces — boot-lazy, unused rungs cost nothing). At
+  > full bleed the tallest rung's 49 px line box tops out at y = 26, clear
+  > of the h/6 = 21 unheard band; the state line follows at y = 77 and ends
+  > at 98. Oracles: 49 resting-card/overlay goldens regenerated + the new
+  > `rolodex-fit` scenario ("Gabriella": 164 px at 38 > 156 usable, 129 at
+  > 30 — fits), seen to fail with the ladder forced to 38 (the name clips
+  > flat at both card edges); striketest grew the four new-size bands and
+  > four ladder-rung assertions (including the 24 floor). mac-smoke's
+  > full-bleed boxes re-pinned from the real tree (name 2/53/156/49, state
+  > y 77). Remaining by-eye: the owner's on-panel A/Bs.
+
 - **Does the ST7735S path sustain >30 fps at all?** If not, `MOTION_FRAME_MS`
   is 33 and the springs still work; the measurement decides, not the code.
 - **Key-repeat feel**: one detent per repeat event rides the kernel's

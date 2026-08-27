@@ -1183,9 +1183,18 @@ treatment, the nubs, the one-element unheard band, black `Palette.INK`
 on every card) is identical and documented at length in the file
 itself and in `docs/design/wata-watch.md`; the geometry fractions are
 this panel's own: three ~42 px rows rather than five (bigger absolute
-type than the watch — the point of the port), `REACH = 2`, the
-full-bleed name box `h/3`, the band `h/6`, the state line `h/6` (the
-NAME strike's 21 px line box, exactly h/6 on 128 px). The
+type than the watch — the point of the port), `REACH = 2`, the band
+`h/6`, the state line `h/6` (the NAME strike's 21 px line box, exactly
+h/6 on 128 px). The full-bleed name box is sized per NAME by the
+DISPLAY fit-down ladder (`FbTypeRoles.displayStrikeFor`): 38 px bold
+unless the measured name overflows the card's usable width, then 30,
+floor 24 — the body sizes the box from the chosen rung's line box and
+the painter picks the strike with the same call on the same box width,
+so the two cannot disagree — and its centre is LIFTED to 40% of panel
+height (h/2 − h/10; dead centre read as "a bit meh" on the panel,
+owner 2026-08-27), the lift fading with openness so the open-stack
+rows keep the plain interpolation. The tallest rung's 49 px line box
+tops out at y = 26, clear of the h/6 = 21 unheard band. The
 two files stay separate copies until the iOS client adopts the rolodex
 (plan 0077's duplication note).
 
@@ -1228,7 +1237,11 @@ spring); the pump around it:
   the claim inverted (quiet forced to zero; openness pinned closed;
   the selected-write removed) — each claim was SEEN TO FAIL before its
   green run was believed, the watch's `rolodexCentreCardIsMarked`
-  discipline. Scripts that navigate the roster settle the physics
+  discipline. The `rolodex-fit` scenario pins the DISPLAY fit-down
+  ladder on a real card: "Gabriella" overflows the 38 px rung and
+  rests at 30, goldened at full bleed — seen to fail with the ladder
+  forced to 38 (the name clips flat at both card edges). Scripts that
+  navigate the roster settle the physics
   first (`wait motioncentre N` + `waitmax motionlive 0`) before acting
   on the selection.
 
@@ -1874,6 +1887,7 @@ sections):
 |---|---|
 | `voice-alice-to-bob` | the send path end to end: the server-minted family room is there from boot (plan 0018 — no bootstrap phase exists anywhere in this suite), alice holds PTT and sends; bob runs, opens the conversation and renders the message row. Goldens both resting rolodex cards, the post-send frame and the settings menu. |
 | `rolodex` | plan 0077 stages 3+4: the rendered rolodex — resting card, mid-opening frame, aligned open stack with the centre-emphasis pixel claims, mid-roll frame, settle back to full bleed, and OK opening whoever is centred (see "The rolodex"). |
+| `rolodex-fit` | the full-bleed DISPLAY fit-down ladder on a real card: "Gabriella" overflows the 38 px rung against the card's usable width and rests at 30, goldened at full bleed (see "The rolodex"). |
 | `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, redacts one by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, the starred row, and the played marks. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
 | `cursor-anchor` | the message cursor's event-id anchoring, via the `msgsel` probe: an idle cursor on row 0 stays on 0 through an arrival (tracking newest), a cursor moved one row down keeps the SAME message as an arrival shifts its index from 1 to 2, and redacting the anchored message falls back to the nearest surviving row. Goldens the held highlight two rows down. |
 | `group-list` | plan 0018's list rendering: the `group` directive mints "kids" through `POST /_wata/v1/group` (server-stamped, both members joined server-side), and the goldens pin the roster `[Family, kids, Bob]` and the opened group view titled by the stamp's name. |

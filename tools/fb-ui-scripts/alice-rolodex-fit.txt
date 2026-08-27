@@ -1,0 +1,21 @@
+# the DISPLAY fit-down ladder on a real card (plan 0077 tuning): the
+# full-bleed name size is resolved per NAME by measurement — "Gabriella"
+# measures 164 px at the 38 px rung against the card's 156 px usable width,
+# so the ladder steps down to 30 (129 px, fits). The golden pins the fitted
+# frame; with the ladder forced to always pick 38 the name clips flat at
+# BOTH card edges (centre-aligned, 4 px lost each side — the red run
+# recorded in plan 0077).
+
+wait syncing 1 900
+# [Family, Gabriella-DM]
+wait convs 2 900
+waitmax motionlive 0 90
+advance 5
+expect motioncentre 0
+
+# one detent down and settle: Gabriella's card grows back to full bleed
+tap down
+waitmax motionlive 0 90
+advance 5
+expect motioncentre 1
+checkpoint roll-fit-gabriella
