@@ -123,6 +123,18 @@ object Ui:
   // the first press arms and says so, a second one within the window OPENS
   // THE EXIT MENU (plan 0040), which is where quitting now lives.
   private val quitArmC: sgo.Atomic[scala.Double] = sgo.atomic(0.0)
+  // the DOT-DOT RECOVERY gesture (the white-panel incident, 2026-08-27):
+  // holding BOTH dot buttons for DOT_HOLD_FRAMES runs the ST7735
+  // powerdown-blank cycle and then ends the frame loop exactly as the exit
+  // menu's confirmed `Restart app` does (tty1 respawns the app) — the way
+  // back from a glass gone white when nothing on it can be read. The held
+  // flags and the frame counter live HERE, beside the quit arm, because the
+  // gesture must work from EVERY screen — including behind the modal exit
+  // menu, which Shell.handleInput never sees.
+  private val dot1HeldC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  private val dot2HeldC: sgo.Atomic[Boolean] = sgo.atomic(false)
+  private val dotArmC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  private val dotFiredC: sgo.Atomic[scala.Int] = sgo.atomic(0)
   // the exit menu, or None while it is closed. A mode of the shell rather
   // than an applet: it is modal, it outlives no session, and an applet would
   // put it in the left/right rotation where it must not be. Touched only by
@@ -307,6 +319,10 @@ object Ui:
     frameC.set(0)
     connForceC.set(-1)
     quitArmC.set(0.0)
+    dot1HeldC.set(false)
+    dot2HeldC.set(false)
+    dotArmC.set(0)
+    dotFiredC.set(0)
     exitC.set(None)
     unsentC.set(Nil)
     undelivC.set(Nil)
@@ -389,7 +405,10 @@ object Ui:
     // poll input — synthesizing the auto-repeat the keypad hardware cannot
     // (no EV_REP; see `withSynthRepeats`) — then route it
     val keyEvents = withSynthRepeats(dev.pollInput(), dt)
-    val quit = handleFrameInput(keyEvents, ctx, dev)
+    var quit = handleFrameInput(keyEvents, ctx, dev)
+    // the dot-dot recovery's hold clock, one frame — its firing is a quit
+    // edge exactly like the exit menu's confirmed Restart (tty1 respawns).
+    if !quit && tickDotHold() then quit = true
     if !quit then
       // the quit confirmation ages out; a press this frame re-armed it, so
       // this runs after the input and one frame of dt never expires it
@@ -612,6 +631,10 @@ object Ui:
    *  (the applet says "again to exit"): the second press inside the window
    *  opens the menu rather than quitting. Only the menu quits now. */
   def applyOne(ev: KeyEvent, ctx: FrameCtx): Boolean =
+    if trackDotHold(ev) then false
+    else applyRouted(ev, ctx)
+
+  def applyRouted(ev: KeyEvent, ctx: FrameCtx): Boolean =
     exitMenu match
       case s: Some[ExitMenuState] => applyExitMenu(s.value, ev, ctx)
       case None =>
@@ -638,6 +661,74 @@ object Ui:
   def isOkKey(k: Key): Boolean = k match
     case _: KEnter => true
     case _         => false
+
+  // ---- the dot-dot recovery gesture -------------------------------------------
+  // Holding BOTH dots for ~3 s = recovery: the ST7735 powerdown-blank cycle
+  // (Led.powerCycleFb — the Learnings-log recipe for the white-glass panel,
+  // device-gated) followed by a clean app exit through the same edge the exit
+  // menu's `Restart app` uses; tty1 respawns the app. Ordinary single-dot
+  // taps are UNTOUCHED: applet cycling still fires on the press, exactly as
+  // before (the snake's goldens count applet ticks from the press frame, so
+  // release-fired cycling would move pixels) — only a dot pressed WHILE THE
+  // OTHER DOT IS HELD is swallowed as the combo's second half. The cost is
+  // that the combo's FIRST press still cycles once, which is invisible on
+  // the white glass the gesture exists for and moot once the app restarts;
+  // an aborted combo leaves the shell one applet over, one tap from home.
+
+  /** frames both dots must be concurrently held (~3 s at the 33 ms clock). */
+  val DOT_HOLD_FRAMES: scala.Int = 90
+
+  /** frames the both-dots hold has currently run (the `dotarm` probe). */
+  def dotArmFrames: scala.Int = dotArmC.get()
+  /** recovery firings this session (the `dotfired` probe — on the device the
+   *  loop ends at 1; the scripted driver ignores quit edges and reads it). */
+  def dotFired: scala.Int = dotFiredC.get()
+
+  /** track dot press/release; true = the event is the combo's second half
+   *  and must not reach the router. Any release resets the arm count. */
+  def trackDotHold(ev: KeyEvent): Boolean =
+    val d = dotOf(ev.key)
+    if d == 0 then false
+    else if Shell.isPressed(ev.state) then
+      val otherHeld = if d == 1 then dot2HeldC.get() else dot1HeldC.get()
+      setDotHeld(d, true)
+      otherHeld   // the combo's join is swallowed; a solo press routes (cycles)
+    else
+      if isReleased(ev.state) then
+        setDotHeld(d, false)
+        dotArmC.set(0)
+      false       // releases route as they always did (a no-op everywhere)
+
+  def dotOf(k: Key): scala.Int = k match
+    case _: KDot1 => 1
+    case _: KDot2 => 2
+    case _        => 0
+
+  def setDotHeld(d: scala.Int, held: Boolean): Unit =
+    if d == 1 then dot1HeldC.set(held) else dot2HeldC.set(held)
+
+  /** one frame of the hold clock; true when the recovery fired — the frame
+   *  loop's quit edge, the exit-menu Restart's plumbing. Fires once per hold
+   *  (the held flags are dropped, so a re-fire needs fresh presses). */
+  def tickDotHold(): Boolean =
+    var fired = false
+    if displayOff then
+      // wake swallows the inputs, so a hold started against a dark panel
+      // never armed; drop anything stale rather than counting blind.
+      dot1HeldC.set(false)
+      dot2HeldC.set(false)
+      dotArmC.set(0)
+    else if dot1HeldC.get() && dot2HeldC.get() then
+      dotArmC.set(dotArmC.get() + 1)
+      if dotArmC.get() >= DOT_HOLD_FRAMES then
+        tally(dotFiredC)
+        dot1HeldC.set(false)
+        dot2HeldC.set(false)
+        dotArmC.set(0)
+        println("recovery: dot-dot hold — panel powerdown cycle, then restart")
+        if Diag.onDevice() then Led.powerCycleFb()
+        fired = true
+    fired
 
   /** age the exit menu's arming out. An armed menu left alone must not sit one
    *  keypress away from EDL until the screensaver takes the panel. */

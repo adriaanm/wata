@@ -228,6 +228,16 @@ SCENARIOS = [
         ],
     },
     {
+        # the dot-dot recovery gesture: both dots held 90 frames fires the
+        # panel powerdown cycle (guarded no-op off-device) + the restart quit
+        # edge; any release resets; single-dot taps still cycle on the press.
+        "name": "dot-dot-recovery",
+        "probe_only": True,
+        "phases": [
+            ("alice", "alice-dotdot.txt"),
+        ],
+    },
+    {
         "name": "session-resume",
         "phases": [
             ("alice", "alice-login.txt"),

@@ -1,0 +1,49 @@
+# the DOT-DOT RECOVERY gesture (the white-panel incident, 2026-08-27):
+# holding BOTH dot buttons for 90 frames (~3 s) runs the ST7735
+# powerdown-blank cycle (off-device: the Diag.onDevice guarded no-op) and
+# ends the frame loop through the exit menu's Restart plumbing. The scripted
+# driver ignores quit edges, so the firing is observed as the `dotfired`
+# count rather than as the session ending; `dotarm` is the hold clock.
+#
+# Probe-only: nothing here is about pixels.
+
+wait syncing 1 900
+
+# ordinary single-dot taps are untouched: cycling still fires on the press
+tap dot2
+expect applet 1
+tap dot1
+waitmax applet 0 1
+
+# the combo: the first press still cycles once (the documented cost — from
+# wata (0), dot1 wraps to the snake (2)); the second press, with the first
+# dot held, is swallowed as the combo join and the hold clock starts.
+key dot1 press
+expect applet 2
+key dot2 press
+expect dotarm 1
+waitmax dotarm 1 1
+
+# ANY release resets the arm; nothing fires early
+advance 30
+expect dotarm 31
+key dot2 release
+waitmax dotarm 0 1
+waitmax dotfired 0 1
+
+# re-join and hold across the threshold: one frame short, nothing; the 90th
+# frame of the hold fires the recovery and drops the held flags
+key dot2 press
+advance 88
+expect dotarm 89
+waitmax dotfired 0 1
+advance 1
+expect dotfired 1
+waitmax dotarm 0 1
+
+# a fired hold does not re-fire without fresh presses
+advance 10
+waitmax dotfired 1 1
+key dot2 release
+key dot1 release
+waitmax dotfired 1 1

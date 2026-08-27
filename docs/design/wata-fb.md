@@ -1146,6 +1146,32 @@ has a hold, its play fires on the RELEASE rather than the press, and it
 is routed before the press-only dispatch (so `conversationInput` has no
 `KEnter` arm at all).
 
+**The dot-dot recovery gesture** (`Ui.trackDotHold`/`tickDotHold`):
+holding BOTH dot buttons for `DOT_HOLD_FRAMES` (90 ≈ 3 s) is the way
+back from a glass gone fully WHITE while the app is healthy — the
+ST7735 controller losing its init (the Learnings-log entry of
+2026-08-27 in the top-level CLAUDE.md: `just fb-shot` shows a correct
+framebuffer under a white glass; a plain blank cycle does not recover
+it, the POWERDOWN cycle does). Firing runs exactly that recipe —
+`Led.powerCycleFb` writes 4 to `/sys/class/graphics/fb0/blank`, waits
+~2 s, writes 0 (best-effort, `Diag.onDevice()`-gated) — then ends the
+frame loop through the same quit edge the exit menu's confirmed
+`Restart app` uses, so tty1 respawns a clean app. The state lives in
+`Ui` beside the quit arm, NOT in the shell: the gesture must work from
+every screen, including behind the modal exit menu, which
+`Shell.handleInput` never sees. Ordinary single-dot taps are
+untouched — applet cycling still fires on the PRESS (the snake's
+goldens count game ticks from the press frame, so release-fired
+cycling would move pixels); only a dot pressed while the other is
+already held is swallowed as the combo's join, so the combo's first
+press still cycles once — invisible on the white glass the gesture
+exists for, and moot once the app restarts. Any release resets the
+hold clock; a hold started against a screensaver-dark panel never arms
+(wake swallows the inputs). Pinned by the probe-only
+`dot-dot-recovery` scenario (`dotarm`/`dotfired` probes; off-device
+the panel-cycle half is the guarded no-op) — seen to fail with the
+threshold broken before its green run was believed.
+
 **Known gap, called out in the code itself**: only three input
 devices are opened. `shell.scala:21-27` documents that this mirrors a
 gap in the original device firmware this was ported from — the

@@ -40,6 +40,19 @@ object Led:
   def unblankFb(): Unit =
     fbBlankStatusC.set(writeSysfs("/sys/class/graphics/fb0/blank", 0, fbBlankStatusC.get()))
 
+  /** the ST7735 POWERDOWN-BLANK cycle — the dot-dot recovery gesture's first
+   *  half (plan 0077 era; the Learnings-log white-panel entry, 2026-08-27):
+   *  a fully white glass with a healthy app is the SPI panel controller
+   *  (fb_st7735r) having lost its init, and a plain blank/unblank does NOT
+   *  recover it — writing 4 (FB_BLANK_POWERDOWN), waiting ~2 s, then 0
+   *  re-runs the controller init and the panel comes back. Best-effort like
+   *  every write here; the caller gates it on the device (the scripted
+   *  harness must not sleep 2 s). */
+  def powerCycleFb(): Unit =
+    fbBlankStatusC.set(writeSysfs("/sys/class/graphics/fb0/blank", 4, fbBlankStatusC.get()))
+    FbCaps.sleepMs(2000L)
+    unblankFb()
+
   /** 255 when on, else 0. */
   def onValue(on: Boolean): scala.Int =
     var v = 0

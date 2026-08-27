@@ -124,7 +124,8 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  report, `Runtime.connTag` — 4 = error, 5 = auth rejected), logins (the
  *  client's login/resume attempts, which is how a script sees the retry loop
  *  turning and a retry-now poke landing), quitarm (1 while the two-step quit
- *  is armed), unsent / undeliv (conversations carrying an outbox marker: a
+ *  is armed), dotarm / dotfired (the dot-dot recovery gesture: frames the
+ *  both-dots hold has run, and how often it fired), unsent / undeliv (conversations carrying an outbox marker: a
  *  send still queued, or one the server refused), frames (the session's frame
  *  counter — what a script watches to prove the frame loop is not blocked),
  *  and the arrival-notification probes (plan 0041): unplayed (the summed
@@ -667,6 +668,12 @@ object UiScript:
     else if name == "conntag" then Runtime.connTag(Ui.connection)
     else if name == "logins" then Runtime.loginAttempts
     else if name == "quitarm" then boolProbe(Ui.quitArmed)
+    // the dot-dot recovery gesture: frames the both-dots hold has run, and
+    // how often it fired (the scripted driver ignores quit edges, so a fired
+    // recovery is observable as a count rather than as the session ending;
+    // off-device the panel-cycle half is the guarded no-op).
+    else if name == "dotarm" then Ui.dotArmFrames
+    else if name == "dotfired" then Ui.dotFired
     // the exit menu (plan 0040): open, which row, and how many OKs have landed
     // on it — `exitconfirm` is what pins the two-step rows, where the check is
     // that ONE OK on "Reboot to EDL" runs nothing and only raises this to 1.
