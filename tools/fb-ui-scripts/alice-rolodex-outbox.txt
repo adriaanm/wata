@@ -1,0 +1,57 @@
+# rolodex-outbox: the card's BOTTOM band — the unheard band's mirror — in
+# both its states and its stack-row degradation, and the ack that clears it.
+# Three users so the open stack has real rows (like alice-rolodex.txt).
+#
+# 1. queued: every upload answers 500 (RETRY class), so the ptt send lands in
+#    the outbox and the family card carries the translucent dark band with
+#    "1 sending" at full bleed.
+
+wait syncing 1 900
+wait convs 3 900
+waitmax motionlive 0 90
+advance 5
+expect motioncentre 0
+
+failnext 200
+key ptt press
+advance 20
+key ptt release
+wait sendfail 1 1500
+wait unsent 1 600
+
+# the 2s SEND FAILED flash ages out; the band stays
+advance 90
+checkpoint obox-sending
+
+# 2. the stack row: one detent down — Family becomes the top row and the band
+#    degrades to a dark rule along that row's BOTTOM edge (the unheard band's
+#    degradation, mirrored).
+tap down
+advance 12
+expect motioncentre 1
+checkpoint obox-row-rule
+
+# back onto Family and settled at full bleed again
+tap up
+waitmax motionlive 0 90
+advance 5
+expect motioncentre 0
+
+# 3. undelivered: re-arm ONE failure answering 400 — the next retry of the
+#    queued entry is refused for good (UNDELIVERABLE), the outbox drops it and
+#    marks the conversation, and the band goes red: "not sent" wins over
+#    "sending".
+failnext 1 400
+wait undeliv 1 2500
+waitmax unsent 0 600
+advance 30
+checkpoint obox-notsent
+
+# 4. the ack: opening the conversation is where the user finds out — it sends
+#    ActAckOutbox for both spellings of the key, and the marker clears.
+tap enter
+waitmax undeliv 0 600
+tap back
+waitmax motionlive 0 90
+advance 5
+checkpoint obox-cleared

@@ -169,7 +169,10 @@ and a hole in the conversation (`outbox.scala`, plan 0022).
   loop only reads `pending`.
 - **The UI is told, not asked.** `EvOutbox(unsent, undelivered)` carries
   the conversation keys on every change, including once at `Runtime.start`
-  for what came off disk. It is an event rather than a snapshot field
+  for what came off disk. `unsent` holds ONE KEY PER QUEUED ENTRY (a
+  conversation with two sends waiting appears twice), so a UI can count a
+  conversation's queued sends — the rolodex card's "N sending" band — as
+  well as ask membership; `undelivered` stays one key per conversation. It is an event rather than a snapshot field
   because a device that cannot reach the server publishes no snapshots —
   and that is exactly the device with a queue. `ActAckOutbox(key)` clears
   an undelivered mark when the user opens that conversation.

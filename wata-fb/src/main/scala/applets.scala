@@ -732,6 +732,28 @@ object WataLogic:
     if conv.roomId != "" then out = conv.roomId
     out
 
+  /** how many of the keys name this conversation — `unsent` carries ONE KEY
+   *  PER QUEUED ENTRY (outbox.scala), so this is the count the rolodex
+   *  card's "N sending" band shows. Both spellings of the conversation's
+   *  key, like `convKeyed`. */
+  def outboxSending(unsent: List[String], conv: Conversation): scala.Int =
+    var n = 0
+    if conv.roomId != "" then n = n + countKey(unsent, conv.roomId)
+    if conv.hasContact then n = n + countKey(unsent, conv.contact.user.id)
+    n
+
+  def countKey(keys: List[String], k: String): scala.Int =
+    var n = 0
+    var cur = keys
+    var going = true
+    while going do
+      cur match
+        case h :: t =>
+          if h == k then n = n + 1
+          cur = t
+        case Nil => going = false
+    n
+
   /** does one of the keys name this conversation — by room, or by contact for
    *  a DM room that did not exist when the send was queued? */
   def convKeyed(keys: List[String], conv: Conversation): Boolean =

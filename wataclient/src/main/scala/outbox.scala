@@ -221,11 +221,16 @@ object Outbox:
   def keyOf(roomId: String, contactId: String): String =
     if roomId != "" then roomId else contactId
 
-  /** conversation keys with something still queued. */
+  /** ONE KEY PER QUEUED ENTRY — a conversation with two sends waiting
+   *  appears twice, so a UI can COUNT its queued sends (the rolodex card's
+   *  "2 sending" band) as well as ask membership. Every consumer that only
+   *  asks membership (`convKeyed`, the outbox marks) is unaffected. */
   def unsentKeys(): List[String] = keysOf(entriesC.get(), Nil)
 
   def keysOf(xs: List[OutboxEntry], acc: List[String]): List[String] = xs match
-    case h :: t => keysOf(t, addKey(acc, keyOf(h.roomId, h.contactId)))
+    case h :: t =>
+      val k = keyOf(h.roomId, h.contactId)
+      keysOf(t, if k == "" then acc else k :: acc)
     case Nil    => ListOps.reverse(acc)
 
   def addKey(acc: List[String], k: String): List[String] =

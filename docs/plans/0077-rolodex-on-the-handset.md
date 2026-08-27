@@ -356,6 +356,24 @@ the arm's-length photo as the owner's leg.
   > full-bleed boxes re-pinned from the real tree (name 2/53/156/49, state
   > y 77). Remaining by-eye: the owner's on-panel A/Bs.
 
+  > **State-legibility pass, 2026-08-27 (owner ruling):** the card now says
+  > its two states at card scale. (1) The unheard band's count draws at the
+  > NAME role — 16 px medium, exactly the h/6 = 21 band's line box — instead
+  > of the 13 px caption; box IS the band, degradation to the stack-row rule
+  > unchanged. (2) The outbox square (plan 0070's delivery-squares corner
+  > mark) is replaced by the band's MIRROR along the card's bottom edge:
+  > translucent dark (the chip's dark, ~50% over the hue) with "N sending"
+  > in white while sends are queued — `Outbox.unsentKeys` now emits one key
+  > per queued entry so the count is real — red with "not sent" in ink once
+  > one is refused for good, a rule along a stack row's bottom, ack on open
+  > untouched. At full bleed: top band 0–21, name tops at 26, state ends at
+  > 98, bottom band 107–128. Oracles: the new `rolodex-outbox` scenario
+  > (dark band + count, row rule, red band via the test hook's new 4xx arm,
+  > clear on ack; the three band checkpoints seen to fail with the band
+  > suppressed), 10 goldens regenerated, mac-smoke's count-label pins
+  > updated from the real tree. Detail in wata-fb.md ("Outbox marks", the
+  > rolodex section).
+
 - **Does the ST7735S path sustain >30 fps at all?** If not, `MOTION_FRAME_MS`
   is 33 and the springs still work; the measurement decides, not the code.
 - **Key-repeat feel**: one detent per repeat event rides the kernel's

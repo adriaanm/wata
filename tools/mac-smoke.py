@@ -273,8 +273,8 @@ def run(tmp):
         arrival = sess.cmd("wait 6000", lambda l: l == "waited 6000")
         patches = [l for l in arrival if l.startswith("patch ")]
         c.ok(patches == ['patch insert [0.0.0] 1 band:fill(0,0,160,21,r=0,65504,a=255)',
-                         'patch insert [0.0.0] 3 count:label(2,1,156,19,"1 unheard",'
-                         'caption,medium,center,0,a=255)',
+                         'patch insert [0.0.0] 3 count:label(2,0,156,21,"1 unheard",'
+                         'name,medium,center,0,a=255)',
                          'patch set [0.0.0.4] label(2,77,156,21,"just now",'
                          'name,medium,center,0,a=255)'],
              f"arrival: want exactly the band + count inserts and the state set, got {patches!r}")
@@ -283,7 +283,7 @@ def run(tmp):
         t2 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
         c.line(t2, lambda l: l.strip() == 'NSBox 0 107 160 21',
                "tree 2: no unheard band NSBox across the card's top")
-        c.line(t2, lambda l: l.strip() == 'NSTextField 2 108 156 19 "1 unheard"',
+        c.line(t2, lambda l: l.strip() == 'NSTextField 2 107 156 21 "1 unheard"',
                "tree 2: no unheard count label in the band")
         c.line(t2, lambda l: l.strip() == 'NSTextField 2 53 156 49 "Family"',
                "tree 2: family card name gone")

@@ -165,6 +165,18 @@ SCENARIOS = [
         ],
     },
     {
+        # the rolodex card's bottom outbox band (the unheard band's mirror):
+        # dark "1 sending" while a send is queued, its stack-row rule, red
+        # "not sent" once the server refuses one for good (failnext's 4xx
+        # arm), and the clear on opening the conversation (ActAckOutbox).
+        "name": "rolodex-outbox",
+        "hooks": True,
+        "users": ["alice", "bob", "charlie"],
+        "phases": [
+            ("alice", "alice-rolodex-outbox.txt"),
+        ],
+    },
+    {
         "name": "playing-hung",
         "stop_server_after": 6.0,
         "http_timeout_ms": 1500,

@@ -57,11 +57,13 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              already satisfies `wait`)
  *    expect <probe> <n>        fail unless probe >= n right now
  *    checkpoint <name>         write <outdir>/<name>.png from the live frame
- *    failnext <n>              arm the server's WATA_TEST_HOOKS=1
+ *    failnext <n> [status]     arm the server's WATA_TEST_HOOKS=1
  *                              fail-on-demand counter (an out-of-band POST,
  *                              like `family`): the next n media
- *                              uploads/downloads answer 500 — how the SEND
- *                              FAILED / PLAY FAILED flashes get provoked
+ *                              uploads/downloads answer status (default 500)
+ *                              — how the SEND FAILED / PLAY FAILED flashes
+ *                              get provoked; a 4xx provokes the outbox's
+ *                              UNDELIVERABLE drop (the red "not sent" band)
  *    conn <state>              force the connection every later frame reports
  *                              (off|connecting|connected|syncing|error, or
  *                              `live` to hand it back to the client), then one
@@ -293,7 +295,7 @@ object UiScript:
     else if cmd == "group" then
       err = group(nth(ts, 1), restOf(restOf(ts)))
     else if cmd == "failnext" then
-      err = failNext(num(nth(ts, 1), 1))
+      err = failNext(num(nth(ts, 1), 1), num(nth(ts, 2), 500))
     else if cmd == "conn" then
       err = connDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "netpipe" then
@@ -640,12 +642,13 @@ object UiScript:
 
   /** arm the server's fail-on-demand hook (testhooks.scala, wata-server;
    *  registered only under WATA_TEST_HOOKS=1): the next `n` media
-   *  uploads/downloads answer 500. Out-of-band and unauthenticated, like the
-   *  hook itself. */
-  def failNext(n: scala.Int): String =
+   *  uploads/downloads answer `status` (default 500 — RETRY class; a 4xx is
+   *  how a script provokes the outbox's UNDELIVERABLE drop). Out-of-band and
+   *  unauthenticated, like the hook itself. */
+  def failNext(n: scala.Int, status: scala.Int): String =
     val hs = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
     val resp = MatrixHttp.request(hs, "POST", "/_wata/v1/test/fail",
-      "application/json", "{\"count\":" + n + "}")
+      "application/json", "{\"count\":" + n + ",\"status\":" + status + "}")
     if resp.status != 200 then "failnext: status " + resp.status else ""
 
   // ---- probes ------------------------------------------------------------------------

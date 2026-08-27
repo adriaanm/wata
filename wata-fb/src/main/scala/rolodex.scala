@@ -41,8 +41,9 @@ import language.experimental.saferExceptions
  *  overflows the card's usable width, then 30, floor 24), its centre
  *  LIFTED to 40% of panel height (h/2 − h/10 — dead centre read as "a bit
  *  meh" on the panel, owner 2026-08-27; the lift fades with openness, so
- *  the open-stack rows are untouched), the unheard band h/6 (holds a
- *  13 px caption), and the state line h/6 — the NAME strike's line box is
+ *  the open-stack rows are untouched), the unheard band h/6 (exactly the
+ *  NAME strike's 21 px line box, so the count draws at 16 px medium — the
+ *  state line's scale), and the state line h/6 — the NAME strike's line box is
  *  21 px, and h/6 is exactly that on 128 px (h/8 = 16 clips five pixels
  *  of it). The lifted name clears the band: the tallest rung's 49 px line
  *  box tops out at y = 26, five below the band's 21.
@@ -82,9 +83,25 @@ import language.experimental.saferExceptions
  *
  *  The unheard count and the unheard BAR are ONE element rather than two: a
  *  yellow band across the top of the card, which is tall enough to hold "3
- *  unheard" when the card is full bleed and degrades continuously into a
- *  yellow rule along the top of a stack row. A second element that had to
- *  agree with the first about when to appear is how a design drifts.
+ *  unheard" when the card is full bleed (the count at the NAME role — 16 px
+ *  medium in the h/6 = 21 px band, the same scale as the state line) and
+ *  degrades continuously into a yellow rule along the top of a stack row. A
+ *  second element that had to agree with the first about when to appear is
+ *  how a design drifts.
+ *
+ *  The OUTBOX state is that band's mirror, along the card's BOTTOM edge, and
+ *  the same one-element rule holds: while sends of mine are queued, a
+ *  translucent dark band (the connectivity chip's dark, ~50% over the hue)
+ *  with "1 sending" in white; once a send is refused for good, the band goes
+ *  red with "not sent" in ink — the louder state wins when both apply, the
+ *  rule the old row marks had. On a stack row it degrades to a rule along
+ *  the row's bottom exactly as the unheard band does along the top. The ack
+ *  semantics are untouched: opening the conversation clears the undelivered
+ *  state (`WataLogic.enterConversation` -> `ActAckOutbox`); this file only
+ *  draws what the outbox lists say. At full bleed the two bands and the
+ *  lifted name cannot meet: the tallest name rung tops out at y = 26 (below
+ *  the top band's 21), the state strip ends at 98, and the bottom band
+ *  starts at 107.
  *
  *  Text is black on every card, because that is the palette's constraint
  *  (`Palette.INK`) rather than a decision this file makes. Type is by ROLE:
@@ -107,9 +124,12 @@ case class RoloCard(
   state: String,
   unheard: scala.Int,
   // 0 = nothing of ours is pending, 1 = still queued, 2 = it will never
-  // arrive. Plan 0070's delivery vocabulary is SQUARES, so this draws as one:
-  // a small square in the card's trailing corner, yellow or red.
-  mark: scala.Int
+  // arrive. Draws as the bottom band: dark "N sending" for 1, red "not
+  // sent" for 2 (the louder state wins — outboxMark already picks it).
+  mark: scala.Int,
+  // how many sends are queued for this conversation — the bottom band's
+  // count while `mark == 1`.
+  sending: scala.Int
 )
 
 object Rolodex:
@@ -225,7 +245,8 @@ object Rolodex:
       // a neighbour's colour, at QUIET_ALPHA over the black panel. This is what
       // makes the centre card the brightest thing on the screen whatever the
       // two hues are, which a size differential alone cannot promise.
-      val ca0 = alphaOf(1.0 - quiet * (1.0 - QUIET_ALPHA))
+      val cov = 1.0 - quiet * (1.0 - QUIET_ALPHA)
+      val ca0 = alphaOf(cov)
       var kids: List[Keyed] = Nil
       kids = Keyed("card", VFill(x, y, cw, ch, radius, c.color, ca0)) :: kids
       // the unheard band, which becomes the unheard bar as the stack opens
@@ -258,23 +279,17 @@ object Rolodex:
       kids = Keyed("name", VLabel(x + pad, nameY, cw - 2 * pad, nameH, c.name,
         role, weight, align, Palette.INK, ca0)) :: kids
       // the count, inside the band, only while the band is tall enough to
-      // hold it. It fades out well before the band has finished shrinking, so
-      // no frame shows clipped text.
+      // hold it — at the NAME role: the band is h/6 = 21 px at full bleed,
+      // exactly the 16 px medium strike's line box, so the count reads at
+      // the card's own scale rather than as small print. It fades out
+      // before the band has finished shrinking, and the box IS the band, so
+      // whatever the fade leaves mid-shrink clips at the band edge like any
+      // overlong run.
       val ca = alphaOf((1.0 - o) * 2.0)
       if bandH >= 8 && ca > 8 then
-        kids = Keyed("count", VLabel(x + pad, y + 1, cw - 2 * pad, bandH - 2,
-          unheardText(c.unheard), TypeRole.CAPTION, TypeWeight.MEDIUM,
+        kids = Keyed("count", VLabel(x + pad, y, cw - 2 * pad, bandH,
+          unheardText(c.unheard), TypeRole.NAME, TypeWeight.MEDIUM,
           TextAlign.CENTER, Palette.INK, ca)) :: kids
-      // a message of ours that has not landed: one square in the trailing
-      // corner, the same rectangle vocabulary as the unheard band, and the
-      // one persistent surface for a send that failed (the SEND FAILED flash
-      // is an edge and is gone two seconds later).
-      if c.mark > 0 then
-        val sq = roundI(lerp((h / 12).toDouble, (rh / 4).toDouble, o))
-        if sq >= 2 then
-          val mc = if c.mark == 2 then Color.red else Color.yellow
-          kids = Keyed("mark", VFill(x + cw - pad - sq, y + ch - pad - sq, sq, sq,
-            0, mc, ca0)) :: kids
       // the state line, which is a full-bleed affordance: in a stack row there
       // is no room for it and the roster is answering a different question. At
       // rest one contact owns the whole panel, so the supporting line takes
@@ -292,10 +307,31 @@ object Rolodex:
         kids = Keyed("state", VLabel(x + pad, stY, cw - 2 * pad, stH, c.state,
           TypeRole.NAME, TypeWeight.MEDIUM, TextAlign.CENTER,
           Palette.INK, sa)) :: kids
+      // the outbox band — the unheard band's mirror along the BOTTOM edge,
+      // same one-element degradation into a rule on a stack row. Queued
+      // sends: the connectivity chip's dark at ~50% over the hue, "N
+      // sending" in white. Refused for good: red, "not sent" in ink — the
+      // louder state won upstream (outboxMark). The label shares the count's
+      // fade and its box IS the band, for the same clipping rule.
+      if c.mark > 0 then
+        val obH = roundI(lerp((h / 6).toDouble, 3.0, o))
+        if obH >= 2 then
+          val oy = y + ch - obH
+          val obc = if c.mark == 2 then Color.red else Color.black
+          val oba = if c.mark == 2 then ca0 else alphaOf(0.5 * cov)
+          kids = Keyed("obband", VFill(x, oy, cw, obH, radius, obc, oba)) :: kids
+          if obH >= 8 && ca > 8 then
+            val txt = if c.mark == 2 then "not sent" else sendingText(c.sending)
+            val ink = if c.mark == 2 then Palette.INK else Color.white
+            kids = Keyed("obtext", VLabel(x + pad, oy, cw - 2 * pad, obH, txt,
+              TypeRole.NAME, TypeWeight.MEDIUM, TextAlign.CENTER, ink, ca)) :: kids
       Some(VGroup(ListOps.reverse(kids)))
 
   def unheardText(n: scala.Int): String =
     if n == 1 then "1 unheard" else "" + n + " unheard"
+
+  def sendingText(n: scala.Int): String =
+    if n <= 1 then "1 sending" else "" + n + " sending"
 
   /** round-half-away-from-zero to a panel pixel. A card sliding past the top
    *  of the panel has a negative y, and truncation there would make it jitter
@@ -348,7 +384,8 @@ object Rolodex:
     if name == "" || name == "?" then name = "Chat"
     RoloCard(WataLogic.convKey(conv), name, color,
       stateOf(conv, nowMs, playingRoom), conv.unplayedCount,
-      WataLogic.outboxMark(unsent, undelivered, conv))
+      WataLogic.outboxMark(unsent, undelivered, conv),
+      WataLogic.outboxSending(unsent, conv))
 
   /** the one line under a full-bleed name: what this conversation is doing, or
    *  when it last said anything. The message list is newest-first. */

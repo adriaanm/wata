@@ -29,6 +29,7 @@ import sgo.{Mutex, mutex}
  */
 class HookState:
   var mediaFails: scala.Int = 0
+  var mediaStatus: scala.Int = 500
 
 object TestHooks:
   private val cell: Mutex[HookState] = mutex(new HookState())
@@ -36,16 +37,24 @@ object TestHooks:
   /** the gate, read per use — costs one getenv and keeps boot order out of it. */
   def enabled: Boolean = go.sys.getenv("WATA_TEST_HOOKS") == "1"
 
-  /** `POST /_wata/v1/test/fail {"count": N}` -> `{}`. */
+  /** `POST /_wata/v1/test/fail {"count": N}` -> `{}`. An optional `status`
+   *  (default 500) picks the answer the armed failures give — a 4xx is how a
+   *  harness provokes the client's UNDELIVERABLE class (a queued message the
+   *  server refuses for good), which no 500 can reach. */
   def route(body: String): Either[MErr, Json] = Json.tryParse(body) match
     case Left(_)  => Left(MErr(400, M_BAD_JSON(), "Invalid JSON"))
     case Right(j) => arm(j)
 
   def arm(j: Json): Either[MErr, Json] =
     val n = longOrDflt(j, "count", 0L).toInt
+    val s = longOrDflt(j, "status", 500L).toInt
     if n < 0 then Left(MErr(400, M_BAD_JSON(), "count must be >= 0"))
+    else if s < 400 || s > 599 then Left(MErr(400, M_BAD_JSON(), "status must be 4xx/5xx"))
     else
-      cell.withLock(st => st.mediaFails = n)
+      cell.withLock { st =>
+        st.mediaFails = n
+        st.mediaStatus = s
+      }
       Right(emptyObj)
 
   /** consume one armed failure; true = the current media op must answer 500.
@@ -61,5 +70,9 @@ object TestHooks:
       out = true
     out
 
-  /** the injected failure, one shape for both media edges. */
-  def mediaErr: MErr = MErr(500, M_UNKNOWN(), "Injected media failure (test hook)")
+  /** the injected failure, one shape for both media edges, at the armed
+   *  status (the status outlives the count on purpose: it is read right
+   *  after the `failMedia()` that consumed the last armed failure). */
+  def mediaErr: MErr =
+    val s = cell.withLock(st => st.mediaStatus)
+    MErr(s, M_UNKNOWN(), "Injected media failure (test hook)")

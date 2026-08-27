@@ -643,15 +643,26 @@ Two row marks say what the client is doing with the user's own audio
 (plan 0022 milestone B; the queue itself is `wataclient`'s —
 [wataclient.md](wataclient.md)).
 
-- **The card's outbox mark** (plan 0070's delivery vocabulary is
-  SQUARES): one small square in the rolodex card's trailing corner,
-  yellow (`mark == 1`) while that conversation has a send still queued,
-  red (`mark == 2`) once one was refused for good — the louder one wins
-  when both apply (`WataLogic.outboxMark`). The undelivered mark stays
+- **The card's outbox band** (owner ruling 2026-08-27; it replaced the
+  small trailing-corner square, one element per idea): a band along the
+  rolodex card's BOTTOM edge, the unheard band's mirror — a translucent
+  dark band (the connectivity chip's dark at ~50% over the hue) with
+  "N sending" in white while that conversation has sends still queued
+  (`mark == 1`; the count is real — `Outbox.unsentKeys` emits one key
+  per queued entry and `WataLogic.outboxSending` counts them), red with
+  "not sent" in ink once one was refused for good (`mark == 2`) — the
+  louder one wins when both apply (`WataLogic.outboxMark`). On a stack
+  row it degrades to a rule along the row's bottom, dark or red, exactly
+  as the unheard band degrades along the top. The undelivered state stays
   until the user OPENS that conversation, which is where they find out —
   `WataLogic.enterConversation` sends `ActAckOutbox` for both spellings
   of the conversation's key (room id and contact id, since a send queued
-  before the DM room existed is filed under the contact).
+  before the DM room existed is filed under the contact). Pinned by the
+  `rolodex-outbox` scenario (`alice-rolodex-outbox.txt`): the dark band
+  with its count at full bleed, the stack row's bottom rule, the red
+  band after `failnext`'s 4xx arm provokes the UNDELIVERABLE drop, and
+  the clear on open — each band checkpoint seen to fail with the band
+  suppressed before the green was believed.
 - **The message row is one fixed grid** (plan 0049,
   `WataLogic.msgRowView`): marks in columns 0-1, the age at column 2
   (3 wide — `ageStr`: "now" under a minute, then "59m"/"23h"/"99d",
@@ -1169,7 +1180,9 @@ the whole roster at once, so no two cards collide): the name at the
 DISPLAY role, one line of state under it at NAME medium — the resting
 card owns the whole panel, so the supporting line takes real size, and
 it fades out by openness 1/3 so no stack row ever has to hold it — the
-yellow unheard band across the top when there is one, and nothing
+yellow unheard band across the top when there is one, the outbox band
+along the bottom when a send of mine is queued or refused ("Outbox
+marks", above), and nothing
 else. No WATA
 title, no footer key legend, no connectivity element while the link is
 healthy (the chip, above), and the full-bleed card covers the shell's
@@ -1185,7 +1198,15 @@ itself and in `docs/design/wata-watch.md`; the geometry fractions are
 this panel's own: three ~42 px rows rather than five (bigger absolute
 type than the watch — the point of the port), `REACH = 2`, the band
 `h/6`, the state line `h/6` (the NAME strike's 21 px line box, exactly
-h/6 on 128 px). The full-bleed name box is sized per NAME by the
+h/6 on 128 px — and the band count draws at that same NAME role, so
+"3 unheard" is card-scale type, not small print). The one-element rule
+holds at BOTH edges: the unheard band across the top and the outbox
+band along the bottom are each ONE element that carries its text at
+full bleed and degrades continuously into a rule on a stack row — a
+count that had to agree with a separate bar about when to appear is
+how a design drifts. At full bleed nothing meets: top band 0–21, the
+tallest name rung tops out at y = 26, the state strip ends at 98, and
+the bottom band runs 107–128. The full-bleed name box is sized per NAME by the
 DISPLAY fit-down ladder (`FbTypeRoles.displayStrikeFor`): 38 px bold
 unless the measured name overflows the card's usable width, then 30,
 floor 24 — the body sizes the box from the chosen rung's line box and
