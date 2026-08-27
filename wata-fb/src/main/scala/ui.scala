@@ -418,11 +418,16 @@ object Ui:
 
   // ---- the rolodex motion pump (plan 0077 stage 2, FB-MOTION-PUMP) ------------
 
-  /** is the contact list — the one screen the integrator drives — what the
-   *  shell is showing? The watch's `isContacts` gating, restated for a shell
-   *  that has more than one applet. */
+  /** is the contact list — the rolodex integrator's screen — what the shell
+   *  is showing? The watch's `isContacts` gating, restated for a shell that
+   *  has more than one applet. */
   def motionShowing: Boolean =
     stateV.active == Shell.WATA && isContacts(Shell.wataState(stateV).view)
+
+  /** is the conversation — the thread integrator's screen (plan 0078) —
+   *  what the shell is showing? */
+  def convMotionShowing: Boolean =
+    stateV.active == Shell.WATA && isConversation(Shell.wataState(stateV).view)
 
   /** Step the wata applet's motion integrator with this frame's real clamped
    *  dt, then hand the applet the item the centre band is over — the fb half
@@ -442,19 +447,11 @@ object Ui:
    *  rolodex starts from when the screen comes back, not something the
    *  physics argues with. */
   def stepMotion(dt: scala.Double): Unit =
-    val w = Shell.wataState(stateV)
-    val count = WataLogic.convCount(snapC.get())
-    if motionShowing then
-      var m = Motion.step(w.motion, dt, count)
-      if count > 0 && Motion.offset(m) > (count - 1).toDouble + 1.0 then
-        m = Motion.placeAt(m, count - 1)
-      val sel = Motion.centre(m, count)
-      var w2 = WataLogic.withMotion(w, m)
-      if w2.selected != sel then w2 = WataLogic.withSel(w2, sel, w2.scrollOffset)
-      stateC.set(Shell.withApplet(stateV, Shell.WATA, WataApplet(w2)))
-    else if Motion.centre(w.motion, count) != w.selected || Motion.live(w.motion) then
-      stateC.set(Shell.withApplet(stateV, Shell.WATA,
-        WataApplet(WataLogic.withMotion(w, Motion.placeAt(w.motion, w.selected)))))
+    if stateV.active != Shell.WATA then ()
+    else
+      val w = Shell.wataState(stateV)
+      stateC.set(Shell.withApplet(stateV, Shell.WATA, WataApplet(
+        WataLogic.stepMotions(w, dt, snapC.get(), unsentC.get(), undelivC.get()))))
 
   // motion throughput (plan 0077 stage 4): while the rolodex coasts, count
   // real frames against the real clock and say what rate the panel actually
@@ -470,7 +467,7 @@ object Ui:
    *  and `dtMs` are the frame's real clock values, so the reported fps is what
    *  the panel sustained, not what the sleep asked for. */
   def logMotionFps(nowMs: Long, dtMs: Long): Unit =
-    if motionShowing && motionLive then
+    if (motionShowing || convMotionShowing) && motionLive then
       if mFramesC.get() == 0 then mWinMsC.set(nowMs - dtMs)
       tally(mFramesC)
       mLiveMsC.set(mLiveMsC.get() + dtMs)
@@ -492,15 +489,23 @@ object Ui:
    *  the ordinary ~30fps otherwise. */
   def framePaceMs(): Long =
     if motionShowing && Motion.live(Shell.wataState(stateV).motion) then MOTION_FRAME_MS
+    else if convMotionShowing && Motion.live(Shell.wataState(stateV).convMotion) then MOTION_FRAME_MS
     else FRAME_MS
 
-  /** the integrator's centre index against the live list — the `motioncentre`
-   *  probe's value. */
+  /** the SHOWN integrator's centre index against its live list — the
+   *  `motioncentre` probe's value: the thread's while the conversation shows,
+   *  else the rolodex's. */
   def motionCentre: scala.Int =
-    Motion.centre(Shell.wataState(stateV).motion, WataLogic.convCount(snapC.get()))
+    val w = Shell.wataState(stateV)
+    if convMotionShowing then
+      Motion.centre(w.convMotion, WataLogic.threadCount(snapC.get(),
+        w.convContactIdx, unsentC.get(), undelivC.get()))
+    else Motion.centre(w.motion, WataLogic.convCount(snapC.get()))
 
-  /** is the integrator still moving (the `motionlive` probe)? */
-  def motionLive: Boolean = Motion.live(Shell.wataState(stateV).motion)
+  /** is the shown integrator still moving (the `motionlive` probe)? */
+  def motionLive: Boolean =
+    val w = Shell.wataState(stateV)
+    if convMotionShowing then Motion.live(w.convMotion) else Motion.live(w.motion)
 
   def clampDt(raw: Long): Long =
     if raw < 0L then 0L else if raw > 1000L then 1000L else raw

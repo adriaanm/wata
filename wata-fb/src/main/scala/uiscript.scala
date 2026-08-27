@@ -735,11 +735,75 @@ object UiScript:
     // — are numbers a script can pin, and numbers that FAIL when the
     // emphasis is inverted (quiet forced to zero), which is what makes the
     // green run believable.
+    // the DRAWN THREAD probes (plan 0078), read off the live pixel buffer at
+    // two scanlines — through the centre row's middle and through the row
+    // below it — restricted to one column band each, so a claim about ink is
+    // a claim about the thing that carries it:
+    //   thrcl/thrnl  summed brightness of the BAR FIELD on the two scanlines
+    //                (played-third vs unheard-ink discriminates here)
+    //   thrsq        lit pixels in the delivery GUTTER on the centre scanline
+    //                (the squares: filled+hollow vs both-filled vs red differ)
+    //   thrstc/thrstn  lit pixels in the STAMP column on the two scanlines
+    //                (the collapse: a burst's second row has an empty column;
+    //                 x starts past the left nub so the band cannot count it)
+    else if name == "thrcl" then scanLumRange(px, thrRowY(0), Thread.fieldX0(Display.W), Thread.fieldX1(Display.W))
+    else if name == "thrnl" then scanLumRange(px, thrRowY(1), Thread.fieldX0(Display.W), Thread.fieldX1(Display.W))
+    else if name == "thrsq" then scanLitRange(px, thrRowY(0), Display.W - Thread.GUTTER_W, Display.W)
+    //   thrylw       YELLOW pixels in the stamp column on the centre scanline
+    //                — the playing row's stamp treatment, pinned as ink
+    //                rather than as text: the hh:mm it spells is the real
+    //                wall clock's (the client keeps the real clock), so the
+    //                text itself cannot be a golden
+    else if name == "thrylw" then scanYellow(px, thrRowY(0), 6, Thread.STAMP_W)
+    else if name == "thrstc" then scanLitRange(px, thrRowY(0), 6, Thread.STAMP_W)
+    else if name == "thrstn" then scanLitRange(px, thrRowY(1), 6, Thread.STAMP_W)
     else if name == "rollcw" then scanLit(px, Rolodex.centreY(Display.H) + Rolodex.rowH(Display.H) / 2)
     else if name == "rollnw" then scanLit(px, Rolodex.centreY(Display.H) - Rolodex.rowH(Display.H) / 2)
     else if name == "rollcl" then scanLum(px, Rolodex.centreY(Display.H) + Rolodex.rowH(Display.H) / 2)
     else if name == "rollnl" then scanLum(px, Rolodex.centreY(Display.H) - Rolodex.rowH(Display.H) / 2)
     else -1
+
+  /** the mid-height scanline of the thread row `off` rows below the centre
+   *  band. */
+  def thrRowY(off: scala.Int): scala.Int =
+    Thread.centreY(Display.H) + off * Thread.rowH(Display.H) + Thread.rowH(Display.H) / 2
+
+  /** lit pixels in `[x0, x1)` on scanline `y`. */
+  def scanLitRange(px: go.Bytes, y: scala.Int, x0: scala.Int, x1: scala.Int): scala.Int =
+    var n = 0
+    if px.length >= Display.BYTES then
+      var x = x0
+      while x < x1 do
+        if pixSum(px, x, y) > 4 then n += 1
+        x += 1
+    n
+
+  /** YELLOW pixels in `[x0, x1)` on scanline `y`: lit in red+green with a
+   *  dark blue channel — the panel's yellow (0xFFE0) and its antialiased
+   *  edges, and nothing the white or gray text produces. */
+  def scanYellow(px: go.Bytes, y: scala.Int, x0: scala.Int, x1: scala.Int): scala.Int =
+    var n = 0
+    if px.length >= Display.BYTES then
+      var x = x0
+      while x < x1 do
+        val i = (y * Display.W + x) * 2
+        val v = (px(i).toInt & 0xff) | ((px(i + 1).toInt & 0xff) << 8)
+        val r = (v >> 11) & 31
+        val g = (v >> 5) & 63
+        val bch = v & 31
+        if r + g > 8 && bch < 2 then n += 1
+        x += 1
+    n
+
+  /** summed channel values in `[x0, x1)` on scanline `y`, /16. */
+  def scanLumRange(px: go.Bytes, y: scala.Int, x0: scala.Int, x1: scala.Int): scala.Int =
+    var tot = 0
+    if px.length >= Display.BYTES then
+      var x = x0
+      while x < x1 do
+        tot += pixSum(px, x, y)
+        x += 1
+    tot / 16
 
   /** pixels on scanline `y` that are not (near-)black — the lit width the
    *  emphasis probes compare. RGB565 little-endian, the buffer's own format. */

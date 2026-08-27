@@ -26,12 +26,17 @@ advance 30
 # the server is stopped mid-phase; the round hangs until the deadline
 wait connerr 1 1200
 
-# OK on the selected row: the download will hang, the mark shows at once
+# OK on the selected row: the download will hang, but the playing row's
+# stamp goes YELLOW the instant OK is released, before any byte has moved —
+# that immediacy is the whole point, and the probe pins it as ink (the
+# stamp's hh:mm is the real wall clock's, so the frame cannot be a golden;
+# the spelling is pinned by the wataui rules oracle)
 key enter press
 key enter release
-checkpoint play-hung
+expect thrylw 1
 
 # the deadline turns the hang into the failure flash and clears the mark
 wait playfail 1 1200
+waitmax thrylw 0 10
 advance 3
 checkpoint play-hung-failed

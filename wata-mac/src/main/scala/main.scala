@@ -569,20 +569,7 @@ object Pump:
    *  it; off the contact screen the integrator is seated on `selected`
    *  instead of stepped. */
   def stepMotion(w: WataState, dt: scala.Double, ctx: FrameCtx): WataState =
-    val count = WataLogic.convCount(ctx.snap)
-    if WataLogic.isContactsView(w) then
-      var m = Motion.step(w.motion, dt, count)
-      // a position past the end of a list that SHRANK is put back rather than
-      // left for the end spring to argue with the model
-      if count > 0 && Motion.offset(m) > (count - 1).toDouble + 1.0 then
-        m = Motion.placeAt(m, count - 1)
-      val sel = Motion.centre(m, count)
-      var out = WataLogic.withMotion(w, m)
-      if out.selected != sel then out = WataLogic.withSel(out, sel, out.scrollOffset)
-      out
-    else if Motion.centre(w.motion, count) != w.selected || Motion.live(w.motion) then
-      WataLogic.withMotion(w, Motion.placeAt(w.motion, w.selected))
-    else w
+    WataLogic.stepMotions(w, dt, ctx.snap, ctx.unsent, ctx.undelivered)
 
   // ---- one frame ------------------------------------------------------------
 

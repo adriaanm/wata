@@ -331,6 +331,20 @@ SCENARIOS = [
         ],
     },
     {
+        # plan 0078: the drawn thread — the mixed frame (my white row with
+        # delivery squares, two speakers' unheard capped bars, one stamp for
+        # a burst), the unheard-ink vs played-third discrimination, the
+        # playing row's yellow stamp (as ink — the hh:mm is wall-clock), and
+        # the outbox's synthetic refused (red square) and queued (hollow
+        # squares) rows via the failnext 4xx/5xx arms.
+        "name": "drawn-thread",
+        "hooks": True,
+        "users": ["alice", "bob", "charlie"],
+        "phases": [
+            ("alice", "alice-thread.txt"),
+        ],
+    },
+    {
         # The message cursor's event-id anchoring: an arrival must not slide
         # an explicitly moved selection onto a different message, while an
         # idle cursor on row 0 keeps tracking newest. The probe assertions do

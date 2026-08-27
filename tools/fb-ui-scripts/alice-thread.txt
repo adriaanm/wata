@@ -1,0 +1,103 @@
+# drawn-thread (plan 0078): the message view as bars. One phase, alice, with
+# bob's and charlie's clips seeded out of band — a mixed thread of my white
+# row (delivery squares), two speakers' unheard capped bars, the played
+# third, the playing row's yellow stamp, the stamp collapse, and the outbox's
+# synthetic queued/refused rows.
+#
+# The ink claims ride the thr* probes (uiscript.scala): scanline sums over
+# the bar field / delivery gutter / stamp column, with thresholds that sit
+# between the measured green values and the values measured with the claim
+# broken (THIRD forced to full ink; the delivery mapping cut; the collapse
+# disabled) — each was seen to fail before its green run was believed.
+#
+# quiet: the seeded arrivals must not auto-play into the ink measurements.
+
+notifymode quiet
+wait syncing 1 900
+wait convs 2 900
+
+# the burst: two clips of bob's and one of charlie's, all inside a minute —
+# three unheard bars in two speaker colours, ONE stamp between them
+sendas bob
+wait msgs 1 2000
+sendas bob
+wait msgs 2 2000
+sendas charlie
+wait msgs 3 2000
+
+# one clip of alice's own, spoken from the contact screen into the family
+key ptt press
+advance 30
+key ptt release
+wait msgs 4 2000
+# outrun the SENT flash before any pixels are measured
+advance 120
+
+# open the thread: the centre seats on row 0 — alice's own newest row
+tap enter
+advance 5
+# my row carries the delivery squares (filled+hollow: the server has it) —
+# and the burst carries exactly one stamp: the centre row's, the row below
+# is collapsed empty
+# gutter ink 11 = the filled square (5) + the hollow ring (2) + the right
+# nub (4); pinned exactly, so a broken state mapping cannot hide
+expect thrsq 11
+waitmax thrsq 11 1
+expect thrstc 12
+waitmax thrstn 0 1
+checkpoint thread-mixed
+
+# one detent down: charlie's unheard bar at the centre — full ink + cap
+tap down
+wait motioncentre 1 200
+waitmax motionlive 0 200
+expect thrcl 40
+checkpoint thread-unheard-centre
+
+# play it: the playing row's stamp goes YELLOW the instant OK is released
+# (its hh:mm is the real wall clock's, so it is pinned as ink, not text);
+# when the clip has played and the receipt returned, the bar drops to a
+# THIRD of the ink and the cap is gone
+key enter press
+key enter release
+expect thrylw 1
+wait played 1 2000
+waitmax thrylw 0 200
+advance 5
+expect thrcl 5
+waitmax thrcl 25 10
+checkpoint thread-played
+
+# back to the top for the outbox rows
+tap up
+waitmax motioncentre 0 200
+waitmax motionlive 0 200
+
+# REFUSED: the next upload answers 404 — the outbox's UNDELIVERABLE drop.
+# The thread is open, so the marker is not acked away: a synthetic row with
+# the single red square appears at the top, at the centre
+failnext 1 404
+key ptt press
+advance 10
+key ptt release
+wait undeliv 1 1500
+# age the SEND FAILED flash out before the frame is pinned
+advance 90
+# gutter ink 9 = the single red square (5) + the nub (4) — no second square
+expect thrsq 9
+waitmax thrsq 9 1
+checkpoint thread-refused
+
+# QUEUED: every later upload answers 500 (RETRY class) — the send stays
+# queued, and the queued row's squares are both hollow, above the red one
+failnext 200 500
+key ptt press
+advance 10
+key ptt release
+wait sendfail 1 1500
+wait unsent 1 600
+advance 90
+# gutter ink 8 = two hollow rings (2+2) + the nub (4)
+expect thrsq 8
+waitmax thrsq 8 1
+checkpoint thread-queued

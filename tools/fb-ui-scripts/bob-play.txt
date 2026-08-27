@@ -19,8 +19,12 @@ advance 30
 checkpoint bob-conv-open
 
 # down to the next row and play that one too — two played rows, two clips
-# actually heard.
+# actually heard. The thread scrolls on the motion integrator now (plan
+# 0078): settle the detent and let the pump write the centre into the
+# cursor before OK acts on it.
 tap down
+wait motioncentre 1 200
+waitmax motionlive 0 200
 tap enter
 wait played 2 2000
 advance 30

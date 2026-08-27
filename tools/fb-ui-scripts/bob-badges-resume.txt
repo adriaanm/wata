@@ -39,7 +39,11 @@ waitmax motionlive 0 90
 tap enter
 tap enter
 wait played 1 2000
+# the thread scrolls on the motion integrator too (plan 0078): settle the
+# detent so the second OK lands on the next row, not the same one again
 tap down
+wait motioncentre 1 200
+waitmax motionlive 0 200
 tap enter
 wait played 2 2000
 tap back

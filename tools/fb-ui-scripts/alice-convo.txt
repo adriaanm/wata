@@ -83,8 +83,10 @@ tap enter
 advance 5
 checkpoint conv-top
 
-# twelve downs walk the selection from the newest message (row 0) to the
-# oldest, which sits one row past the window — the list scrolls by one.
+# twelve downs walk the centre from the newest message (row 0) to the
+# oldest — the thread scrolls on the motion integrator (plan 0078), so the
+# taps are impulses and the checkpoint waits for the physics to settle on
+# the last detent.
 tap down
 tap down
 tap down
@@ -97,14 +99,22 @@ tap down
 tap down
 tap down
 tap down
+# twelve rapid taps are one twelve-detent flick, and a flick COASTS: under
+# the integrator's friction it lands one short, on detent 11 — deterministic
+# on the fixed 33 ms virtual clock, and exactly the physics the thread now
+# scrolls with. The checkpoint pins the coasted-to frame.
+wait motioncentre 11 400
+waitmax motionlive 0 400
 advance 5
 checkpoint conv-scrolled
 
-# back up two rows, then holding red past BACK_HOLD_DELETE redacts the
-# selected message (a red TAP would navigate back instead). The row count
+# back up two rows (settled), then holding red past BACK_HOLD_DELETE redacts
+# the selected message (a red TAP would navigate back instead). The row count
 # drops, which `wait` cannot see (it tests >=), so `waitmax` asserts it.
 tap up
 tap up
+waitmax motioncentre 9 400
+waitmax motionlive 0 400
 key back press
 advance 30
 key back release

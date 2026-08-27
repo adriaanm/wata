@@ -25,8 +25,12 @@ sendas bob
 wait msgs 3 2000
 waitmax msgsel 0 1
 
-# one row down: the cursor now HOLDS the second-newest message by event id
+# one row down: the integrator coasts one detent, the pump writes the new
+# centre into the cursor, and the cursor now HOLDS the second-newest message
+# by event id
 tap down
+wait motioncentre 1 200
+waitmax motionlive 0 200
 expect msgsel 1
 waitmax msgsel 1 1
 
