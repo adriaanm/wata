@@ -1,0 +1,13 @@
+The two faces the handset's type roles resolve against (plan 0077 stage 1),
+vendored so `go:embed` can reach them (embed only takes in-module files).
+Both are SIL OFL 1.1 — the license texts sit beside the ttfs.
+
+  Inter-Bold.ttf, Inter-Medium.ttf        INTER-LICENSE.txt
+    https://github.com/rsms/inter (release 4.x desktop ttfs)
+  AtkinsonHyperlegible-Bold.ttf,          ATKINSON-LICENSE.txt
+  AtkinsonHyperlegible-Regular.ttf
+    https://www.brailleinstitute.org/freefont/
+    (also https://github.com/googlefonts/atkinson-hyperlegible)
+
+Atkinson Hyperlegible has no Medium cut, so the strike table maps its
+"medium" entries to the Regular ttf.
