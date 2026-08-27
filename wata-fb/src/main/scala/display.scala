@@ -93,29 +93,41 @@ object Draw:
       if under >= 0 then setPixel(px, x, y, Alpha.over(under, color, alpha))
 
   /** a filled rectangle with a corner radius and an alpha — wataui's `VFill`.
-   *  A pixel inside a corner's square is kept only when it is inside that
-   *  corner's arc, and the radius is clamped to half the shorter side, so an
-   *  over-large radius is a stadium rather than a defect. */
+   *  The radius is clamped to half the shorter side, so an over-large radius
+   *  is a stadium rather than a defect.
+   *
+   *  The corner arcs are ANTI-ALIASED analytically: a pixel inside a corner's
+   *  square takes fractional coverage `clamp(r + 0.5 - dist, 0, 1)`, where
+   *  `dist` is its centre's distance to that corner's circle centre — a
+   *  one-pixel ramp across the arc, multiplied into the call's alpha and
+   *  blended through the ordinary path. Pixels off the corner squares keep
+   *  the plain fill (no per-pixel cost), and the arithmetic is plain float64
+   *  (`go.math.sqrt` is IEEE correctly-rounded), so the frames stay
+   *  byte-identical across darwin/linux — the golden contract. */
   def fillRoundRect(px: go.Bytes, x: scala.Int, y: scala.Int, w: scala.Int,
       h: scala.Int, radius: scala.Int, color: scala.Int, alpha: scala.Int): Unit =
     if w > 0 && h > 0 && alpha > 0 then
       val half = (if w < h then w else h) / 2
       var r = if radius < 0 then 0 else radius
       if r > half then r = half
-      val rr = r * r
       var dy = 0
       while dy < h do
         var dx = 0
         while dx < w do
-          var inside = true
+          var a = alpha
           if r > 0 then
-            val cx = if dx < r then r else if dx >= w - r then w - r - 1 else -1
-            val cy = if dy < r then r else if dy >= h - r then h - r - 1 else -1
+            // the corner circle's centre in continuous coords: (r, r) from the
+            // near edges, (w-r, h-r) from the far ones; -1 marks "not in a
+            // corner square" on that axis.
+            val cx = if dx < r then r else if dx >= w - r then w - r else -1
+            val cy = if dy < r then r else if dy >= h - r then h - r else -1
             if cx >= 0 && cy >= 0 then
-              val ex = dx - cx
-              val ey = dy - cy
-              inside = ex * ex + ey * ey <= rr
-          if inside then blendPixel(px, x + dx, y + dy, color, alpha)
+              val fx = dx.toDouble + 0.5 - cx.toDouble
+              val fy = dy.toDouble + 0.5 - cy.toDouble
+              val cov = r.toDouble + 0.5 - go.math.sqrt(fx * fx + fy * fy)
+              if cov <= 0.0 then a = 0
+              else if cov < 1.0 then a = (cov * alpha.toDouble + 0.5).toInt
+          if a > 0 then blendPixel(px, x + dx, y + dy, color, a)
           dx = dx + 1
         dy = dy + 1
 

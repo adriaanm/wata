@@ -158,7 +158,13 @@ probe of the framebuffer's actual size. The pixel buffer is a
 buffer — `setPixel`, `clear`, `fillRect`, `hline`, `strokeRect` — not
 methods on a class; there's no object wrapping the buffer.
 `Color` (`display.scala:23`) holds precomputed RGB565 constants plus
-an `rgb()` helper for dynamic colors.
+an `rgb()` helper for dynamic colors. `fillRoundRect` anti-aliases its
+corner arcs analytically: a pixel in a corner's square takes fractional
+coverage `clamp(r + 0.5 − dist, 0, 1)` from its centre's distance to
+the corner circle, multiplied into the call's alpha and blended through
+the ordinary path — plain float64 with `go.math.sqrt` (IEEE
+correctly-rounded), so the frames stay byte-identical across
+darwin/linux; pixels off the corner squares keep the plain fill.
 
 **Type comes in two tiers.** The rolodex design language (plan 0077)
 draws real type through **strikes**: one face at one pixel size as
