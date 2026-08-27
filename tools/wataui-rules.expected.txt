@@ -1,0 +1,41 @@
+== stamps: the back-off, per age ==
+age future +5s -> "now"
+age 0s -> "now"
+age 59s -> "now"
+age 60s -> "1m"
+age 4m59s -> "4m"
+age 5m -> "5m"
+age 9m59s -> "5m"
+age 10m -> "10m"
+age 55m -> "55m"
+age 59m59s -> "55m"
+age 1h -> "1h"
+age 1h14m -> "1h"
+age 1h15m -> "1h15"
+age 1h30m -> "1h30"
+age 1h45m -> "1h45"
+age 2h -> "2h"
+age 5h59m -> "5h45"
+age 6h -> "6h"
+age 23h59m -> "23h"
+age 24h -> "Wed"
+age 2d -> "Tue"
+age 6d23h -> "Thu"
+age 7d -> "20 Aug"
+age 30d -> "28 Jul"
+age 400d -> "23 Jul"
+== stamps: the exact time (the playing row) ==
+exact 12:00:00Z -> "12:00"
+exact 09:05:00Z -> "9:05"
+== stamps: the collapse ==
+burst within a minute: ["now","","","5m"]
+identical 5-minute run: ["25m","","30m","",""]
+interloper breaks the run: ["2h","Mon","2h"]
+blanks never match: ["","","3h",""]
+single weekday for last week: ["Fri","",""]
+== delivery: the squares ==
+none -> -,-
+queued -> hollow,hollow
+server -> filled,hollow
+played -> filled,filled
+refused -> red,-

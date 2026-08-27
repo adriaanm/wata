@@ -48,6 +48,11 @@ object Main:
     // painter does not use it, so wata-fb is only its driver.
     else if args.length > 0 && args(0) == "difftest" then
       printReport(DiffOracle.report())
+    // the thread rules' oracle (plan 0078, tools/wataui-tests.sh): the stamp
+    // back-off and the delivery squares, byte-diffed against
+    // tools/wataui-rules.expected.txt. Pure wataui rules; wata-fb only drives.
+    else if args.length > 0 && args(0) == "ruletest" then
+      printReport(ThreadRulesOracle.report())
     // the framebuffer golden-frame oracle + smoke.
     //   wata-fb fbdump      draw the deterministic test pattern, encode PNG, and
     //                       write the raw PNG bytes to stdout (fd 1) — the host
