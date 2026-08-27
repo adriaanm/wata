@@ -388,10 +388,15 @@ clock or a backend — "now" is always passed in.
   the first, so a burst carries one stamp; blanks never match, so two
   collapsed runs cannot merge across an interloper. Civil-date math is
   Hinnant's `civil_from_days`, self-contained.
-- **`delivery.scala` — the delivery squares.** The four-state delivery
+- **`delivery.scala` — the delivery dots.** The four-state delivery
   vocabulary (`QUEUED`/`SERVER`/`PLAYED`/`REFUSED` + `NONE`) mapped to
-  the two squares an own row draws: queued = two hollow, server-has =
-  filled + hollow, played-by-peer = two filled, refused = one red.
+  the two slots an own row draws, each `ring` (pending), `green`
+  (completed) or `red`: queued = ring + ring, server-has = green +
+  ring, played-by-peer = green + green, refused = one red. The slot
+  names are renderer-agnostic — what a ring or a green disc is in
+  pixels is each body's geometry. (Owner ruling 2026-08-27: colour-
+  coded circles, overriding plan 0070's squares — they stand apart
+  from the bar rectangles better.)
 
 Both are pinned by their own oracle, `rulesoracle.scala`'s
 `ThreadRulesOracle.report()` — the DiffOracle discipline again: every

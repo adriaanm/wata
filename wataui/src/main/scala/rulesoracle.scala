@@ -13,7 +13,7 @@
  *     sides), and
  *     the collapse (a burst inside a minute carries one stamp; blanks never
  *     match; an interleaved run does not collapse across the interloper).
- *   - the DELIVERY SQUARES (`Delivery`): all five states, both squares.
+ *   - the DELIVERY DOTS (`Delivery`): all five states, both slots.
  *
  *  The fixed `NOW` is 2026-08-27 12:00:00 UTC (a Thursday), so the weekday
  *  and date lines are checkable by hand against a real calendar.
@@ -78,7 +78,7 @@ object ThreadRulesOracle:
     b.append(scrubLine("14d", -1209600000L))
     b.append(scrubLine("20d", -1728000000L))
     b.append(scrubLine("400d", -34560000000L))
-    b.append("== delivery: the squares ==\n")
+    b.append("== delivery: the slots ==\n")
     b.append(deliveryLine(Delivery.NONE))
     b.append(deliveryLine(Delivery.QUEUED))
     b.append(deliveryLine(Delivery.SERVER))
@@ -112,5 +112,5 @@ object ThreadRulesOracle:
 
   def deliveryLine(state: scala.Int): String =
     Delivery.showState(state) + " -> " +
-      Delivery.showSquare(Delivery.squareOne(state)) + "," +
-      Delivery.showSquare(Delivery.squareTwo(state)) + "\n"
+      Delivery.showSlot(Delivery.slotOne(state)) + "," +
+      Delivery.showSlot(Delivery.slotTwo(state)) + "\n"

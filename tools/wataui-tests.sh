@@ -67,6 +67,6 @@ if ! diff <(printf '%s\n' "$RULES") tools/wataui-rules.expected.txt; then
   echo "wataui-tests FAIL: thread rules oracle diverged from the pinned expected"
   exit 1
 fi
-echo "   ok — the stamp back-off and the delivery squares byte-match the pinned expected"
+echo "   ok — the stamp back-off and the delivery slots byte-match the pinned expected"
 
 echo "wataui-tests: PASS (portability + dependency tripwires + differ oracle + thread rules)"

@@ -1,14 +1,15 @@
 # drawn-thread (plan 0078): the message view as bars. One phase, alice, with
 # bob's and charlie's clips seeded out of band — a mixed thread of my white
-# row (delivery squares), two speakers' unheard capped bars, the played
+# row (delivery dots), two speakers' unheard capped bars, the played
 # third, the playing row's yellow stamp, the stamp collapse, and the outbox's
 # synthetic queued/refused rows.
 #
 # The ink claims ride the thr* probes (uiscript.scala): scanline sums over
 # the bar field / delivery gutter / stamp column, with thresholds that sit
 # between the measured green values and the values measured with the claim
-# broken (THIRD forced to full ink; the delivery mapping cut; the collapse
-# disabled) — each was seen to fail before its green run was believed.
+# broken (THIRD forced to full ink; the delivery slot mapping cut; the
+# collapse disabled; the length normaliser swapped for a fixed scale) — each
+# was seen to fail before its green run was believed.
 #
 # quiet: the seeded arrivals must not auto-play into the ink measurements.
 
@@ -17,12 +18,15 @@ wait syncing 1 900
 wait convs 2 900
 
 # the burst: two clips of bob's and one of charlie's, all inside a minute —
-# three unheard bars in two speaker colours, ONE stamp between them
+# three unheard bars in two speaker colours, ONE stamp between them.
+# Charlie's is TWO seconds — the thread's longest row — while everything
+# else is the 1s default (a sim recording is always RecordMs=1000), so the
+# normalised length mapping has a longest and a shorter bar to pin.
 sendas bob
 wait msgs 1 2000
 sendas bob
 wait msgs 2 2000
-sendas charlie
+sendas charlie 2000
 wait msgs 3 2000
 
 # one clip of alice's own, spoken from the contact screen into the family
@@ -36,15 +40,28 @@ advance 120
 # open the thread: the centre seats on row 0 — alice's own newest row
 tap enter
 advance 5
-# my row carries the delivery squares (filled+hollow: the server has it) —
+# my row carries the delivery dots, stacked vertically (green disc on top:
+# the server has it; the dim pending ring below: nobody has played it) —
 # and the burst carries exactly one stamp: the centre row's, the row below
 # is collapsed empty
-# gutter ink 11 = the filled square (5) + the hollow ring (2) + the right
-# nub (4); pinned exactly, so a broken state mapping cannot hide
-expect thrsq 11
-waitmax thrsq 11 1
+# gutter ink (summed over the pair's two dot-centre scanlines + the row
+# middle): the green disc (5) + the ring's two flanks (2) + the nub (4 on
+# each of the three lines) = 19; pinned exactly, so a broken slot mapping
+# cannot hide (slotTwo forced green on SERVER reads 22 here — seen to
+# fail)
+expect thrsq 19
+waitmax thrsq 19 1
 expect thrstc 12
 waitmax thrstn 0 1
+# the NORMALISED length (owner tweak 2026-08-27, replacing CAP_S): the
+# longest row — charlie's 2s, on the row below the centre — spans 80% of
+# the 111 px field (88), and my 1s bar at the centre is proportional (44).
+# A fixed scale (maxDur ignored) was seen to fail both pins before this
+# green was believed.
+expect thrbw 44
+waitmax thrbw 44 1
+expect thrnw 88
+waitmax thrnw 88 1
 checkpoint thread-mixed
 
 # one detent down: charlie's unheard bar at the centre — full ink + cap.
@@ -66,7 +83,10 @@ expect thrchip 1
 # the linger drains on the frame counter; only then is the frame a golden
 advance 25
 waitmax thrchip 0 1
-expect thrcl 40
+# charlie's 2s bar at full ink (88 wide + the yellow cap) reads 448 here;
+# the played third of the same bar reads 143 (the next leg's drop)
+expect thrcl 448
+waitmax thrcl 448 1
 checkpoint thread-unheard-centre
 
 # play it: the playing row's stamp goes YELLOW the instant OK is released
@@ -80,7 +100,7 @@ wait played 1 2000
 waitmax thrylw 0 200
 advance 5
 expect thrcl 5
-waitmax thrcl 25 10
+waitmax thrcl 143 10
 checkpoint thread-played
 
 # back to the top for the outbox rows
@@ -90,7 +110,7 @@ waitmax motionlive 0 200
 
 # REFUSED: the next upload answers 404 — the outbox's UNDELIVERABLE drop.
 # The thread is open, so the marker is not acked away: a synthetic row with
-# the single red square appears at the top, at the centre
+# the single red disc appears at the top, at the centre
 failnext 1 404
 key ptt press
 advance 10
@@ -98,13 +118,14 @@ key ptt release
 wait undeliv 1 1500
 # age the SEND FAILED flash out before the frame is pinned
 advance 90
-# gutter ink 9 = the single red square (5) + the nub (4) — no second square
-expect thrsq 9
-waitmax thrsq 9 1
+# gutter ink 17 = the centred red disc (5, on the row-middle line) + the
+# nub (4 x 3 lines) — no second dot on the pair lines
+expect thrsq 17
+waitmax thrsq 17 1
 checkpoint thread-refused
 
 # QUEUED: every later upload answers 500 (RETRY class) — the send stays
-# queued, and the queued row's squares are both hollow, above the red one
+# queued, and the queued row's dots are both pending rings, above the red one
 failnext 200 500
 key ptt press
 advance 10
@@ -112,9 +133,9 @@ key ptt release
 wait sendfail 1 1500
 wait unsent 1 600
 advance 90
-# gutter ink 8 = two hollow rings (2+2) + the nub (4)
-expect thrsq 8
-waitmax thrsq 8 1
+# gutter ink 16 = the two stacked rings' flanks (2+2) + the nub (4 x 3)
+expect thrsq 16
+waitmax thrsq 16 1
 checkpoint thread-queued
 
 # a SYNTHETIC centre hides the chip: moving onto the refused row opens the

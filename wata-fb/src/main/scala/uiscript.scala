@@ -103,12 +103,14 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *                              the scenario pins the mark staying OFF for
  *                              the whole 3-minute window. `auto` hands the
  *                              read back to sysfs (false on every host)
- *    sendas <user>             send one voice message into the FAMILY room
+ *    sendas <user> [durMs]     send one voice message into the FAMILY room
  *                              as <user>, out of band (a direct login +
  *                              upload + send with the phase's password, like
  *                              `group`) — the only way a scripted session
  *                              sees a mid-session ARRIVAL, since its own
- *                              sends never raise its unplayed counts
+ *                              sends never raise its unplayed counts; the
+ *                              optional duration (default 1000 ms) is
+ *                              metadata, what the bar-length claims vary
  *
  *  keys: up down left right enter back ptt dot1 dot2 f2 (input.scala's names).
  *  probes: syncing (1 once the sync loop is live), convs (conversation count),
@@ -313,7 +315,7 @@ object UiScript:
     else if cmd == "caplevel" then
       err = capLevelDirective(nth(ts, 1), c, clock, evts, dev, px)
     else if cmd == "sendas" then
-      err = sendAs(nth(ts, 1))
+      err = sendAs(nth(ts, 1), nth(ts, 2))
     else err = "unknown directive '" + cmd + "'"
     err
 
@@ -549,24 +551,26 @@ object UiScript:
    *  the `group` shape. This is what makes a mid-session ARRIVAL scriptable:
    *  the frame loop's own sends never raise its unplayed counts. The family
    *  room id comes from the live snapshot, so the script must have waited
-   *  for `convs` first. */
-  def sendAs(user: String): String =
+   *  for `convs` first. An optional second token is the reported duration in
+   *  ms (default 1000) — durations only differ in metadata here, which is
+   *  exactly what the normalised bar-length claims need. */
+  def sendAs(user: String, durStr: String): String =
     if user == "" then "sendas wants a <user>"
     else
       val room = familyRoom(Ui.frameSnap)
       if room == "" then "sendas: no family room in the snapshot yet"
-      else sendAsInto(user, room)
+      else sendAsInto(user, room, num(durStr, 1000).toLong)
 
-  def sendAsInto(user: String, room: String): String =
+  def sendAsInto(user: String, room: String, durMs: Long): String =
     val anon = Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), "")
     val lr = MatrixHttp.login(anon, user, passC.get())
     if lr.status != 200 then "sendas: login status " + lr.status
     else
       val tok = Matrix.parseLogin(MatrixHttp.parseOrNull(lr.body)).accessToken
       if tok == "" then "sendas: no access token"
-      else sendVoiceAs(Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), tok), room)
+      else sendVoiceAs(Hs(FbCaps.httpDo(), FbCaps.clock(), baseC.get(), tok), room, durMs)
 
-  def sendVoiceAs(hs: Hs, room: String): String =
+  def sendVoiceAs(hs: Hs, room: String, durMs: Long): String =
     val ogg = Integ.fakeOgg()
     val up = MatrixHttp.uploadMedia(hs, ogg)
     if up.status != 200 then "sendas: upload status " + up.status
@@ -574,7 +578,7 @@ object UiScript:
       val mxc = MatrixHttp.parseMxcUrl(up.body)
       if mxc == "" then "sendas: no content_uri"
       else
-        val resp = MatrixHttp.sendVoiceMessage(hs, room, mxc, 1000L, ogg.size, txnC.add(1))
+        val resp = MatrixHttp.sendVoiceMessage(hs, room, mxc, durMs, ogg.size, txnC.add(1))
         if resp.status != 200 then "sendas: send status " + resp.status
         else ""
 
@@ -741,14 +745,30 @@ object UiScript:
     // a claim about the thing that carries it:
     //   thrcl/thrnl  summed brightness of the BAR FIELD on the two scanlines
     //                (played-third vs unheard-ink discriminates here)
-    //   thrsq        lit pixels in the delivery GUTTER on the centre scanline
-    //                (the squares: filled+hollow vs both-filled vs red differ)
+    //   thrsq        lit pixels in the delivery GUTTER, summed over THREE
+    //                scanlines of the centre row — the stacked pair's two
+    //                dot centres (rowMid ∓ 3) and the row middle (the gap
+    //                between them, and the centred red disc's middle) —
+    //                (the dots: green+ring vs green+green vs the red disc
+    //                 differ — a broken slot mapping shifts the count)
+    //   thrbw/thrnw  lit pixels in the BAR FIELD on the two scanlines — at a
+    //                bar's mid-height that is its WIDTH, which is what pins
+    //                the normalised length mapping: the thread's longest row
+    //                at 80% of the field (thrbw at the centre), a shorter
+    //                one proportional (thrnw on the row below). A normaliser
+    //                that ignores maxDur (a fixed scale) moves both numbers
+    //                and the claims go red.
     //   thrstc/thrstn  lit pixels in the STAMP column on the two scanlines
     //                (the collapse: a burst's second row has an empty column;
     //                 x starts past the left nub so the band cannot count it)
     else if name == "thrcl" then scanLumRange(px, thrRowY(0), Thread.fieldX0(Display.W), Thread.fieldX1(Display.W))
     else if name == "thrnl" then scanLumRange(px, thrRowY(1), Thread.fieldX0(Display.W), Thread.fieldX1(Display.W))
-    else if name == "thrsq" then scanLitRange(px, thrRowY(0), Display.W - Thread.GUTTER_W, Display.W)
+    else if name == "thrsq" then
+      scanLitRange(px, thrRowY(0) - 3, Display.W - Thread.GUTTER_W, Display.W) +
+        scanLitRange(px, thrRowY(0), Display.W - Thread.GUTTER_W, Display.W) +
+        scanLitRange(px, thrRowY(0) + 3, Display.W - Thread.GUTTER_W, Display.W)
+    else if name == "thrbw" then scanLitRange(px, thrRowY(0), Thread.fieldX0(Display.W), Thread.fieldX1(Display.W))
+    else if name == "thrnw" then scanLitRange(px, thrRowY(1), Thread.fieldX0(Display.W), Thread.fieldX1(Display.W))
     //   thrylw       YELLOW pixels in the stamp column on the centre scanline
     //                — the playing row's stamp treatment, pinned as ink
     //                rather than as text: the hh:mm it spells is the real

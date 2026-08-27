@@ -670,10 +670,10 @@ Two row marks say what the client is doing with the user's own audio
   `stateWithSending` inverted before the green was believed.
 - **Inside the conversation the outbox draws itself as rows**: a queued
   send is a synthetic head row in the drawn thread (see "The drawn
-  thread" below) — an own-side bar at `MIN_W` with both delivery
-  squares hollow — and an UNDELIVERABLE drop that lands while the
-  conversation is open shows as a red-square row until the ack clears
-  the marker. Delivery state on a real own row is the two squares
+  thread" below) — an own-side bar at `MIN_W` with both delivery dots
+  pending rings — and an UNDELIVERABLE drop that lands while the
+  conversation is open shows as a red-disc row until the ack clears
+  the marker. Delivery state on a real own row is the two dots
   (`Delivery` in wataui), which replaced plan 0051's adjacent check
   glyphs.
 - **Playback feedback is the playing row's stamp**: the centre row's
@@ -1286,27 +1286,49 @@ unsent, undelivered)` reads the snapshot once into a `List[ThreadRow]`
 that list plus a `Motion` (and the scrub chip's text, "" = hidden).
 
 - **Six ~21 px rows** (`VISIBLE = 6`, `rowH = h/6`), the centre band at
-  `centreY = 53`. The bar field spans `x = 38..144`: a fixed LEFT stamp
+  `centreY = 53`. The bar field spans `x = 38..149`: a fixed LEFT stamp
   column (`STAMP_W = 36`) and a right delivery gutter (`GUTTER_W =
-  16`). The stamp column sits LEFT because the right edge already
-  belongs to the delivery squares — two vocabularies on one edge would
+  11` — one dot column since the pair stacks vertically, plus a pixel
+  of air and the 4 px nub). The stamp column sits LEFT because the right edge already
+  belongs to the delivery dots — two vocabularies on one edge would
   collide exactly on own rows — and the right-rooted own bars are the
   minority in a family thread.
-- **The bar is the message.** Length is duration, linear with a floor
-  and a cap: `max(MIN_W=8, dur * usable / CAP_S=30s)`. Theirs root at
+- **The bar is the message.** Length NORMALISES to the thread (owner
+  ruling 2026-08-27, replacing the fixed `CAP_S = 30 s` scale): the
+  longest LOADED row draws at 80% of the field — the headroom is the
+  owner's margin for the caps and stars past a bar's tip — and every
+  other bar is proportional: `max(MIN_W=8, dur * (0.8 * usable) /
+  maxDur)` (`Thread.NORM_NUM/NORM_DEN`; `maxDur = 0`, a thread of
+  synthetic rows only, draws everything at `MIN_W`). A new longest
+  message rescales the whole thread — inherent to normalisation,
+  owner-accepted. Theirs root at
   the LEFT field edge in the sender's rolodex colour
   (`Palette.forRoster`); mine root at the RIGHT edge in white. Radius
   3, `BAR_H = 11`.
 - **Ink level is state, and only state — no row is dimmed.** An unheard
   received bar is full ink with a yellow cap (`CAP_W = 4`) inside its
   growing tip; a played one drops to a third (`THIRD_ALPHA = 85`) and
-  loses the cap. Own bars stay full ink — their state is the squares'.
+  loses the cap. Own bars stay full ink — their state is the dots'.
   The centre is marked by the two nubs at the panel edges and the
   full-strength stamp (`QUIET_STAMP_ALPHA = 150` off-centre), never by
   dimming neighbours.
-- **Delivery squares** (`Delivery` in wataui) sit in own rows' right
-  gutter: queued = two hollow, server-has = filled + hollow, played by
-  the peer = two filled, refused = one red. Queued sends and a
+- **Delivery dots** (`Delivery` in wataui) sit in own rows' right
+  gutter — two colour-coded circles STACKED VERTICALLY (owner rulings
+  2026-08-27, overriding plan 0070's squares: circles stand apart from
+  the bar rectangles better, each dot keeping the squares' 5 px
+  footprint; and stacking halves the gutter — `GUTTER_W` 16 → 11 —
+  handing the freed width to the bar field). Slot one sits on TOP —
+  the old left-to-right first-event order read downward. Vertical fit
+  in a 21 px row: two dots + the 1 px `DOT_GAP` = 11 = `BAR_H`,
+  leaving 5 px of air above and below the pair.
+  Each dot is a `VFill` with `w = h = SQ` and radius `SQ/2` — the
+  round-rect radius clamp renders that as an anti-aliased disc. A
+  pending slot is
+  a dim RING (a white disc at `RING_ALPHA = 102`, ~40% ink, around a
+  ground-colour core disc — two nested discs, no stroke), a completed
+  one a GREEN disc: queued = ring + ring, server-has = green + ring,
+  played by the peer = green + green, refused = one RED disc replacing
+  the pair, centred in the row. Queued sends and a
   fresh UNDELIVERABLE drop appear as synthetic head rows
   (`Thread.synthCount`) built from the `EvOutbox` lists `FrameCtx`
   already carries; a queued row draws at `MIN_W` (entry durations are
@@ -1352,11 +1374,17 @@ that list plus a `Motion` (and the scrub chip's text, "" = hidden).
   row (`rowMsg`; synthetic rows are no-ops).
 - **Pinned** by the `drawn-thread` scenario
   (`alice-thread.txt`) through numeric probes off the live pixels
-  (`thrcl`/`thrnl` bar-field luminance, `thrsq` gutter, `thrstc`/
+  (`thrcl`/`thrnl` bar-field luminance, `thrsq` gutter, `thrbw`/
+  `thrnw` bar widths, `thrstc`/
   `thrstn` stamp column, `thrylw` yellow ink): the mixed thread, the
-  unheard-vs-played ink drop, the squares through `failnext`'s 4xx and
-  5xx arms, the stamp collapse, and the motion settle — the ink-third,
-  square-mapping and collapse claims each SEEN TO FAIL before their
+  unheard-vs-played ink drop, the dots through `failnext`'s 4xx and
+  5xx arms, the stamp collapse, the normalised lengths (a 2s seed via
+  `sendas charlie 2000` gives the thread a longest row: its bar pinned
+  at 88 = 80% of the 111 px field, a 1s bar at 44), and the motion
+  settle — the ink-third,
+  slot-mapping (a pending slot forced green reads +3 in the gutter),
+  length-normalisation (a fixed scale puts a 1s bar at 88, not 44) and
+  collapse claims each SEEN TO FAIL before their
   green runs were believed. mac-smoke pins the same semantics as
   retained-tree patches (the play round-trip on the stamp, the
   receipt-driven ink drop, the live keyed row insert, the collapse in
@@ -2007,7 +2035,7 @@ sections):
 | `rolodex` | plan 0077 stages 3+4: the rendered rolodex — resting card, mid-opening frame, aligned open stack with the centre-emphasis pixel claims, mid-roll frame, settle back to full bleed, and OK opening whoever is centred (see "The rolodex"). |
 | `rolodex-fit` | the full-bleed DISPLAY fit-down ladder on a real card: "Gabriella" overflows the 38 px rung against the card's usable width and rests at 30, goldened at full bleed (see "The rolodex"). |
 | `conversation-actions` | the drawn thread's own inputs: alice sends thirteen clips, flicks the centre deep into the list (twelve rapid taps coast to detent 11 on the fixed clock — the physics, pinned as such), redacts the centre row by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives and plays one. Goldens the resting thread, the flicked window, the post-redaction thread, the starred row, and the played ink. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
-| `drawn-thread` | plan 0078's pixel claims via the `thr*` probes (see "The drawn thread"): the mixed three-sender thread with collapsed stamps, the unheard full-ink centre, the play round-trip (yellow exact stamp, then the receipt's ink drop to a third), the refused red square after `failnext`'s 4xx, the queued hollow squares under a 500, and the scrub chip (`thrchip`/`thrchw`): up on the impulse, held through the linger past settle, gone after, hidden over a synthetic centre. |
+| `drawn-thread` | plan 0078's pixel claims via the `thr*` probes (see "The drawn thread"): the mixed three-sender thread with collapsed stamps, the unheard full-ink centre, the play round-trip (yellow exact stamp, then the receipt's ink drop to a third), the refused red disc after `failnext`'s 4xx, the queued pending rings under a 500, and the scrub chip (`thrchip`/`thrchw`): up on the impulse, held through the linger past settle, gone after, hidden over a synthetic centre. |
 | `cursor-anchor` | the message cursor's event-id anchoring, via the `msgsel` probe: an idle centre on row 0 stays on 0 through an arrival (tracking newest), a centre moved one row down keeps the SAME message as an arrival shifts its index from 1 to 2, and redacting the anchored message falls back to the nearest surviving row. Goldens the settled centre two rows down. |
 | `group-list` | plan 0018's list rendering: the `group` directive mints "kids" through `POST /_wata/v1/group` (server-stamped, both members joined server-side), and the goldens pin the roster `[Family, kids, Bob]` and the opened group view titled by the stamp's name. |
 | `dm-roundtrip` | the canonical-DM flow (plan 0007) rendered: alice selects bob's ROOMLESS roster row, the first PTT send resolves the room through `POST /_wata/v1/dm`, bob receives with an unplayed badge, receipts, plays, replies, and alice's second session pins the reply and the badge clearing. Goldens the roster before/after, both conversation views, and the badge lifecycle. |
@@ -2427,7 +2455,7 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `snake.scala` | 275 | The snake applet, ported from the Zig client's `applets/snake.zig`: packed-cell body, deterministic minstd food PRNG, tick/step game logic, and rendering; frame counts for its uitest scenario are designed with `tools/snake-frames.py`, an exact Python mirror. |
 | `applets.scala` | 2465 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and their `wataui` bodies (both applets are pure view functions painted by `FbPaint`); also the `Applet` interface, the shared `FrameCtx` per-frame context record, and the shared motion pumps (`stepMotions`). |
 | `rolodex.scala` | 427 | The contact rolodex's geometry (plan 0077): cards, the open stack, the DISPLAY fit-down ladder — shared verbatim with wata-mac via a symlink. See "The rolodex". |
-| `thread.scala` | 394 | The drawn thread (plan 0078): `ThreadRow`, `Thread.rows` (snapshot -> data, incl. the synthetic outbox rows) and `Thread.body` (pure geometry: bars, ink, caps, squares, stamps, nubs) — shared verbatim with wata-mac via a symlink. See "The drawn thread". |
+| `thread.scala` | 394 | The drawn thread (plan 0078): `ThreadRow`, `Thread.rows` (snapshot -> data, incl. the synthetic outbox rows) and `Thread.body` (pure geometry: bars, ink, caps, delivery dots, stamps, nubs) — shared verbatim with wata-mac via a symlink. See "The drawn thread". |
 | `netstatus.scala` | 176 | The connectivity element's computed state (`NetState` = pipe + health + blink phase): the cached ~5s interface read, the `ConnectionState` mapping, the reconnecting animation's phase, and what the header draws for each combination — read by both the header indicator and the 1px status line. |
 | `diag.scala` | 371 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test and the goroutine that runs it off the frame loop, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
 | `netexec.scala` | 73 | The `go.exec` facade over `os/exec` (`Command` at one, two and three arities, `Run`, `Output`, and the `Stdin` field as a pre-run setter) and the `go.netif` facade over `net` — what `Diag` and `WifiCmd` run their command lines through. |

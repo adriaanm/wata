@@ -13,19 +13,25 @@
  *  One fixed STAMP column on the LEFT (`STAMP_W`), the bar field between it
  *  and the delivery gutter on the right (`GUTTER_W`), six ~21 px rows under
  *  a fixed pair of white nubs at the centre band. The stamp column is on the
- *  left because the right edge already belongs to the delivery squares (my
+ *  left because the right edge already belongs to the delivery dots (my
  *  rows' root — two vocabularies on one edge would collide exactly on the
  *  rows that carry both), and my bars — the only ones rooted at the right —
  *  are the minority in a family thread, so the left column is the
  *  least-crossed ground; bars never enter it (the field starts after it).
  *
- *  A bar is `max(MIN_W, duration * usable / CAP_S)` wide, capped at the
- *  field (`CAP_S` = 30 s — a walkie-talkie clip is seconds, not minutes;
- *  both constants are panel-tuned like the type sizes were). UNHEARD is full
+ *  A bar's length NORMALISES to the thread: the longest loaded row draws at
+ *  80% of the field (the owner's headroom for the caps and stars past a
+ *  bar's tip) and every other bar is proportional to it —
+ *  `max(MIN_W, dur * (0.8 * usable) / maxDur)` — so the thread always uses
+ *  the panel and relative length is what a bar says (owner ruling
+ *  2026-08-27, replacing the fixed 30 s scale; a new longest message
+ *  rescales the whole thread, which is inherent to normalisation and
+ *  accepted). `maxDur` = 0 (only synthetic rows) draws everything at
+ *  `MIN_W`. UNHEARD is full
  *  ink with a small yellow cap block at the growing end — the card's unheard
  *  band's rectangle vocabulary; PLAYED is the same bar at a third of the ink
  *  (`THIRD_ALPHA` over the black ground). My rows draw at full ink — their
- *  state is the squares', not the bar's. NOTHING here is dimmed by centre
+ *  state is the dots', not the bar's. NOTHING here is dimmed by centre
  *  distance: the ink level IS data (played thirds vs unheard ink), so the
  *  rolodex's quiet-neighbour treatment would destroy information. The
  *  centre's whole marking is the nubs plus the stamp treatment (the centre
@@ -37,9 +43,14 @@
  *  PLAYING shows its exact hh:mm in yellow instead — the one row whose
  *  "45m" is not the question being asked.
  *
- *  My rows carry the DELIVERY SQUARES (`Delivery`) in the right gutter:
- *  hollow+hollow queued, filled+hollow once the server has it, both filled
- *  once somebody played it, one red square when it will never arrive. A
+ *  My rows carry the DELIVERY DOTS (`Delivery`) in the right gutter — two
+ *  colour-coded circles STACKED VERTICALLY, slot one (server-has) on top
+ *  (owner rulings 2026-08-27: circles stand apart from the bar rectangles
+ *  better than plan 0070's squares did, and stacking frees gutter width
+ *  for the bar field): a pending slot
+ *  is a dim ring, a completed one a green disc — ring+ring queued,
+ *  green+ring once the server has it, green+green once somebody played it —
+ *  and one red disc, centred in the row, when it will never arrive. A
  *  queued or refused send is not in the timeline, so those rows are
  *  SYNTHESIZED at the top from the outbox marker lists the frame already
  *  carries (one unsent key per queued entry; the undelivered flag) — their
@@ -83,13 +94,18 @@ object Thread:
   val VISIBLE = 6
   /** the fixed stamp column (left), sized for "20 Aug" at CAPTION 13. */
   val STAMP_W = 36
-  /** the delivery gutter (right): two 5 px squares, their gaps, and the
-   *  right nub's ground (the nub is 4 px at the panel edge — the squares
-   *  stop short of it, or the centre row's second square would merge with
-   *  the band mark). */
-  val GUTTER_W = 16
-  /** the length mapping: linear in duration, floored and capped. */
-  val CAP_S = 30
+  /** the delivery gutter (right): ONE 5 px dot column — the pair stacks
+   *  VERTICALLY (owner addendum 2026-08-27, freeing gutter width for the
+   *  bar field) — plus a pixel of air and the right nub's ground (the nub
+   *  is 4 px at the panel edge). Vertical fit in a 21 px row: two dots and
+   *  their 1 px gap are 5+1+5 = 11 = BAR_H, leaving 5 px of air above and
+   *  below the pair. */
+  val GUTTER_W = 11
+  /** the length mapping: normalised to the thread's longest row, which draws
+   *  at this fraction of the field (num/den — the owner's 80%, headroom for
+   *  the indicators past a bar's tip); floored at `MIN_W`. */
+  val NORM_NUM = 4
+  val NORM_DEN = 5
   val MIN_W = 8
   /** bar shape. */
   val BAR_H = 11
@@ -100,8 +116,12 @@ object Thread:
   val THIRD_ALPHA = 85
   /** a neighbour row's stamp ink; the centre row's is full strength. */
   val QUIET_STAMP_ALPHA = 150
-  /** delivery square side. */
+  /** delivery dot diameter (the squares' 5 px footprint, kept). */
   val SQ = 5
+  /** the air between the stacked pair's two dots. */
+  val DOT_GAP = 1
+  /** a pending slot's ring ink: dim white, ~40%. */
+  val RING_ALPHA = 102
   /** how far either side of the centre a row is worth building. */
   val REACH = 4
 
@@ -115,12 +135,31 @@ object Thread:
   def fieldX0(w: scala.Int): scala.Int = STAMP_W + 2
   def fieldX1(w: scala.Int): scala.Int = w - GUTTER_W
 
-  /** a bar's length for `ms` of audio. */
-  def barW(ms: Long, w: scala.Int): scala.Int =
+  /** a bar's length for `ms` of audio, against the thread's longest loaded
+   *  duration: the longest bar is EXACTLY `usable * NORM_NUM / NORM_DEN`
+   *  (computed first, so it does not depend on its own duration), the rest
+   *  proportional. `maxDur` 0 — a thread of synthetic rows only — draws
+   *  everything at the floor. */
+  def barW(ms: Long, maxDur: Long, w: scala.Int): scala.Int =
     val usable = fieldX1(w) - fieldX0(w)
-    var out = ((ms * usable.toLong) / (CAP_S.toLong * 1000L)).toInt
+    val target = usable * NORM_NUM / NORM_DEN
+    var out = MIN_W
+    if maxDur > 0L then out = ((ms * target.toLong) / maxDur).toInt
     if out < MIN_W then out = MIN_W
     if out > usable then out = usable
+    out
+
+  /** the longest loaded duration in the thread (synthetic rows are 0). */
+  def maxDurOf(rs: List[ThreadRow]): Long =
+    var out = 0L
+    var cur = rs
+    var going = true
+    while going do
+      cur match
+        case r :: t =>
+          if r.durationMs > out then out = r.durationMs
+          cur = t
+        case Nil => going = false
     out
 
   // ---- the screen -----------------------------------------------------------
@@ -129,6 +168,7 @@ object Thread:
       w: scala.Int, h: scala.Int, chip: String): View =
     val p = Motion.offset(m)
     val centre = Motion.centre(m, count)
+    val maxDur = maxDurOf(rows)
     var lo = centre - REACH
     if lo < 0 then lo = 0
     var hi = centre + REACH
@@ -138,7 +178,7 @@ object Thread:
     while i <= hi do
       rowAt(rows, i) match
         case r: Some[ThreadRow] =>
-          rowView(r.value, i, p, i == centre, w, h) match
+          rowView(r.value, i, p, i == centre, maxDur, w, h) match
             case v: Some[View] => acc = Keyed(r.value.key, v.value) :: acc
             case None          => ()
         case None => ()
@@ -189,12 +229,12 @@ object Thread:
 
   /** one row, or None when it is entirely off the panel. */
   def rowView(r: ThreadRow, i: scala.Int, p: scala.Double, isCentre: Boolean,
-      w: scala.Int, h: scala.Int): Option[View] =
+      maxDur: Long, w: scala.Int, h: scala.Int): Option[View] =
     val rh = rowH(h)
     val y = centreY(h) + roundI((i.toDouble - p) * rh.toDouble)
     if y + rh <= 0 || y >= h then None
     else
-      val bw = barW(r.durationMs, w)
+      val bw = barW(r.durationMs, maxDur, w)
       val bx = if r.own then fieldX1(w) - bw else fieldX0(w)
       val by = y + (rh - BAR_H) / 2
       val ink = if r.own || r.unheard then 255 else THIRD_ALPHA
@@ -211,11 +251,20 @@ object Thread:
         val sx = if r.own then bx - Font.GLYPH_W - 3 else bx + bw + 3
         kids = Keyed("star", VGlyph(sx, y + (rh - Font.GLYPH_H) / 2,
           Font.ICON_STAR, Color.yellow)) :: kids
-      // the delivery squares, my rows only, rooted in the right gutter
+      // the delivery dots, my rows only, in the right gutter: the pair
+      // stacks VERTICALLY — slot one (server-has) on TOP, the old
+      // left-to-right first-event order read downward — a pixel of air
+      // between them; the refused single red disc centres in the row.
       if r.own && r.delivery != Delivery.NONE then
-        val sy = y + (rh - SQ) / 2
-        kids = squareView("sq1", Delivery.squareOne(r.delivery), w - 15, sy, kids)
-        kids = squareView("sq2", Delivery.squareTwo(r.delivery), w - 9, sy, kids)
+        val dx = w - 10
+        if r.delivery == Delivery.REFUSED then
+          kids = slotView("sq1", Delivery.slotOne(r.delivery), dx,
+            y + (rh - SQ) / 2, kids)
+        else
+          val ty = y + (rh - (2 * SQ + DOT_GAP)) / 2
+          kids = slotView("sq1", Delivery.slotOne(r.delivery), dx, ty, kids)
+          kids = slotView("sq2", Delivery.slotTwo(r.delivery), dx,
+            ty + SQ + DOT_GAP, kids)
       // the stamp column: the playing row's exact time in yellow at full
       // strength; otherwise the back-off label — full strength beside the
       // centre row (its half of the centre marking), quieter elsewhere.
@@ -227,18 +276,22 @@ object Thread:
           TypeWeight.MEDIUM, TextAlign.TRAILING, sc, sa)) :: kids
       Some(VGroup(ListOps.reverse(kids)))
 
-  /** one delivery square, by its render state (Delivery.SQ_*). A hollow
-   *  square is the fill plus a black core — the vocabulary has no stroke. */
-  def squareView(key: String, sq: scala.Int, x: scala.Int, y: scala.Int,
+  /** one delivery dot, by its render state (Delivery.SLOT_*). Every dot is a
+   *  `VFill` circle — w = h = SQ with radius SQ/2, which the round-rect
+   *  clamp (radius ≤ half the short side) renders as an anti-aliased disc.
+   *  A pending RING is two nested discs — a dim white outer over a
+   *  ground-colour core — the vocabulary has no stroke; a completed slot is
+   *  a solid GREEN disc, the refused state a solid RED one. */
+  def slotView(key: String, sq: scala.Int, x: scala.Int, y: scala.Int,
       kids: List[Keyed]): List[Keyed] =
     var out = kids
-    if sq == Delivery.SQ_FILLED then
-      out = Keyed(key, VFill(x, y, SQ, SQ, 0, Color.white, 255)) :: out
-    else if sq == Delivery.SQ_RED then
-      out = Keyed(key, VFill(x, y, SQ, SQ, 0, Color.red, 255)) :: out
-    else if sq == Delivery.SQ_HOLLOW then
-      out = Keyed(key, VFill(x, y, SQ, SQ, 0, Color.white, 255)) :: out
-      out = Keyed(key + "c", VFill(x + 1, y + 1, SQ - 2, SQ - 2, 0,
+    if sq == Delivery.SLOT_GREEN then
+      out = Keyed(key, VFill(x, y, SQ, SQ, SQ / 2, Color.green, 255)) :: out
+    else if sq == Delivery.SLOT_RED then
+      out = Keyed(key, VFill(x, y, SQ, SQ, SQ / 2, Color.red, 255)) :: out
+    else if sq == Delivery.SLOT_RING then
+      out = Keyed(key, VFill(x, y, SQ, SQ, SQ / 2, Color.white, RING_ALPHA)) :: out
+      out = Keyed(key + "c", VFill(x + 1, y + 1, SQ - 2, SQ - 2, (SQ - 2) / 2,
         Color.black, 255)) :: out
     out
 

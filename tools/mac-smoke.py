@@ -291,7 +291,9 @@ def run(tmp):
         # the key path: OK (a real kVK code through the real translation
         # table) opens the family conversation. The drawn thread (plan 0078):
         # bob's message is a horizontal bar rooted at the left field edge
-        # (x=38, MIN_W=8 for a short clip) in his speaker colour, at full ink
+        # (x=38; his 1s clip is the thread's longest, so the normalised
+        # length puts it at 80% of the 111 px field = 88 wide) in his
+        # speaker colour, at full ink
         # with the yellow unheard cap inside its tip, a "now" stamp in the
         # left stamp column — and no sender names, no footer legend, no
         # per-row chrome. The header is still the room name.
@@ -303,9 +305,9 @@ def run(tmp):
         t3 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
         c.line(t3, lambda l: l.strip() == 'NSTextField 0 119 36 8 "Family"',
                "tree 3: no conversation header")
-        c.line(t3, lambda l: l.strip() == 'NSBox 38 59 8 11',
+        c.line(t3, lambda l: l.strip() == 'NSBox 38 59 88 11',
                f"tree 3: no left-rooted bar for bob's message on the centre row, got {t3!r}")
-        c.line(t3, lambda l: l.strip() == 'NSBox 42 59 4 11',
+        c.line(t3, lambda l: l.strip() == 'NSBox 122 59 4 11',
                f"tree 3: no yellow unheard cap inside the bar's tip, got {t3!r}")
         c.line(t3, lambda l: l.strip() == 'NSTextField 2 54 32 21 "now"',
                f"tree 3: no stamp on the centre row, got {t3!r}")
@@ -362,14 +364,14 @@ def run(tmp):
         c.line(pp, lambda l: l == 'patch set [0.0.0.2] label(2,53,32,21,"now",'
                                  'caption,medium,trailing,65535,a=255)',
                f"play: the stamp never returned to the back-off label, got {pp!r}")
-        c.line(pp, lambda l: l == 'patch set [0.0.0.0] fill(38,58,8,11,r=3,28333,a=85)',
+        c.line(pp, lambda l: l == 'patch set [0.0.0.0] fill(38,58,88,11,r=3,28333,a=85)',
                f"play: the ink never dropped to the played third, got {pp!r}")
         c.line(pp, lambda l: l == 'patch delete [0.0.0] 1',
                f"play: the unheard cap was never removed, got {pp!r}")
         t4 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
-        c.line(t4, lambda l: l.strip() == 'NSBox 38 59 8 11',
+        c.line(t4, lambda l: l.strip() == 'NSBox 38 59 88 11',
                f"tree 4: the played bar is gone, got {t4!r}")
-        c.ok(not any(l.strip() == 'NSBox 42 59 4 11' for l in t4),
+        c.ok(not any(l.strip() == 'NSBox 122 59 4 11' for l in t4),
              f"tree 4: the unheard cap survived the receipt, got {t4!r}")
 
         # ---- audio: RECORD ----------------------------------------------------
@@ -411,15 +413,18 @@ def run(tmp):
              f"send: the recording overlay was not removed first, got {sp[:1]!r}")
         # index 0: messages come back newest first, so the sent message lands
         # at the TOP of the drawn thread — an own row: a white bar rooted at
-        # the RIGHT field edge (x=136..144, MIN_W for a ~1.2s clip), the two
-        # delivery squares in the right gutter reading server-has (sq1
-        # filled, sq2 a hollow white ring around a black core), and a "now"
+        # the RIGHT field edge (her ~1.2s clip is now the thread's longest,
+        # so the normalised length is exactly 88 regardless of its ms:
+        # x=149-88=61), the two delivery dots STACKED in the right gutter
+        # reading server-has (sq1 on top a green disc, sq2 below a dim
+        # pending ring — a white r=2 disc at 40% ink around a black r=1
+        # core), and a "now"
         # stamp. No highlight, no sender text — own rows are told by their
         # colour and their root edge.
         c.line(sp, lambda l: re.fullmatch(
-            r'patch insert \[0\.0\] 0 \$\S+:group\[bar:fill\(136,58,8,11,r=3,65535,a=255\) '
-            r'sq1:fill\(145,61,5,5,r=0,65535,a=255\) sq2:fill\(151,61,5,5,r=0,65535,a=255\) '
-            r'sq2c:fill\(152,62,3,3,r=0,0,a=255\) '
+            r'patch insert \[0\.0\] 0 \$\S+:group\[bar:fill\(61,58,88,11,r=3,65535,a=255\) '
+            r'sq1:fill\(150,58,5,5,r=2,2016,a=255\) sq2:fill\(150,64,5,5,r=2,65535,a=102\) '
+            r'sq2c:fill\(151,65,3,3,r=1,0,a=255\) '
             r'stamp:label\(2,53,32,21,"now",caption,medium,trailing,65535,a=255\)\]', l),
             f"send: no own drawn row for the ~1.2s recording, got {sp!r}")
         c.line(sp, lambda l: l == 'patch insert [] 1 flash:group[msg:text(8,9,"SENT",2016)]',
@@ -450,17 +455,20 @@ def run(tmp):
         live = sess.cmd("wait 8000", lambda l: l == "waited 8000")
         lp = [l for l in live if l.startswith("patch ")]
         # the new row is a keyed insert at the top: bob's speaker colour at
-        # full ink with the yellow unheard cap and a "now" stamp.
+        # full ink with the yellow unheard cap and a "now" stamp. His 1s bar
+        # normalises against alice's ~1.2s (the longest, real-clock ms), so
+        # its width and the cap's x inside its tip are shapes, not values.
         c.line(lp, lambda l: re.fullmatch(
             r'patch insert \[0\.0\] 0 \$\S+:group\[bar:fill\(38,\d+,\d+,11,r=3,28333,a=255\) '
-            r'cap:fill\(42,\d+,4,11,r=0,65504,a=255\) '
+            r'cap:fill\(\d+,\d+,4,11,r=0,65504,a=255\) '
             r'stamp:label\(2,\d+,32,21,"now",caption,medium,trailing,65535,a=255\)\]', l),
             f"open-conversation arrival: no new drawn row, got {lp!r}")
         t6 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
-        # two of bob's bars (both left-rooted at x=38, 8 wide) around alice's
-        # own right-rooted one — and the three rows inside a minute carry ONE
-        # visible "now" stamp: the collapse rule, live in the native tree.
-        c.ok(sum(1 for l in t6 if re.fullmatch(r'NSBox 38 \d+ 8 11', l.strip())) == 2,
+        # two of bob's bars (both left-rooted at x=38, equal normalised
+        # width) around alice's own right-rooted one (x=60) — and the three
+        # rows inside a minute carry ONE visible "now" stamp: the collapse
+        # rule, live in the native tree. (own is at x=61.)
+        c.ok(sum(1 for l in t6 if re.fullmatch(r'NSBox 38 \d+ \d+ 11', l.strip())) == 2,
              f"tree 6: want two of bob's bars in the open conversation, got {t6!r}")
         c.ok(sum(1 for l in t6 if '"now"' in l) == 1,
              f"tree 6: the burst's stamps did not collapse to one, got {t6!r}")

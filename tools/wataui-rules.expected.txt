@@ -44,9 +44,9 @@ scrub 13d23h -> "13:00 13d"
 scrub 14d -> "12:00 2w"
 scrub 20d -> "12:00 2w"
 scrub 400d -> "12:00 57w"
-== delivery: the squares ==
+== delivery: the slots ==
 none -> -,-
-queued -> hollow,hollow
-server -> filled,hollow
-played -> filled,filled
+queued -> ring,ring
+server -> green,ring
+played -> green,green
 refused -> red,-

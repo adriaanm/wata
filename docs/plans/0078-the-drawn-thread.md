@@ -162,3 +162,37 @@ edges are what ramped it — coasted multi-row at 21–27 fps (`motion:
 fps=` covers both integrators) with the chip reading "12:46 5d" in
 place mid-hold and through the linger; the rolodex hold rides the same
 synthesis.
+
+**Two owner tweaks (2026-08-27, after judging the first deploy):**
+
+- **The delivery squares became colour-coded circles** — this
+  OVERRIDES the squares ruling above (and plan 0070's), because on the
+  panel the dots "stand apart better" from a language made entirely of
+  rectangles. The pair's grammar is unchanged (first = server has it,
+  second = played by the audience); only the rendering moved: a
+  pending slot is a dim ring (a white `VFill` disc at ~40% ink around
+  a ground-colour core — w = h = 5 with radius w/2, which the
+  round-rect clamp draws as an AA disc), a completed slot a GREEN
+  disc, the refused state a single RED disc replacing the pair,
+  centred in the row. The pair STACKS VERTICALLY, slot one
+  (server-has) on top — the old left-to-right order read downward —
+  which halves the gutter (16 → 11 px; each dot keeps the 5 px
+  footprint) and hands the freed width to the bar field; two dots +
+  a 1 px gap = 11 px = the bar height, 5 px of air above and below
+  in a 21 px row. The
+  pure rule's vocabulary is now slots (`ring`/`green`/`red`), re-pinned
+  in the rules oracle.
+- **Bar length normalises to the thread**, replacing the fixed
+  `CAP_S = 30 s` scale: the longest loaded row draws at 80% of the
+  field — 88 of the 111 px the narrowed gutter leaves (the headroom
+  is the owner's margin for the indicators past a bar's tip) — and
+  the rest are proportional: `max(MIN_W, dur *
+  (0.8 * usable) / maxDur)`, all-`MIN_W` when `maxDur` is 0. A new
+  longest message rescales the whole thread; that is inherent to
+  normalisation and owner-accepted. `CAP_S` is gone, `MIN_W` stays;
+  the "tuned on the panel" open question above is closed by the
+  normalisation.
+
+Both re-pinned in the drawn-thread scenario (new `thrbw`/`thrnw`
+width probes; the slot mapping and the normaliser each seen to fail
+first) and in mac-smoke's native tree.
