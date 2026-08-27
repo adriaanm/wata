@@ -97,7 +97,9 @@ if [ "$INSTALL" = 1 ]; then
 fi
 
 echo "== fb-deploy: scp -> $HOST:$REMOTE (+ chirp.ogg) =="
-if ! scp -q "$BIN" "$CHIRP" "root@$HOST:/dev/shm/"; then
+# NB: $BIN's local basename is not "wata-fb" — scp it to $REMOTE explicitly,
+# or the chmod/run below acts on a name nothing landed at.
+if ! scp -q "$BIN" "root@$HOST:$REMOTE" || ! scp -q "$CHIRP" "root@$HOST:$REMOTE_CHIRP"; then
   echo "################################################"
   echo "## fb-deploy FAILED: cannot scp to $HOST (wifi/DHCP? update ~/.ssh/config HostName)"
   echo "################################################"
