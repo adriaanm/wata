@@ -155,4 +155,10 @@ chip at the top of the message area showing `Stamps.scrub(now, ts)` —
 exact time under 24 h, "+Nd" under two weeks, "+Nw" beyond, the third
 pure stamp rule in wataui — live during motion, lingering ~600 ms after
 settle on the applet's own frame counter, never at rest. Detail and the
-oracle story in wata-fb.md ("The drawn thread").
+oracle story in wata-fb.md ("The drawn thread"). On the handset same
+day (deploy md5 `67846322…`): a press-only HOLD in the live family
+thread — the keypad emits no autorepeat; the frame loop's synthesized
+edges are what ramped it — coasted multi-row at 21–27 fps (`motion:
+fps=` covers both integrators) with the chip reading "12:46 5d" in
+place mid-hold and through the linger; the rolodex hold rides the same
+synthesis.
