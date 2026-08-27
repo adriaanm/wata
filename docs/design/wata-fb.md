@@ -663,30 +663,16 @@ Two row marks say what the client is doing with the user's own audio
   band after `failnext`'s 4xx arm provokes the UNDELIVERABLE drop, and
   the clear on open — each band checkpoint seen to fail with the band
   suppressed before the green was believed.
-- **The message row is one fixed grid** (plan 0049,
-  `WataLogic.msgRowView`): marks in columns 0-1, the age at column 2
-  (3 wide — `ageStr`: "now" under a minute, then "59m"/"23h"/"99d",
-  future timestamps clamped to "now" for the 1970-boot handset and the
-  scripted harness alike; the non-"now" arms are pinned by the
-  `agecheck` selfcheck in fb-smoke), the sender at column 6 — "me" on
-  an own row, else the display name clipped to the room left of the
-  duration — and the duration right-aligned ending at column 24, with
-  column 25 the favorite star. Both mark columns are reserved on every
-  row, so own and received text share the grid and nothing ever
-  reflows. The marks read the SAME on every row (plan 0051): check one
-  always — the message is delivered (in the timeline; for an own row
-  that says the server has it) — and a second adjacent `ICON_CHECK`
-  when it has been HEARD by its audience (`WataLogic.heardMark`):
-  `VoiceMessage.playedByPeer` for an own row, `isPlayed` for a
-  received one. Two adjacent check glyphs rather than a new doubled
-  glyph is the Zig reference's documented convention
-  (`src/fbclient/src/font.zig` in git history at `27a2f75`: "draw two
-  0x80 glyphs adjacent"). The `uitest` probe `peer`
-  counts peer-played messages in the open conversation; the
-  `dm-roundtrip` scenario waits on it and the `dm-alice-reply` golden
-  shows the double check.
-- **The message row's play mark**, column 0: `ICON_PLAY` in place of the
-  played check while `WataState.playing` holds, i.e. from the instant OK
+- **Inside the conversation the outbox draws itself as rows**: a queued
+  send is a synthetic head row in the drawn thread (see "The drawn
+  thread" below) — an own-side bar at `MIN_W` with both delivery
+  squares hollow — and an UNDELIVERABLE drop that lands while the
+  conversation is open shows as a red-square row until the ack clears
+  the marker. Delivery state on a real own row is the two squares
+  (`Delivery` in wataui), which replaced plan 0051's adjacent check
+  glyphs.
+- **Playback feedback is the playing row's stamp**: the centre row's
+  stamp becomes the exact wall-clock time in yellow from the instant OK
   is RELEASED — before any byte has moved. A slow fetch is exactly when
   the feedback matters. A hung download resolves through the request
   deadline into `EvPlaybackError`, which clears `playing` and flashes;
@@ -1266,6 +1252,70 @@ spring); the pump around it:
   first (`wait motioncentre N` + `waitmax motionlive 0`) before acting
   on the selection.
 
+### The drawn thread (plan 0078, `thread.scala`)
+
+The conversation is the rolodex's language applied to messages: each
+voice message is a horizontal BAR, not a text row. `thread.scala` is
+shared verbatim with wata-mac (a symlink, like `rolodex.scala`), split
+the same way: `Thread.rows(snap, conv, selfId, nowMs, playingId,
+unsent, undelivered)` reads the snapshot once into a `List[ThreadRow]`
+— plain data, so `WATCH-DRAWN-THREAD` becomes a geometry file — and
+`Thread.body(rows, count, motion, w, h)` is pure geometry from that
+list plus a `Motion`.
+
+- **Six ~21 px rows** (`VISIBLE = 6`, `rowH = h/6`), the centre band at
+  `centreY = 53`. The bar field spans `x = 38..144`: a fixed LEFT stamp
+  column (`STAMP_W = 36`) and a right delivery gutter (`GUTTER_W =
+  16`). The stamp column sits LEFT because the right edge already
+  belongs to the delivery squares — two vocabularies on one edge would
+  collide exactly on own rows — and the right-rooted own bars are the
+  minority in a family thread.
+- **The bar is the message.** Length is duration, linear with a floor
+  and a cap: `max(MIN_W=8, dur * usable / CAP_S=30s)`. Theirs root at
+  the LEFT field edge in the sender's rolodex colour
+  (`Palette.forRoster`); mine root at the RIGHT edge in white. Radius
+  3, `BAR_H = 11`.
+- **Ink level is state, and only state — no row is dimmed.** An unheard
+  received bar is full ink with a yellow cap (`CAP_W = 4`) inside its
+  growing tip; a played one drops to a third (`THIRD_ALPHA = 85`) and
+  loses the cap. Own bars stay full ink — their state is the squares'.
+  The centre is marked by the two nubs at the panel edges and the
+  full-strength stamp (`QUIET_STAMP_ALPHA = 150` off-centre), never by
+  dimming neighbours.
+- **Delivery squares** (`Delivery` in wataui) sit in own rows' right
+  gutter: queued = two hollow, server-has = filled + hollow, played by
+  the peer = two filled, refused = one red. Queued sends and a
+  fresh UNDELIVERABLE drop appear as synthetic head rows
+  (`Thread.synthCount`) built from the `EvOutbox` lists `FrameCtx`
+  already carries; a queued row draws at `MIN_W` (entry durations are
+  not plumbed to the UI — WATA-TODO).
+- **The stamp column** carries `Stamps.label` (the back-off rule in
+  wataui, collapsed by `Stamps.collapse` so a burst carries one stamp);
+  the playing row's stamp is `Stamps.exact` — hh:mm — in yellow, which
+  is also the play feedback (see "Outbox marks" above). A favourite
+  star renders past the bar's outer end (render only).
+- **The thread scrolls on the motion integrator**: `WataState.convMotion`
+  is a second `Motion`, stepped by `WataLogic.stepThreadMotion` (inside
+  the shared `stepMotions`) only while the conversation shows, impulses
+  from up/down, one detent per row. The pump writes the centre into
+  `msgSelected` and re-anchors; `clampMessages` reconciles the event-id
+  anchor by `Motion.placeAt` when the LIST moved (arrival, redaction),
+  so a redaction cannot teleport the centre and a flick is never killed
+  mid-coast. OK, hold-favourite and red-hold-delete act on the centre
+  row (`rowMsg`; synthetic rows are no-ops).
+- **Pinned** by the `drawn-thread` scenario
+  (`alice-thread.txt`) through numeric probes off the live pixels
+  (`thrcl`/`thrnl` bar-field luminance, `thrsq` gutter, `thrstc`/
+  `thrstn` stamp column, `thrylw` yellow ink): the mixed thread, the
+  unheard-vs-played ink drop, the squares through `failnext`'s 4xx and
+  5xx arms, the stamp collapse, and the motion settle — the ink-third,
+  square-mapping and collapse claims each SEEN TO FAIL before their
+  green runs were believed. mac-smoke pins the same semantics as
+  retained-tree patches (the play round-trip on the stamp, the
+  receipt-driven ink drop, the live keyed row insert, the collapse in
+  the native tree). The two pure rules are byte-pinned by the
+  wataui-tests thread-rules oracle.
+
 ## Audio
 
 Audio is split into a Sgola-side facade (`audio.scala`, binding
@@ -1723,17 +1773,17 @@ Received messages become UI state purely through the snapshot: the
 sync loop (inside `wataclient`) updates server state and publishes a
 new `StateSnapshot`; the UI loop picks it up next frame and the
 applet bodies (`WataLogic.bodyContacts`'s rolodex via `Rolodex.cards`,
-`bodyConversation`'s `msgRowsView`) build their views from it directly —
-there is no separate "apply message" step in this module.
+`bodyConversation`'s `Thread.rows`/`Thread.body`) build their views from
+it directly — there is no separate "apply message" step in this module.
 
-The message rows render the snapshot's list as it comes, and that list is
-**newest first** (see `docs/design/wataclient.md`), so row 0 — the top row,
-and the row `enterConv` puts the cursor on — is the message that just
-arrived — so opening a conversation puts the cursor on the message
+The thread renders the snapshot's list as it comes, and that list is
+**newest first** (see `docs/design/wataclient.md`), so row 0 — the row
+`enterConv` seats the motion's centre on — is the message that just
+arrived — so opening a conversation puts the centre on the message
 somebody just sent, and OK plays it.
 
 **The message cursor is an index anchored by event id.** `msgSelected`
-stays the index the renderer and the scroll window read, but every
+stays the index the renderer and the thread's motion read, but every
 arrival inserts a row at index 0 and shifts the rest down, so an index
 alone would slide the selection one message older per arrival — onto a
 row the user never chose, which PTT, favorite and delete would then act
@@ -1898,7 +1948,7 @@ time is wall-clock), and playback succeeds silently. So the full send
 path — PTT, upload, `m.audio`, the other client's timeline — runs
 host-side; only the codec stays device-only.
 
-Twenty-eight scripted scenarios, each a fresh server and a sequence of
+Thirty-one scripted scenarios, each a fresh server and a sequence of
 one-user phases (the table names the foundational ones; the newer
 scenarios — kid-settings, charge-anomaly, rec-meter, arrival-notify,
 ptt-first, enroll, motion-pump, rolodex — are described in their own
@@ -1909,15 +1959,16 @@ sections):
 | `voice-alice-to-bob` | the send path end to end: the server-minted family room is there from boot (plan 0018 — no bootstrap phase exists anywhere in this suite), alice holds PTT and sends; bob runs, opens the conversation and renders the message row. Goldens both resting rolodex cards, the post-send frame and the settings menu. |
 | `rolodex` | plan 0077 stages 3+4: the rendered rolodex — resting card, mid-opening frame, aligned open stack with the centre-emphasis pixel claims, mid-roll frame, settle back to full bleed, and OK opening whoever is centred (see "The rolodex"). |
 | `rolodex-fit` | the full-bleed DISPLAY fit-down ladder on a real card: "Gabriella" overflows the 38 px rung against the card's usable width and rests at 30, goldened at full bleed (see "The rolodex"). |
-| `conversation-actions` | the conversation view's own inputs: alice sends thirteen clips (one more than the twelve rows that fit), scrolls the selection to the bottom, redacts one by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives the twelve and plays one. Goldens the full window, the scrolled window, the post-redaction list, the starred row, and the played marks. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
-| `cursor-anchor` | the message cursor's event-id anchoring, via the `msgsel` probe: an idle cursor on row 0 stays on 0 through an arrival (tracking newest), a cursor moved one row down keeps the SAME message as an arrival shifts its index from 1 to 2, and redacting the anchored message falls back to the nearest surviving row. Goldens the held highlight two rows down. |
+| `conversation-actions` | the drawn thread's own inputs: alice sends thirteen clips, flicks the centre deep into the list (twelve rapid taps coast to detent 11 on the fixed clock — the physics, pinned as such), redacts the centre row by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives and plays one. Goldens the resting thread, the flicked window, the post-redaction thread, the starred row, and the played ink. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
+| `drawn-thread` | plan 0078's pixel claims via the `thr*` probes (see "The drawn thread"): the mixed three-sender thread with collapsed stamps, the unheard full-ink centre, the play round-trip (yellow exact stamp, then the receipt's ink drop to a third), the refused red square after `failnext`'s 4xx, and the queued hollow squares under a 500. |
+| `cursor-anchor` | the message cursor's event-id anchoring, via the `msgsel` probe: an idle centre on row 0 stays on 0 through an arrival (tracking newest), a centre moved one row down keeps the SAME message as an arrival shifts its index from 1 to 2, and redacting the anchored message falls back to the nearest surviving row. Goldens the settled centre two rows down. |
 | `group-list` | plan 0018's list rendering: the `group` directive mints "kids" through `POST /_wata/v1/group` (server-stamped, both members joined server-side), and the goldens pin the roster `[Family, kids, Bob]` and the opened group view titled by the stamp's name. |
 | `dm-roundtrip` | the canonical-DM flow (plan 0007) rendered: alice selects bob's ROOMLESS roster row, the first PTT send resolves the room through `POST /_wata/v1/dm`, bob receives with an unplayed badge, receipts, plays, replies, and alice's second session pins the reply and the badge clearing. Goldens the roster before/after, both conversation views, and the badge lifecycle. |
 | `family-three` | a third account (per-scenario `$WATA_USERS`), all three boot-joined by the server: all three send into the family room. Goldens charlie's roster (the family plus TWO DM-able contacts) and the conversation with three-way sender attribution and interleaved ordering. |
 | `badges-across-restart` | unplayed counts across a restart: bob sees family=1 / DM=2, resumes with no credentials, and the badge frame is byte-identical; playing out the DM clears only its own badge. |
-| `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED` over a row that now carries the unsent mark, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm, and the send's retry is the OUTBOX's, not a second press. |
+| `send-play-failed` | the failure flashes, against a server failing on demand (`WATA_TEST_HOOKS=1` + the `failnext` directive): an armed upload 500 draws `SEND FAILED` over a thread that now carries the queued synthetic row, an armed download 500 draws `PLAY FAILED`, and the retry after each succeeds — the self-disarming counter is the disarm, and the send's retry is the OUTBOX's, not a second press. |
 | `outbox-restart` | a message survives an outage and a restart (plan 0022): with every upload answering 500, the send is queued and the row marked; a SECOND PROCESS resumes from the config store, finds the queue on disk beside it, and — once the hook is disarmed — delivers it on the next sync round, clearing the mark. Goldens the marked row, the cleared row with its badge, and the message in the conversation. |
-| `playing-hung` | the playback mark and the hung download: a SIGSTOPped server (`stop_server_after` + `http_timeout_ms: 1500`) means the fetch never answers, so the mark drawn on the OK release stays until the deadline turns it into `PLAY FAILED` and clears it. |
+| `playing-hung` | the play feedback and the hung download: a SIGSTOPped server (`stop_server_after` + `http_timeout_ms: 1500`) means the fetch never answers, so the yellow exact-time stamp drawn on the OK release (the `thrylw` probe — the hh:mm is wall-clock, so it is probed, not goldened) stays until the deadline turns it into `PLAY FAILED` and clears it. |
 | `early-boot` | the applet's boot presentation and its session latch: the earliest cold-boot frame (`starting up...`, no interface), a dial that FAILED while there is still no interface (`starting up...` again — plan 0035's calm-outranks-failure rule, and the frame the field sequence got wrong), the frame after an interface appears and the client starts trying (`waiting for network`), the resting rolodex card once the link has been live once, and — after a scripted health drop — that the boot screen does NOT come back (with the reconnect chip over the card). Forced with `conn`/`netpipe` from the first frame the script steps, so no frame is ever polled live before the boot frames are taken. |
 | `conn-status` | the connectivity element on the rolodex: a healthy link shows NOTHING (three checkpoints pin exactly the resting card), reconnecting on both phases of the `..` alternation and disconnected show the dark chip, and — through the `netpipe` override — `OFF` brings the chip back even while the client believes it is syncing. |
 | `settings-walk` | every settings item and its detail block: the echo test, brightness down two steps, the screen-timeout picker, network, device info (battery/uptime/memory), and the device rows absorbed from system-menu — the IP and cellular info rows, the net test and the wifi/data toggles (all an honest `n/a` on the host, the toggles reporting `not on device` after their armed OK), the confirm arming on a power row, the guarded no-op on the second OK, and a move-away cancelling an armed action. Nineteen checkpoints in one phase rather than a second scenario: every frame's scroll window and detail block depends on where the walk is, and a fresh server would only re-derive that. A second phase with no credentials goldens the same menu with the changed preferences restored from the store. |
@@ -2044,7 +2095,7 @@ a rediscovery):
 | play a message: receipt + played mark round trip | `conversation-actions`, `dm-roundtrip` |
 | delete a message (hold-red redact) | `conversation-actions` |
 | favorite a message (hold-OK), star rendered on both sides | `conversation-actions` |
-| long conversation: scroll window, selection clamp | `conversation-actions` |
+| long conversation: motion scroll, centre clamp | `conversation-actions` |
 | selection anchored across an arrival (same message, not same index) | `cursor-anchor` |
 | sender attribution, >2 participants, interleaved ordering | `family-three` |
 | send failure feedback (`SEND FAILED`) and recovery | `send-play-failed` |
@@ -2083,7 +2134,7 @@ information in the equivalent place, not the same number.
 | contact list: select, scroll window, family accent | yes | replaced | plan 0070's rolodex replaced the grid list (plan 0077 stage 3) |
 | unplayed-count badge, right-aligned | yes | yes | same |
 | open conversation (NO receipt: a receipt means heard, and only playback posts one) | receipts | no receipt | wata-fb changed the rule — see `docs/design/wataclient.md` |
-| message rows: duration `m:ss`, sender, played check-mark, gray-when-played | yes | yes | same |
+| message rows: duration `m:ss`, sender, played check-mark, gray-when-played | yes | replaced | plan 0078's drawn thread: duration is the bar's length, the sender its colour, played its ink level |
 | OK tap = download-and-play, receipt when the audio ENDS | receipt on play start | receipt on `AePlaybackDone` | same gesture; wata-fb acts on the RELEASE, because OK now also has a hold, and a failed playback receipts nothing |
 | hold OK past `OK_HOLD_FAVORITE` = toggle the message's favorite | no | yes | wata-fb only (plan 0019): the star keeps the clip past media retention |
 | a favorited row's star, right-aligned | no | yes | wata-fb only; `Font.ICON_STAR` (0x8D), drawn from the server's `net.wata.favorite` state |
@@ -2327,7 +2378,9 @@ deleting `WATA_IROH_CONFIG` from `start.sh`.
 | `selftest.scala` | 112 | `--selftest` driver: spawns the production audio thread and drives it through its real command mailbox for an echo test and a tone-playback test. |
 | `shell.scala` | 214 | `ShellState`, the active-applet index, status-line coloring, and input routing/dispatch between applets (PTT-always-to-wata, dot-buttons switch applets, red-in-snake goes back to wata, everything else goes to the active applet; the snake is also the one applet ticked only while active). |
 | `snake.scala` | 275 | The snake applet, ported from the Zig client's `applets/snake.zig`: packed-cell body, deterministic minstd food PRNG, tick/step game logic, and rendering; frame counts for its uitest scenario are designed with `tools/snake-frames.py`, an exact Python mirror. |
-| `applets.scala` | 1579 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and their `wataui` bodies (both applets are pure view functions painted by `FbPaint`); also the `Applet` interface and the shared `FrameCtx` per-frame context record. |
+| `applets.scala` | 2465 | The `wata` and `settings` applets: their state records, wither-style update functions, input handling, and their `wataui` bodies (both applets are pure view functions painted by `FbPaint`); also the `Applet` interface, the shared `FrameCtx` per-frame context record, and the shared motion pumps (`stepMotions`). |
+| `rolodex.scala` | 427 | The contact rolodex's geometry (plan 0077): cards, the open stack, the DISPLAY fit-down ladder — shared verbatim with wata-mac via a symlink. See "The rolodex". |
+| `thread.scala` | 394 | The drawn thread (plan 0078): `ThreadRow`, `Thread.rows` (snapshot -> data, incl. the synthetic outbox rows) and `Thread.body` (pure geometry: bars, ink, caps, squares, stamps, nubs) — shared verbatim with wata-mac via a symlink. See "The drawn thread". |
 | `netstatus.scala` | 176 | The connectivity element's computed state (`NetState` = pipe + health + blink phase): the cached ~5s interface read, the `ConnectionState` mapping, the reconnecting animation's phase, and what the header draws for each combination — read by both the header indicator and the 1px status line. |
 | `diag.scala` | 371 | The settings applet's device rows (`Diag`): the wlan0/ppp0/signal/uptime/memory reads, the ping+DNS net test and the goroutine that runs it off the frame loop, the wifi and cellular-data toggles, and the poweroff / reboot-bootloader / reboot-edl commands, all mirroring system-menu's sources and command lines; `onDevice()` (the lcd-bl sysfs probe) gates every read and every command. |
 | `netexec.scala` | 73 | The `go.exec` facade over `os/exec` (`Command` at one, two and three arities, `Run`, `Output`, and the `Stdin` field as a pre-run setter) and the `go.netif` facade over `net` — what `Diag` and `WifiCmd` run their command lines through. |

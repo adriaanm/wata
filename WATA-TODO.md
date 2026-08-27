@@ -135,6 +135,12 @@ blocks + git log; each entry cites where it was recorded.*
   outbox's entries reuse their own persisted txn deliberately, which is
   correct for them and does not widen this. The fix is to persist the
   counter, or to seed it from something per-run.
+- **Queued outbox rows draw at MIN_W** (plan 0078): the drawn thread's
+  synthetic queued rows have no duration — `EvOutbox` carries only the
+  conversation keys, not the entries' clip lengths — so every queued bar
+  is the 8px floor regardless of what was recorded. Plumbing the
+  duration through `EvOutbox`/`FrameCtx` would let the queued bar tell
+  the truth.
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 

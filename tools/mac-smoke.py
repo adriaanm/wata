@@ -289,50 +289,66 @@ def run(tmp):
                "tree 2: family card name gone")
 
         # the key path: OK (a real kVK code through the real translation
-        # table) opens the family conversation; its native tree shows bob's
-        # message row and the conversation footer.
+        # table) opens the family conversation. The drawn thread (plan 0078):
+        # bob's message is a horizontal bar rooted at the left field edge
+        # (x=38, MIN_W=8 for a short clip) in his speaker colour, at full ink
+        # with the yellow unheard cap inside its tip, a "now" stamp in the
+        # left stamp column — and no sender names, no footer legend, no
+        # per-row chrome. The header is still the room name.
         sess.cmd("key enter press", lambda l: l == "key ok")
         sess.cmd("key enter release", lambda l: l == "key ok")
         opened = sess.cmd("wait 500", lambda l: l == "waited 500")
-        c.line(opened, lambda l: l.startswith("patch insert [0] 0 header:text(0,0,\"Family\""),
-               "open: no conversation header patch")
+        c.line(opened, lambda l: l.startswith("patch ") and 'header:text(0,0,"Family"' in l,
+               f"open: no conversation header patch, got {[l for l in opened if l.startswith('patch ')]!r}")
         t3 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
         c.line(t3, lambda l: l.strip() == 'NSTextField 0 119 36 8 "Family"',
                "tree 3: no conversation header")
-        c.line(t3, lambda l: re.fullmatch(r'NSTextField \d+ 103 \d+ 8 "Bob"', l.strip()),
-               "tree 3: no message row sender")
-        c.line(t3, lambda l: l.strip() == 'NSTextField 0 7 144 8 "OK play hold=fav red=del"',
-               "tree 3: no conversation footer")
+        c.line(t3, lambda l: l.strip() == 'NSBox 38 59 8 11',
+               f"tree 3: no left-rooted bar for bob's message on the centre row, got {t3!r}")
+        c.line(t3, lambda l: l.strip() == 'NSBox 42 59 4 11',
+               f"tree 3: no yellow unheard cap inside the bar's tip, got {t3!r}")
+        c.line(t3, lambda l: l.strip() == 'NSTextField 2 54 32 21 "now"',
+               f"tree 3: no stamp on the centre row, got {t3!r}")
+        c.ok(not any('"Bob"' in l for l in t3),
+             "tree 3: a sender name survived the grid's removal")
+        c.ok(not any('OK play' in l for l in t3),
+             "tree 3: the old footer key legend is back")
 
         # ---- audio: PLAY (plan 0033) -----------------------------------------
-        # OK on the selected message really plays it: the runtime fetches the
-        # ogg, the action loop hands `AcPlay` to the audio thread this client
+        # OK on the centre row really plays it: the runtime fetches the ogg,
+        # the action loop hands `AcPlay` to the audio thread this client
         # forks, the thread decodes every Opus frame and plays the pcm against
         # the fake backend's clock, and `AePlaybackDone` returns through the
-        # ONE audio drain. The row carries the DELIVERED check from the start
-        # (plan 0051), so both play edges are `patch set` on that same glyph:
-        # the play triangle (0x90 = 144) the instant OK is released, then back
-        # to the check (0x80 = 128) when the audio ends. The HEARD check
-        # (`mark2`) is then INSERTED a moment later, when the receipt has been
-        # round-tripped through /sync — seeing it is the end-to-end proof of
-        # the runtime's `UiEvent`/audio drains, since nothing else creates
-        # that node. Nothing here is optimistic; mark2 means the server
-        # recorded the receipt.
+        # ONE audio drain. The drawn thread's play edges are on the STAMP
+        # (plan 0078): the instant OK is released the centre row's stamp turns
+        # into the exact wall-clock time in yellow (65504 — the real client
+        # clock, so the hh:mm is matched by shape, not value), and it returns
+        # to the back-off label in white when the audio ends. The receipt
+        # round-trip through /sync then drops the row's ink to the played
+        # third (a=85) and removes the unheard cap — seeing those two patches
+        # is the end-to-end proof of the runtime's `UiEvent`/audio drains,
+        # since only a server-recorded receipt changes `isPlayed`. Nothing
+        # here is optimistic.
         sess.cmd("key enter press", lambda l: l == "key ok")
         sess.cmd("key enter release", lambda l: l == "key ok")
         played = sess.cmd("wait 8000", lambda l: l == "waited 8000")
         pp = [l for l in played if l.startswith("patch ")]
-        c.ok(pp[:1] == ['patch set [0.1.0.1] glyph(0,17,144,0)'],
-             f"play: want the play-triangle patch first, got {pp!r}")
-        c.line(pp, lambda l: l == 'patch set [0.1.0.1] glyph(0,17,128,0)',
-               f"play: the mark never returned to the delivered check, got {pp!r}")
-        c.line(pp, lambda l: l == 'patch insert [0.1.0] 2 mark2:glyph(6,17,128,0)',
-               f"play: no heard-check insert after the receipt round-trip, got {pp!r}")
+        c.ok(len(pp) >= 1 and re.fullmatch(
+            r'patch set \[0\.0\.0\.2\] label\(2,53,32,21,"\d+:\d\d",'
+            r'caption,medium,trailing,65504,a=255\)', pp[0]) is not None,
+            f"play: want the yellow exact-time stamp first, got {pp!r}")
+        c.line(pp, lambda l: l == 'patch set [0.0.0.2] label(2,53,32,21,"now",'
+                                 'caption,medium,trailing,65535,a=255)',
+               f"play: the stamp never returned to the back-off label, got {pp!r}")
+        c.line(pp, lambda l: l == 'patch set [0.0.0.0] fill(38,58,8,11,r=3,28333,a=85)',
+               f"play: the ink never dropped to the played third, got {pp!r}")
+        c.line(pp, lambda l: l == 'patch delete [0.0.0] 1',
+               f"play: the unheard cap was never removed, got {pp!r}")
         t4 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
-        c.line(t4, lambda l: l.strip() == 'NSTextField 0 103 6 8 "✓"',
-               "tree 4: no delivered check on the message row")
-        c.line(t4, lambda l: l.strip() == 'NSTextField 6 103 6 8 "✓"',
-               "tree 4: no heard check on the message row")
+        c.line(t4, lambda l: l.strip() == 'NSBox 38 59 8 11',
+               f"tree 4: the played bar is gone, got {t4!r}")
+        c.ok(not any(l.strip() == 'NSBox 42 59 4 11' for l in t4),
+             f"tree 4: the unheard cap survived the receipt, got {t4!r}")
 
         # ---- audio: RECORD ----------------------------------------------------
         # PTT (space) holds the microphone open: `AcRecordStart` reaches the
@@ -371,16 +387,19 @@ def run(tmp):
         sp = [l for l in sent if l.startswith("patch ")]
         c.ok(sp[:1] == ['patch delete [] 1'],
              f"send: the recording overlay was not removed first, got {sp[:1]!r}")
-        # index 0 and highlighted: messages come back newest first, so a sent
-        # message lands at the TOP, under a cursor that never moved. The black
-        # ink (0) on the green highlight rect is what "selected" looks like.
-        # the plan-0049 grid: marks, then the age ("now"), the sender — "me"
-        # on an own row — and the right-aligned duration.
+        # index 0: messages come back newest first, so the sent message lands
+        # at the TOP of the drawn thread — an own row: a white bar rooted at
+        # the RIGHT field edge (x=136..144, MIN_W for a ~1.2s clip), the two
+        # delivery squares in the right gutter reading server-has (sq1
+        # filled, sq2 a hollow white ring around a black core), and a "now"
+        # stamp. No highlight, no sender text — own rows are told by their
+        # colour and their root edge.
         c.line(sp, lambda l: re.fullmatch(
-            r'patch insert \[0\.1\] 0 \$\S+:group\[hl:rect\(0,17,160,8,2016\) '
-            r'mark:glyph\(0,17,128,0\) age:text\(2,2,"now",0\) '
-            r'dur:text\(21,2,"0:01",0\) sender:text\(6,2,"me",0\)\]', l),
-            f"send: no own message row for the ~1.2s recording, got {sp!r}")
+            r'patch insert \[0\.0\] 0 \$\S+:group\[bar:fill\(136,58,8,11,r=3,65535,a=255\) '
+            r'sq1:fill\(145,61,5,5,r=0,65535,a=255\) sq2:fill\(151,61,5,5,r=0,65535,a=255\) '
+            r'sq2c:fill\(152,62,3,3,r=0,0,a=255\) '
+            r'stamp:label\(2,53,32,21,"now",caption,medium,trailing,65535,a=255\)\]', l),
+            f"send: no own drawn row for the ~1.2s recording, got {sp!r}")
         c.line(sp, lambda l: l == 'patch insert [] 1 flash:group[msg:text(8,9,"SENT",2016)]',
                f"send: no SENT flash (EvSendComplete never reached the pump), got {sp!r}")
 
@@ -408,14 +427,21 @@ def run(tmp):
                "bob3: no `sent` line")
         live = sess.cmd("wait 8000", lambda l: l == "waited 8000")
         lp = [l for l in live if l.startswith("patch ")]
+        # the new row is a keyed insert at the top: bob's speaker colour at
+        # full ink with the yellow unheard cap and a "now" stamp.
         c.line(lp, lambda l: re.fullmatch(
-            r'patch insert \[0\.1\] 0 \$\S+:group\[hl:rect\(\S+\) '
-            r'mark:glyph\(\S+\) age:text\(\d+,\d+,"now",\d+\) '
-            r'dur:text\(\d+,\d+,"0:0\d",\d+\) sender:text\(\d+,\d+,"Bob",\d+\)\]', l),
-            f"open-conversation arrival: no new message row, got {lp!r}")
+            r'patch insert \[0\.0\] 0 \$\S+:group\[bar:fill\(38,\d+,\d+,11,r=3,28333,a=255\) '
+            r'cap:fill\(42,\d+,4,11,r=0,65504,a=255\) '
+            r'stamp:label\(2,\d+,32,21,"now",caption,medium,trailing,65535,a=255\)\]', l),
+            f"open-conversation arrival: no new drawn row, got {lp!r}")
         t6 = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
-        c.ok(sum(1 for l in t6 if l.strip().endswith('"Bob"')) == 2,
-             f"tree 6: want two Bob rows in the open conversation, got {t6!r}")
+        # two of bob's bars (both left-rooted at x=38, 8 wide) around alice's
+        # own right-rooted one — and the three rows inside a minute carry ONE
+        # visible "now" stamp: the collapse rule, live in the native tree.
+        c.ok(sum(1 for l in t6 if re.fullmatch(r'NSBox 38 \d+ 8 11', l.strip())) == 2,
+             f"tree 6: want two of bob's bars in the open conversation, got {t6!r}")
+        c.ok(sum(1 for l in t6 if '"now"' in l) == 1,
+             f"tree 6: the burst's stamps did not collapse to one, got {t6!r}")
     except TimeoutError as e:
         c.failed.append(str(e))
     finally:

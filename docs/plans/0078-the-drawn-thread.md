@@ -1,6 +1,6 @@
 # 0078 — the drawn thread: the message view in the rolodex's language
 
-status: accepted
+status: done
 
 ## The problem
 
@@ -124,3 +124,20 @@ type was.
 - Whether six rows or the rolodex's row height wins once real threads
   are on the panel (six ≈ 21 px rows; the stack's 42 px rows would show
   three — density is the point of this screen, so start at six).
+
+## Landed (2026-08-27)
+
+Everything above is in the tree: the two pure rules + their oracle in
+wataui (wataui-tests check 4/4), `thread.scala` shared fb/mac, the
+second motion integrator with the event-id anchor reconciled through
+`Motion.placeAt`, the grid and the discrete scroll deleted, the
+`drawn-thread` scenario with its `thr*` pixel probes (played-third,
+square-mapping and stamp-collapse claims each seen to fail first), the
+conversation goldens regenerated wholesale, and mac-smoke's
+conversation assertions re-pinned to the drawn tree. Settled choices:
+the stamp column sits LEFT (the right edge belongs to the delivery
+squares; own right-rooted bars are the minority); "today" is
+approximated as under 24h; the flick physics were pinned as measured
+(twelve rapid taps coast to detent 11). Open debt: queued synthetic
+rows draw at MIN_W because outbox entry durations are not plumbed to
+the UI (WATA-TODO.md).

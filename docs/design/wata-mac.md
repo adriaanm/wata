@@ -852,12 +852,16 @@ next probe, and the only one that can.
   the smoke asserts the printed differ script is EXACTLY the unheard
   band + count inserts into the card and the state-line set — then the
   key path (real kVK codes through the real table) opens the
-  conversation and the native tree shows the message row. (This gate
+  conversation and the native tree shows the DRAWN THREAD (plan 0078,
+  the shared `thread.scala` riding the same symlink): bob's left-rooted
+  bar with its yellow unheard cap and stamp. (This gate
   was red for weeks on a stale pre-rolodex footer-legend assertion —
   the `MAC-SMOKE-STALE-LEGEND` item; the rolodex rewrite of the contact
   assertions retired it, and the gate is what guards the next drift.) Then the two
   AUDIO legs under `WATA_MAC_AUDIO=fake`: OK plays bob's message (the differ
-  prints the play triangle then the played check) and PTT records one (the
+  prints the yellow exact-time stamp, its return to the back-off label, and
+  the receipt's ink drop to the played third with the cap removed) and PTT
+  records one (the
   overlay counts up, alice's own row and the SENT flash appear, and a fresh
   bob session reads the ~1.2s message back off the server).
 - `just mac-notify-smoke` (~3min, macOS-only, not in ci): the arrival

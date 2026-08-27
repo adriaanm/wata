@@ -364,3 +364,35 @@ Each case prints two things, and the difference matters:
 Everything in the module builds and returns its own `String`: a
 `StringBuilder` is a function-local accumulator in this dialect and
 cannot cross a `def` boundary.
+
+## The thread rules (plan 0078)
+
+Two pure presentation rules live here because every client's drawn
+thread shares them, and neither knows anything about a view tree, a
+clock or a backend — "now" is always passed in.
+
+- **`stamps.scala` — the stamp back-off.** `Stamps.label(nowMs, ts)`
+  spells a message's age with precision that decays with distance:
+  "now" under a minute; whole minutes under 5 ("1m".."4m"); 5-minute
+  steps under an hour ("5m".."55m"); quarter-hours under 6 hours
+  ("1h", "1h15", "1h30", "1h45", "2h", …); whole hours under 24
+  ("6h".."23h" — "today" approximated as under 24h, per the file
+  header); the weekday ("Mon".."Sun") under a week; the date
+  ("3 Jun") beyond. A future timestamp clamps to "now" (the 1970-boot
+  handset). `Stamps.exact(ts)` is the playing row's hh:mm.
+  `Stamps.collapse(labels)` blanks consecutive identical labels after
+  the first, so a burst carries one stamp; blanks never match, so two
+  collapsed runs cannot merge across an interloper. Civil-date math is
+  Hinnant's `civil_from_days`, self-contained.
+- **`delivery.scala` — the delivery squares.** The four-state delivery
+  vocabulary (`QUEUED`/`SERVER`/`PLAYED`/`REFUSED` + `NONE`) mapped to
+  the two squares an own row draws: queued = two hollow, server-has =
+  filled + hollow, played-by-peer = two filled, refused = one red.
+
+Both are pinned by their own oracle, `rulesoracle.scala`'s
+`ThreadRulesOracle.report()` — the DiffOracle discipline again: every
+age boundary both sides at a fixed hand-checkable NOW (2026-08-27
+12:00Z, a Thursday), the exact-time spellings, five collapse cases and
+all five delivery states, byte-diffed against
+`tools/wataui-rules.expected.txt` by `tools/wataui-tests.sh` check 4/4
+(`wata-fb ruletest` is the driver).
