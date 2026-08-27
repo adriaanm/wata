@@ -141,3 +141,10 @@ approximated as under 24h; the flick physics were pinned as measured
 (twelve rapid taps coast to detent 11). Open debt: queued synthetic
 rows draw at MIN_W because outbox entry durations are not plumbed to
 the UI (WATA-TODO.md).
+Deployed to the handset the same day (`just fb-deploy install`, md5
+match host/device `31987f6b…`): the live family thread draws weekday
+stamps, own right-rooted bars with their delivery squares (two filled
+where papa has played), and a played-to-a-third received bar in the
+sender's hue; the papa DM draws the own-bar column with mixed square
+states. The panel confirms the eye-tunable constants read well at
+160x128 — no retune needed on first sight.
