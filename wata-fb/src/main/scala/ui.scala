@@ -86,6 +86,14 @@ object Ui:
 
   /** the frame pace (~30fps for the panel). */
   val FRAME_MS: Long = 33L
+  /** the pace while the rolodex motion is live (plan 0077 stage 2): a coasting
+   *  flick wants the panel's best rate, so the sleep drops to ~60fps while
+   *  `Motion.live` and returns to `FRAME_MS` at rest. Whether the ST7735S path
+   *  can actually SHOW 60fps is stage 4's hardware measurement — if it cannot,
+   *  this goes back to 33 and only the physics dt cares. The scripted driver
+   *  is untouched: its `frameSleep` ignores the argument (a fixed real pace)
+   *  and its clock ticks a fixed 33ms per frame regardless. */
+  val MOTION_FRAME_MS: Long = 16L
 
   // The UI-goroutine shell state lives in `val`-held Atomic cells: still
   // driven by the one UI goroutine by protocol, but data-race-freedom is
@@ -391,6 +399,9 @@ object Ui:
       // what gets drawn, whole-frame: it is a decision, not an overlay.
       stateC.set(Shell.update(stateV, dt, ctx))
       stateC.set(Shell.withStatus(stateV, ShellStatus.fromNet(net, conn)))
+      // the rolodex motion integrator (plan 0077 stage 2), once per frame
+      // with the same clamped dt as everything else on the frame clock
+      stepMotion(dt)
       if !displayOff then
         Draw.clear(px, Color.black)
         exitMenu match
@@ -398,9 +409,55 @@ object Ui:
           case None                   => Shell.render(stateV, px, ctx)
         drawBanner(px)
         dev.present(px)
-      dev.frameSleep(FRAME_MS)
+      dev.frameSleep(framePaceMs())
     tally(frameC)
     quit
+
+  // ---- the rolodex motion pump (plan 0077 stage 2, FB-MOTION-PUMP) ------------
+
+  /** is the contact list — the one screen the integrator drives — what the
+   *  shell is showing? The watch's `isContacts` gating, restated for a shell
+   *  that has more than one applet. */
+  def motionShowing: Boolean =
+    stateV.active == Shell.WATA && isContacts(Shell.wataState(stateV).view)
+
+  /** Step the wata applet's motion integrator with this frame's real clamped
+   *  dt — the fb half of the watch's `Pump.stepMotion`, WITHOUT the write of
+   *  `Motion.centre` into `selected`: this stage the integrator is plumbing
+   *  only, `selected` stays the discrete authority, and nothing rendered
+   *  reads the motion (stage 3, FB-ROLODEX-BODY, flips that). Two clamps keep
+   *  the two from drifting apart in the meantime: a position past the end of
+   *  a list that SHRANK is put back (`placeAt`, the watch's rule — the end
+   *  spring must not argue with the model), and a settled integrator whose
+   *  centre disagrees with `selected` (the selection moved by other means —
+   *  entering the screen, a list shrink's discrete clamp) is re-seated on it.
+   *  Only stepped while the contact list is showing; elsewhere the motion
+   *  simply holds, and the pace below ignores it. */
+  def stepMotion(dt: scala.Double): Unit =
+    if motionShowing then
+      val w = Shell.wataState(stateV)
+      val count = WataLogic.convCount(snapC.get())
+      var m = Motion.step(w.motion, dt, count)
+      if count > 0 && Motion.offset(m) > (count - 1).toDouble + 1.0 then
+        m = Motion.placeAt(m, count - 1)
+      if !Motion.live(m) && Motion.centre(m, count) != w.selected then
+        m = Motion.placeAt(m, w.selected)
+      stateC.set(Shell.withApplet(stateV, Shell.WATA,
+        WataApplet(WataLogic.withMotion(w, m))))
+
+  /** this frame's pace: the motion rate while the shown rolodex is coasting,
+   *  the ordinary ~30fps otherwise. */
+  def framePaceMs(): Long =
+    if motionShowing && Motion.live(Shell.wataState(stateV).motion) then MOTION_FRAME_MS
+    else FRAME_MS
+
+  /** the integrator's centre index against the live list — the `motioncentre`
+   *  probe's value. */
+  def motionCentre: scala.Int =
+    Motion.centre(Shell.wataState(stateV).motion, WataLogic.convCount(snapC.get()))
+
+  /** is the integrator still moving (the `motionlive` probe)? */
+  def motionLive: Boolean = Motion.live(Shell.wataState(stateV).motion)
 
   def clampDt(raw: Long): Long =
     if raw < 0L then 0L else if raw > 1000L then 1000L else raw

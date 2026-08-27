@@ -58,6 +58,9 @@ ADMIN_URL = "http://192.168.1.4:8008"
 #       for this scenario's server (password PASSWORD, displayname the
 #       capitalized localpart, matching the built-in alice/bob pair). Without
 #       it the server boots its compiled-in two accounts.
+#   "probe_only": True — the scenario asserts through script probes alone and
+#       takes no checkpoints; producing zero PNGs is then a pass rather than
+#       the broken-script failure it means everywhere else.
 #   "hooks": True — start the scenario's server with WATA_TEST_HOOKS=1 (the
 #       fail-on-demand media hook; scripts arm it with the `failnext`
 #       directive). Every scenario's server is probed for the hook route
@@ -278,6 +281,20 @@ SCENARIOS = [
         "name": "rec-meter",
         "phases": [
             ("alice", "alice-rec-meter.txt"),
+        ],
+    },
+    {
+        # plan 0077 stage 2 (FB-MOTION-PUMP): the rolodex motion integrator
+        # runs in the frame loop, probe-only — one down press converges the
+        # centre one detent and comes to rest; two quick presses are twice
+        # the shove and coast further by the same frame count. No checkpoints
+        # on purpose: nothing rendered reads the motion until stage 3, and
+        # this scenario existing must not move a single golden.
+        "name": "motion-pump",
+        "probe_only": True,
+        "users": ["alice", "bob", "charlie"],
+        "phases": [
+            ("alice", "alice-motion.txt"),
         ],
     },
     {
@@ -521,6 +538,11 @@ def compare(scenario, outdir, update):
     """Byte-compare every checkpoint this scenario produced against its golden."""
     produced = sorted(f for f in os.listdir(outdir) if f.endswith(".png"))
     if not produced:
+        # A probe-only scenario asserts through the script's probes alone and
+        # deliberately pins no pixels (its phases already passed to get here);
+        # anything else producing nothing is a broken script, not a pass.
+        if scenario.get("probe_only"):
+            return True, "probe-only, no checkpoints"
         return False, "no checkpoints produced"
     bad = []
     for name in produced:

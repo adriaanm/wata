@@ -125,6 +125,16 @@ the watch's `Pump.stepMotion` shape:
   stage 4's measurement; if it cannot, the pace stays 33 ms and only the
   physics dt cares.
 
+> **Landed 2026-08-27, with one deliberate narrowing:** the integrator does
+> NOT yet write `Motion.centre` into `selected` — that flip is stage 3's,
+> when the rolodex body exists to show what the centre means. This stage is
+> invisible plumbing: `selected` stays the discrete authority, a settled
+> integrator is re-seated on it (`placeAt`) so the two cannot drift, and the
+> observable surface is the `motioncentre`/`motionlive` probes plus the
+> probe-only `motion-pump` fb-ui-tests scenario (no goldens touched — the
+> acceptance bar). Detail in `docs/design/wata-fb.md`, "The rolodex motion
+> pump".
+
 ### 3. The rolodex bodies
 
 `rolodex.scala` lands in wata-fb (shared to wata-mac by symlink, like

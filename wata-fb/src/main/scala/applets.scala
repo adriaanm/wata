@@ -77,7 +77,15 @@ case class WataState(
   // them (plan 0046): a full queue must not silently eat a delete. Session
   // intents only — a new session starts from `initial()`, so nothing here
   // outlives the session that meant it.
-  pendingOneshots: List[Action]
+  pendingOneshots: List[Action],
+  // the rolodex motion integrator (plan 0077 stage 2, FB-MOTION-PUMP): the
+  // physical scroll position of the contact list, fed by up/down impulses and
+  // stepped once per frame by `Ui.stepMotion`. Applet state, not a UI cell —
+  // a plain immutable wataui record, so the applet stays Shareable. This
+  // stage it is plumbing only: `selected` remains the discrete authority and
+  // nothing rendered reads the motion; stage 3 (FB-ROLODEX-BODY) flips the
+  // authority to `Motion.centre`.
+  motion: Motion
 )
 
 object WataLogic:
@@ -86,7 +94,7 @@ object WataLogic:
 
   def initial(): WataState =
     WataState(VContacts(), 0, 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, false, 0.0,
-      false, 0.0, false, 0.0, 0, "", Nil)
+      false, 0.0, false, 0.0, 0, "", Nil, Motion.initial())
 
   /** visible list rows between header and footer (bitmap grid). */
   def visibleRows(): scala.Int = FOOTER_ROW - FONT_ROWS_HEADER
@@ -95,11 +103,11 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   /** Opens at row 0, which is the NEWEST message now that the list comes back
    *  newest first — the one somebody just pressed the LED for. It used to be
@@ -107,35 +115,35 @@ object WataLogic:
    *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "", s.pendingOneshots)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "", s.pendingOneshots, s.motion)
 
   /** cursor move that keeps the current anchor — the per-frame reconcile's
    *  found-the-anchor path and every non-cursor wither go through here. */
   def withMsgSel(s: WataState, sel: scala.Int, scr: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   /** cursor move that also RE-DECIDES the anchor — what an explicit up/down
    *  and the vanished-anchor fallback use. */
   def withMsgAnchor(s: WataState, sel: scala.Int, scr: scala.Int, anchor: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel, scr,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor, s.pendingOneshots)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor, s.pendingOneshots, s.motion)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   /** the recording meter's level — the only field `AeCaptureLevel` moves. */
   def withCapLevel(s: WataState, level: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId, s.pendingOneshots)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   /** `room`/`id` name what is playing, and are cleared when it stops — a
    *  playback target that outlives the playback would receipt the wrong
    *  message the next time audio ends. */
   def withPlaying(s: WataState, playing: Boolean, room: String, id: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
-      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   /** the full status-flash tuple (hold + timer + the four flash flags); the
    *  play-failure CAUSE rides along unchanged. */
@@ -143,7 +151,7 @@ object WataLogic:
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean, micErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, micErr, timer, s.backHeld, s.backHoldTime,
-      s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   /** a play that failed: the flash, its cause, and `playing` dropped — a
    *  playback indicator that outlives the playback is a lie. */
@@ -151,26 +159,38 @@ object WataLogic:
                   timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, s.micError, timer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots)
+      held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion)
 
   def withPendingOneshots(s: WataState, pending: List[Action]): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, pending)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, pending, s.motion)
+
+  /** the motion integrator's field, alone — what the impulse feed and the
+   *  per-frame `Ui.stepMotion` write (plan 0077 stage 2, FB-MOTION-PUMP). */
+  def withMotion(s: WataState, m: Motion): WataState =
+    WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected, s.msgScroll,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, m)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
-  /** full input with per-frame context (snapshot + queues). Returns new state. */
-  def handleInput(s: WataState, k: Key, ks: KeyState, ctx: FrameCtx): WataState =
+  /** full input with per-frame context (snapshot + queues). Returns new state.
+   *  The rolodex impulse feed runs FIRST, before the press-only gate below:
+   *  the gate drops kernel key-REPEAT events, and repeat is exactly what ramps
+   *  a held arrow key into a coast (plan 0077 stage 2). The discrete dispatch
+   *  underneath is untouched — `contactsInput` still sees presses only. */
+  def handleInput(s0: WataState, k: Key, ks: KeyState, ctx: FrameCtx): WataState =
+    val s = motionImpulse(s0, k, ks)
     if isPtt(k) then pttInput(s, ks, ctx)
     else if isBack(k) && isConvView(s) then backInput(s, ks)
     else if isEnter(k) && isConvView(s) then okInput(s, ks, ctx)
@@ -178,6 +198,32 @@ object WataLogic:
     else s.view match
       case _: VContacts     => contactsInput(s, k, ctx)
       case _: VConversation => conversationInput(s, k, ctx)
+
+  /** FB-MOTION-PUMP (plan 0077 stage 2): up/down on the contact list shove the
+   *  motion integrator — one detent per event, `Pressed` AND `Repeat`, which
+   *  is the key-repeat ramp (two quick shoves are twice the velocity, so
+   *  acceleration falls out of `Motion.impulse` itself). Fed ALONGSIDE the
+   *  discrete `downSel`/`upSel` this stage: `selected` stays the authority a
+   *  press acts on, and `Ui.stepMotion` re-seats a settled integrator on it
+   *  (`Motion.placeAt`) so the two cannot drift apart before stage 3 makes
+   *  `Motion.centre` the selection. */
+  def motionImpulse(s: WataState, k: Key, ks: KeyState): WataState =
+    if isContactsView(s) && isImpulseEdge(ks) then impulseFor(s, k) else s
+
+  /** the edges that shove: a press and every kernel auto-repeat after it. */
+  def isImpulseEdge(ks: KeyState): Boolean = ks match
+    case Pressed() => true
+    case Repeat()  => true
+    case _         => false
+
+  def impulseFor(s: WataState, k: Key): WataState = k match
+    case _: KDown => withMotion(s, Motion.impulse(s.motion, MotionAxes.V, 1.0))
+    case _: KUp   => withMotion(s, Motion.impulse(s.motion, MotionAxes.V, -1.0))
+    case _        => s
+
+  def isContactsView(s: WataState): Boolean = s.view match
+    case _: VContacts => true
+    case _            => false
 
   def isPtt(k: Key): Boolean = k match
     case KPtt() => true

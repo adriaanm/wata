@@ -135,8 +135,11 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  kid panel's selected row, 4 = the hidden development row), kidtarget
  *  (the data row's pending tri-state target, shifted non-negative for the
  *  unsigned script parser: 0 none, 1 off, 2 wifi, 3 cell), kidapply
- *  (the applying wait's frame count, same shift: 0 = not applying), and
- *  chargebad (plan 0073: 1 while the debounced charge-anomaly mark is up). */
+ *  (the applying wait's frame count, same shift: 0 = not applying), chargebad
+ *  (plan 0073: 1 while the debounced charge-anomaly mark is up), and the
+ *  motion-pump probes (plan 0077 stage 2): motioncentre (the rolodex
+ *  integrator's centre index against the live conversation count) and
+ *  motionlive (1 while the integrator is still moving). */
 
 /** the virtual frame clock: one frame of simulated time per read, so `dt` is
  *  constant and the animated pixels are reproducible. Only the UI loop uses
@@ -691,6 +694,13 @@ object UiScript:
     // `charge` directive's forced reads feed. 0 for the whole debounce
     // window is the assertion that matters.
     else if name == "chargebad" then boolProbe(ChargeStatus.active())
+    // the rolodex motion integrator (plan 0077 stage 2, FB-MOTION-PUMP):
+    // the centre index the physics has converged on, and whether it is still
+    // moving. The pair is the stage's whole observable — nothing rendered
+    // reads the motion yet — and the fixed 33ms virtual clock is what makes
+    // "advance N then expect" deterministic against it.
+    else if name == "motioncentre" then Ui.motionCentre
+    else if name == "motionlive" then boolProbe(Ui.motionLive)
     else -1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run

@@ -1,0 +1,45 @@
+# motion-pump (plan 0077 stage 2): the rolodex integrator runs in the fb
+# frame loop, probe-only — NOTHING rendered reads it yet, so this scenario
+# takes no checkpoints and no golden may move. The virtual clock ticks a
+# fixed 33ms per frame, so "advance N then expect" is deterministic.
+#
+# Three users -> three conversations [Family, Bob, Charlie]: room for a
+# single detent (centre 0 -> 1) and a two-press double impulse (0 -> 2).
+
+wait syncing 1 900
+wait convs 3 900
+
+# settled at the top: centre 0, not moving
+waitmax motionlive 0 60
+expect motioncentre 0
+waitmax motioncentre 0 1
+
+# ONE down press: the impulse is live immediately...
+tap down
+expect motionlive 1
+# ...and a fixed frame budget later it has coasted one detent and stopped
+advance 40
+expect motioncentre 1
+waitmax motioncentre 1 1
+waitmax motionlive 0 1
+
+# back to the top the same way
+tap up
+advance 40
+expect motioncentre 0
+waitmax motioncentre 0 1
+waitmax motionlive 0 1
+
+# TWO quick presses are twice the shove: by the same early frame count a
+# single press has only reached centre 1 (see above at advance 40's midpoint),
+# the double impulse is already past centre 2 and still coasting
+tap down
+tap down
+advance 8
+expect motioncentre 2
+expect motionlive 1
+# and it comes to rest on the second card, not beyond it
+advance 40
+waitmax motionlive 0 1
+expect motioncentre 2
+waitmax motioncentre 2 1

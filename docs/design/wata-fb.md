@@ -1079,6 +1079,43 @@ if it's on a fourth device node. This module reproduces that
 behavior rather than fixing it; `WATA-TODO.md` tracks it as an open
 item ("dot2 input bus undiscovered").
 
+### The rolodex motion pump (plan 0077 stage 2)
+
+The contact list carries wataui's motion integrator (`Motion`,
+`wataui/motion.scala` — plan 0070's physical scrolling), plumbed but not
+yet in charge: `WataState.motion` holds the value (a plain immutable
+record, so the applet stays `Shareable`), and nothing rendered reads it
+until stage 3 (FB-ROLODEX-BODY) swaps the grid list for the rolodex and
+makes `Motion.centre` the selection.
+
+- **Impulse feed** (`WataLogic.motionImpulse`, called at the top of
+  `WataLogic.handleInput`): up/down on the contact list shove the
+  integrator one detent, on `Pressed` AND `Repeat` — the feed sits ABOVE
+  the press-only gate precisely because that gate drops the kernel's
+  key-repeat events, and repeat is what ramps a held arrow into a coast.
+  The discrete `downSel`/`upSel` below stay press-only and remain the
+  authority a press acts on.
+- **Step** (`Ui.stepMotion`, once per `frameStep` with the same clamped
+  `dt` as every other timer): the fb half of the watch's
+  `Pump.stepMotion`, gated on the wata applet's contact view being what
+  the shell shows. A position past the end of a list that shrank is put
+  back with `Motion.placeAt`, and a SETTLED integrator whose centre
+  disagrees with `selected` (the selection moved by other means —
+  entering the screen, a shrink's discrete clamp) is re-seated on it, so
+  the two cannot drift apart while the selection is still discrete.
+- **Pace** (`Ui.framePaceMs`): the device's `frameSleep` drops to
+  `MOTION_FRAME_MS` (16 ms) while the shown rolodex is `Motion.live`,
+  else the ordinary `FRAME_MS`. Whether the ST7735S path can actually
+  show 60 fps is stage 4's hardware measurement; the scripted driver is
+  untouched (its `frameSleep` ignores the argument and its clock ticks a
+  fixed 33 ms per frame).
+- **Gate**: the `motioncentre`/`motionlive` uitest probes and the
+  probe-only `motion-pump` scenario (`tools/fb-ui-scripts/alice-motion.txt`)
+  — one press converges the centre one detent and comes to rest, two
+  quick presses coast further by the same frame count. Probe-only by
+  design: the stage is invisible, and the scenario pins no pixels
+  (`"probe_only"` in `tools/fb-ui-tests.py`).
+
 ## Audio
 
 Audio is split into a Sgola-side facade (`audio.scala`, binding
