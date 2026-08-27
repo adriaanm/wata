@@ -403,6 +403,7 @@ object Ui:
       // the rolodex motion integrator (plan 0077 stage 2), once per frame
       // with the same clamped dt as everything else on the frame clock
       stepMotion(dt)
+      logMotionFps(nowMs, dtMs)
       if !displayOff then
         Draw.clear(px, Color.black)
         exitMenu match
@@ -453,6 +454,38 @@ object Ui:
     else if Motion.centre(w.motion, count) != w.selected || Motion.live(w.motion) then
       stateC.set(Shell.withApplet(stateV, Shell.WATA,
         WataApplet(WataLogic.withMotion(w, Motion.placeAt(w.motion, w.selected)))))
+
+  // motion throughput (plan 0077 stage 4): while the rolodex coasts, count
+  // real frames against the real clock and say what rate the panel actually
+  // sustained — one line per ~second to stdout (/tmp/wata.log on the device),
+  // plus a flush when the motion settles. Device-only (`Diag.onDevice()`),
+  // so the host front ends and the scripted harness never see a byte; the
+  // counting itself is three atomic ints off the render path.
+  private val mFramesC: sgo.Atomic[scala.Int] = sgo.atomic(0)
+  private val mWinMsC: sgo.Atomic[Long] = sgo.atomic(0L)
+  private val mLiveMsC: sgo.Atomic[Long] = sgo.atomic(0L)
+
+  /** account one frame of live motion (or flush after the last one). `nowMs`
+   *  and `dtMs` are the frame's real clock values, so the reported fps is what
+   *  the panel sustained, not what the sleep asked for. */
+  def logMotionFps(nowMs: Long, dtMs: Long): Unit =
+    if motionShowing && motionLive then
+      if mFramesC.get() == 0 then mWinMsC.set(nowMs - dtMs)
+      tally(mFramesC)
+      mLiveMsC.set(mLiveMsC.get() + dtMs)
+      if nowMs - mWinMsC.get() >= 1000L then flushMotionFps(nowMs)
+    else if mFramesC.get() > 0 then
+      flushMotionFps(nowMs)   // the episode's last (partial) window
+      mLiveMsC.set(0L)
+
+  def flushMotionFps(nowMs: Long): Unit =
+    val span = nowMs - mWinMsC.get()
+    val n = mFramesC.get()
+    if span > 0L && n > 1 && Diag.onDevice() then
+      println("motion: fps=" + (n.toLong * 1000L / span) + " frames=" + n +
+        " span_ms=" + span + " live_ms=" + mLiveMsC.get())
+    mFramesC.set(0)
+    mWinMsC.set(nowMs)
 
   /** this frame's pace: the motion rate while the shown rolodex is coasting,
    *  the ordinary ~30fps otherwise. */
