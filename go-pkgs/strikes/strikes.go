@@ -93,11 +93,11 @@ var table = []*strike{
 	{face: "inter", px: 30, weight: "bold", ttf: interBold},
 	{face: "inter", px: 16, weight: "bold", ttf: interBold},
 	{face: "inter", px: 16, weight: "medium", ttf: interMedium},
-	{face: "inter", px: 11, weight: "medium", ttf: interMedium},
+	{face: "inter", px: 13, weight: "medium", ttf: interMedium},
 	{face: "atkinson", px: 30, weight: "bold", ttf: atkinsonBold},
 	{face: "atkinson", px: 16, weight: "bold", ttf: atkinsonBold},
 	{face: "atkinson", px: 16, weight: "medium", ttf: atkinsonRegular},
-	{face: "atkinson", px: 11, weight: "medium", ttf: atkinsonRegular},
+	{face: "atkinson", px: 13, weight: "medium", ttf: atkinsonRegular},
 }
 
 // Strike resolves (face, px, weight) to a strike id, or -1 if the table has

@@ -248,7 +248,7 @@ def run(tmp):
                "tree 1: no full-bleed family card NSBox")
         c.line(t1, lambda l: l.strip() == 'NSTextField 2 43 156 42 "Family"',
                "tree 1: no full-bleed Family name label")
-        c.line(t1, lambda l: l.strip() == 'NSTextField 2 25 156 16 "no messages"',
+        c.line(t1, lambda l: l.strip() == 'NSTextField 2 20 156 21 "no messages"',
                "tree 1: no state line under the name")
         c.ok(not any('"WATA"' in l for l in t1),
              "tree 1: the WATA title chrome is back on the rolodex")
@@ -275,8 +275,8 @@ def run(tmp):
         c.ok(patches == ['patch insert [0.0.0] 1 band:fill(0,0,160,21,r=0,65504,a=255)',
                          'patch insert [0.0.0] 3 count:label(2,1,156,19,"1 unheard",'
                          'caption,medium,center,0,a=255)',
-                         'patch set [0.0.0.4] label(2,87,156,16,"just now",'
-                         'caption,regular,center,0,a=255)'],
+                         'patch set [0.0.0.4] label(2,87,156,21,"just now",'
+                         'name,medium,center,0,a=255)'],
              f"arrival: want exactly the band + count inserts and the state set, got {patches!r}")
 
         # and the native tree now shows it, retained (no rebuild: same frames).

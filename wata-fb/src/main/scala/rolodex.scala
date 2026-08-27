@@ -36,9 +36,9 @@ import language.experimental.saferExceptions
  *  landing this design on the handset at all. The other fractions are
  *  re-derived from this panel's height rather than copied (the watch's were
  *  portrait choices): the full-bleed name box is h/3 (the DISPLAY strike
- *  sits in 42 px), the unheard band h/6 (holds an 11 px caption), and the
- *  state line h/8 — the watch's h/10 is 12 px here, which clips a caption's
- *  descenders.
+ *  sits in 42 px), the unheard band h/6 (holds a 13 px caption), and the
+ *  state line h/6 — the NAME strike's line box is 21 px, and h/6 is exactly
+ *  that on 128 px (h/8 = 16 clips five pixels of it).
  *
  *  ## Which card the talk button reaches
  *
@@ -82,9 +82,13 @@ import language.experimental.saferExceptions
  *  Text is black on every card, because that is the palette's constraint
  *  (`Palette.INK`) rather than a decision this file makes. Type is by ROLE:
  *  the full-bleed name is `display`, a stack card's name is `name`, and the
- *  state line is `caption` — the renderer resolves each against this panel's
- *  strikes (`FbTypeRoles`), which is the one place that knows how big the
- *  panel is.
+ *  state line is `name` at medium weight — at rest one contact owns the whole
+ *  panel, so the supporting line has breathing room and takes real size
+ *  (caption read as illegible on the physical panel, owner 2026-08-27); it
+ *  only ever draws at/near full bleed, fading out with openness well before
+ *  the stack rows exist, so no row form has to hold it. The renderer resolves
+ *  each role against this panel's strikes (`FbTypeRoles`), which is the one
+ *  place that knows how big the panel is.
  */
 case class RoloCard(
   // the conversation's identity — the differ's key, so a card that scrolled is
@@ -256,13 +260,22 @@ object Rolodex:
           kids = Keyed("mark", VFill(x + cw - pad - sq, y + ch - pad - sq, sq, sq,
             0, mc, ca0)) :: kids
       // the state line, which is a full-bleed affordance: in a stack row there
-      // is no room for it and the roster is answering a different question.
-      val stH = h / 8
+      // is no room for it and the roster is answering a different question. At
+      // rest one contact owns the whole panel, so the supporting line takes
+      // the NAME role at real size rather than a caption (which read as
+      // illegible on the physical panel — owner, 2026-08-27). The strip is
+      // h/6: the NAME strike's line box is 21 px, exactly h/6 on 128 px (h/8
+      // clips its descenders). Its fade is its OWN, faster than the count's:
+      // gone by o = 1/3, safely before the shrinking card stops fitting the
+      // strip (the fit gate below culls at o ~ 0.47 — on the count's fade
+      // that cull would land at full alpha and pop).
+      val sa = alphaOf(1.0 - o * 3.0)
+      val stH = h / 6
       val stY = nameY + nameH + 2
-      if ca > 8 && stH >= 6 && stY + stH <= y + ch && c.state != "" then
+      if sa > 8 && stH >= 6 && stY + stH <= y + ch && c.state != "" then
         kids = Keyed("state", VLabel(x + pad, stY, cw - 2 * pad, stH, c.state,
-          TypeRole.CAPTION, TypeWeight.REGULAR, TextAlign.CENTER,
-          Palette.INK, ca)) :: kids
+          TypeRole.NAME, TypeWeight.MEDIUM, TextAlign.CENTER,
+          Palette.INK, sa)) :: kids
       Some(VGroup(ListOps.reverse(kids)))
 
   def unheardText(n: scala.Int): String =

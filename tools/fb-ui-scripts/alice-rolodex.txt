@@ -35,9 +35,13 @@ checkpoint roll-stack
 # Brighter: the neighbour's card is drawn at QUIET_ALPHA over black, so its
 # scanline sums visibly less light. Each claim is an expect (>=) paired with
 # a waitmax (<=), and each FAILS when the emphasis is inverted (quiet forced
-# to zero in rolodex.scala) — the red runs are recorded in plan 0077.
+# to zero in rolodex.scala) — the red runs are recorded in plan 0077. The
+# rollnw margin is narrow but the frames are deterministic: the 13 px caption
+# puts more black ink columns on the neighbour scanline, which pulls the
+# UN-inset red card's lit width down to 139 while the inset green card reads
+# an inkless 136 (re-measured 2026-08-27 for the caption bump).
 expect rollcw 140
-waitmax rollnw 140 1
+waitmax rollnw 137 1
 expect rollcl 600
 waitmax rollnl 600 1
 

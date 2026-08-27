@@ -288,7 +288,27 @@ the arm's-length photo as the owner's leg.
 
 - **Strike sizes and the palette on the physical panel** — both tuned
   against hardware, not a mock; the producer and `FbTypeRoles` keep each
-  a one-line change. The panel is low-resolution and **desaturates**
+  a one-line change.
+
+  > **First panel verdict, 2026-08-27:** the resting card's NAME reads
+  > well but an 11 px CAPTION does not — the state line ("3d ago") was
+  > illegible at the panel. And since one contact owns the whole 160×128
+  > at rest, the supporting line has breathing room and should be BIGGER,
+  > not nudged: the full-bleed state line now draws at NAME medium
+  > (16 px) in an h/6 strip (the NAME strike's 21 px line box — h/8
+  > clipped five pixels), with its own fade (gone by openness 1/3, before
+  > the shrinking card would cull it at full alpha), and CAPTION is 13 px
+  > everywhere (still visibly under NAME 16 — the type half of the
+  > centre-card emphasis holds). The emphasis probes were re-measured
+  > honestly for the bigger caption: green rollcw 141 / rollnw 136 /
+  > rollcl 699 / rollnl 478; quiet-forced-to-0 red rollnw 139 (the 13 px
+  > ink columns pull the un-inset card's lit width down from 146) /
+  > rollnl 778; openness-pinned-closed red rollnw 160. rollnw's waitmax
+  > re-pinned 140 → 137 (between 136 and 139 — narrow but the frames are
+  > deterministic); the 140/600 thresholds elsewhere still discriminate
+  > and stayed. 50 contact-screen goldens regenerated. Remaining by-eye:
+  > palette saturation, motion feel, the face A/B, the arm's-length
+  > photo. The panel is low-resolution and **desaturates**
   (owner, 2026-08-27): re-interpret the design language in bold, saturated
   colour — a hue that reads muted on the watch may vanish here, and the
   near-neutral `sand` is the first suspect. The palette is shared

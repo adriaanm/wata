@@ -175,7 +175,8 @@ bytes; a strike is a small int id from the Go-owned table.
 `FbTypeRoles` (`typeroles.scala`, symlink-shared to wata-mac) is the
 ONE place a `TypeRole` becomes a strike: `DISPLAY` → 30 px bold,
 `NAME` → 16 px (bold when `TypeWeight.BOLD`, else medium), `CAPTION` →
-11 px medium, `STATUS` → no strike, the 5x8 grid font. The **face is a
+13 px medium (11 px read as illegible on the physical panel — owner,
+2026-08-27), `STATUS` → no strike, the 5x8 grid font. The **face is a
 config choice**, not a constant (owner ruling 2026-08-27):
 `FbConfig.typeFace()` reads the `type_face` key — `"atkinson"`
 (default) or `"inter"`, unknown values fall back loudly — primed by
@@ -1142,8 +1143,11 @@ item ("dot2 input bus undiscovered").
 The contact screen is plan 0070's ROLODEX. At rest the panel is ONE
 CONTACT, full bleed, in that person's own colour (`Palette.forRoster` —
 the whole roster at once, so no two cards collide): the name at the
-DISPLAY role, one line of state (CAPTION) under it, the yellow unheard
-band across the top when there is one — and nothing else. No WATA
+DISPLAY role, one line of state under it at NAME medium — the resting
+card owns the whole panel, so the supporting line takes real size, and
+it fades out by openness 1/3 so no stack row ever has to hold it — the
+yellow unheard band across the top when there is one, and nothing
+else. No WATA
 title, no footer key legend, no connectivity element while the link is
 healthy (the chip, above), and the full-bleed card covers the shell's
 1 px status line. Navigating shrinks the card into a vertical stack of
@@ -1157,8 +1161,8 @@ on every card) is identical and documented at length in the file
 itself and in `docs/design/wata-watch.md`; the geometry fractions are
 this panel's own: three ~42 px rows rather than five (bigger absolute
 type than the watch — the point of the port), `REACH = 2`, the
-full-bleed name box `h/3`, the band `h/6`, the state line `h/8` (the
-watch's `h/10` is 12 px here, which clips a caption's descenders). The
+full-bleed name box `h/3`, the band `h/6`, the state line `h/6` (the
+NAME strike's 21 px line box, exactly h/6 on 128 px). The
 two files stay separate copies until the iOS client adopts the rolodex
 (plan 0077's duplication note).
 

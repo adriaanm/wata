@@ -27,11 +27,11 @@ object StrikeCheck:
     bad += band("atkinson", 30, "bold", 170, 210)
     bad += band("atkinson", 16, "bold", 90, 115)
     bad += band("atkinson", 16, "medium", 82, 106)
-    bad += band("atkinson", 11, "medium", 55, 75)
+    bad += band("atkinson", 13, "medium", 66, 86)
     bad += band("inter", 30, "bold", 178, 220)
     bad += band("inter", 16, "bold", 95, 120)
     bad += band("inter", 16, "medium", 92, 117)
-    bad += band("inter", 11, "medium", 60, 82)
+    bad += band("inter", 13, "medium", 74, 94)
     // the role table routes as stated: DISPLAY is the 30px bold of the
     // configured face (atkinson by default — no config loaded here), STATUS
     // has no strike at all.

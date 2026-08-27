@@ -25,5 +25,5 @@ object FbTypeRoles:
       else if role == TypeRole.NAME then
         val w = if weight == TypeWeight.BOLD then "bold" else "medium"
         go.strikes.strike(face, 16, w)
-      else if role == TypeRole.CAPTION then go.strikes.strike(face, 11, "medium")
+      else if role == TypeRole.CAPTION then go.strikes.strike(face, 13, "medium")
       else -1
