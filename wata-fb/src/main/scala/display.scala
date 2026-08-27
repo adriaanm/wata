@@ -86,20 +86,17 @@ object Draw:
    *  wataui's `Alpha.over`, per pixel. Opaque takes the plain store, so the
    *  common case costs nothing. Every blend on this backend funnels through
    *  here — the round-rect corners, the strike coverage, the 5x8 alpha
-   *  glyphs — which is what makes the `gamma_blend` A/B one switch: with the
-   *  config cell on, the composite happens in linear light (`Gamma.over`)
-   *  instead of the shared gamma-space `Alpha.over`. The switch lives HERE,
-   *  in the device blend path, and not in wataui: `Alpha.over` is the
-   *  vocabulary every backend agrees on, and the mac/watch painters never
-   *  take this path. */
+   *  glyphs. Deliberately GAMMA-SPACE: plan 0077's linear-light A/B
+   *  (`Gamma.over` behind a `gamma_blend` DEV row) was tried on the panel
+   *  and REJECTED (owner, 2026-08-27) — linear light thins dark-on-bright
+   *  small type until lines stop looking continuous; the gamma-space
+   *  fattening of the coverage ramp is load-bearing at these sizes. */
   def blendPixel(px: go.Bytes, x: scala.Int, y: scala.Int, color: scala.Int,
       alpha: scala.Int): Unit =
     if alpha >= 255 then setPixel(px, x, y, color)
     else if alpha > 0 then
       val under = getPixel(px, x, y)
-      if under >= 0 then
-        if FbConfig.gammaBlend() then setPixel(px, x, y, Gamma.over(under, color, alpha))
-        else setPixel(px, x, y, Alpha.over(under, color, alpha))
+      if under >= 0 then setPixel(px, x, y, Alpha.over(under, color, alpha))
 
   /** a filled rectangle with a corner radius and an alpha — wataui's `VFill`.
    *  The radius is clamped to half the shorter side, so an over-large radius
@@ -149,72 +146,6 @@ object Draw:
     hline(px, x, y + h - 1, w, color)
     fillRect(px, x, y, 1, h, color)
     fillRect(px, x + w - 1, y, 1, h, color)
-
-/** LINEAR-LIGHT compositing — `Alpha.over`'s gamma-aware variant, behind the
- *  `gamma_blend` config cell (default off = today's bytes).
- *
- *  `Alpha.over` blends the sRGB-encoded channel values directly, which
- *  under-weights the brighter side of a blend: dark ink antialiased over a
- *  bright card renders its coverage ramp too dark, reading thin and harsh.
- *  Blending in linear light is the physically-honest composite; whether it
- *  READS better on this desaturating panel is the A/B the DEV `Gamma blend`
- *  row exists for (plan 0077).
- *
- *  Mechanics: each 5/6-bit channel maps through a small sRGB→linear table
- *  (16-bit linear), the source-over runs on the linear values, and the result
- *  maps back by nearest-neighbour binary search over the same table. The
- *  tables are LITERALS — `round(65535 * srgbEOTF(v / (2^bits - 1)))`, the
- *  piecewise IEC 61966-2-1 curve — not computed at init, so determinism is
- *  by construction (nothing environmental, no float transcendentals at
- *  runtime; the blend itself is integer arithmetic). */
-object Gamma:
-  /** sRGB→linear for the 5-bit channels (r, b): strictly monotonic. */
-  val LIN5: IArray[Int] = IArray(
-    0, 164, 352, 625, 992, 1461, 2040, 2734,
-    3550, 4492, 5565, 6775, 8127, 9623, 11269, 13069,
-    15026, 17143, 19426, 21877, 24499, 27295, 30270, 33426,
-    36766, 40292, 44009, 47918, 52022, 56325, 60828, 65535)
-  /** sRGB→linear for the 6-bit channel (g): strictly monotonic. */
-  val LIN6: IArray[Int] = IArray(
-    0, 81, 161, 244, 345, 466, 609, 776,
-    965, 1180, 1420, 1687, 1980, 2301, 2651, 3030,
-    3439, 3879, 4349, 4851, 5386, 5953, 6554, 7189,
-    7858, 8562, 9302, 10078, 10890, 11739, 12626, 13551,
-    14513, 15515, 16556, 17636, 18757, 19918, 21120, 22363,
-    23648, 24974, 26344, 27756, 29211, 30710, 32253, 33840,
-    35471, 37148, 38870, 40638, 42452, 44312, 46219, 48173,
-    50174, 52223, 54320, 56465, 58659, 60901, 63193, 65535)
-
-  /** `src` at coverage `a0` over `dst`, both RGB565, composited in linear
-   *  light — the drop-in twin of `Alpha.over`, agreeing with it exactly at
-   *  a=0 and a=255. */
-  def over(dst: scala.Int, src: scala.Int, a0: scala.Int): scala.Int =
-    val a = Alpha.clamp(a0)
-    var out = dst
-    if a >= 255 then out = src
-    else if a > 0 then
-      val ia = 255 - a
-      val r = nearest(LIN5, 32,
-        (LIN5((src >> 11) & 0x1f) * a + LIN5((dst >> 11) & 0x1f) * ia) / 255)
-      val g = nearest(LIN6, 64,
-        (LIN6((src >> 5) & 0x3f) * a + LIN6((dst >> 5) & 0x3f) * ia) / 255)
-      val b = nearest(LIN5, 32,
-        (LIN5(src & 0x1f) * a + LIN5(dst & 0x1f) * ia) / 255)
-      out = (r << 11) | (g << 5) | b
-    out
-
-  /** the channel code whose linear value is nearest `lin` — binary search for
-   *  the floor, then one neighbour compare (ties keep the floor: fully
-   *  deterministic). */
-  def nearest(t: IArray[Int], n: scala.Int, lin: scala.Int): scala.Int =
-    var lo = 0
-    var hi = n - 1
-    while lo < hi do
-      val mid = (lo + hi + 1) / 2
-      if t(mid) <= lin then lo = mid else hi = mid - 1
-    var out = lo
-    if lo < n - 1 && t(lo + 1) - lin < lin - t(lo) then out = lo + 1
-    out
 
 /** the 5x8 bitmap font renderer. `bg` is drawn only when `hasBg` (the subset
  *  has no `?Color`; this is the same has-flag idiom used in the domain

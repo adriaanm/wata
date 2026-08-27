@@ -166,21 +166,14 @@ the ordinary path — plain float64 with `go.math.sqrt` (IEEE
 correctly-rounded), so the frames stay byte-identical across
 darwin/linux; pixels off the corner squares keep the plain fill.
 
-Every blend funnels through `Draw.blendPixel`, which is where the
-`gamma_blend` A/B lives (plan 0077): with the `FbConfig` cell on
-(default off — today's bytes), the source-over runs in LINEAR LIGHT via
-`Gamma.over` instead of the shared gamma-space `Alpha.over` — each
-5/6-bit channel maps through a literal 32/64-entry sRGB→linear table
-(16-bit linear), blends there, and maps back by nearest-neighbour
-binary search. The switch is deliberately in the device blend path and
-NOT in wataui: `Alpha.over` is the vocabulary every backend agrees on,
-and the mac/watch painters never take this path (wata-mac's `FbConfig`
-carries a session-local mirror cell so the shared sources compile).
-Because the round-rect corners, the strike coverage and the 5x8 alpha
-glyphs all blend through this one function, the toggle A/Bs text edges
-and card corners together — pinned by `roll-rest-gamma` (the resting
-rolodex frame with gamma on, byte-different from its off twin) and the
-`gammablend` probe.
+Every blend funnels through `Draw.blendPixel`, and it is deliberately
+GAMMA-SPACE (`Alpha.over`). Plan 0077 built the linear-light
+alternative (`Gamma.over` + a `gamma_blend` DEV row) for an on-panel
+A/B, and the owner REJECTED it (2026-08-27): linear light thins
+dark-on-bright small type until lines stop looking continuous — the
+gamma-space fattening of the coverage ramp is load-bearing at these
+sizes. The row, the config key, the LUTs and the `gammablend` probe
+were deleted with the verdict; plan 0077 records the reasoning.
 
 **Type comes in two tiers.** The rolodex design language (plan 0077)
 draws real type through **strikes**: one face at one pixel size as
@@ -189,8 +182,11 @@ advance/bearing tables, printable ASCII. They are rasterised **once at
 boot, lazily per strike**, by `go-pkgs/strikes` (pure Go,
 `golang.org/x/image/font/opentype` at `HintingNone` — x/image has no
 hinter; `HintingFull` only quantises advances, opening uneven word
-gaps at 11 px), which embeds two OFL faces: Inter and Atkinson
-Hyperlegible (Bold + Medium cuts; Atkinson's "medium" is its Regular).
+gaps at 11 px), which embeds ONE OFL face: **Atkinson Hyperlegible**
+(Bold + Regular cuts — the settled verdict of plan 0077's on-panel
+face A/B, owner 2026-08-27: Atkinson won on legibility at this
+panel's sizes, and Inter, its ttfs and the runtime `type_face` config
+switch were deleted with the ruling; plan 0077 records it).
 The `go.strikes` facade (`strikes.scala`) crosses plain ints/strings/
 bytes; a strike is a small int id from the Go-owned table.
 
@@ -198,16 +194,7 @@ bytes; a strike is a small int id from the Go-owned table.
 ONE place a `TypeRole` becomes a strike: `DISPLAY` → 30 px bold,
 `NAME` → 16 px (bold when `TypeWeight.BOLD`, else medium), `CAPTION` →
 13 px medium (11 px read as illegible on the physical panel — owner,
-2026-08-27), `STATUS` → no strike, the 5x8 grid font. The **face is a
-config choice**, not a constant (owner ruling 2026-08-27):
-`FbConfig.typeFace()` reads the `type_face` key — `"atkinson"`
-(default) or `"inter"`, unknown values fall back loudly — primed by
-`Ui.resetCells` and edited by the DEV settings panel's Type face row.
-The switch is LIVE with no machinery: `strikeFor` reads the cell per
-strike lookup and both faces rasterise lazily, so a cycle on the row
-changes the rolodex type on the next frame — pinned by the
-`settings-face-roll-atkinson`/`-inter` golden pair (the same resting
-frame in each face).
+2026-08-27), `STATUS` → no strike, the 5x8 grid font.
 
 `FbPaint.drawLabel` is the consumer: resolve the strike, measure the
 text (fractional advances summed Go-side, rounded once) to honour
@@ -284,14 +271,16 @@ explicit state machine, not a generic widget framework:
   reachable only through the kid panel's hidden development row:
   audio echo test, screen timeout, disconnect, info, plus
   everything absorbed from system-menu — the IP and cellular info
-  rows, the net test, the
-  power off / reboot-to-BL / reboot-to-EDL actions and the Type face
-  row; see "The settings device rows". Brightness, notify and the radio toggles retired to
-  the kid panel — plan 0054's de-dupe, one door per preference).
+  rows, the net test, and the
+  power off / reboot-to-BL / reboot-to-EDL actions; see "The settings
+  device rows". Brightness, notify and the radio toggles retired to
+  the kid panel — plan 0054's de-dupe, one door per preference; the
+  plan-0077 Type face and Gamma blend A/B rows retired with their
+  verdicts).
   There is deliberately no display-name row: a person's
   name is their account's, set by whoever administers the server (the
   admin interface, plan 0021), not picked from presets on a handset —
-  so the developer menu holds eleven items (twelve with Enroll) and every
+  so the developer menu holds ten items (eleven with Enroll) and every
   row is about this device. That menu outgrew the grid, so it
   renders as a scrolling window of six with `^`/`v` cues in the
   last column; the window start is derived from the selection (no
@@ -483,8 +472,11 @@ verbs, via the same `Diag` calls) — one control instead of two; the
 combination the tri-state cannot express (both radios up at once) is
 exactly what `auto` failover provides when it is needed.
 | Enroll | OK opens the enrolment QR (Back closes) | nothing external — `enrol.scala`; see "Device identity and enrolment" |
-| Type face | the rolodex face (`atkinson`/`inter`); `<`/`>` toggle — applied on the next frame and persisted at once (the timeout row's grammar) | nothing external — `FbConfig.saveTypeFace` moves the live `type_face` cell and writes the store in one call; `FbTypeRoles` resolves strikes against the cell per lookup, so the cycle is live (plan 0077). Dev-only by design: the kid panel stays four rows (plan 0053) |
-| Gamma blend | linear-light compositing for every blend (`on`/`off`, default off — today's bytes); `<`/`>` toggle, same immediate-apply grammar | nothing external — `FbConfig.saveGammaBlend` moves the live `gamma_blend` cell and writes the store in one call; `Draw.blendPixel` consults the cell per blended pixel and routes through `Gamma.over` (see "The display stack"). The on-panel A/B — whether linear light reads better on this desaturating panel, text edges especially — is the owner's (plan 0077) |
+
+(The plan-0077 Type face and Gamma blend rows lived here for the
+owner's on-panel A/Bs and are RETIRED with their verdicts — face:
+Atkinson; gamma: rejected. Their ids, 15 and 16, stay reserved like
+the other retired rows'.)
 
 Enroll is the one CONDITIONAL row: it exists only when this handset is
 configured to speak iroh, i.e. when it has an identity that needs

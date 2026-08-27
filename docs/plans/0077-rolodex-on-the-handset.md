@@ -332,6 +332,31 @@ the arm's-length photo as the owner's leg.
   > probe, `roll-rest-gamma` byte-different from its off twin (1087 px),
   > and striketest untouched (its digest pins strike bytes, not blends).
   > The A/B itself is the owner's; the handset deploys with gamma off.
+  >
+  > **Both A/Bs decided on the panel, 2026-08-27 — losers deleted:**
+  >
+  > - **FACE = Atkinson** (legibility: Atkinson Hyperlegible read better
+  >   than Inter at every size this design uses on the 160×128 panel).
+  >   Deleted with the verdict: the DEV `Type face` row (id 15), the
+  >   `type_face` config key + `saveTypeFace` (fb and the wata-mac mirror
+  >   cell), the Inter entries in `FbTypeRoles`/go-pkgs/strikes (table rows,
+  >   embedded ttfs, license), the Inter striketest bands, and the
+  >   `settings-typeface*`/`settings-face-roll-inter` scenario legs.
+  >   `FbTypeRoles.FACE` is now the one spelling.
+  > - **GAMMA BLEND rejected** ("thins small type until lines stop looking
+  >   continuous"): linear-light compositing renders a dark-on-bright
+  >   coverage ramp too dark on the bright side, and at these sizes the
+  >   gamma-space fattening of antialiased edges is load-bearing — small
+  >   strokes must read as continuous lines, not as beads. Deleted: the
+  >   `Gamma blend` row (id 16), the `gamma_blend` config key both sides,
+  >   `Gamma.over` + the sRGB LUTs, the `gammablend` probe, and the
+  >   `settings-gamma*`/`roll-rest-gamma` goldens and phases.
+  >   `Draw.blendPixel` is unconditionally `Alpha.over` again — today's
+  >   bytes, now by ruling rather than by default.
+  >
+  > The settings-menu goldens re-pinned (two rows gone shifts the window
+  > and the down-cue on the deep rows). The rolodex-fit ladder scenario
+  > stays, Atkinson-only.
 
   > **Second panel verdict, 2026-08-27 (after the type rebalance):** sizes
   > read well; the full-bleed resting card wanted the name HIGHER (dead

@@ -10,9 +10,9 @@
 wait syncing 1 900
 wait convs 1 900
 
-# the rolodex's resting frame in the DEFAULT face — the atkinson half of the
-# Type face row's live-apply pair (its inter twin is this run's last
-# checkpoint, same frame after the cycle).
+# the rolodex's resting frame in the settled face (Atkinson — the plan-0077
+# face A/B is decided, so this is the one rendering; the name is kept so the
+# golden's history reads).
 waitmax motionlive 0 90
 advance 5
 checkpoint settings-face-roll-atkinson
@@ -107,54 +107,3 @@ advance 2
 tap down
 advance 5
 checkpoint settings-reboot-edl
-
-# the Type face row (plan 0077): the face the rolodex strikes resolve
-# against — atkinson by default, cycled with </> like the timeout row
-# (immediate apply, no confirm) and persisted through the config store,
-# which phase 2 asserts came back. `FbTypeRoles` reads the config cell per
-# strike lookup, so the change is live on the next frame — no restart.
-tap down
-advance 5
-checkpoint settings-typeface
-expect typeface 1
-tap right
-advance 5
-checkpoint settings-typeface-inter
-expect typeface 2
-
-# live-apply, on pixels: back on the wata applet the same resting rolodex
-# frame now draws its text in inter — byte-different from the atkinson twin
-# pinned at the top of this run.
-tap dot1
-waitmax motionlive 0 90
-advance 5
-checkpoint settings-face-roll-inter
-
-# the Gamma blend row (plan 0077): linear-light blending behind a DEV config
-# switch, default off — the owner's on-panel A/B. Applet states persist in
-# the shell, so dot2 lands the kid panel with its selection still on the
-# development door, OK re-opens the DEV panel still on Type face, and one
-# down is the gamma row. Pin it off (waitmax — `expect` is >= and cannot
-# assert a low value), toggle it on with the timeout row's immediate-apply
-# grammar, and LEAVE it on: phase 2's expect is the restart-restore proof.
-tap dot2
-advance 2
-tap enter
-advance 2
-tap down
-advance 5
-checkpoint settings-gamma
-waitmax gammablend 1 5
-tap right
-advance 5
-checkpoint settings-gamma-on
-expect gammablend 2
-
-# live-apply, on pixels: the same resting rolodex frame again, now
-# composited in linear light — byte-different from settings-face-roll-inter
-# (identical setup but for the blend), which is what proves the switch
-# reaches the pixels and not just the store.
-tap dot1
-waitmax motionlive 0 90
-advance 5
-checkpoint roll-rest-gamma

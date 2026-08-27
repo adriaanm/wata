@@ -21,25 +21,20 @@ object StrikeCheck:
 
   def run(): Unit =
     var bad = 0
-    // every (face, size, weight) the role table can ask for resolves, and
-    // measures the same known string within a band — wide enough to survive
-    // nothing, tight enough that a wrong size or a collapsed advance fails.
+    // every (size, weight) the role table can ask for resolves, and measures
+    // the same known string within a band — wide enough to survive nothing,
+    // tight enough that a wrong size or a collapsed advance fails. One face:
+    // Atkinson, the settled verdict (plan 0077; the Inter bands died with it).
     bad += band("atkinson", 38, "bold", 220, 260)
     bad += band("atkinson", 30, "bold", 170, 210)
     bad += band("atkinson", 24, "bold", 138, 168)
     bad += band("atkinson", 16, "bold", 90, 115)
     bad += band("atkinson", 16, "medium", 82, 106)
     bad += band("atkinson", 13, "medium", 66, 86)
-    bad += band("inter", 38, "bold", 230, 272)
-    bad += band("inter", 30, "bold", 178, 220)
-    bad += band("inter", 24, "bold", 144, 176)
-    bad += band("inter", 16, "bold", 95, 120)
-    bad += band("inter", 16, "medium", 92, 117)
-    bad += band("inter", 13, "medium", 74, 94)
     // the role table routes as stated: STATUS has no strike at all, and the
     // DISPLAY fit-down ladder (38 → 30 → 24 against the box width, floor 24)
-    // steps exactly where the measured widths say it must. The widths under
-    // the default face (atkinson — no config loaded here): "Bob" 69 px at 38
+    // steps exactly where the measured widths say it must. The widths:
+    // "Bob" 69 px at 38
     // (fits 156); "Gabriella" 164 at 38, 129 at 30 (steps once);
     // "Ada Lovelace" 189 at 30, 152 at 24 (steps twice); at 100 px avail
     // even 24 overflows and the floor holds — the painter clips, the ladder

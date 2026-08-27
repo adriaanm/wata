@@ -4,11 +4,10 @@
  *  `paint.scala`; the mac's retained backend draws `VLabel` natively and
  *  never reaches the strike path, but the table compiles there unchanged.
  *
- *  The FACE is a runtime configuration, not a constant: `FbConfig.typeFace()`
- *  answers "atkinson" or "inter" (owner ruling 2026-08-27 — default Atkinson,
- *  and the on-panel A/B is a config edit plus a restart, never a rebuild).
- *  Both faces live in the go-pkgs/strikes table and rasterise lazily, so the
- *  one not configured costs nothing.
+ *  The FACE is SETTLED: Atkinson Hyperlegible, by the owner's on-panel A/B
+ *  (2026-08-27 — legibility at this panel's sizes; Inter and its config
+ *  switch are retired, plan 0077 records the verdict). `FACE` below is the
+ *  one spelling the strike table carries.
  *
  *  `STATUS` — and any (role, face) combination the strike table cannot serve
  *  — resolves to NO strike (-1), and the painter keeps the 5x8 grid font for
@@ -19,18 +18,19 @@
  *  `strikeFor` — the painter routes the DISPLAY role there itself. */
 object FbTypeRoles:
 
-  /** the strike for (role, weight) under the configured face, or -1 for the
-   *  5x8 fallback. Called per label per frame; the Go side is a scan of 12.
+  /** the settled face (owner verdict 2026-08-27). */
+  val FACE: String = "atkinson"
+
+  /** the strike for (role, weight), or -1 for the 5x8 fallback. Called per
+   *  label per frame; the Go side is a small table scan.
    *  DISPLAY never arrives here (see `displayStrikeFor`). */
   def strikeFor(role: scala.Int, weight: scala.Int): scala.Int =
     if role == TypeRole.STATUS then -1
-    else
-      val face = FbConfig.typeFace()
-      if role == TypeRole.NAME then
-        val w = if weight == TypeWeight.BOLD then "bold" else "medium"
-        go.strikes.strike(face, 16, w)
-      else if role == TypeRole.CAPTION then go.strikes.strike(face, 13, "medium")
-      else -1
+    else if role == TypeRole.NAME then
+      val w = if weight == TypeWeight.BOLD then "bold" else "medium"
+      go.strikes.strike(FACE, 16, w)
+    else if role == TypeRole.CAPTION then go.strikes.strike(FACE, 13, "medium")
+    else -1
 
   /** the full-bleed DISPLAY ladder (plan 0077 tuning, owner 2026-08-27): the
    *  resting name is as big as its card can fit — try 38 px bold, step down
@@ -41,10 +41,9 @@ object FbTypeRoles:
    *  the two cannot disagree. Deterministic and cheap: at most three
    *  measures, each a scan of the text's advances. */
   def displayStrikeFor(text: String, availW: scala.Int): scala.Int =
-    val face = FbConfig.typeFace()
-    val s1 = go.strikes.strike(face, 38, "bold")
+    val s1 = go.strikes.strike(FACE, 38, "bold")
     if go.strikes.measureText(s1, text) <= availW then s1
     else
-      val s2 = go.strikes.strike(face, 30, "bold")
+      val s2 = go.strikes.strike(FACE, 30, "bold")
       if go.strikes.measureText(s2, text) <= availW then s2
-      else go.strikes.strike(face, 24, "bold")
+      else go.strikes.strike(FACE, 24, "bold")

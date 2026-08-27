@@ -6,17 +6,6 @@
 
 wait syncing 1 900
 
-# the type face phase 1 cycled came back from the store: `FbConfig`'s cell
-# was primed to inter (2) before the first frame — the restart-restore proof
-# for the DEV panel's Type face row.
-expect typeface 2
-
-# and the gamma switch phase 1 toggled on came back the same way (primed by
-# `loadGammaBlend` in resetCells) — the Gamma blend row's restore proof. The
-# frames this phase pins are all plain text/rect draws (no blends), so gamma
-# staying on changes none of their bytes.
-expect gammablend 2
-
 # the kid panel's Bright row shows the restored 30/40.
 tap dot2
 tap down

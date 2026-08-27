@@ -15,8 +15,9 @@
 //
 // The strike table is owned here: a strike is named by a small integer id
 // resolved by Strike(face, px, weight). Each entry rasterises lazily, once
-// (sync.Once) — a face nobody looks up costs only its embedded ttf bytes,
-// which is what lets both faces ship for the owner's on-panel A/B.
+// (sync.Once) — an entry nobody looks up costs only its table row. The face
+// is settled: Atkinson Hyperlegible (owner A/B verdict 2026-08-27, plan
+// 0077; Inter was the other candidate and is retired).
 //
 // Everything crossing the boundary is plain ints, strings and []byte — the
 // shapes the Sgola facade binds. Per-glyph calls are ordinary Go calls from
@@ -38,12 +39,6 @@ import (
 	"image"
 	"image/draw"
 )
-
-//go:embed fonts/Inter-Bold.ttf
-var interBold []byte
-
-//go:embed fonts/Inter-Medium.ttf
-var interMedium []byte
 
 //go:embed fonts/AtkinsonHyperlegible-Bold.ttf
 var atkinsonBold []byte
@@ -86,30 +81,25 @@ type strike struct {
 	glyphs  [nGlyphs]glyph
 }
 
-// The table: every (face, px, weight) the role table can ask for, both faces
-// so the A/B face switch is a config change, not a rebuild. Ids are the
-// slice indices and are stable only within a process — nothing persists them.
+// The table: every (face, px, weight) the role table can ask for. One face —
+// Atkinson Hyperlegible, the owner's on-panel verdict (2026-08-27; Inter and
+// the runtime face switch retired with it, plan 0077). Ids are the slice
+// indices and are stable only within a process — nothing persists them.
 var table = []*strike{
-	{face: "inter", px: 30, weight: "bold", ttf: interBold},
-	{face: "inter", px: 16, weight: "bold", ttf: interBold},
-	{face: "inter", px: 16, weight: "medium", ttf: interMedium},
-	{face: "inter", px: 13, weight: "medium", ttf: interMedium},
 	{face: "atkinson", px: 30, weight: "bold", ttf: atkinsonBold},
 	{face: "atkinson", px: 16, weight: "bold", ttf: atkinsonBold},
 	{face: "atkinson", px: 16, weight: "medium", ttf: atkinsonRegular},
 	{face: "atkinson", px: 13, weight: "medium", ttf: atkinsonRegular},
 	// the full-bleed DISPLAY ladder's other rungs (38 is the resting card's
-	// first choice, 24 the floor; 30 above is the middle rung) — appended so
-	// the earlier ids keep their positions, and boot-lazy like everything
-	// else, so a rung no name ever needs costs only these table rows.
-	{face: "inter", px: 38, weight: "bold", ttf: interBold},
-	{face: "inter", px: 24, weight: "bold", ttf: interBold},
+	// first choice, 24 the floor; 30 above is the middle rung) — boot-lazy
+	// like everything else, so a rung no name ever needs costs only these
+	// table rows.
 	{face: "atkinson", px: 38, weight: "bold", ttf: atkinsonBold},
 	{face: "atkinson", px: 24, weight: "bold", ttf: atkinsonBold},
 }
 
 // Strike resolves (face, px, weight) to a strike id, or -1 if the table has
-// no such entry. Cheap (a scan of 8), callable per label per frame.
+// no such entry. Cheap (a scan of 6), callable per label per frame.
 func Strike(face string, px int, weight string) int {
 	for i, s := range table {
 		if s.face == face && s.px == px && s.weight == weight {

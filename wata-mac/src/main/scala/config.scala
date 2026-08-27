@@ -179,29 +179,6 @@ object FbConfig:
 
   def notifyMode(): NotifyMode = Notify.parseMode(modeC.get())
 
-  /** the handset's type-face preference (plan 0077 stage 1), present because
-   *  the shared `FbTypeRoles`/`paint.scala` and the shared DEV settings
-   *  panel's Type face row reach for it — the mac's retained backend draws
-   *  `VLabel` natively and never takes the strike path, so the face changes
-   *  nothing here and is not a stored preference: the cell exists so the
-   *  shared row compiles and reads back what it set within a session. */
-  private val faceC: sgo.Atomic[String] = sgo.atomic("atkinson")
-
-  def typeFace(): String = faceC.get()
-
-  def saveTypeFace(f: String): Unit = faceC.set(f)
-
-  /** the handset's gamma-blend switch (plan 0077), mirrored for the same
-   *  reason as `typeFace` above: the shared `display.scala` blend path and
-   *  the shared DEV panel's Gamma blend row reach for it, but the mac's
-   *  retained backend paints natively and never takes `Draw.blendPixel` —
-   *  a session-local cell, not a stored preference. */
-  private val gammaC: sgo.Atomic[Boolean] = sgo.atomic(false)
-
-  def gammaBlend(): Boolean = gammaC.get()
-
-  def saveGammaBlend(on: Boolean): Unit = gammaC.set(on)
-
   /** the user changed it in Settings: remember it for the next launch. */
   def saveNotifyMode(m: NotifyMode): Unit =
     modeC.set(Notify.spellMode(m))

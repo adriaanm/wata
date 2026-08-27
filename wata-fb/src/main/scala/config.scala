@@ -166,71 +166,6 @@ object FbConfig:
    *  cannot smuggle its mode into the next session's store. */
   def forceNotifyMode(m: NotifyMode): Unit = modeC.set(Notify.spellMode(m))
 
-  // ---- the type face (plan 0077 stage 1) -----------------------------------
-
-  /** Which face `FbTypeRoles` resolves the strikes against — "atkinson"
-   *  (default; owner ruling 2026-08-27) or "inter". A CONFIG choice, not a
-   *  constant: the DEV settings panel's Type face row cycles it, and because
-   *  `FbTypeRoles.strikeFor` reads this cell per strike lookup the change is
-   *  live on the next frame — no restart, no rebuild. Same single-cell shape
-   *  as the notify mode: `loadTypeFace` primes it (`Ui.resetCells`),
-   *  `typeFace` is the per-frame reader, `saveTypeFace` is the row's writer,
-   *  and `writeStore` stamps the cell back so an unrelated save preserves
-   *  the choice. */
-  val FACE_DEFAULT: String = "atkinson"
-  private val faceC: sgo.Atomic[String] = sgo.atomic(FACE_DEFAULT)
-
-  def loadTypeFace(): String =
-    val raw = WJson.strField(readJson(), "type_face", FACE_DEFAULT)
-    var f = raw
-    if f != "atkinson" && f != "inter" then
-      // loud, not silent: an unknown face falls back to the default and says so
-      println("config: unknown type_face \"" + raw + "\" — using " + FACE_DEFAULT)
-      f = FACE_DEFAULT
-    faceC.set(f)
-    f
-
-  def typeFace(): String = faceC.get()
-
-  /** the user cycled the DEV panel's Type face row: remember it for the next
-   *  boot. The live cell moves in the same call, so the rolodex is already
-   *  drawing the new face when the write returns. */
-  def saveTypeFace(f: String): Unit =
-    faceC.set(f)
-    writeStore(load(), loadPrefs())
-
-  // ---- gamma-aware blending (plan 0077) ------------------------------------
-
-  /** Whether `Draw.blendPixel` composites in linear light (`Gamma.over`)
-   *  rather than gamma space (`Alpha.over`) — the DEV panel's Gamma blend
-   *  row's cell, default OFF so the stock frames keep today's bytes. Two
-   *  cells like the notify mode's, for the same reason: the LIVE one is what
-   *  every blend reads per pixel and what `forceGammaBlend`'s test-only force
-   *  moves, the STORED one is what `writeStore` stamps into the file — so a
-   *  scripted force can never leak into the store through an unrelated
-   *  save. */
-  private val gammaC: sgo.Atomic[Boolean] = sgo.atomic(false)
-  private val storedGammaC: sgo.Atomic[Boolean] = sgo.atomic(false)
-
-  def loadGammaBlend(): Boolean =
-    val on = WJson.boolField(readJson(), "gamma_blend")
-    gammaC.set(on)
-    storedGammaC.set(on)
-    on
-
-  def gammaBlend(): Boolean = gammaC.get()
-
-  /** the user toggled the DEV panel's Gamma blend row: remember it for the
-   *  next boot. The live cell moves in the same call, so the very next frame
-   *  blends the new way. */
-  def saveGammaBlend(on: Boolean): Unit =
-    gammaC.set(on)
-    storedGammaC.set(on)
-    writeStore(load(), loadPrefs())
-
-  /** set the LIVE cell only — the scripted driver's force, no config I/O. */
-  def forceGammaBlend(on: Boolean): Unit = gammaC.set(on)
-
   /** the one writer: session fields first (the Zig client's file order), then
    *  the preference fields. Both halves are always written, so a caller that
    *  changed one of them has to have read the other back — which `saveSession`
@@ -239,8 +174,6 @@ object FbConfig:
 
   def toJson(s: Session, p: FbPrefs): Json =
     var fs: List[(String, Json)] = Nil
-    fs = ("gamma_blend", JBool(storedGammaC.get())) :: fs
-    fs = ("type_face", JStr(faceC.get())) :: fs
     fs = ("notify_mode", JStr(storedModeC.get())) :: fs
     fs = ("screen_timeout_idx", JInt(p.timeoutIdx.toLong)) :: fs
     fs = ("brightness", JInt(p.brightness.toLong)) :: fs
