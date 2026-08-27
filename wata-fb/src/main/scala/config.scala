@@ -170,12 +170,13 @@ object FbConfig:
 
   /** Which face `FbTypeRoles` resolves the strikes against — "atkinson"
    *  (default; owner ruling 2026-08-27) or "inter". A CONFIG choice, not a
-   *  constant, so the on-panel A/B is an edit of `type_face` in the config
-   *  file plus a restart — no rebuild, and no settings row yet (the key is
-   *  the A/B's whole surface this stage). Same single-cell shape as the
-   *  notify mode: `loadTypeFace` primes it (`Ui.resetCells`), `typeFace` is
-   *  the per-frame reader, `writeStore` stamps the cell back so an unrelated
-   *  save preserves the choice. */
+   *  constant: the DEV settings panel's Type face row cycles it, and because
+   *  `FbTypeRoles.strikeFor` reads this cell per strike lookup the change is
+   *  live on the next frame — no restart, no rebuild. Same single-cell shape
+   *  as the notify mode: `loadTypeFace` primes it (`Ui.resetCells`),
+   *  `typeFace` is the per-frame reader, `saveTypeFace` is the row's writer,
+   *  and `writeStore` stamps the cell back so an unrelated save preserves
+   *  the choice. */
   val FACE_DEFAULT: String = "atkinson"
   private val faceC: sgo.Atomic[String] = sgo.atomic(FACE_DEFAULT)
 
@@ -190,6 +191,13 @@ object FbConfig:
     f
 
   def typeFace(): String = faceC.get()
+
+  /** the user cycled the DEV panel's Type face row: remember it for the next
+   *  boot. The live cell moves in the same call, so the rolodex is already
+   *  drawing the new face when the write returns. */
+  def saveTypeFace(f: String): Unit =
+    faceC.set(f)
+    writeStore(load(), loadPrefs())
 
   /** the one writer: session fields first (the Zig client's file order), then
    *  the preference fields. Both halves are always written, so a caller that

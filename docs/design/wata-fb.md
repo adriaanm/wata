@@ -179,10 +179,12 @@ ONE place a `TypeRole` becomes a strike: `DISPLAY` → 30 px bold,
 config choice**, not a constant (owner ruling 2026-08-27):
 `FbConfig.typeFace()` reads the `type_face` key — `"atkinson"`
 (default) or `"inter"`, unknown values fall back loudly — primed by
-`Ui.resetCells`, so the on-panel A/B is a config edit plus a restart,
-no rebuild. Live switching has no machinery on purpose;
-restart-applies is the contract. Open item: no settings row exposes
-the key yet — a dev-settings row can come later if the A/B wants one.
+`Ui.resetCells` and edited by the DEV settings panel's Type face row.
+The switch is LIVE with no machinery: `strikeFor` reads the cell per
+strike lookup and both faces rasterise lazily, so a cycle on the row
+changes the rolodex type on the next frame — pinned by the
+`settings-face-roll-atkinson`/`-inter` golden pair (the same resting
+frame in each face).
 
 `FbPaint.drawLabel` is the consumer: resolve the strike, measure the
 text (fractional advances summed Go-side, rounded once) to honour
@@ -259,14 +261,14 @@ explicit state machine, not a generic widget framework:
   reachable only through the kid panel's hidden development row:
   audio echo test, screen timeout, disconnect, info, plus
   everything absorbed from system-menu — the IP and cellular info
-  rows, the net test and the
-  power off / reboot-to-BL / reboot-to-EDL actions; see "The settings
-  device rows". Brightness, notify and the radio toggles retired to
+  rows, the net test, the
+  power off / reboot-to-BL / reboot-to-EDL actions and the Type face
+  row; see "The settings device rows". Brightness, notify and the radio toggles retired to
   the kid panel — plan 0054's de-dupe, one door per preference).
   There is deliberately no display-name row: a person's
   name is their account's, set by whoever administers the server (the
   admin interface, plan 0021), not picked from presets on a handset —
-  so the developer menu holds ten items (eleven with Enroll) and every
+  so the developer menu holds eleven items (twelve with Enroll) and every
   row is about this device. That menu outgrew the grid, so it
   renders as a scrolling window of six with `^`/`v` cues in the
   last column; the window start is derived from the selection (no
@@ -458,6 +460,7 @@ verbs, via the same `Diag` calls) — one control instead of two; the
 combination the tri-state cannot express (both radios up at once) is
 exactly what `auto` failover provides when it is needed.
 | Enroll | OK opens the enrolment QR (Back closes) | nothing external — `enrol.scala`; see "Device identity and enrolment" |
+| Type face | the rolodex face (`atkinson`/`inter`); `<`/`>` toggle — applied on the next frame and persisted at once (the timeout row's grammar) | nothing external — `FbConfig.saveTypeFace` moves the live `type_face` cell and writes the store in one call; `FbTypeRoles` resolves strikes against the cell per lookup, so the cycle is live (plan 0077). Dev-only by design: the kid panel stays four rows (plan 0053) |
 
 Enroll is the one CONDITIONAL row: it exists only when this handset is
 configured to speak iroh, i.e. when it has an identity that needs
@@ -2077,7 +2080,7 @@ Three things worth stating outright:
 
 - **The settings detail area is sized to the grid it draws on.** The
   menu shows six items at two-row spacing (grid rows 2..12; a scrolling
-  window over the eleven), which leaves
+  window over the twelve), which leaves
   rows 13 and 14 — the last two of the 15-row landscape grid — for the
   selected item's detail text, so two lines is what every item gets.
   The layout number this replaced, `2 + N_ITEMS * 2 + 1` = 15, was

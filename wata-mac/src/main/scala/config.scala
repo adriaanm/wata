@@ -180,10 +180,16 @@ object FbConfig:
   def notifyMode(): NotifyMode = Notify.parseMode(modeC.get())
 
   /** the handset's type-face preference (plan 0077 stage 1), present because
-   *  the shared `FbTypeRoles`/`paint.scala` reach for it — the mac's retained
-   *  backend draws `VLabel` natively and never takes the strike path, so this
-   *  stays the default and is not a stored preference here. */
-  def typeFace(): String = "atkinson"
+   *  the shared `FbTypeRoles`/`paint.scala` and the shared DEV settings
+   *  panel's Type face row reach for it — the mac's retained backend draws
+   *  `VLabel` natively and never takes the strike path, so the face changes
+   *  nothing here and is not a stored preference: the cell exists so the
+   *  shared row compiles and reads back what it set within a session. */
+  private val faceC: sgo.Atomic[String] = sgo.atomic("atkinson")
+
+  def typeFace(): String = faceC.get()
+
+  def saveTypeFace(f: String): Unit = faceC.set(f)
 
   /** the user changed it in Settings: remember it for the next launch. */
   def saveNotifyMode(m: NotifyMode): Unit =

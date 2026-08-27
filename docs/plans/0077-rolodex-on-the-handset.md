@@ -112,7 +112,10 @@ Bold — all OFL/free, vendored under `tools/fonts/`.
 > `type_face` config key, and the `striketest` selfcheck in fb-smoke with a
 > pinned byte-determinism digest. No golden moved — no fb body emits `VLabel`
 > into a rendered frame until stage 3. Detail in `docs/design/wata-fb.md`,
-> "The display stack".
+> "The display stack". The "no settings row yet" open item closed 2026-08-27:
+> the DEV settings panel's Type face row (`SettingsLogic.TYPE_FACE`) cycles
+> and persists the key, live on the next frame since `strikeFor` reads the
+> cell per lookup — see "The settings device rows" in that doc.
 
 Whatever produces them:
 

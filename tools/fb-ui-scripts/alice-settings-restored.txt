@@ -6,6 +6,11 @@
 
 wait syncing 1 900
 
+# the type face phase 1 cycled came back from the store: `FbConfig`'s cell
+# was primed to inter (2) before the first frame — the restart-restore proof
+# for the DEV panel's Type face row.
+expect typeface 2
+
 # the kid panel's Bright row shows the restored 30/40.
 tap dot2
 tap down
