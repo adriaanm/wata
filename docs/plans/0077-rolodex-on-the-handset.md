@@ -231,6 +231,22 @@ decision, not an accident.
   than none. Then the arm's-length photo — the oracle proves it draws what
   we said; only the photo proves it is readable.
 
+> **Measured 2026-08-27 (the hardware floor):** the frame loop logs
+> `motion: fps=N frames=N span_ms=M live_ms=L` once per second while the
+> rolodex coasts (device-only, `Diag.onDevice()`). Driven on the handset by
+> evdev injection over ssh — two-press flicks, an ~9 s sustained
+> alternation, and press + value=2 repeat trains for the ramp — the panel
+> sustains **~19–20 fps** in every shape (windows of 17–20 fps, typical
+> 21 frames / ~1045 ms). Arithmetic: ~50 ms/frame = the 16 ms
+> `MOTION_FRAME_MS` sleep + ~34 ms of frame work (render + present on this
+> CPU), so the sleep is NOT the limiter — putting `MOTION_FRAME_MS` back to
+> 33 would land ~15 fps, strictly worse. Recommendation: keep 16; the lever
+> for more rate is the frame's work cost, not the pace. 20 fps is well
+> above plan 0070's 8 fps floor and the coast reads as continuous motion
+> on the shots. The repeat ramp needed no new plumbing — injected value=2
+> events impulse exactly as designed. Remaining here: the owner's by-eye
+> halves (strike sizes/palette/motion feel, face A/B, arm's-length photo).
+
 ## What changes
 
 - `tools/gen-strikes.py`, `tools/fonts/` (vendored face), and
