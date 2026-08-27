@@ -105,7 +105,11 @@ tap down
 # scrolls with. The checkpoint pins the coasted-to frame.
 wait motioncentre 11 400
 waitmax motionlive 0 400
-advance 5
+# the scrub chip lingers 18 frames past settle and its text is the wall
+# clock's — drain it before the frame is pinned (the chip's own claims
+# live in the drawn-thread scenario)
+advance 25
+waitmax thrchip 0 1
 checkpoint conv-scrolled
 
 # back up two rows (settled), then holding red past BACK_HOLD_DELETE redacts

@@ -88,7 +88,14 @@ case class WataState(
   // physical scroll, one detent per row, stepped only while the conversation
   // shows — `WataLogic.stepThreadMotion` writes `Motion.centre` back into
   // `msgSelected`, so the centre row IS what OK plays.
-  convMotion: Motion
+  convMotion: Motion,
+  // the SCRUB CHIP's visibility, in frames left (the thread's mid-scroll
+  // time chip): pinned at CHIP_LINGER_FRAMES while the conversation's
+  // motion is live, counting down to zero after it settles — a frame count
+  // on the applet's own counter (the kid panel's SPIN_FRAMES pattern), so
+  // the scripted clock pins the linger. 0 = no chip, which is the state at
+  // rest and on every other screen.
+  chipFrames: scala.Int
 )
 
 object WataLogic:
@@ -97,7 +104,7 @@ object WataLogic:
 
   def initial(): WataState =
     WataState(VContacts(), 0, 0, 0, 0, false, 0.0, false, "", "", false, false, false, false, false, 0.0,
-      false, 0.0, false, 0.0, 0, "", Nil, Motion.initial(), Motion.initial())
+      false, 0.0, false, 0.0, 0, "", Nil, Motion.initial(), Motion.initial(), 0)
 
   /** visible list rows between header and footer (bitmap grid). */
   def visibleRows(): scala.Int = FOOTER_ROW - FONT_ROWS_HEADER
@@ -106,11 +113,11 @@ object WataLogic:
   //      `copy`; the house style reconstructs the record explicitly) ----------
   def withView(s: WataState, v: WataView): WataState =
     WataState(v, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   def withSel(s: WataState, sel: scala.Int, off: scala.Int): WataState =
     WataState(s.view, sel, off, s.convContactIdx, s.msgSelected,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   /** Opens at row 0, which is the NEWEST message now that the list comes back
    *  newest first — the one somebody just pressed the LED for. It used to be
@@ -118,35 +125,35 @@ object WataLogic:
    *  had to be scrolled to the bottom before anything could be played. */
   def enterConv(s: WataState, idx: scala.Int): WataState =
     WataState(VConversation(), s.selected, s.scrollOffset, idx, 0,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "", s.pendingOneshots, s.motion, Motion.initial())
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, "", s.pendingOneshots, s.motion, Motion.initial(), 0)
 
   /** cursor move that keeps the current anchor — the per-frame reconcile's
    *  found-the-anchor path and every non-cursor wither go through here. */
   def withMsgSel(s: WataState, sel: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   /** cursor move that also RE-DECIDES the anchor — what an explicit up/down
    *  and the vanished-anchor fallback use. */
   def withMsgAnchor(s: WataState, sel: scala.Int, anchor: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, sel,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor, s.pendingOneshots, s.motion, s.convMotion)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, anchor, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   def withPtt(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
-      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      held, hold, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   /** the recording meter's level — the only field `AeCaptureLevel` moves. */
   def withCapLevel(s: WataState, level: scala.Int): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
-      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, level, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   /** `room`/`id` name what is playing, and are cleared when it stops — a
    *  playback target that outlives the playback would receipt the wrong
    *  message the next time audio ends. */
   def withPlaying(s: WataState, playing: Boolean, room: String, id: String): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
-      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.pttHeld, s.pttHoldTime, playing, room, id, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer, s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   /** the full status-flash tuple (hold + timer + the four flash flags); the
    *  play-failure CAUSE rides along unchanged. */
@@ -154,7 +161,7 @@ object WataLogic:
                 sendErr: Boolean, sendOk: Boolean, playErr: Boolean, micErr: Boolean): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
       s.pttHeld, hold, s.playing, s.playingRoom, s.playingId, sendErr, sendOk, playErr, s.noAudio, micErr, timer, s.backHeld, s.backHoldTime,
-      s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   /** a play that failed: the flash, its cause, and `playing` dropped — a
    *  playback indicator that outlives the playback is a lie. */
@@ -162,36 +169,42 @@ object WataLogic:
                   timer: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
       s.pttHeld, s.pttHoldTime, playing, "", "", s.sendError, s.sendOk, playErr, noAudio, s.micError, timer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   def withOk(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      s.backHeld, s.backHoldTime, held, hold, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   def withBack(s: WataState, held: Boolean, hold: scala.Double): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion)
+      held, hold, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, s.chipFrames)
 
   def withPendingOneshots(s: WataState, pending: List[Action]): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, pending, s.motion, s.convMotion)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, pending, s.motion, s.convMotion, s.chipFrames)
 
   /** the motion integrator's field, alone — what the impulse feed and the
    *  per-frame `Ui.stepMotion` write (plan 0077 stage 2, FB-MOTION-PUMP). */
   def withMotion(s: WataState, m: Motion): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, m, s.convMotion)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, m, s.convMotion, s.chipFrames)
+
+  /** the scrub chip's frame counter, alone (`stepThreadMotion`'s write). */
+  def withChipFrames(s: WataState, n: scala.Int): WataState =
+    WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
+      s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, s.convMotion, n)
 
   /** the conversation motion's field, alone — the thread's impulse feed and
    *  the per-frame `stepThreadMotion` write (plan 0078). */
   def withConvMotion(s: WataState, m: Motion): WataState =
     WataState(s.view, s.selected, s.scrollOffset, s.convContactIdx, s.msgSelected,
       s.pttHeld, s.pttHoldTime, s.playing, s.playingRoom, s.playingId, s.sendError, s.sendOk, s.playError, s.noAudio, s.micError, s.statusTimer,
-      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, m)
+      s.backHeld, s.backHoldTime, s.okHeld, s.okHoldTime, s.captureLevel, s.msgAnchorId, s.pendingOneshots, s.motion, m, s.chipFrames)
 
   // ---- input (needs the snapshot + queues) -----------------------------------
   /** full input with per-frame context (snapshot + queues). Returns new state.
@@ -233,6 +246,15 @@ object WataLogic:
     case _: KDown => withMotion(s, Motion.impulse(s.motion, MotionAxes.V, 1.0))
     case _: KUp   => withMotion(s, Motion.impulse(s.motion, MotionAxes.V, -1.0))
     case _        => s
+
+  /** the scrub chip's linger after the motion settles: ~600 ms of frames
+   *  (18 × the 33 ms pace — a FRAME count on the applet's own counter, the
+   *  kid panel's SPIN_FRAMES pattern, so the scripted clock pins it). */
+  val CHIP_LINGER_FRAMES = 18
+
+  /** is the scrub chip's window open (live motion pins it, the linger drains
+   *  it)? The body still needs a centre row with a stamp to actually draw. */
+  def chipShowing(s: WataState): Boolean = s.chipFrames > 0
 
   /** the thread's shove (plan 0078): the same feel, one detent per row —
    *  down moves toward older rows, exactly where the old discrete cursor
@@ -581,10 +603,21 @@ object WataLogic:
       var out = withConvMotion(w, m)
       if sel != w.msgSelected then
         out = withMsgAnchor(out, sel, anchorAtRow(snap, w.convContactIdx, sel, synth))
+      // the scrub chip's window: pinned open while the motion is live, then
+      // a linger countdown so the settled time can still be read; the chip
+      // is never shown at rest.
+      val cf =
+        if Motion.live(m) then CHIP_LINGER_FRAMES
+        else if out.chipFrames > 0 then out.chipFrames - 1
+        else 0
+      if cf != out.chipFrames then out = withChipFrames(out, cf)
       out
-    else if Motion.centre(w.convMotion, count) != w.msgSelected || Motion.live(w.convMotion) then
-      withConvMotion(w, Motion.placeAt(w.convMotion, w.msgSelected))
-    else w
+    else
+      var out = w
+      if Motion.centre(w.convMotion, count) != w.msgSelected || Motion.live(w.convMotion) then
+        out = withConvMotion(out, Motion.placeAt(out.convMotion, w.msgSelected))
+      if out.chipFrames != 0 then out = withChipFrames(out, 0)
+      out
 
   /** the last index, or 0 for an empty list (which renders no rows anyway). */
   def clampIdx(i: scala.Int, count: scala.Int): scala.Int =
@@ -892,7 +925,17 @@ object WataLogic:
       kids = Keyed("empty", VText(3, 6, "No messages", Color.midGray)) ::
         (Keyed("footer", VText(0, FOOTER_ROW, "ESC back", Color.midGray)) :: Nil)
     else
-      kids = Keyed("rows", Thread.body(rows, n, s.convMotion, Display.W, Display.H)) :: Nil
+      // the scrub chip's text: the CENTRE row's compact timestamp, while
+      // the chip window is open (live motion + the linger) — "" hides it,
+      // including while a synthetic outbox row (scrub "") is the centre.
+      val chip =
+        if chipShowing(s) then
+          Thread.rowAt(rows, Motion.centre(s.convMotion, n)) match
+            case r: Some[ThreadRow] => r.value.scrub
+            case None => ""
+        else ""
+      kids = Keyed("rows", Thread.body(rows, n, s.convMotion, Display.W,
+        Display.H, chip)) :: Nil
     VGroup(ListOps.reverse(Keyed("header",
       VText(0, 0, clip(header, 20), Color.cyan)) :: kids))
 

@@ -33,6 +33,17 @@ identical 5-minute run: ["25m","","30m","",""]
 interloper breaks the run: ["2h","Mon","2h"]
 blanks never match: ["","","3h",""]
 single weekday for last week: ["Fri","",""]
+== stamps: the scrub chip (exact time + coarse age) ==
+scrub future +5s -> "12:00"
+scrub 0s -> "12:00"
+scrub 2h -> "10:00"
+scrub 23h59m -> "12:01"
+scrub 24h -> "12:00 1d"
+scrub 3d -> "12:00 3d"
+scrub 13d23h -> "13:00 13d"
+scrub 14d -> "12:00 2w"
+scrub 20d -> "12:00 2w"
+scrub 400d -> "12:00 57w"
 == delivery: the squares ==
 none -> -,-
 queued -> hollow,hollow

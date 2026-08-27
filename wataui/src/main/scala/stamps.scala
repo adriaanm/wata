@@ -65,6 +65,27 @@ object Stamps:
     val pad = if m < 10 then "0" else ""
     "" + h + ":" + pad + m
 
+  /** THE SCRUB CHIP's spelling (the thread's mid-scroll time chip): the
+   *  exact clock time, plus a coarse age once the message is older than
+   *  "today" — approximated as UNDER 24 HOURS, the same rule `label` uses
+   *  and for the same reason (no timezone on the handset). The age is the
+   *  day count under two weeks and the week count beyond:
+   *
+   *      age < 24 h      "14:32"
+   *      age < 14 d      "14:32 3d"     (1d .. 13d)
+   *      beyond          "14:32 2w"     (2w, 3w, ...)
+   *
+   *  A FUTURE timestamp clamps into the today form, like `label`'s clamp —
+   *  the 1970-boot handset and the harness's virtual clock both land
+   *  there. */
+  def scrub(nowMs: Long, ts: Long): String =
+    var age = nowMs - ts
+    if age < 0L then age = 0L
+    if age < DAY_MS then exact(ts)
+    else if age < 14L * DAY_MS then
+      exact(ts) + " " + (age / DAY_MS).toInt + "d"
+    else exact(ts) + " " + (age / (7L * DAY_MS)).toInt + "w"
+
   /** consecutive identical labels collapse to the FIRST — the list is in
    *  render order (the thread's is newest first, top down), so a burst's one
    *  stamp sits on its newest row. Blanks stay blank and never match. */

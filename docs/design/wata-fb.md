@@ -1266,8 +1266,8 @@ shared verbatim with wata-mac (a symlink, like `rolodex.scala`), split
 the same way: `Thread.rows(snap, conv, selfId, nowMs, playingId,
 unsent, undelivered)` reads the snapshot once into a `List[ThreadRow]`
 — plain data, so `WATCH-DRAWN-THREAD` becomes a geometry file — and
-`Thread.body(rows, count, motion, w, h)` is pure geometry from that
-list plus a `Motion`.
+`Thread.body(rows, count, motion, w, h, chip)` is pure geometry from
+that list plus a `Motion` (and the scrub chip's text, "" = hidden).
 
 - **Six ~21 px rows** (`VISIBLE = 6`, `rowH = h/6`), the centre band at
   `centreY = 53`. The bar field spans `x = 38..144`: a fixed LEFT stamp
@@ -1300,6 +1300,31 @@ list plus a `Motion`.
   the playing row's stamp is `Stamps.exact` — hh:mm — in yellow, which
   is also the play feedback (see "Outbox marks" above). A favourite
   star renders past the bar's outer end (render only).
+- **The scrub chip** (owner ask 2026-08-27: while scrolling, the time is
+  readable in a STABLE position, updating in place): the CENTRE row's
+  compact timestamp — `Stamps.scrub`, the third pure stamp rule: exact
+  time under 24 h ("14:32"), plus the day count under two weeks
+  ("14:32 3d"), the week count beyond ("14:32 2w") — in the dark-chip
+  vocabulary the connectivity chip established (translucent dark
+  rounded box, white CAPTION text), fixed in panel space at the top of
+  the message area (`Thread.CHIP_Y`, below the shell's header, centred
+  over the bar field so the stamp column stays clear). It updates from
+  `Motion.centre` each frame, so it scrubs in place while rows fly.
+  Visibility is `WataState.chipFrames`: pinned at `CHIP_LINGER_FRAMES`
+  (18 ≈ 600 ms) while the conversation's motion is live, draining to
+  zero after settle — a frame count on the applet's own counter (the
+  kid panel's SPIN_FRAMES pattern), so the scripted clock pins the
+  linger; never shown at rest, and a synthetic outbox centre (scrub
+  "") hides it. The chip's hh:mm is the WALL clock's (the playing
+  stamp's caveat), so it is pinned by probes, not goldens: `thrchip`
+  (the window, state) and `thrchw` (near-white ink over the bar
+  field's top — text only: neither the chip's dark fill nor a bar
+  bleeding through it reads near-white), with no checkpoint taken
+  while the chip shows; the linger seen to fail (`CHIP_LINGER_FRAMES`
+  forced to 0 → the settle-frame `expect thrchip 1` red) before the
+  green was believed. mac-smoke regexes the chip label's "h:mm" shape
+  in the native tree and its absence after the linger. The per-row
+  stamp column is untouched.
 - **The thread scrolls on the motion integrator**: `WataState.convMotion`
   is a second `Motion`, stepped by `WataLogic.stepThreadMotion` (inside
   the shared `stepMotions`) only while the conversation shows, impulses
@@ -1966,7 +1991,7 @@ sections):
 | `rolodex` | plan 0077 stages 3+4: the rendered rolodex — resting card, mid-opening frame, aligned open stack with the centre-emphasis pixel claims, mid-roll frame, settle back to full bleed, and OK opening whoever is centred (see "The rolodex"). |
 | `rolodex-fit` | the full-bleed DISPLAY fit-down ladder on a real card: "Gabriella" overflows the 38 px rung against the card's usable width and rests at 30, goldened at full bleed (see "The rolodex"). |
 | `conversation-actions` | the drawn thread's own inputs: alice sends thirteen clips, flicks the centre deep into the list (twelve rapid taps coast to detent 11 on the fixed clock — the physics, pinned as such), redacts the centre row by holding red past `BACK_HOLD_DELETE`, and favorites another by holding OK past `OK_HOLD_FAVORITE`; bob then receives and plays one. Goldens the resting thread, the flicked window, the post-redaction thread, the starred row, and the played ink. Bob's goldens carry alice's star too, which is what pins the marker travelling as ordinary room state. |
-| `drawn-thread` | plan 0078's pixel claims via the `thr*` probes (see "The drawn thread"): the mixed three-sender thread with collapsed stamps, the unheard full-ink centre, the play round-trip (yellow exact stamp, then the receipt's ink drop to a third), the refused red square after `failnext`'s 4xx, and the queued hollow squares under a 500. |
+| `drawn-thread` | plan 0078's pixel claims via the `thr*` probes (see "The drawn thread"): the mixed three-sender thread with collapsed stamps, the unheard full-ink centre, the play round-trip (yellow exact stamp, then the receipt's ink drop to a third), the refused red square after `failnext`'s 4xx, the queued hollow squares under a 500, and the scrub chip (`thrchip`/`thrchw`): up on the impulse, held through the linger past settle, gone after, hidden over a synthetic centre. |
 | `cursor-anchor` | the message cursor's event-id anchoring, via the `msgsel` probe: an idle centre on row 0 stays on 0 through an arrival (tracking newest), a centre moved one row down keeps the SAME message as an arrival shifts its index from 1 to 2, and redacting the anchored message falls back to the nearest surviving row. Goldens the settled centre two rows down. |
 | `group-list` | plan 0018's list rendering: the `group` directive mints "kids" through `POST /_wata/v1/group` (server-stamped, both members joined server-side), and the goldens pin the roster `[Family, kids, Bob]` and the opened group view titled by the stamp's name. |
 | `dm-roundtrip` | the canonical-DM flow (plan 0007) rendered: alice selects bob's ROOMLESS roster row, the first PTT send resolves the room through `POST /_wata/v1/dm`, bob receives with an unplayed badge, receipts, plays, replies, and alice's second session pins the reply and the badge clearing. Goldens the roster before/after, both conversation views, and the badge lifecycle. |

@@ -69,6 +69,10 @@ case class ThreadRow(
   stamp: String,
   // the exact hh:mm, drawn in yellow while `playing`
   exactStamp: String,
+  // the scrub chip's spelling for this row (`Stamps.scrub` — exact time,
+  // plus a coarse age beyond today); "" on a synthetic outbox row, which
+  // hides the chip while it is the centre.
+  scrub: String,
   playing: Boolean,
   favorite: Boolean
 )
@@ -122,7 +126,7 @@ object Thread:
   // ---- the screen -----------------------------------------------------------
 
   def body(rows: List[ThreadRow], count: scala.Int, m: Motion,
-      w: scala.Int, h: scala.Int): View =
+      w: scala.Int, h: scala.Int, chip: String): View =
     val p = Motion.offset(m)
     val centre = Motion.centre(m, count)
     var lo = centre - REACH
@@ -147,7 +151,37 @@ object Thread:
     val ny = centreY(h) + (rowH(h) - nh) / 2
     acc = Keyed("nub-r", VFill(w - nw, ny, nw, nh, nw / 2, Color.white, 255)) :: acc
     acc = Keyed("nub-l", VFill(0, ny, nw, nh, nw / 2, Color.white, 255)) :: acc
+    // the SCRUB CHIP, on top of everything: while scrolling, the centre
+    // row's time in a STABLE panel spot, updating in place ("" = hidden —
+    // at rest, and while a synthetic outbox row is the centre).
+    if chip != "" then acc = Keyed("chip", chipView(chip, w)) :: acc
     VGroup(ListOps.reverse(acc))
+
+  /** the scrub chip (owner ask 2026-08-27): the centre row's timestamp,
+   *  compact (`Stamps.scrub`), in the dark-chip vocabulary the rolodex's
+   *  connectivity chip established — a translucent dark rounded box with
+   *  white CAPTION text. Fixed in PANEL space at the top of the message
+   *  area (below the shell's 8 px header line), centred over the bar field
+   *  so it never covers the stamp column; rows fly under it and the text
+   *  scrubs in place from `Motion.centre` each frame. The box is sized to
+   *  the text it holds; the per-row stamp column is untouched. */
+  val CHIP_Y = 10
+  val CHIP_PAD = 4
+
+  def chipView(text: String, w: scala.Int): View =
+    val st = FbTypeRoles.strikeFor(TypeRole.CAPTION, TypeWeight.MEDIUM)
+    val lineBox =
+      if st >= 0 then go.strikes.ascent(st) + go.strikes.descent(st)
+      else Font.GLYPH_H + 4
+    val tw =
+      if st >= 0 then go.strikes.measureText(st, text)
+      else 8 * Font.GLYPH_W
+    val cw = tw + 2 * CHIP_PAD
+    val cx = (fieldX0(w) + fieldX1(w)) / 2 - cw / 2
+    VGroup(Keyed("chipbg", VFill(cx, CHIP_Y, cw, lineBox, 3, Color.black, 210)) ::
+      (Keyed("chiptxt", VLabel(cx + CHIP_PAD, CHIP_Y, tw, lineBox, text,
+        TypeRole.CAPTION, TypeWeight.MEDIUM, TextAlign.CENTER,
+        Color.white, 255)) :: Nil))
 
   def nubW(w: scala.Int): scala.Int =
     val n = w / 40
@@ -243,11 +277,11 @@ object Thread:
     var qi = 0
     while qi < nq do
       acc = ThreadRow("queued-" + qi, 0L, true, Color.white, false,
-        Delivery.QUEUED, "", "", false, false) :: acc
+        Delivery.QUEUED, "", "", "", false, false) :: acc
       qi += 1
     if WataLogic.convKeyed(undelivered, conv) then
       acc = ThreadRow("refused", 0L, true, Color.white, false,
-        Delivery.REFUSED, "", "", false, false) :: acc
+        Delivery.REFUSED, "", "", "", false, false) :: acc
     var cur = conv.messages
     var going = true
     while going do
@@ -276,7 +310,7 @@ object Thread:
       if nowMs >= m.timestamp then Stamps.exact(m.timestamp)
       else Stamps.label(nowMs, m.timestamp)
     ThreadRow(m.id, m.durationMs, own, col, unheard, delivery,
-      Stamps.label(nowMs, m.timestamp), exact,
+      Stamps.label(nowMs, m.timestamp), exact, Stamps.scrub(nowMs, m.timestamp),
       playingId != "" && m.id == playingId, m.isFavorite)
 
   /** apply the collapse over the built list (render order, newest first):
@@ -301,7 +335,7 @@ object Thread:
 
   def withStamp(r: ThreadRow, stamp: String): ThreadRow =
     ThreadRow(r.key, r.durationMs, r.own, r.color, r.unheard, r.delivery,
-      stamp, r.exactStamp, r.playing, r.favorite)
+      stamp, r.exactStamp, r.scrub, r.playing, r.favorite)
 
   def stampsOf(rs: List[ThreadRow]): List[String] =
     var acc: List[String] = Nil

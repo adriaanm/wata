@@ -380,6 +380,10 @@ clock or a backend — "now" is always passed in.
   header); the weekday ("Mon".."Sun") under a week; the date
   ("3 Jun") beyond. A future timestamp clamps to "now" (the 1970-boot
   handset). `Stamps.exact(ts)` is the playing row's hh:mm.
+  `Stamps.scrub(nowMs, ts)` is the thread's scrub-chip spelling: the
+  exact time under 24 h ("14:32"), plus the day count under two weeks
+  ("14:32 3d") and the week count beyond ("14:32 2w"); a future
+  timestamp clamps into the today form.
   `Stamps.collapse(labels)` blanks consecutive identical labels after
   the first, so a burst carries one stamp; blanks never match, so two
   collapsed runs cannot merge across an interloper. Civil-date math is
@@ -392,7 +396,8 @@ clock or a backend — "now" is always passed in.
 Both are pinned by their own oracle, `rulesoracle.scala`'s
 `ThreadRulesOracle.report()` — the DiffOracle discipline again: every
 age boundary both sides at a fixed hand-checkable NOW (2026-08-27
-12:00Z, a Thursday), the exact-time spellings, five collapse cases and
+12:00Z, a Thursday), the exact-time and scrub spellings, five collapse
+cases and
 all five delivery states, byte-diffed against
 `tools/wataui-rules.expected.txt` by `tools/wataui-tests.sh` check 4/4
 (`wata-fb ruletest` is the driver).

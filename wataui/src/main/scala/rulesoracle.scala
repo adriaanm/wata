@@ -7,7 +7,10 @@
  *
  *   - the STAMP BACK-OFF (`Stamps`): every age boundary, both sides — the
  *     minute, the 5-minute, the quarter-hour, the hour, the weekday, the
- *     date — plus the future-timestamp clamp, the exact-time spelling, and
+ *     date — plus the future-timestamp clamp, the exact-time spelling, the
+ *     SCRUB CHIP's spelling (`Stamps.scrub`: exact time under 24h, day
+ *     count under two weeks, week count beyond — every boundary both
+ *     sides), and
  *     the collapse (a burst inside a minute carries one stamp; blanks never
  *     match; an interleaved run does not collapse across the interloper).
  *   - the DELIVERY SQUARES (`Delivery`): all five states, both squares.
@@ -64,6 +67,17 @@ object ThreadRulesOracle:
       "" :: ("" :: ("3h" :: ("3h" :: Nil)))))
     b.append(collapseLine("single weekday for last week",
       "Fri" :: ("Fri" :: ("Fri" :: Nil))))
+    b.append("== stamps: the scrub chip (exact time + coarse age) ==\n")
+    b.append(scrubLine("future +5s", 5000L))
+    b.append(scrubLine("0s", 0L))
+    b.append(scrubLine("2h", -7200000L))
+    b.append(scrubLine("23h59m", -86340000L))
+    b.append(scrubLine("24h", -86400000L))
+    b.append(scrubLine("3d", -259200000L))
+    b.append(scrubLine("13d23h", -1206000000L))
+    b.append(scrubLine("14d", -1209600000L))
+    b.append(scrubLine("20d", -1728000000L))
+    b.append(scrubLine("400d", -34560000000L))
     b.append("== delivery: the squares ==\n")
     b.append(deliveryLine(Delivery.NONE))
     b.append(deliveryLine(Delivery.QUEUED))
@@ -74,6 +88,9 @@ object ThreadRulesOracle:
 
   def stampLine(name: String, offset: Long): String =
     "age " + name + " -> \"" + Stamps.label(NOW, NOW + offset) + "\"\n"
+
+  def scrubLine(name: String, offset: Long): String =
+    "scrub " + name + " -> \"" + Stamps.scrub(NOW, NOW + offset) + "\"\n"
 
   def collapseLine(name: String, labels: List[String]): String =
     name + ": [" + joinQuoted(Stamps.collapse(labels)) + "]\n"

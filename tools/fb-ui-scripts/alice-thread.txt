@@ -47,10 +47,25 @@ expect thrstc 12
 waitmax thrstn 0 1
 checkpoint thread-mixed
 
-# one detent down: charlie's unheard bar at the centre — full ink + cap
+# one detent down: charlie's unheard bar at the centre — full ink + cap.
+# The SCRUB CHIP rides the move (owner ask): from the first impulse the
+# centre row's compact time hangs in the dark chip at the top of the
+# message area — white ink over the bar field (thrchw counts NEAR-WHITE
+# pixels there, which neither the chip's dark fill nor a bar bleeding
+# through it produces) — and it LINGERS ~600ms (18 frames on the applet's
+# own counter) past settle, then goes. Its hh:mm is the real wall clock's
+# (thrylw's caveat), so the chip is pinned by probes and no checkpoint is
+# taken while it shows.
 tap down
+expect thrchip 1
+expect thrchw 12
 wait motioncentre 1 200
 waitmax motionlive 0 200
+# settled, still inside the linger window: the chip holds
+expect thrchip 1
+# the linger drains on the frame counter; only then is the frame a golden
+advance 25
+waitmax thrchip 0 1
 expect thrcl 40
 checkpoint thread-unheard-centre
 
@@ -101,3 +116,14 @@ advance 90
 expect thrsq 8
 waitmax thrsq 8 1
 checkpoint thread-queued
+
+# a SYNTHETIC centre hides the chip: moving onto the refused row opens the
+# chip's window (thrchip — the counter runs) but its scrub is empty, so no
+# chip is drawn — the box over the bar field stays free of white ink.
+tap down
+wait motioncentre 1 200
+expect thrchip 1
+waitmax thrchw 0 1
+waitmax motionlive 0 200
+advance 25
+waitmax thrchip 0 1

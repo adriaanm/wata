@@ -148,3 +148,11 @@ where papa has played), and a played-to-a-third received bar in the
 sender's hue; the papa DM draws the own-bar column with mixed square
 states. The panel confirms the eye-tunable constants read well at
 160x128 — no retune needed on first sight.
+
+**Follow-up (owner ask, 2026-08-27): the scrub chip.** While scrolling,
+the centre row's time reads in a STABLE spot, updating in place: a dark
+chip at the top of the message area showing `Stamps.scrub(now, ts)` —
+exact time under 24 h, "+Nd" under two weeks, "+Nw" beyond, the third
+pure stamp rule in wataui — live during motion, lingering ~600 ms after
+settle on the applet's own frame counter, never at rest. Detail and the
+oracle story in wata-fb.md ("The drawn thread").

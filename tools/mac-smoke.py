@@ -314,6 +314,28 @@ def run(tmp):
         c.ok(not any('OK play' in l for l in t3),
              "tree 3: the old footer key legend is back")
 
+        # ---- the scrub chip (owner ask 2026-08-27) ----------------------------
+        # a down impulse makes the thread's motion live, and the centre row's
+        # compact timestamp appears in a dark chip fixed at the top of the
+        # message area, updating in place while rows fly, lingering ~600ms
+        # past settle, then gone — never at rest. The text is the real wall
+        # clock's, so it is matched by shape (the today form, "h:mm"); the
+        # only other "h:mm" labels are the playing row's yellow stamp, and
+        # nothing is playing yet.
+        sess.cmd("key down press", lambda l: l == "key ok")
+        sess.cmd("key down release", lambda l: l == "key ok")
+        # frames pump only inside `wait` — a short one leaves the coast live
+        sess.cmd("wait 100", lambda l: l == "waited 100")
+        t3c = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
+        c.line(t3c, lambda l: re.fullmatch(
+            r'NSTextField \d+ \d+ \d+ \d+ "\d+:\d\d"', l.strip()),
+            f"tree 3c: no scrub chip label while the thread motion is live, got {t3c!r}")
+        sess.cmd("wait 2500", lambda l: l == "waited 2500")
+        t3d = tree_of(sess.cmd("tree", lambda l: l == "tree end"))
+        c.ok(not any(re.fullmatch(r'NSTextField \d+ \d+ \d+ \d+ "\d+:\d\d"', l.strip())
+                     for l in t3d),
+             f"tree 3d: the scrub chip is still up after the linger, got {t3d!r}")
+
         # ---- audio: PLAY (plan 0033) -----------------------------------------
         # OK on the centre row really plays it: the runtime fetches the ogg,
         # the action loop hands `AcPlay` to the audio thread this client

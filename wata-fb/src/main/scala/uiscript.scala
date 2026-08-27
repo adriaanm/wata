@@ -757,6 +757,20 @@ object UiScript:
     else if name == "thrylw" then scanYellow(px, thrRowY(0), 6, Thread.STAMP_W)
     else if name == "thrstc" then scanLitRange(px, thrRowY(0), 6, Thread.STAMP_W)
     else if name == "thrstn" then scanLitRange(px, thrRowY(1), 6, Thread.STAMP_W)
+    //   thrchip      is the scrub chip's WINDOW open (the applet's frame
+    //                counter — live motion pins it, the linger drains it)?
+    //                The state probe, so a disabled linger is a red at the
+    //                settle frame without any pixel having to prove absence.
+    //   thrchw       NEAR-WHITE pixels in the chip's box (the top of the
+    //                message area, over the bar field) — the chip's white
+    //                CAPTION text, pinned as ink rather than text: the
+    //                hh:mm it spells is the real wall clock's (thrylw's
+    //                caveat), so neither the text nor the frame can be a
+    //                golden while the chip shows. Near-white excludes both
+    //                the dark chip fill and anything bleeding through it.
+    else if name == "thrchip" then boolProbe(WataLogic.chipShowing(Shell.wataState(Ui.shellState)))
+    else if name == "thrchw" then scanWhiteBox(px, Thread.fieldX0(Display.W),
+      Thread.fieldX1(Display.W), Thread.CHIP_Y, Thread.CHIP_Y + 20)
     else if name == "rollcw" then scanLit(px, Rolodex.centreY(Display.H) + Rolodex.rowH(Display.H) / 2)
     else if name == "rollnw" then scanLit(px, Rolodex.centreY(Display.H) - Rolodex.rowH(Display.H) / 2)
     else if name == "rollcl" then scanLum(px, Rolodex.centreY(Display.H) + Rolodex.rowH(Display.H) / 2)
@@ -776,6 +790,27 @@ object UiScript:
       while x < x1 do
         if pixSum(px, x, y) > 4 then n += 1
         x += 1
+    n
+
+  /** NEAR-WHITE pixels in the box `[x0,x1) x [y0,y1)`: all three channels
+   *  high — the chip's full-strength white text, and not the ~18% of a bar
+   *  bleeding through the chip's 210-alpha dark fill. */
+  def scanWhiteBox(px: go.Bytes, x0: scala.Int, x1: scala.Int,
+      y0: scala.Int, y1: scala.Int): scala.Int =
+    var n = 0
+    if px.length >= Display.BYTES then
+      var y = y0
+      while y < y1 do
+        var x = x0
+        while x < x1 do
+          val i = (y * Display.W + x) * 2
+          val v = (px(i).toInt & 0xff) | ((px(i + 1).toInt & 0xff) << 8)
+          val r = (v >> 11) & 31
+          val g = (v >> 5) & 63
+          val bch = v & 31
+          if r >= 20 && g >= 45 && bch >= 20 then n += 1
+          x += 1
+        y += 1
     n
 
   /** YELLOW pixels in `[x0, x1)` on scanline `y`: lit in red+green with a
