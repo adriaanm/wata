@@ -138,7 +138,9 @@ import sgo.add  // the Atomic[Long] add extension (the virtual clock cell)
  *  (the applying wait's frame count, same shift: 0 = not applying), chargebad
  *  (plan 0073: 1 while the debounced charge-anomaly mark is up), typeface
  *  (the configured type face from `FbConfig`'s cell — 1 atkinson, 2 inter —
- *  what the DEV panel's Type face row edits and a restart restores), and the
+ *  what the DEV panel's Type face row edits and a restart restores),
+ *  gammablend (the linear-light blend switch, same shape — 1 off, 2 on;
+ *  the DEV panel's Gamma blend row), and the
  *  motion-pump probes (plan 0077): motioncentre (the rolodex integrator's
  *  centre index against the live conversation count — the selection itself,
  *  since the pump writes it into `selected`), motionlive (1 while the
@@ -707,6 +709,14 @@ object UiScript:
     // face row edits — so a restarted phase expecting 2 IS the proof that
     // the cycle reached the store and came back.
     else if name == "typeface" then faceProbe()
+    // the gamma-blend switch (plan 0077): 1 = off (today's gamma-space
+    // blends), 2 = on (linear light) — same shifted spelling as typeface so
+    // both directions assert strongly (`expect gammablend 2` for on,
+    // `waitmax gammablend 1 N` for off; the parser reads unsigned only).
+    // Reads `FbConfig`'s live cell, the same one every `Draw.blendPixel`
+    // consults — and the persisted authority the DEV panel's Gamma blend row
+    // edits, so a restarted phase expecting 2 IS the restore proof.
+    else if name == "gammablend" then gammaProbe()
     // the rolodex motion integrator (plan 0077): the centre index the physics
     // has converged on — the selection itself, since the pump writes it into
     // `selected` — and whether it is still moving. The fixed 33ms virtual
@@ -759,6 +769,10 @@ object UiScript:
   /** the configured type face as a script number: 1 atkinson, 2 inter. */
   def faceProbe(): scala.Int =
     if FbConfig.typeFace() == "inter" then 2 else 1
+
+  /** the gamma-blend cell as a script number: 1 off, 2 on. */
+  def gammaProbe(): scala.Int =
+    if FbConfig.gammaBlend() then 2 else 1
 
   /** 1 once the net test's verdicts are IN THE APPLET's state. The probes run
    *  on a goroutine of their own, so "OK pressed" and "the row shows a result"

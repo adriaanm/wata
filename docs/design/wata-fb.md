@@ -166,6 +166,22 @@ the ordinary path — plain float64 with `go.math.sqrt` (IEEE
 correctly-rounded), so the frames stay byte-identical across
 darwin/linux; pixels off the corner squares keep the plain fill.
 
+Every blend funnels through `Draw.blendPixel`, which is where the
+`gamma_blend` A/B lives (plan 0077): with the `FbConfig` cell on
+(default off — today's bytes), the source-over runs in LINEAR LIGHT via
+`Gamma.over` instead of the shared gamma-space `Alpha.over` — each
+5/6-bit channel maps through a literal 32/64-entry sRGB→linear table
+(16-bit linear), blends there, and maps back by nearest-neighbour
+binary search. The switch is deliberately in the device blend path and
+NOT in wataui: `Alpha.over` is the vocabulary every backend agrees on,
+and the mac/watch painters never take this path (wata-mac's `FbConfig`
+carries a session-local mirror cell so the shared sources compile).
+Because the round-rect corners, the strike coverage and the 5x8 alpha
+glyphs all blend through this one function, the toggle A/Bs text edges
+and card corners together — pinned by `roll-rest-gamma` (the resting
+rolodex frame with gamma on, byte-different from its off twin) and the
+`gammablend` probe.
+
 **Type comes in two tiers.** The rolodex design language (plan 0077)
 draws real type through **strikes**: one face at one pixel size as
 renderable data — per-glyph alpha-coverage bitmaps plus
@@ -468,6 +484,7 @@ combination the tri-state cannot express (both radios up at once) is
 exactly what `auto` failover provides when it is needed.
 | Enroll | OK opens the enrolment QR (Back closes) | nothing external — `enrol.scala`; see "Device identity and enrolment" |
 | Type face | the rolodex face (`atkinson`/`inter`); `<`/`>` toggle — applied on the next frame and persisted at once (the timeout row's grammar) | nothing external — `FbConfig.saveTypeFace` moves the live `type_face` cell and writes the store in one call; `FbTypeRoles` resolves strikes against the cell per lookup, so the cycle is live (plan 0077). Dev-only by design: the kid panel stays four rows (plan 0053) |
+| Gamma blend | linear-light compositing for every blend (`on`/`off`, default off — today's bytes); `<`/`>` toggle, same immediate-apply grammar | nothing external — `FbConfig.saveGammaBlend` moves the live `gamma_blend` cell and writes the store in one call; `Draw.blendPixel` consults the cell per blended pixel and routes through `Gamma.over` (see "The display stack"). The on-panel A/B — whether linear light reads better on this desaturating panel, text edges especially — is the owner's (plan 0077) |
 
 Enroll is the one CONDITIONAL row: it exists only when this handset is
 configured to speak iroh, i.e. when it has an identity that needs

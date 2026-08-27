@@ -129,3 +129,32 @@ tap dot1
 waitmax motionlive 0 90
 advance 5
 checkpoint settings-face-roll-inter
+
+# the Gamma blend row (plan 0077): linear-light blending behind a DEV config
+# switch, default off — the owner's on-panel A/B. Applet states persist in
+# the shell, so dot2 lands the kid panel with its selection still on the
+# development door, OK re-opens the DEV panel still on Type face, and one
+# down is the gamma row. Pin it off (waitmax — `expect` is >= and cannot
+# assert a low value), toggle it on with the timeout row's immediate-apply
+# grammar, and LEAVE it on: phase 2's expect is the restart-restore proof.
+tap dot2
+advance 2
+tap enter
+advance 2
+tap down
+advance 5
+checkpoint settings-gamma
+waitmax gammablend 1 5
+tap right
+advance 5
+checkpoint settings-gamma-on
+expect gammablend 2
+
+# live-apply, on pixels: the same resting rolodex frame again, now
+# composited in linear light — byte-different from settings-face-roll-inter
+# (identical setup but for the blend), which is what proves the switch
+# reaches the pixels and not just the store.
+tap dot1
+waitmax motionlive 0 90
+advance 5
+checkpoint roll-rest-gamma

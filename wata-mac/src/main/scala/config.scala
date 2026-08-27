@@ -191,6 +191,17 @@ object FbConfig:
 
   def saveTypeFace(f: String): Unit = faceC.set(f)
 
+  /** the handset's gamma-blend switch (plan 0077), mirrored for the same
+   *  reason as `typeFace` above: the shared `display.scala` blend path and
+   *  the shared DEV panel's Gamma blend row reach for it, but the mac's
+   *  retained backend paints natively and never takes `Draw.blendPixel` —
+   *  a session-local cell, not a stored preference. */
+  private val gammaC: sgo.Atomic[Boolean] = sgo.atomic(false)
+
+  def gammaBlend(): Boolean = gammaC.get()
+
+  def saveGammaBlend(on: Boolean): Unit = gammaC.set(on)
+
   /** the user changed it in Settings: remember it for the next launch. */
   def saveNotifyMode(m: NotifyMode): Unit =
     modeC.set(Notify.spellMode(m))

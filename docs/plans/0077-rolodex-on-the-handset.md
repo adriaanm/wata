@@ -315,6 +315,24 @@ the arm's-length photo as the owner's leg.
   (`wataclient`), so the answer is choosing hues that survive BOTH panels,
   or a documented per-device saturation bias in the fb renderer — decide
   on hardware, record the ruling in plan 0070's palette section.
+  > **Rendering pass, 2026-08-27 (owner-approved):** two levers for the
+  > by-eye halves landed. (1) `Draw.fillRoundRect` anti-aliases its corner
+  > arcs analytically, unconditionally — fractional coverage
+  > `clamp(r + 0.5 − dist, 0, 1)` at the arc boundary, byte-deterministic
+  > (plain float64 + IEEE `go.math.sqrt`); the open-stack cards, the nubs
+  > and the connectivity chip ride automatically (roll-open/midroll/stack
+  > and the seven chip-bearing goldens regenerated; resting frames have
+  > radius 0 and did not move). (2) `gamma_blend`, a DEV row (id 16, after
+  > TYPE_FACE) defaulting OFF: every `Draw.blendPixel` — card corners,
+  > strike coverage, 5x8 alpha glyphs — composites in linear light via
+  > sRGB↔linear LUTs when on, so the owner can A/B whether gamma-space
+  > blending's thin, harsh dark-ink AA edges read better linearised on the
+  > physical panel. Oracles: the persistence red/green (store write dropped
+  > → phase-2 `expect gammablend 2` failed, restored), the `gammablend`
+  > probe, `roll-rest-gamma` byte-different from its off twin (1087 px),
+  > and striketest untouched (its digest pins strike bytes, not blends).
+  > The A/B itself is the owner's; the handset deploys with gamma off.
+
 - **Does the ST7735S path sustain >30 fps at all?** If not, `MOTION_FRAME_MS`
   is 33 and the springs still work; the measurement decides, not the code.
 - **Key-repeat feel**: one detent per repeat event rides the kernel's

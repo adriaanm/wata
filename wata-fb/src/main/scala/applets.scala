@@ -1327,7 +1327,8 @@ case class SettingsState(
   actionMsg: String,
   diagLeft: scala.Int,
   enrolOpen: Boolean,
-  typeFace: String
+  typeFace: String,
+  gammaBlend: Boolean
 )
 
 /** the settings applet: a thin dynamic-dispatch shell over `SettingsLogic`
@@ -1345,7 +1346,8 @@ object SettingsLogic:
   // menu order (plan 0054's de-dupe): echo, screen_off, disconnect,
   // [enroll], info, then the diagnostics absorbed from system-menu (plan
   // 0003, phase 5): ip, cell data, net test, the three power actions, and
-  // the type-face row (plan 0077 — dev-only: the kid panel stays four rows).
+  // the two plan-0077 rows — type face and gamma blend (dev-only: the kid
+  // panel stays four rows).
   // Brightness, notify and the two radio toggles left for the KID panel
   // (its Data tri-state replaced the independent wifi/data toggles) — the
   // item CONSTANTS keep their values as stable ids, so nothing keyed on an
@@ -1363,7 +1365,7 @@ object SettingsLogic:
   // stable ids rather than menu positions: `itemAt` maps a position to an
   // id, so inserting the row after Network shifts no id and invalidates no
   // golden of a non-iroh device.
-  val N_BASE = 11
+  val N_BASE = 12
   val ECHO = 0
   val BRIGHTNESS = 1   // retired from this menu (kid panel row) — id reserved
   val SCREEN_OFF = 2
@@ -1382,6 +1384,8 @@ object SettingsLogic:
   val TYPE_FACE = 15   // plan 0077: the rolodex face, appended last (a new id,
                        // not a new position for anyone — the ids-not-positions
                        // rule that let Enroll appear without renaming rows)
+  val GAMMA_BLEND = 16 // plan 0077: linear-light blending, the owner's on-panel
+                       // A/B — appended after TYPE_FACE, same rule
 
   /** how many rows the menu has this run — one more on a handset with an
    *  identity to enroll. */
@@ -1413,7 +1417,8 @@ object SettingsLogic:
     else if i == 7 then POWER_OFF
     else if i == 8 then REBOOT_BL
     else if i == 9 then REBOOT_EDL
-    else TYPE_FACE
+    else if i == 10 then TYPE_FACE
+    else GAMMA_BLEND
 
   /** the item id the selection is on. */
   def cur(s: SettingsState): scala.Int = itemAt(s, s.selected)
@@ -1443,7 +1448,7 @@ object SettingsLogic:
 
   def initial(): SettingsState =
     SettingsState(0, 40, EchoIdle(), 1, true, false, noDiag(), "", "", false, "", 0, false,
-      FbConfig.typeFace())
+      FbConfig.typeFace(), FbConfig.gammaBlend())
 
   /** the boot state: preferences come back from the config store, so a device
    *  keeps the backlight and timeout its owner set. The notify mode reads the
@@ -1452,7 +1457,7 @@ object SettingsLogic:
    *  so a field for one would have to appear on the other in the same move. */
   def restored(p: FbPrefs): SettingsState =
     SettingsState(0, p.brightness, EchoIdle(), p.timeoutIdx, true, false,
-      noDiag(), "", "", false, "", 0, false, FbConfig.typeFace())
+      noDiag(), "", "", false, "", 0, false, FbConfig.typeFace(), FbConfig.gammaBlend())
 
   /** nothing read yet — the first `refreshDiag` fills it in on the first frame
    *  (`diagLeft` starts at 0). `enrol` is the exception: it decides how many
@@ -1474,37 +1479,40 @@ object SettingsLogic:
   // ---- record withers (no `.copy` on sgola — see WataApplet) ----------------
   def withSelected(s: SettingsState, sel: scala.Int): SettingsState =
     SettingsState(sel, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withBrightness(s: SettingsState, b: scala.Int): SettingsState =
     SettingsState(s.selected, b, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withEcho(s: SettingsState, e: EchoState): SettingsState =
     SettingsState(s.selected, s.brightness, e, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withTimeoutIdx(s: SettingsState, i: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, i, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withConnected(s: SettingsState, c: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, c,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withArmed(s: SettingsState, a: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      a, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace)
+      a, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withDiag(s: SettingsState, d: DiagSnap, left: scala.Int): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, d, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, left, s.enrolOpen, s.typeFace)
+      s.armed, d, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, left, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withNetTest(s: SettingsState, l1: String, l2: String, running: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, l1, l2, running, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace)
+      s.armed, s.diag, l1, l2, running, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withEnrolOpen(s: SettingsState, o: Boolean): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, o, s.typeFace)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, o, s.typeFace, s.gammaBlend)
   def withActionMsg(s: SettingsState, m: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, m, s.diagLeft, s.enrolOpen, s.typeFace)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, m, s.diagLeft, s.enrolOpen, s.typeFace, s.gammaBlend)
   def withTypeFace(s: SettingsState, f: String): SettingsState =
     SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
-      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, f)
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, f, s.gammaBlend)
+  def withGammaBlend(s: SettingsState, on: Boolean): SettingsState =
+    SettingsState(s.selected, s.brightness, s.echo, s.screenTimeoutIdx, s.connected,
+      s.armed, s.diag, s.netLine1, s.netLine2, s.netRunning, s.actionMsg, s.diagLeft, s.enrolOpen, s.typeFace, on)
   // ---- input (press-only) ------------------------------------------------------
   /** every key goes through `persisted`, so the three stored preferences are
    *  written back the moment one of them changes and there is exactly one
@@ -1554,6 +1562,10 @@ object SettingsLogic:
     // same call, so the rolodex is drawing the new face on the next frame.
     if before.typeFace != after.typeFace then
       FbConfig.saveTypeFace(after.typeFace)
+    // same shape for the gamma switch: its own config cell, saved by the one
+    // call that also moves the live cell every blend reads.
+    if before.gammaBlend != after.gammaBlend then
+      FbConfig.saveGammaBlend(after.gammaBlend)
     after
 
   def prefsChanged(a: SettingsState, b: SettingsState): Boolean =
@@ -1643,11 +1655,13 @@ object SettingsLogic:
   def onLeft(s: SettingsState): SettingsState =
     if cur(s) == SCREEN_OFF then withTimeoutIdx(s, decMod(s.screenTimeoutIdx, N_TIMEOUTS))
     else if cur(s) == TYPE_FACE then withTypeFace(s, otherFace(s.typeFace))
+    else if cur(s) == GAMMA_BLEND then withGammaBlend(s, !s.gammaBlend)
     else s
 
   def onRight(s: SettingsState): SettingsState =
     if cur(s) == SCREEN_OFF then withTimeoutIdx(s, (s.screenTimeoutIdx + 1) % N_TIMEOUTS)
     else if cur(s) == TYPE_FACE then withTypeFace(s, otherFace(s.typeFace))
+    else if cur(s) == GAMMA_BLEND then withGammaBlend(s, !s.gammaBlend)
     else s
 
   /** two faces, so the cycle is a toggle and both arrows walk it the same
@@ -1760,7 +1774,8 @@ object SettingsLogic:
     else if i == POWER_OFF then "Power off"
     else if i == REBOOT_BL then "Reboot to BL"
     else if i == REBOOT_EDL then "Reboot to EDL"
-    else "Type face"
+    else if i == TYPE_FACE then "Type face"
+    else "Gamma blend"
 
   /** the row's right-hand value; "" for the rows that are a label alone (Device
    *  Info and the three power actions, whose whole content is in the detail
@@ -1774,7 +1789,11 @@ object SettingsLogic:
     else if i == CELL_DATA then WataLogic.clip(s.diag.cell, 14)
     else if i == NET_TEST then netTestStatus(s)
     else if i == TYPE_FACE then s.typeFace
+    else if i == GAMMA_BLEND then gammaLabel(s)
     else ""
+
+  def gammaLabel(s: SettingsState): String =
+    if s.gammaBlend then "on" else "off"
 
   def netLabel(s: SettingsState): String =
     var out = "OFF"
@@ -1783,7 +1802,7 @@ object SettingsLogic:
 
   /** where each row's value starts — the column its label leaves free. */
   def valueCol(i: scala.Int): scala.Int =
-    if i == ECHO || i == SCREEN_OFF || i == TYPE_FACE then 12
+    if i == ECHO || i == SCREEN_OFF || i == TYPE_FACE || i == GAMMA_BLEND then 12
     else if i == IP_ADDR then 4
     else 11
 
@@ -1825,6 +1844,7 @@ object SettingsLogic:
     else if i == DISCONNECT then twoLines(connectDetail(s), "")
     else if i == SCREEN_OFF then twoLines("</> timeout", "Any key wakes")
     else if i == TYPE_FACE then twoLines("</> font for names, cards", "applies immediately")
+    else if i == GAMMA_BLEND then twoLines("</> linear-light blending", "applies immediately")
     else if i == IP_ADDR then twoLines("wlan0 IPv4 address", "")
     else if i == CELL_DATA then twoLines("ppp0 link + signal", cellAddrLine(s))
     else if i == NET_TEST then netTestDetail(s)
