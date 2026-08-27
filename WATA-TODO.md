@@ -138,6 +138,16 @@ blocks + git log; each entry cites where it was recorded.*
 
 ## sgola-side items that Wata is waiting on (tracked THERE, not here)
 
+- **`GOMOD-STAGE-NO-MVS`** (filed 2026-08-27, sgola inbox) — sgo's
+  go.mod stage errors on a version conflict between two godeps' direct
+  requires instead of MVS-resolving (take-the-max, `go mod tidy`'s
+  answer). Hit by `go-pkgs/strikes` (x/image v0.45.0) against
+  `go-pkgs/gioshell` (v0.26.0), then x/text one level down. Workaround:
+  strikes pinned DOWN to gioshell's versions, key-comment in
+  `go-pkgs/strikes/go.mod`; every future godep sharing a transitive dep
+  re-hits this until the stage resolves versions itself. On the landing
+  notice: lift the pins, delete the comment, verify with `just ci`.
+
 - **`SELECT2-ARM-VAR-MUT`** (filed 2026-08-23, sgola inbox) — an
   `sgo.select2` arm assigning to an enclosing var emits
   `scala.runtime.BooleanRef`, which the Go backend cannot map; the
